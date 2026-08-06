@@ -1,0 +1,26 @@
+# Temporary files directory for LLM agents
+.agents/temp
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Node.js / pnpm
+/node_modules/
+**/node_modules/
+/.pnpm-store/
+/coverage/
+**/dist/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local environment and test artifacts
+.env
+.env.*
+!.env.example
+/artifacts/
+/tmp/

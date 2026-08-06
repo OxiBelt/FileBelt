@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+
+"""Fail closed on FileBelt repository, workspace, and license boundaries."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+
+IGNORED_PARTS = {".agents", ".git", "dist", "node_modules", "target"}
+ADAPTER_ROOTS = {
+    "adapters/smb": "GPL-3.0-or-later",
+    "adapters/ftp-ftps": "GPL-3.0-or-later",
+    "adapters/onlyoffice": "AGPL-3.0-only",
+    "adapters/nfs": "LGPL-3.0-or-later",
+    "adapters/transcode": "Apache-2.0",
+}
+EXPECTED_RUST_MEMBERS = {
+    "source",
+    "source/apps/filebelt-api",
+    "source/apps/filebelt-worker-io",
+    "source/apps/filebelt-worker-maintenance",
+    "source/apps/filebelt-media-controller",
+    "source/apps/filebelt-mcp-broker",
+    "source/apps/filebelt-controller",
+    "source/apps/filebeltctl",
+    "source/crates/filebelt-build-identity",
+    "source/crates/filebelt-domain",
+    "source/crates/filebelt-authz",
+    "source/crates/filebelt-database",
+    "source/crates/filebelt-storage-protocol",
+    "source/crates/filebelt-vfs-protocol",
+    "source/crates/filebelt-document-protocol",
+    "source/crates/filebelt-mcp-policy",
+    "source/crates/filebelt-control-protocol",
+    "source/crates/filebelt-deployment-diagnostics",
+    "fuzz",
+    "tests/rust",
+    "tests/unsafe-harness",
+}
+EXPECTED_NODE_PACKAGES = {
+    "devops": "@filebelt/devops",
+    "ui/admin": "@filebelt/admin",
+    "ui/design-system": "@filebelt/design-system",
+    "ui/markdown": "@filebelt/markdown",
+    "ui/mcp-settings": "@filebelt/mcp-settings",
+    "ui/web": "@filebelt/web",
+}
+REQUIRED_ADRS = range(1, 7)
+SPDX_EXTENSIONS = {".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
+TOOL_OWNED_SPDX_FILES = {
+    "supply-chain/audits.toml",
+    "supply-chain/config.toml",
+    "supply-chain/imports.lock",
+}
+
+
+def load_toml(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def iter_files(root: Path):
+    for path in root.rglob("*"):
+        if path.is_file() and not any(part in IGNORED_PARTS for part in path.parts):
+            yield path
+
+
+def dependency_tables(manifest: dict[str, Any]):
+    for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+        table = manifest.get(key, {})
+        if isinstance(table, dict):
+            yield table
+    for target in manifest.get("target", {}).values():
+        if isinstance(target, dict):
+            for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                table = target.get(key, {})
+                if isinstance(table, dict):
+                    yield table
+
+
+def check(root: Path) -> list[str]:
+    failures: list[str] = []
+
+    required_files = [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "docs/LicenseMap.md",
+        "docs/ThreatModel.md",
+        "supply-chain/license-regions.toml",
+        "supply-chain/node-policy.toml",
+        "supply-chain/imports.lock",
+        "tests/scripts/check-node-licenses.py",
+        ".github/CODEOWNERS",
+        ".github/workflows/check-filebelt.yml",
+    ]
+    for relative in required_files:
+        if not (root / relative).is_file():
+            failures.append(f"missing required file: {relative}")
+
+    region_data = load_toml(root / "supply-chain/license-regions.toml")
+    regions = {
+        item["path"]: item["license"]
+        for item in region_data.get("regions", [])
+        if isinstance(item, dict) and "path" in item and "license" in item
+    }
+    expected_top = {
+        "source",
+        "protocol",
+        "ui",
+        "devops",
+        "deploy",
+        "tests",
+        "docs",
+        "supply-chain",
+        "fuzz",
+        "tools",
+    }
+    missing_regions = expected_top - regions.keys()
+    if missing_regions:
+        failures.append(f"top-level paths missing license regions: {sorted(missing_regions)}")
+    for adapter, license_id in ADAPTER_ROOTS.items():
+        if regions.get(adapter) != license_id:
+            failures.append(f"{adapter} must be mapped as {license_id}")
+        for filename in ("AGENTS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+            if not (root / adapter / filename).is_file():
+                failures.append(f"{adapter} is missing {filename}")
+
+    transcode_allowed = {"AGENTS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"}
+    transcode_files = {
+        path.name for path in (root / "adapters/transcode").iterdir() if path.is_file()
+    }
+    unexpected_transcode = transcode_files - transcode_allowed
+    if unexpected_transcode:
+        failures.append(
+            f"transcode implementation requires an ADR: {sorted(unexpected_transcode)}"
+        )
+
+    cargo = load_toml(root / "Cargo.toml")
+    workspace = cargo.get("workspace", {})
+    members = set(workspace.get("members", []))
+    if members != EXPECTED_RUST_MEMBERS:
+        failures.append(
+            f"root Cargo members differ: missing={sorted(EXPECTED_RUST_MEMBERS - members)}, "
+            f"unexpected={sorted(members - EXPECTED_RUST_MEMBERS)}"
+        )
+    for member in members:
+        if member.startswith("adapters/"):
+            failures.append(f"adapter is a root Cargo member: {member}")
+        manifest_path = root / member / "Cargo.toml"
+        if not manifest_path.is_file():
+            failures.append(f"workspace member has no manifest: {member}")
+            continue
+        manifest = load_toml(manifest_path)
+        package = manifest.get("package", {})
+        name = package.get("name", "")
+        if not isinstance(name, str) or not name.startswith("filebelt"):
+            failures.append(f"invalid Cargo package name in {member}: {name!r}")
+        if package.get("publish") != {"workspace": True}:
+            failures.append(f"Cargo package must inherit publish=false: {member}")
+
+    for manifest_path in root.rglob("Cargo.toml"):
+        relative = manifest_path.relative_to(root).as_posix()
+        if any(part in IGNORED_PARTS for part in manifest_path.parts):
+            continue
+        manifest = load_toml(manifest_path)
+        for table in dependency_tables(manifest):
+            for name, dependency in table.items():
+                if isinstance(dependency, dict) and "path" in dependency:
+                    resolved = (manifest_path.parent / dependency["path"]).resolve()
+                    adapter_root = (root / "adapters").resolve()
+                    if not relative.startswith("adapters/") and resolved.is_relative_to(adapter_root):
+                        failures.append(
+                            f"Apache manifest {relative} path-depends on adapter {name}"
+                        )
+
+    workspace_text = (root / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    if "adapters/" in workspace_text:
+        failures.append("root pnpm workspace may not include adapters")
+    for relative, expected_name in EXPECTED_NODE_PACKAGES.items():
+        package_path = root / relative / "package.json"
+        if not package_path.is_file():
+            failures.append(f"missing pnpm package: {relative}")
+            continue
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        if package.get("name") != expected_name:
+            failures.append(f"unexpected pnpm package name in {relative}")
+        if package.get("version") != "0.1.0" or package.get("private") is not True:
+            failures.append(f"pnpm package must be private version 0.1.0: {relative}")
+
+    root_package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    exact_version = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+    for name, version in root_package.get("devDependencies", {}).items():
+        if not isinstance(version, str) or not exact_version.fullmatch(version):
+            failures.append(f"Node dependency must use an exact version: {name}={version}")
+
+    node_policy = load_toml(root / "supply-chain/node-policy.toml")
+    allowed_node_licenses = node_policy.get("allowed_licenses", [])
+    if not allowed_node_licenses or len(allowed_node_licenses) != len(
+        set(allowed_node_licenses)
+    ):
+        failures.append("Node license allowlist must be non-empty and contain no duplicates")
+
+    adr_dir = root / "docs/adr"
+    for number in REQUIRED_ADRS:
+        matches = list(adr_dir.glob(f"{number:04d}-*.md"))
+        if len(matches) != 1:
+            failures.append(f"expected exactly one ADR-{number:04d}")
+            continue
+        content = matches[0].read_text(encoding="utf-8")
+        if "- Status: Accepted" not in content:
+            failures.append(f"ADR-{number:04d} is not accepted")
+        if "## Open questions\n\nNone." not in content:
+            failures.append(f"ADR-{number:04d} has unresolved open questions")
+
+    for path in iter_files(root):
+        if path.suffix not in SPDX_EXTENSIONS:
+            continue
+        relative = path.relative_to(root).as_posix()
+        if path.name == "pnpm-lock.yaml" or relative in TOOL_OWNED_SPDX_FILES:
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        if "SPDX-License-Identifier:" not in content[:500]:
+            failures.append(f"missing SPDX identifier: {relative}")
+
+    workflow_dir = root / ".github/workflows"
+    if workflow_dir.is_dir():
+        for workflow in workflow_dir.glob("*.yml"):
+            content = workflow.read_text(encoding="utf-8")
+            if "pull_request_target:" in content:
+                failures.append(f"forbidden pull_request_target in {workflow.name}")
+            if re.search(r"packages:\s*write", content):
+                failures.append(f"package write permission in PR workflow {workflow.name}")
+            for uses in re.findall(r"uses:\s*([^\s#]+)", content):
+                if uses.startswith("./"):
+                    continue
+                if not re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", uses):
+                    failures.append(f"GitHub Action is not SHA-pinned: {uses}")
+
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-root", type=Path, required=True)
+    args = parser.parse_args()
+    root = args.repo_root.resolve()
+    failures = check(root)
+    if failures:
+        for failure in failures:
+            print(f"error: {failure}", file=sys.stderr)
+        return 1
+    print("FileBelt source-structure contracts passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

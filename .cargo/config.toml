@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[net]
+git-fetch-with-cli = false
+retry = 2
+
+[registries.crates-io]
+protocol = "sparse"

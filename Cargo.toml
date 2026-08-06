@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+members = [
+  "source",
+  "source/apps/filebelt-api",
+  "source/apps/filebelt-worker-io",
+  "source/apps/filebelt-worker-maintenance",
+  "source/apps/filebelt-media-controller",
+  "source/apps/filebelt-mcp-broker",
+  "source/apps/filebelt-controller",
+  "source/apps/filebeltctl",
+  "source/crates/filebelt-build-identity",
+  "source/crates/filebelt-domain",
+  "source/crates/filebelt-authz",
+  "source/crates/filebelt-database",
+  "source/crates/filebelt-storage-protocol",
+  "source/crates/filebelt-vfs-protocol",
+  "source/crates/filebelt-document-protocol",
+  "source/crates/filebelt-mcp-policy",
+  "source/crates/filebelt-control-protocol",
+  "source/crates/filebelt-deployment-diagnostics",
+  "fuzz",
+  "tests/rust",
+  "tests/unsafe-harness",
+]
+exclude = [
+  "adapters/smb",
+  "adapters/ftp-ftps",
+  "adapters/onlyoffice",
+  "adapters/nfs",
+  "adapters/transcode",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+repository = "https://github.com/OxiBelt/FileBelt"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"

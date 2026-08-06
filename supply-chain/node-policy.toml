@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+registry = "https://registry.npmjs.org/"
+allow_lifecycle_scripts = []
+allow_git_dependencies = []
+allowed_licenses = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BlueOak-1.0.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "Python-2.0",
+  "Unicode-3.0",
+  "Zlib",
+]

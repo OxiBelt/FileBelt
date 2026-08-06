@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+default_owner = "@PiQuark6046"
+default_license = "Apache-2.0"
+
+[[regions]]
+path = "source"
+license = "Apache-2.0"
+workspace = "root-rust"
+
+[[regions]]
+path = "protocol"
+license = "Apache-2.0"
+workspace = "root-rust"
+
+[[regions]]
+path = "ui"
+license = "Apache-2.0"
+workspace = "root-pnpm"
+
+[[regions]]
+path = "devops"
+license = "Apache-2.0"
+workspace = "root-pnpm"
+
+[[regions]]
+path = "deploy"
+license = "Apache-2.0"
+workspace = "none"
+
+[[regions]]
+path = "tests"
+license = "Apache-2.0"
+workspace = "root-rust"
+
+[[regions]]
+path = "docs"
+license = "Apache-2.0"
+workspace = "none"
+
+[[regions]]
+path = "supply-chain"
+license = "Apache-2.0"
+workspace = "none"
+
+[[regions]]
+path = "fuzz"
+license = "Apache-2.0"
+workspace = "root-rust"
+
+[[regions]]
+path = "tools"
+license = "Apache-2.0"
+workspace = "none"
+
+[[regions]]
+path = "adapters/smb"
+license = "GPL-3.0-or-later"
+workspace = "adapter"
+
+[[regions]]
+path = "adapters/ftp-ftps"
+license = "GPL-3.0-or-later"
+workspace = "adapter"
+
+[[regions]]
+path = "adapters/onlyoffice"
+license = "AGPL-3.0-only"
+workspace = "adapter"
+
+[[regions]]
+path = "adapters/nfs"
+license = "LGPL-3.0-or-later"
+workspace = "adapter"
+
+[[regions]]
+path = "adapters/transcode"
+license = "Apache-2.0"
+workspace = "reserved"
+implementation_forbidden_until_adr = true

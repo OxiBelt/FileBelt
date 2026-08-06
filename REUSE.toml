@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+SPDX-PackageName = "FileBelt"
+SPDX-PackageSupplier = "Person: PiQuark6046"
+SPDX-PackageDownloadLocation = "https://github.com/OxiBelt/FileBelt"
+
+[[annotations]]
+path = [
+  ".cargo/**",
+  ".github/**",
+  ".gitignore",
+  ".node-version",
+  ".npmrc",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "Cargo.lock",
+  "Cargo.toml",
+  "GOVERNANCE.md",
+  "README.md",
+  "REUSE.toml",
+  "SECURITY.md",
+  "THIRD_PARTY_NOTICES.md",
+  "adapters/README.md",
+  "adapters/transcode/**",
+  "deny.toml",
+  "deploy/**",
+  "devops/**",
+  "docs/**",
+  "eslint.config.js",
+  "fuzz/**",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "protocol/**",
+  "rust-toolchain.toml",
+  "rustfmt.toml",
+  "source/**",
+  "supply-chain/**",
+  "tests/**",
+  "tools/**",
+  "tsconfig.json",
+  "ui/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["adapters/smb/**", "adapters/ftp-ftps/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["adapters/onlyoffice/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = ["adapters/nfs/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "LGPL-3.0-or-later"

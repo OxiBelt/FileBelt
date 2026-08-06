@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Check FileBelt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-filebelt-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  source-structure:
+    name: Source structure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.14.4"
+      - name: Check repository boundaries
+        run: python3 tests/scripts/check-source-structure.py --repo-root .
+      - name: Check local Markdown links
+        run: python3 tests/scripts/check-markdown-links.py --repo-root .
+      - name: Install REUSE
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          "reuse[charset-normalizer]==6.2.0"
+      - name: Check REUSE compliance
+        run: reuse lint
+
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Show pinned toolchain
+        run: rustc --version && cargo --version
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Run tests
+        run: cargo test --workspace --all-features --locked
+
+  supply-chain:
+    name: Rust supply chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install pinned policy tools
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo install --locked cargo-deny --version 0.20.2
+          cargo install --locked cargo-vet --version 0.10.2
+      - name: Check advisories
+        run: cargo audit
+      - name: Check dependencies and licenses
+        run: cargo deny check
+      - name: Check review evidence
+        run: cargo vet --locked
+
+  node:
+    name: Node workspace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: Activate pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+      - name: Install without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check dependency licenses
+        run: >-
+          pnpm licenses list --json |
+          python3 tests/scripts/check-node-licenses.py
+          --policy supply-chain/node-policy.toml
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  protocol:
+    name: Protocol policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install pinned Buf when schemas exist
+        run: |
+          if find protocol -name '*.proto' -print -quit | grep -q .; then
+            GOBIN="$RUNNER_TEMP/bin" go install github.com/bufbuild/buf/cmd/buf@v1.72.0
+            echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Check generated protocol clients
+        run: python3 tests/scripts/check-generated.py --repo-root .
+
+  dco:
+    name: DCO
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Check commit sign-offs
+        run: >-
+          python3 tests/scripts/check-dco.py
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"
+
+  bootstrap-gate:
+    name: Bootstrap gate
+    if: always()
+    needs: [source-structure, rust, supply-chain, node, protocol, dco]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every bootstrap job
+        env:
+          SOURCE_STRUCTURE: ${{ needs.source-structure.result }}
+          RUST: ${{ needs.rust.result }}
+          SUPPLY_CHAIN: ${{ needs.supply-chain.result }}
+          NODE: ${{ needs.node.result }}
+          PROTOCOL: ${{ needs.protocol.result }}
+          DCO: ${{ needs.dco.result }}
+        run: |
+          test "$SOURCE_STRUCTURE" = success
+          test "$RUST" = success
+          test "$SUPPLY_CHAIN" = success
+          test "$NODE" = success
+          test "$PROTOCOL" = success
+          test "$DCO" = success -o "$DCO" = skipped

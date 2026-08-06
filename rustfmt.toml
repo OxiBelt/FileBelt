@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
+edition = "2024"
+newline_style = "Unix"
+use_small_heuristics = "Default"

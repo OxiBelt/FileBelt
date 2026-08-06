@@ -1,11 +1,1192 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! FileBelt I/O worker role smoke probe.
+//! Capability-limited FileBelt POSIX I/O worker.
 
 #![deny(unsafe_code)]
 
+use std::collections::VecDeque;
+use std::io;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Path as FilePath, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-fn main() -> ExitCode {
-    filebelt_deployment_diagnostics::run_probe("filebelt-worker-io")
+use axum::body::Body;
+use axum::extract::{Path, State};
+use axum::http::header::{
+    ACCEPT_RANGES, AUTHORIZATION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE,
+};
+use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post, put};
+use axum::{Json, Router};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use bytes::Bytes;
+use clap::{Parser, Subcommand};
+use filebelt_control_protocol::{Config, read_secret_string};
+use filebelt_database::{Database, DatabaseError, UploadRecord};
+use filebelt_storage::{DownloadSegment, StorageError, StorageLayout};
+use filebelt_storage_protocol::{
+    CapabilityClaims, CapabilityOperation, VerificationKey, unix_time_now, verify_capability,
+};
+use futures_util::StreamExt as _;
+use serde::Serialize;
+use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+use tracing::{error, info, warn};
+use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
+
+const ROLE: &str = "filebelt-worker-io";
+const CAPABILITY_AUDIENCE: &str = "filebelt-worker-io";
+const CAPABILITY_COOKIE_NAMES: [&str; 2] = ["filebelt_capability", "filebelt-capability"];
+const FINALIZATION_LEASE_SECONDS: i64 = 120;
+const FINALIZATION_HEARTBEAT_SECONDS: u64 = 30;
+
+#[derive(Debug, Parser)]
+#[command(disable_version_flag = true)]
+struct Arguments {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Serve {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+    },
+}
+
+#[derive(Clone)]
+struct AppState {
+    database: Database,
+    storage: StorageLayout,
+    keys: Arc<Vec<VerificationKey>>,
+    generation_recheck: Duration,
+    tenant_id: Uuid,
+    backend_id: Uuid,
+    storage_ready: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+struct AuthorizedCapability {
+    claims: CapabilityClaims,
+    tenant_id: Uuid,
+    session_id: Uuid,
+    principal_id: Uuid,
+    resource_id: Uuid,
+    capability_id: Uuid,
+}
+
+#[derive(Debug)]
+enum AppError {
+    BadRequest(&'static str),
+    NotFound(&'static str),
+    Unauthorized,
+    Forbidden,
+    Conflict(&'static str),
+    Range,
+    Unavailable,
+    Internal,
+}
+
+#[derive(Serialize)]
+struct Problem {
+    r#type: &'static str,
+    title: &'static str,
+    status: u16,
+    code: &'static str,
+}
+
+#[derive(Serialize)]
+struct PartResult {
+    upload_id: Uuid,
+    part_number: i32,
+    size_bytes: u64,
+    blake3: String,
+}
+
+#[derive(Serialize)]
+struct FinalizeResult {
+    upload_id: Uuid,
+    payload_id: Uuid,
+    size_bytes: u64,
+    blake3: String,
+    state: &'static str,
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    let raw = std::env::args().skip(1).collect::<Vec<_>>();
+    let raw_refs = raw.iter().map(String::as_str).collect::<Vec<_>>();
+    if matches!(raw_refs.as_slice(), ["--version"] | ["--build-info=json"]) {
+        return filebelt_deployment_diagnostics::run_probe(ROLE);
+    }
+    init_tracing();
+    let arguments = match Arguments::try_parse() {
+        Ok(arguments) => arguments,
+        Err(error) => {
+            let _ = error.print();
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = match arguments.command {
+        Command::Serve { config } => serve(&config).await,
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            error!(error = %message, "I/O worker stopped");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
+async fn serve(config_path: &FilePath) -> Result<(), String> {
+    let config = Config::load(config_path).map_err(|error| error.to_string())?;
+    let database_url =
+        read_secret_string(&config.database.url_file).map_err(|error| error.to_string())?;
+    let database = Database::connect(&database_url, config.database.max_connections)
+        .await
+        .map_err(|error| error.to_string())?;
+    database.health().await.map_err(|error| error.to_string())?;
+    let tenant_id = database
+        .tenant_by_slug(&config.tenant.slug)
+        .await
+        .map_err(|error| format!("configured tenant is unavailable: {error}"))?;
+    let storage = StorageLayout::new(config.storage.root.clone());
+    storage.probe().await.map_err(|error| error.to_string())?;
+    report_capacity(
+        &database,
+        tenant_id,
+        config.storage.backend_id,
+        storage.root(),
+        true,
+    )
+    .await?;
+    let keys = load_verification_keys(
+        &config.keys.capability_public_key_file,
+        config.keys.current_generation,
+    )?;
+    let storage_ready = Arc::new(AtomicBool::new(true));
+    let state = AppState {
+        database,
+        storage,
+        keys: Arc::new(keys),
+        generation_recheck: Duration::from_secs(config.limits.generation_recheck_seconds),
+        tenant_id,
+        backend_id: config.storage.backend_id,
+        storage_ready: storage_ready.clone(),
+    };
+    let application = Router::new()
+        .route("/health/live", get(live))
+        .route("/health/ready", get(ready))
+        .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
+        .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
+        .route("/io/v1/downloads/{grant_id}", get(download).head(download))
+        .fallback(not_found)
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind(config.listeners.io)
+        .await
+        .map_err(|error| error.to_string())?;
+    info!(listener = %config.listeners.io, "I/O worker ready");
+    let capacity_database = state.database.clone();
+    let capacity_root = state.storage.root().to_path_buf();
+    let capacity_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            match report_capacity(
+                &capacity_database,
+                tenant_id,
+                config.storage.backend_id,
+                &capacity_root,
+                true,
+            )
+            .await
+            {
+                Ok(()) => storage_ready.store(true, Ordering::Release),
+                Err(error) => {
+                    storage_ready.store(false, Ordering::Release);
+                    let _ = capacity_database
+                        .mark_storage_unready(tenant_id, config.storage.backend_id)
+                        .await;
+                    warn!(code = "capacity_report_failed", %error);
+                }
+            }
+        }
+    });
+    let result = axum::serve(listener, application)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .map_err(|error| error.to_string());
+    capacity_task.abort();
+    result
+}
+
+async fn report_capacity(
+    database: &Database,
+    tenant_id: Uuid,
+    backend_id: Uuid,
+    root: &FilePath,
+    ready: bool,
+) -> Result<(), String> {
+    let root = root.to_path_buf();
+    let (total, free) = tokio::task::spawn_blocking(move || {
+        Ok::<_, std::io::Error>((fs2::total_space(&root)?, fs2::available_space(&root)?))
+    })
+    .await
+    .map_err(|_| "capacity probe task failed".to_owned())?
+    .map_err(|error| error.to_string())?;
+    database
+        .report_storage_capacity(
+            tenant_id,
+            backend_id,
+            i64::try_from(total)
+                .map_err(|_| "storage capacity exceeds supported range".to_owned())?,
+            i64::try_from(free).map_err(|_| "free capacity exceeds supported range".to_owned())?,
+            ready,
+        )
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn shutdown_signal() {
+    let control_c = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            warn!("failed to install Ctrl-C handler");
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => warn!(%error, "failed to install termination handler"),
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! { () = control_c => {}, () = terminate => {} }
+}
+
+async fn live() -> &'static str {
+    "live\n"
+}
+
+async fn ready(State(state): State<AppState>) -> Result<&'static str, AppError> {
+    if !state.storage_ready.load(Ordering::Acquire) {
+        return Err(AppError::Unavailable);
+    }
+    state
+        .database
+        .health()
+        .await
+        .map_err(|_| AppError::Unavailable)?;
+    Ok("ready\n")
+}
+
+async fn not_found() -> AppError {
+    AppError::NotFound("route_not_found")
+}
+
+async fn upload_part(
+    State(state): State<AppState>,
+    Path((upload_id, part_number)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<PartResult>, AppError> {
+    let upload_id =
+        Uuid::parse_str(&upload_id).map_err(|_| AppError::BadRequest("invalid_upload_id"))?;
+    let part_number = part_number
+        .parse::<i32>()
+        .map_err(|_| AppError::BadRequest("invalid_part_number"))?;
+    if part_number < 0 {
+        return Err(AppError::BadRequest("invalid_part_number"));
+    }
+    let authorized = authorize(&state, &headers, CapabilityOperation::UploadPart).await?;
+    let claim_upload = parse_required_uuid(&authorized.claims.upload_id)?;
+    let claim_payload = parse_required_uuid(&authorized.claims.payload_id)?;
+    if claim_upload != upload_id
+        || authorized.claims.part_number
+            != u64::try_from(part_number)
+                .map_err(|_| AppError::BadRequest("invalid_part_number"))?
+    {
+        return Err(AppError::Forbidden);
+    }
+    let upload = state
+        .database
+        .upload(authorized.tenant_id, upload_id)
+        .await?;
+    validate_upload_capability(&authorized, &upload, claim_payload, state.backend_id)?;
+    check_generations(&state, &authorized, upload.drive_id).await?;
+    let expected_size = expected_part_size(&upload, part_number)?;
+    if authorized.claims.range_start != 0
+        || (expected_size > 0 && authorized.claims.range_end != expected_size - 1)
+        || (expected_size == 0 && authorized.claims.range_end != 0)
+    {
+        return Err(AppError::Forbidden);
+    }
+    if let Some(length) = headers.get(CONTENT_LENGTH) {
+        let length = length
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or(AppError::BadRequest("invalid_content_length"))?;
+        if length != expected_size {
+            return Err(AppError::Conflict("part_size_mismatch"));
+        }
+    }
+    let part = state
+        .database
+        .upload_part(authorized.tenant_id, upload_id, part_number)
+        .await?;
+    if upload.state != "open" || part.locator.is_nil() {
+        return Err(AppError::Conflict("upload_not_open"));
+    }
+    consume_nonce(&state, &authorized, "upload_part").await?;
+    let temporary = state
+        .storage
+        .staging_temporary_path(part.locator, authorized.capability_id)
+        .map_err(storage_error)?;
+    let (size, digest) = write_body(body, &temporary, expected_size).await?;
+    let storage = state.storage.clone();
+    let temporary_for_publish = temporary.clone();
+    tokio::task::spawn_blocking(move || {
+        storage.publish_staging_part(&temporary_for_publish, part.locator, size, &digest)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    state
+        .database
+        .mark_part_durable(
+            authorized.tenant_id,
+            upload_id,
+            part_number,
+            i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?,
+            i32::try_from(size).map_err(|_| AppError::Conflict("part_too_large"))?,
+            &digest,
+        )
+        .await?;
+    Ok(Json(PartResult {
+        upload_id,
+        part_number,
+        size_bytes: size,
+        blake3: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+    }))
+}
+
+async fn finalize_upload(
+    State(state): State<AppState>,
+    Path(upload_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<FinalizeResult>, AppError> {
+    let upload_id =
+        Uuid::parse_str(&upload_id).map_err(|_| AppError::BadRequest("invalid_upload_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::FinalizeUpload).await?;
+    let claim_upload = parse_required_uuid(&authorized.claims.upload_id)?;
+    let claim_payload = parse_required_uuid(&authorized.claims.payload_id)?;
+    if claim_upload != upload_id {
+        return Err(AppError::Forbidden);
+    }
+    let upload = state
+        .database
+        .upload(authorized.tenant_id, upload_id)
+        .await?;
+    validate_upload_capability(&authorized, &upload, claim_payload, state.backend_id)?;
+    check_generations(&state, &authorized, upload.drive_id).await?;
+    consume_nonce(&state, &authorized, "finalize_upload").await?;
+    let fencing_token =
+        i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?;
+    state
+        .database
+        .claim_upload_finalization(
+            authorized.tenant_id,
+            upload_id,
+            fencing_token,
+            authorized.capability_id,
+            FINALIZATION_LEASE_SECONDS,
+        )
+        .await?;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = finish_upload_finalization(state, authorized, upload_id, fencing_token).await;
+        let _ = sender.send(result);
+    });
+    receiver.await.map_err(|_| AppError::Internal)?.map(Json)
+}
+
+async fn finish_upload_finalization(
+    state: AppState,
+    authorized: AuthorizedCapability,
+    upload_id: Uuid,
+    fencing_token: i64,
+) -> Result<FinalizeResult, AppError> {
+    let result =
+        finish_upload_finalization_inner(&state, &authorized, upload_id, fencing_token).await;
+    if result.is_err()
+        && let Err(error) = state
+            .database
+            .abort_upload_finalization(
+                authorized.tenant_id,
+                upload_id,
+                fencing_token,
+                authorized.capability_id,
+            )
+            .await
+    {
+        warn!(%upload_id, %error, "failed to release upload finalization lease");
+    }
+    result
+}
+
+async fn finish_upload_finalization_inner(
+    state: &AppState,
+    authorized: &AuthorizedCapability,
+    upload_id: Uuid,
+    fencing_token: i64,
+) -> Result<FinalizeResult, AppError> {
+    let upload = state
+        .database
+        .upload(authorized.tenant_id, upload_id)
+        .await?;
+    let parts = state
+        .database
+        .upload_parts(authorized.tenant_id, upload_id)
+        .await?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, upload.payload_id)
+        .await?;
+    if upload.state != "finalizing"
+        || upload.fencing_token != fencing_token
+        || payload.state != "finalizing"
+        || payload.backend_id != state.backend_id
+    {
+        return Err(AppError::Conflict("payload_not_finalizing"));
+    }
+    let storage = state.storage.clone();
+    let upload_for_storage = upload.clone();
+    let payload_for_storage = payload.clone();
+    let parts_for_storage = parts.clone();
+    let operation_id = authorized.capability_id;
+    let work = tokio::task::spawn_blocking(move || {
+        storage.finalize(
+            &upload_for_storage,
+            &payload_for_storage,
+            &parts_for_storage,
+            operation_id,
+        )
+    });
+    tokio::pin!(work);
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(FINALIZATION_HEARTBEAT_SECONDS));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeat.tick().await;
+    let finalized = loop {
+        tokio::select! {
+            result = &mut work => {
+                break result.map_err(|_| AppError::Internal)?.map_err(storage_error)?;
+            }
+            _ = heartbeat.tick() => {
+                if let Err(error) = state.database.heartbeat_upload_finalization(
+                    authorized.tenant_id,
+                    upload_id,
+                    fencing_token,
+                    authorized.capability_id,
+                    FINALIZATION_LEASE_SECONDS,
+                ).await {
+                    warn!(%upload_id, %error, "upload finalization heartbeat failed");
+                }
+            }
+        }
+    };
+    check_generations(state, authorized, upload.drive_id).await?;
+    state
+        .database
+        .mark_upload_finalized(
+            authorized.tenant_id,
+            upload_id,
+            fencing_token,
+            authorized.capability_id,
+            &finalized.digest,
+        )
+        .await?;
+    let cleanup_storage = state.storage.clone();
+    if let Err(error) =
+        tokio::task::spawn_blocking(move || cleanup_storage.remove_staging_parts(&parts))
+            .await
+            .map_err(|_| StorageError::Join)
+            .and_then(|result| result)
+    {
+        warn!(%upload_id, %error, "finalized upload staging cleanup deferred");
+    } else if let Err(error) = state
+        .database
+        .mark_upload_staging_cleaned(authorized.tenant_id, upload_id)
+        .await
+    {
+        warn!(%upload_id, %error, "finalized upload staging cleanup marker deferred");
+    }
+    Ok(FinalizeResult {
+        upload_id,
+        payload_id: upload.payload_id,
+        size_bytes: finalized.size,
+        blake3: finalized
+            .digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        state: "finalized",
+    })
+}
+
+async fn download(
+    State(state): State<AppState>,
+    Path(grant_id): Path<String>,
+    headers: HeaderMap,
+    request: Request<Body>,
+) -> Result<Response, AppError> {
+    let grant_id =
+        Uuid::parse_str(&grant_id).map_err(|_| AppError::BadRequest("invalid_grant_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::Download).await?;
+    if parse_required_uuid(&authorized.claims.grant_id)? != grant_id {
+        return Err(AppError::Forbidden);
+    }
+    let payload_id = parse_required_uuid(&authorized.claims.payload_id)?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, payload_id)
+        .await?;
+    if payload.state != "referenced" || payload.backend_id != state.backend_id {
+        return Err(AppError::Conflict("payload_not_referenced"));
+    }
+    check_generations(&state, &authorized, payload.drive_id).await?;
+    let upload = state
+        .database
+        .upload_for_payload(authorized.tenant_id, payload_id)
+        .await?;
+    let parts = state
+        .database
+        .upload_parts(authorized.tenant_id, upload.upload_id)
+        .await?;
+    let size = u64::try_from(payload.size_bytes).map_err(|_| AppError::Internal)?;
+    let (start, end, partial) = requested_range(headers.get(RANGE), size, &authorized.claims)?;
+    let storage = state.storage.clone();
+    let payload_for_storage = payload.clone();
+    let upload_for_storage = upload.clone();
+    let segments = tokio::task::spawn_blocking(move || {
+        storage.verified_download_segments(
+            &upload_for_storage,
+            &payload_for_storage,
+            &parts,
+            start,
+            end,
+        )
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    check_generations(&state, &authorized, payload.drive_id).await?;
+    let response_length = if size == 0 { 0 } else { end - start + 1 };
+    let mut builder = Response::builder()
+        .status(if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(ACCEPT_RANGES, "bytes")
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, response_length.to_string())
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff");
+    if partial {
+        builder = builder.header(CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
+    }
+    let body = if request.method() == Method::HEAD || size == 0 {
+        Body::empty()
+    } else {
+        Body::from_stream(download_stream(
+            state.database.clone(),
+            authorized,
+            payload.drive_id,
+            segments,
+            state.generation_recheck,
+        ))
+    };
+    builder.body(body).map_err(|_| AppError::Internal)
+}
+
+fn download_stream(
+    database: Database,
+    authorized: AuthorizedCapability,
+    drive_id: Uuid,
+    segments: Vec<DownloadSegment>,
+    recheck: Duration,
+) -> impl futures_util::Stream<Item = Result<Bytes, io::Error>> {
+    struct StreamState {
+        database: Database,
+        authorized: AuthorizedCapability,
+        drive_id: Uuid,
+        segments: VecDeque<DownloadSegment>,
+        current: Option<(tokio::fs::File, u64)>,
+        last_check: Instant,
+        recheck: Duration,
+        finished: bool,
+    }
+    futures_util::stream::unfold(
+        StreamState {
+            database,
+            authorized,
+            drive_id,
+            segments: segments.into(),
+            current: None,
+            last_check: Instant::now(),
+            recheck,
+            finished: false,
+        },
+        |mut state| async move {
+            if state.finished {
+                return None;
+            }
+            if state.last_check.elapsed() >= state.recheck {
+                match generations_match(&state.database, &state.authorized, state.drive_id).await {
+                    Ok(true) => state.last_check = Instant::now(),
+                    Ok(false) | Err(_) => {
+                        state.finished = true;
+                        return Some((Err(io::Error::other("authorization changed")), state));
+                    }
+                }
+            }
+            if state.current.is_none() {
+                let segment = state.segments.pop_front()?;
+                match tokio::fs::File::open(&segment.path).await {
+                    Ok(mut file) => {
+                        if let Err(error) = file.seek(io::SeekFrom::Start(segment.offset)).await {
+                            state.finished = true;
+                            return Some((Err(error), state));
+                        }
+                        state.current = Some((file, segment.length));
+                    }
+                    Err(error) => {
+                        state.finished = true;
+                        return Some((Err(error), state));
+                    }
+                }
+            }
+            let (file, remaining) = state.current.as_mut().expect("current segment is set");
+            let read_length =
+                usize::try_from((*remaining).min(64 * 1024)).expect("bounded read length");
+            let mut buffer = vec![0_u8; read_length];
+            match file.read(&mut buffer).await {
+                Ok(0) => {
+                    state.finished = true;
+                    Some((
+                        Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "short stored payload",
+                        )),
+                        state,
+                    ))
+                }
+                Ok(read) => {
+                    buffer.truncate(read);
+                    *remaining -= read as u64;
+                    if *remaining == 0 {
+                        state.current = None;
+                    }
+                    Some((Ok(Bytes::from(buffer)), state))
+                }
+                Err(error) => {
+                    state.finished = true;
+                    Some((Err(error), state))
+                }
+            }
+        },
+    )
+}
+
+async fn authorize(
+    state: &AppState,
+    headers: &HeaderMap,
+    operation: CapabilityOperation,
+) -> Result<AuthorizedCapability, AppError> {
+    let wire = capability_wire(headers).ok_or(AppError::Unauthorized)?;
+    let now = unix_time_now().map_err(|_| AppError::Unauthorized)?;
+    let claims = verify_capability(&wire, &state.keys, CAPABILITY_AUDIENCE, operation, now)
+        .map_err(|_| AppError::Unauthorized)?;
+    let tenant_id = parse_required_uuid(&claims.tenant_id)?;
+    if tenant_id != state.tenant_id {
+        return Err(AppError::Forbidden);
+    }
+    let principal_id = parse_required_uuid(&claims.principal_id)?;
+    let resource_id = parse_required_uuid(&claims.resource_id)?;
+    let capability_id = parse_required_uuid(&claims.capability_id)?;
+    let session_id = parse_required_uuid(&claims.session_id)?;
+    Ok(AuthorizedCapability {
+        claims,
+        tenant_id,
+        session_id,
+        principal_id,
+        resource_id,
+        capability_id,
+    })
+}
+
+fn capability_wire(headers: &HeaderMap) -> Option<String> {
+    if let Some(value) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    {
+        if value.starts_with("fbcap1.") {
+            return Some(value.to_owned());
+        }
+        if let Some((scheme, credential)) = value.split_once(' ')
+            && scheme.eq_ignore_ascii_case("fbcap1")
+        {
+            return Some(if credential.starts_with("fbcap1.") {
+                credential.to_owned()
+            } else {
+                format!("fbcap1.{credential}")
+            });
+        }
+    }
+    let cookies = headers.get("cookie")?.to_str().ok()?;
+    cookies.split(';').find_map(|cookie| {
+        let (name, value) = cookie.trim().split_once('=')?;
+        CAPABILITY_COOKIE_NAMES
+            .contains(&name)
+            .then(|| value.to_owned())
+    })
+}
+
+fn validate_upload_capability(
+    authorized: &AuthorizedCapability,
+    upload: &UploadRecord,
+    claim_payload: Uuid,
+    configured_backend_id: Uuid,
+) -> Result<(), AppError> {
+    if upload.tenant_id != authorized.tenant_id
+        || upload.owner_principal_id != authorized.principal_id
+        || upload.backend_id != configured_backend_id
+        || upload.payload_id != claim_payload
+        || upload.fencing_token
+            != i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?
+        || authorized.resource_id != upload.node_id.unwrap_or(upload.parent_id)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+async fn consume_nonce(
+    state: &AppState,
+    authorized: &AuthorizedCapability,
+    operation: &str,
+) -> Result<(), AppError> {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"filebelt-capability-nonce-v1\0");
+    hasher.update(&authorized.claims.nonce);
+    state
+        .database
+        .consume_capability_nonce(
+            authorized.tenant_id,
+            hasher.finalize().as_bytes(),
+            operation,
+            authorized.claims.expires_at_unix_seconds,
+        )
+        .await
+        .map_err(|error| match error {
+            DatabaseError::Conflict => AppError::Conflict("capability_replayed"),
+            _ => AppError::Unavailable,
+        })
+}
+
+async fn check_generations(
+    state: &AppState,
+    authorized: &AuthorizedCapability,
+    drive_id: Uuid,
+) -> Result<(), AppError> {
+    match generations_match(&state.database, authorized, drive_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(AppError::Forbidden),
+        Err(_) => Err(AppError::Unavailable),
+    }
+}
+
+async fn generations_match(
+    database: &Database,
+    authorized: &AuthorizedCapability,
+    drive_id: Uuid,
+) -> Result<bool, DatabaseError> {
+    database
+        .authorization_generations_match(
+            authorized.tenant_id,
+            authorized.session_id,
+            authorized.principal_id,
+            drive_id,
+            authorized.resource_id,
+            i64::try_from(authorized.claims.membership_generation)
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+            i64::try_from(authorized.claims.drive_acl_generation)
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+            i64::try_from(authorized.claims.namespace_generation)
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+            i64::try_from(authorized.claims.resource_acl_generation)
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+        )
+        .await
+}
+
+fn expected_part_size(upload: &UploadRecord, part_number: i32) -> Result<u64, AppError> {
+    if part_number < 0 || part_number >= upload.part_count || upload.part_count <= 0 {
+        return Err(AppError::BadRequest("invalid_part_number"));
+    }
+    let declared = u64::try_from(upload.declared_size_bytes).map_err(|_| AppError::Internal)?;
+    let chunk = u64::try_from(upload.chunk_size_bytes).map_err(|_| AppError::Internal)?;
+    let part =
+        u64::try_from(part_number).map_err(|_| AppError::BadRequest("invalid_part_number"))?;
+    if upload.part_count == 1 {
+        return Ok(declared);
+    }
+    let offset = chunk.checked_mul(part).ok_or(AppError::Internal)?;
+    let remaining = declared.checked_sub(offset).ok_or(AppError::Internal)?;
+    if part_number + 1 == upload.part_count {
+        Ok(remaining)
+    } else if remaining >= chunk {
+        Ok(chunk)
+    } else {
+        Err(AppError::Internal)
+    }
+}
+
+async fn write_body(
+    body: Body,
+    path: &FilePath,
+    expected_size: u64,
+) -> Result<(u64, [u8; 32]), AppError> {
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+        .map_err(|_| AppError::Conflict("part_write_in_progress"))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .await
+        .map_err(|_| AppError::Internal)?;
+    let mut stream = body.into_data_stream();
+    let mut size = 0_u64;
+    let mut hasher = blake3::Hasher::new();
+    let result = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| AppError::BadRequest("invalid_request_body"))?;
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or(AppError::BadRequest("part_too_large"))?;
+            if size > expected_size {
+                return Err(AppError::Conflict("part_size_mismatch"));
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|_| AppError::Internal)?;
+            hasher.update(&chunk);
+        }
+        if size != expected_size {
+            return Err(AppError::Conflict("part_size_mismatch"));
+        }
+        file.sync_all().await.map_err(|_| AppError::Internal)?;
+        Ok((size, *hasher.finalize().as_bytes()))
+    }
+    .await;
+    drop(file);
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    result
+}
+
+fn requested_range(
+    header: Option<&HeaderValue>,
+    size: u64,
+    claims: &CapabilityClaims,
+) -> Result<(u64, u64, bool), AppError> {
+    if size == 0 {
+        if header.is_some() || claims.range_start != 0 || claims.range_end != 0 {
+            return Err(AppError::Range);
+        }
+        return Ok((0, 0, false));
+    }
+    if claims.range_start > claims.range_end || claims.range_end >= size {
+        return Err(AppError::Forbidden);
+    }
+    let Some(value) = header else {
+        let partial = claims.range_start != 0 || claims.range_end != size - 1;
+        return Ok((claims.range_start, claims.range_end, partial));
+    };
+    let value = value.to_str().map_err(|_| AppError::Range)?;
+    let value = value.strip_prefix("bytes=").ok_or(AppError::Range)?;
+    if value.contains(',') {
+        return Err(AppError::Range);
+    }
+    let (start_text, end_text) = value.split_once('-').ok_or(AppError::Range)?;
+    let (start, end) = if start_text.is_empty() {
+        let suffix = end_text.parse::<u64>().map_err(|_| AppError::Range)?;
+        if suffix == 0 {
+            return Err(AppError::Range);
+        }
+        (size.saturating_sub(suffix), size - 1)
+    } else {
+        let start = start_text.parse::<u64>().map_err(|_| AppError::Range)?;
+        let end = if end_text.is_empty() {
+            size - 1
+        } else {
+            end_text
+                .parse::<u64>()
+                .map_err(|_| AppError::Range)?
+                .min(size - 1)
+        };
+        (start, end)
+    };
+    if start > end || start < claims.range_start || end > claims.range_end {
+        return Err(AppError::Range);
+    }
+    Ok((start, end, true))
+}
+
+fn parse_required_uuid(value: &str) -> Result<Uuid, AppError> {
+    Uuid::parse_str(value).map_err(|_| AppError::Unauthorized)
+}
+
+fn load_verification_keys(
+    path: &FilePath,
+    current_generation: u32,
+) -> Result<Vec<VerificationKey>, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    if bytes.len() == 32 {
+        return Ok(vec![VerificationKey {
+            generation: current_generation,
+            public_key: bytes,
+        }]);
+    }
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| "capability public keyset is invalid".to_owned())?;
+    let mut lines = text.lines();
+    if lines.next() != Some("filebelt-capability-keyset-v1") {
+        return Err("capability public keyset header is invalid".into());
+    }
+    let mut keys = Vec::new();
+    for line in lines.filter(|line| !line.is_empty()) {
+        let (generation, encoded) = line
+            .split_once(':')
+            .ok_or_else(|| "capability public key entry is invalid".to_owned())?;
+        let generation = generation
+            .parse::<u32>()
+            .map_err(|_| "capability public key generation is invalid".to_owned())?;
+        let public_key = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| "capability public key is invalid".to_owned())?;
+        if generation == 0
+            || public_key.len() != 32
+            || keys
+                .iter()
+                .any(|key: &VerificationKey| key.generation == generation)
+        {
+            return Err("capability public key entry is invalid".into());
+        }
+        keys.push(VerificationKey {
+            generation,
+            public_key,
+        });
+    }
+    if keys.is_empty() || !keys.iter().any(|key| key.generation == current_generation) {
+        return Err("current capability key generation is absent".into());
+    }
+    Ok(keys)
+}
+
+fn storage_error(error: StorageError) -> AppError {
+    match error {
+        StorageError::StateConflict => AppError::Conflict("storage_state_conflict"),
+        StorageError::CorruptObject | StorageError::UnsafeObject => {
+            AppError::Conflict("storage_integrity_failure")
+        }
+        StorageError::Io(_) | StorageError::Join => AppError::Internal,
+    }
+}
+
+impl From<DatabaseError> for AppError {
+    fn from(error: DatabaseError) -> Self {
+        match error {
+            DatabaseError::NotFound => Self::NotFound("object_not_found"),
+            DatabaseError::Conflict => Self::Conflict("state_conflict"),
+            DatabaseError::StaleGeneration => Self::Forbidden,
+            DatabaseError::QuotaExceeded => Self::Conflict("quota_exceeded"),
+            DatabaseError::AdmissionLimited => Self::Unavailable,
+            DatabaseError::Sql(_) | DatabaseError::Migration(_) => Self::Unavailable,
+            DatabaseError::StorageUnavailable => Self::Unavailable,
+            DatabaseError::InvalidPersistedValue => Self::Internal,
+        }
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, title, code) = match self {
+            Self::BadRequest(code) => (StatusCode::BAD_REQUEST, "Request rejected", code),
+            Self::NotFound(code) => (StatusCode::NOT_FOUND, "Object not found", code),
+            Self::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "Capability required",
+                "invalid_capability",
+            ),
+            Self::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "Capability no longer authorized",
+                "authorization_changed",
+            ),
+            Self::Conflict(code) => (StatusCode::CONFLICT, "Storage state conflict", code),
+            Self::Range => (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "Range not satisfiable",
+                "invalid_range",
+            ),
+            Self::Unavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Authoritative state unavailable",
+                "dependency_unavailable",
+            ),
+            Self::Internal => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Storage operation failed",
+                "storage_failure",
+            ),
+        };
+        let body = Json(Problem {
+            r#type: "https://filebelt.dev/problems/storage",
+            title,
+            status: status.as_u16(),
+            code,
+        });
+        let mut response = (status, body).into_response();
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/problem+json"),
+        );
+        response
+            .headers_mut()
+            .insert("cache-control", HeaderValue::from_static("no-store"));
+        if status == StatusCode::UNAUTHORIZED {
+            response
+                .headers_mut()
+                .insert("www-authenticate", HeaderValue::from_static("fbcap1"));
+        }
+        response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claims(start: u64, end: u64) -> CapabilityClaims {
+        CapabilityClaims {
+            range_start: start,
+            range_end: end,
+            ..CapabilityClaims::default()
+        }
+    }
+
+    #[test]
+    fn range_must_be_attenuated_by_capability() {
+        assert_eq!(
+            requested_range(
+                Some(&HeaderValue::from_static("bytes=12-19")),
+                100,
+                &claims(10, 20)
+            )
+            .unwrap(),
+            (12, 19, true)
+        );
+        assert!(
+            requested_range(
+                Some(&HeaderValue::from_static("bytes=0-19")),
+                100,
+                &claims(10, 20)
+            )
+            .is_err()
+        );
+        assert!(
+            requested_range(
+                Some(&HeaderValue::from_static("bytes=12-30")),
+                100,
+                &claims(10, 20)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn keyset_parser_supports_rotation_file() {
+        let temporary = tempfile::tempdir().expect("temporary key directory");
+        let path = temporary.path().join("keys.pub");
+        std::fs::write(
+            &path,
+            format!(
+                "filebelt-capability-keyset-v1\n1:{}\n2:{}\n",
+                URL_SAFE_NO_PAD.encode([1_u8; 32]),
+                URL_SAFE_NO_PAD.encode([2_u8; 32])
+            ),
+        )
+        .expect("write keyset");
+        let keys = load_verification_keys(&path, 2).expect("valid keyset");
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[1].generation, 2);
+    }
+
+    #[test]
+    fn capability_transport_accepts_http_scheme_and_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("fbcap1 abc"));
+        assert_eq!(capability_wire(&headers).as_deref(), Some("fbcap1.abc"));
+        headers.remove(AUTHORIZATION);
+        headers.insert(
+            "cookie",
+            HeaderValue::from_static("unrelated=x; filebelt_capability=fbcap1.cookie"),
+        );
+        assert_eq!(capability_wire(&headers).as_deref(), Some("fbcap1.cookie"));
+    }
+
+    #[test]
+    fn finalization_claim_precedes_detached_filesystem_work() {
+        let source = include_str!("main.rs");
+        let handler = source
+            .split_once("async fn finalize_upload")
+            .expect("finalize handler exists")
+            .1
+            .split_once("async fn download")
+            .expect("download follows finalize helpers")
+            .0;
+        let claim = handler
+            .find(".claim_upload_finalization(")
+            .expect("database claim exists");
+        let detached = handler
+            .find("tokio::spawn(async move")
+            .expect("detached orchestration exists");
+        let filesystem = handler
+            .find("storage.finalize(")
+            .expect("filesystem finalization exists");
+        assert!(claim < detached && detached < filesystem);
+        assert!(handler.contains("heartbeat_upload_finalization("));
+        assert!(handler.contains("abort_upload_finalization("));
+    }
 }

@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.events.v1;
+
+message EventEnvelope {
+  string event_id = 1;
+  string tenant_id = 2;
+  string aggregate_type = 3;
+  string aggregate_id = 4;
+  uint64 aggregate_generation = 5;
+  string event_type = 6;
+  int64 occurred_at_unix_seconds = 7;
+  bytes payload = 8;
+}

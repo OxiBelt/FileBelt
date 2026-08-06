@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[advisories]
+# `openidconnect` uses `rsa` only to verify public issuer signatures. FileBelt
+# never performs the advisory's vulnerable private-key RSA operation.
+# The producer-only Iggy path never accepts or validates an rkyv archive.
+ignore = ["RUSTSEC-2023-0071", "RUSTSEC-2026-0235"]

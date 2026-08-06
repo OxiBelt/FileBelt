@@ -2,9 +2,15 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "outDir": "dist",
     "rootDir": "source",
+    "skipLibCheck": true,
     "tsBuildInfoFile": "dist/admin.tsbuildinfo"
   },
-  "include": ["source/**/*.ts"]
+  "include": ["source/**/*.ts", "source/**/*.tsx"],
+  "exclude": ["source/**/*.test.ts", "source/**/*.test.tsx"]
 }

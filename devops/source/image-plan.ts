@@ -5,7 +5,15 @@ export const IMAGE_REGISTRY = "ghcr.io/oxibelt" as const;
 export const SOURCE_URL = "https://github.com/OxiBelt/FileBelt" as const;
 export const RUNTIME_IDENTITY = Object.freeze({ uid: 10001, gid: 10001 });
 export const RUST_IMAGE_LICENSE = "Apache-2.0 AND MIT" as const;
-export const WEB_IMAGE_LICENSE = "Apache-2.0" as const;
+export const RUST_CDLA_IMAGE_LICENSE =
+  "Apache-2.0 AND MIT AND CDLA-Permissive-2.0" as const;
+export const RUST_IGGY_IMAGE_LICENSE =
+  "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0" as const;
+export const WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD" as const;
+export const OXIBELT_IMAGE =
+  "ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030" as const;
+export const OXIBELT_VERSION = "0.7.1-beta.2" as const;
+export const OXIBELT_REVISION = "bf40172e40298325775ca9d708162a9d8d14e6d4" as const;
 
 export const IMAGE_ROLES = [
   "filebelt-api",
@@ -28,7 +36,11 @@ export const IMAGE_PLATFORMS = [
 export type ImagePlatform = (typeof IMAGE_PLATFORMS)[number];
 export type ImagePlanChannel = "build" | "release";
 export type SourceKind = "local" | "ci" | "release" | "rebuild";
-export type ImageLicense = typeof RUST_IMAGE_LICENSE | typeof WEB_IMAGE_LICENSE;
+export type ImageLicense =
+  | typeof RUST_IMAGE_LICENSE
+  | typeof RUST_CDLA_IMAGE_LICENSE
+  | typeof RUST_IGGY_IMAGE_LICENSE
+  | typeof WEB_IMAGE_LICENSE;
 export type ComponentRelationship = "runtime" | "build-tool";
 
 export interface ImageComponent {
@@ -61,8 +73,13 @@ export type ImageArtifact =
       readonly components: PlatformComponentInventory;
     }
   | {
-      readonly kind: "static-web";
+      readonly kind: "oxibelt-edge";
       readonly packages: readonly ["ui/web", "ui/markdown"];
+      readonly base: {
+        readonly image: typeof OXIBELT_IMAGE;
+        readonly version: typeof OXIBELT_VERSION;
+        readonly revision: typeof OXIBELT_REVISION;
+      };
     };
 
 export interface ImageRow {
@@ -110,6 +127,40 @@ const RISCV64_TOOLCHAIN_EVIDENCE =
   "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl@sha256:60372bf6ad955bc04ac9b0689476b05955b4e90fc2030d311be687025672cc6d";
 
 const FILEBELT_PACKAGE_VERSION = "0.1.0" as const;
+
+const WEBPKI_RUNTIME_COMPONENTS = [
+  component(
+    "library",
+    "webpki-roots",
+    "0.26.11",
+    "pkg:cargo/webpki-roots@0.26.11",
+    "CDLA-Permissive-2.0",
+    "runtime",
+    "Cargo.lock#webpki-roots@0.26.11",
+  ),
+  component(
+    "library",
+    "webpki-roots",
+    "1.0.9",
+    "pkg:cargo/webpki-roots@1.0.9",
+    "CDLA-Permissive-2.0",
+    "runtime",
+    "Cargo.lock#webpki-roots@1.0.9",
+  ),
+] as const;
+
+const IGGY_RUNTIME_COMPONENTS = [
+  ...WEBPKI_RUNTIME_COMPONENTS,
+  component(
+    "library",
+    "option-ext",
+    "0.2.0",
+    "pkg:cargo/option-ext@0.2.0",
+    "MPL-2.0",
+    "runtime",
+    "Cargo.lock#option-ext@0.2.0",
+  ),
+] as const;
 
 const RUST_PLATFORM_COMPONENTS: PlatformComponentInventory = {
   "linux/amd64": nativeComponents("amd64", "x86_64-unknown-linux-musl"),
@@ -164,17 +215,35 @@ const RUST_PLATFORM_COMPONENTS: PlatformComponentInventory = {
 };
 
 const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
-  rustRole("filebelt-api", "filebelt-api"),
-  rustRole("filebelt-worker-io", "filebelt-worker-io"),
-  rustRole("filebelt-worker-maintenance", "filebelt-worker-maintenance"),
+  rustRole("filebelt-api", "filebelt-api", RUST_CDLA_IMAGE_LICENSE, WEBPKI_RUNTIME_COMPONENTS),
+  rustRole(
+    "filebelt-worker-io",
+    "filebelt-worker-io",
+    RUST_CDLA_IMAGE_LICENSE,
+    WEBPKI_RUNTIME_COMPONENTS,
+  ),
+  rustRole(
+    "filebelt-worker-maintenance",
+    "filebelt-worker-maintenance",
+    RUST_IGGY_IMAGE_LICENSE,
+    IGGY_RUNTIME_COMPONENTS,
+  ),
   rustRole("filebelt-media-controller", "filebelt-media-controller"),
   rustRole("filebelt-mcp-broker", "filebelt-mcp-broker"),
-  rustRole("filebelt-tools", "filebeltctl"),
+  rustRole("filebelt-tools", "filebeltctl", RUST_IGGY_IMAGE_LICENSE, IGGY_RUNTIME_COMPONENTS),
   {
     role: "filebelt-web",
     dockerfile: "ui/web/Dockerfile",
     license: WEB_IMAGE_LICENSE,
-    artifact: { kind: "static-web", packages: ["ui/web", "ui/markdown"] },
+    artifact: {
+      kind: "oxibelt-edge",
+      packages: ["ui/web", "ui/markdown"],
+      base: {
+        image: OXIBELT_IMAGE,
+        version: OXIBELT_VERSION,
+        revision: OXIBELT_REVISION,
+      },
+    },
   },
 ];
 
@@ -190,19 +259,31 @@ const ROLE_DESCRIPTIONS: Readonly<Record<ImageRole, string>> = {
   "filebelt-media-controller": "FileBelt media controller",
   "filebelt-mcp-broker": "FileBelt MCP broker",
   "filebelt-tools": "FileBelt command-line tools",
-  "filebelt-web": "FileBelt static web application",
+  "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };
 
-function rustRole(role: ImageRole, binary: string): RoleDefinition {
+function rustRole(
+  role: ImageRole,
+  binary: string,
+  license: ImageLicense = RUST_IMAGE_LICENSE,
+  extraRuntimeComponents: readonly ImageComponent[] = [],
+): RoleDefinition {
   return {
     role,
     dockerfile: "source/ops/Dockerfile.roles",
-    license: RUST_IMAGE_LICENSE,
-    artifact: { kind: "rust-binary", binary, components: rustComponents(binary) },
+    license,
+    artifact: {
+      kind: "rust-binary",
+      binary,
+      components: rustComponents(binary, extraRuntimeComponents),
+    },
   };
 }
 
-function rustComponents(packageName: string): PlatformComponentInventory {
+function rustComponents(
+  packageName: string,
+  extraRuntimeComponents: readonly ImageComponent[],
+): PlatformComponentInventory {
   return Object.fromEntries(
     IMAGE_PLATFORMS.map((platform) => [
       platform,
@@ -216,6 +297,7 @@ function rustComponents(packageName: string): PlatformComponentInventory {
           "runtime",
           `Cargo.lock#${packageName}@${FILEBELT_PACKAGE_VERSION}`,
         ),
+        ...extraRuntimeComponents,
         ...RUST_PLATFORM_COMPONENTS[platform],
       ],
     ]),
@@ -379,7 +461,11 @@ function createImageRow(definition: RoleDefinition): ImageRow {
             binary: definition.artifact.binary,
             components: cloneComponentInventory(definition.artifact.components),
           }
-        : { kind: "static-web", packages: [...definition.artifact.packages] },
+        : {
+            kind: "oxibelt-edge",
+            packages: [...definition.artifact.packages],
+            base: { ...definition.artifact.base },
+          },
   };
 }
 

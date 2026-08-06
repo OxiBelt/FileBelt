@@ -2,9 +2,17 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "dist",
-    "rootDir": "source",
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "paths": {
+      "@filebelt/admin": ["../admin/source/index.tsx"],
+      "@filebelt/design-system": ["../design-system/source/index.tsx"]
+    },
+    "skipLibCheck": true,
     "tsBuildInfoFile": "dist/web.tsbuildinfo"
   },
-  "include": ["source/**/*.ts"]
+  "include": ["source/**/*.ts", "source/**/*.tsx", "vite.config.ts"]
 }

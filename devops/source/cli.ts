@@ -174,7 +174,7 @@ function readJson(path: string): unknown {
 function readRole(options: ReadonlyMap<string, string>): ImageRole {
   const value = readOption(options, "role");
   if (!IMAGE_ROLES.includes(value as ImageRole)) {
-    throw new Error("--role is not a Phase 1 image role");
+    throw new Error("--role is not a FileBelt image role");
   }
   return value as ImageRole;
 }
@@ -182,7 +182,7 @@ function readRole(options: ReadonlyMap<string, string>): ImageRole {
 function readPlatform(options: ReadonlyMap<string, string>): ImagePlatform {
   const value = readOption(options, "platform");
   if (!IMAGE_PLATFORMS.includes(value as ImagePlatform)) {
-    throw new Error("--platform is not a Phase 1 image platform");
+    throw new Error("--platform is not a FileBelt image platform");
   }
   return value as ImagePlatform;
 }
@@ -201,10 +201,7 @@ function normalizeTrivy(
     throw new Error("Trivy report must be produced by version 0.73.0");
   }
   if (report.Results === undefined) {
-    if (role !== "filebelt-web") {
-      throw new Error("Rust Trivy report must contain a scanned runtime package inventory");
-    }
-    return [];
+    throw new Error(`${role} Trivy report must contain a scanned runtime package inventory`);
   }
   if (!Array.isArray(report.Results)) {
     throw new Error("Trivy report Results must be an array");
@@ -242,8 +239,8 @@ function normalizeTrivy(
       });
     }
   }
-  if (role !== "filebelt-web" && packageCount === 0) {
-    throw new Error("Rust Trivy report must contain a scanned runtime package inventory");
+  if (packageCount === 0) {
+    throw new Error(`${role} Trivy report must contain a scanned runtime package inventory`);
   }
   return findings;
 }

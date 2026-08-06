@@ -12,6 +12,11 @@ import test from "node:test";
 import {
   IMAGE_PLATFORMS,
   IMAGE_ROLES,
+  OXIBELT_IMAGE,
+  OXIBELT_REVISION,
+  OXIBELT_VERSION,
+  RUST_CDLA_IMAGE_LICENSE,
+  RUST_IGGY_IMAGE_LICENSE,
   RUST_IMAGE_LICENSE,
   SOURCE_URL,
   WEB_IMAGE_LICENSE,
@@ -52,10 +57,16 @@ test("build plan contains the seven fixed roles and immutable runtime contract",
     assert.equal(image.title, image.role);
     assert.ok(image.description.startsWith("FileBelt "));
     assert.deepEqual(image.platforms, IMAGE_PLATFORMS);
-    assert.equal(
-      image.license,
-      image.role === "filebelt-web" ? WEB_IMAGE_LICENSE : RUST_IMAGE_LICENSE,
-    );
+    const expectedLicense = {
+      "filebelt-api": RUST_CDLA_IMAGE_LICENSE,
+      "filebelt-worker-io": RUST_CDLA_IMAGE_LICENSE,
+      "filebelt-worker-maintenance": RUST_IGGY_IMAGE_LICENSE,
+      "filebelt-media-controller": RUST_IMAGE_LICENSE,
+      "filebelt-mcp-broker": RUST_IMAGE_LICENSE,
+      "filebelt-tools": RUST_IGGY_IMAGE_LICENSE,
+      "filebelt-web": WEB_IMAGE_LICENSE,
+    }[image.role];
+    assert.equal(image.license, expectedLicense);
     assert.equal(image.build.target, image.role);
     if (image.artifact.kind === "rust-binary") {
       assert.deepEqual(Object.keys(image.artifact.components), IMAGE_PLATFORMS);
@@ -77,11 +88,30 @@ test("build plan contains the seven fixed roles and immutable runtime contract",
           `${image.role} must identify its linked Cargo application for Trivy`,
         );
       }
+      if (["filebelt-api", "filebelt-worker-io"].includes(image.role)) {
+        assert.ok(
+          image.artifact.components["linux/amd64"].some(
+            ({ name, license }) => name === "webpki-roots" && license === "CDLA-Permissive-2.0",
+          ),
+        );
+      }
+      if (["filebelt-worker-maintenance", "filebelt-tools"].includes(image.role)) {
+        assert.ok(
+          image.artifact.components["linux/amd64"].some(
+            ({ name, license }) => name === "option-ext" && license === "MPL-2.0",
+          ),
+        );
+      }
     }
   }
   assert.deepEqual(plan.images.at(-1).artifact, {
-    kind: "static-web",
+    kind: "oxibelt-edge",
     packages: ["ui/web", "ui/markdown"],
+    base: {
+      image: OXIBELT_IMAGE,
+      version: OXIBELT_VERSION,
+      revision: OXIBELT_REVISION,
+    },
   });
   assert.equal(plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary, "filebeltctl");
 });

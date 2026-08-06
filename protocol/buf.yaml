@@ -6,6 +6,10 @@ modules:
 lint:
   use:
     - STANDARD
+  except:
+    # ADR-0004 fixes the public tree at protocol/<domain>/v1 while package
+    # names retain the repository-wide filebelt prefix.
+    - PACKAGE_DIRECTORY_MATCH
 breaking:
   use:
     - FILE

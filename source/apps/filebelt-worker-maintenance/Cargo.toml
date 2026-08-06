@@ -10,7 +10,24 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+axum.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+clap.workspace = true
+filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
+filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
+filebelt-events-protocol = { version = "=0.1.0", path = "../../crates/filebelt-events-protocol" }
+filebelt-storage.workspace = true
+iggy.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror = "2.0.18"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

@@ -17,5 +17,77 @@ is forbidden.
   may depend inward on those contracts, never the reverse.
 - UI packages consume documented APIs and do not implement authorization.
 
+## Phase 2 package direction
+
+```text
+role binaries / browser SPA
+        │
+        ├── application services ──> database repositories
+        │             │
+        │             ├──> domain and authorization
+        │             └──> protocol contracts
+        │
+        └── generated public clients ──> protocol/OpenAPI contracts
+
+adapters ──process boundary──> Apache protocol contract
+```
+
+- `filebelt-domain` owns IDs, normalized namespace values, action vocabulary,
+  immutable-version state, and generation primitives. It contains no async
+  runtime or implementation integration.
+- `filebelt-authz` is a deterministic evaluator over supplied principals,
+  ancestry, entries, membership, owner state, action, and generations. It does
+  not load database rows, inspect cookies/OIDC claims, publish events, or open
+  payload paths.
+- `filebelt-database` owns SQLx queries, transactions, migration compatibility,
+  outbox mechanics, idempotency storage, and lease fencing. It does not decide
+  whether an actor is authorized.
+- Application services resolve repository records, invoke `filebelt-authz`,
+  enforce expected-generation/idempotency rules, and coordinate transactions.
+  HTTP handlers translate wire types and do not contain a second policy model.
+- Capability/event Protobuf schemas and the OpenAPI contract contain FileBelt
+  IDs and stable wire enums. They expose no SQL row, OxiBelt, Iggy, host path,
+  Kubernetes, or adapter implementation type.
+- `filebelt-api` may use application services and database repositories but has
+  no storage implementation dependency or payload mount.
+- `filebelt-worker-io` may use capability/storage protocol packages and narrow
+  operation/payload/generation repositories. It does not depend on HTTP session
+  authentication or namespace/ACL write repositories.
+- `filebelt-worker-maintenance` uses fenced job, payload, and reconciliation
+  repositories. Iggy is an optional wake-up adapter outside its correctness
+  path.
+- `filebeltctl` composes explicit operator commands. It must not make a library
+  package depend on CLI types or silently widen a service's database role.
+- `@filebelt/web` and `@filebelt/admin` consume one generated OpenAPI client.
+  Admin UI is a lazy route, not a separate authority; hiding a control is not
+  authorization.
+- OxiBelt, PostgreSQL, OIDC, and Iggy are replaceable external processes.
+  Apache packages may depend on reviewed generic clients or schemas, never on
+  their internal source or deployment-specific row/config types.
+
+## Data and trust direction
+
+The edge resolves no FileBelt principal. The API resolves an OIDC/session input
+to an internal principal and supplies policy facts to the authorization
+evaluator. It may then issue a signed operation capability. A storage worker
+accepts that capability, not the browser session, and resolves physical UUID
+locators through its narrow repository. The filesystem never maps host
+UID/GID ownership to a FileBelt user.
+
+PostgreSQL is authoritative for metadata, policy, generations, operations,
+jobs, outbox, and audit. Iggy consumers read PostgreSQL after a notification;
+an event payload cannot overwrite committed truth. Payload bytes are
+authoritative only in conjunction with their committed PostgreSQL version and
+manifest state.
+
+## Change review
+
+Adding a dependency edge across one of these layers requires an accepted ADR
+when it changes public contracts, policy, persistence, runtime trust, native
+linkage, or a license boundary. Review the resolved Cargo/pnpm graph rather
+than only direct manifest text. Generated code follows the destination
+package's license and records its schema and generator provenance.
+
 Repository contract tests validate workspace membership, resolved path
-dependencies, package license metadata, and unsafe-code exceptions.
+dependencies, package license metadata, generated-code provenance, database
+role use, image/mount contracts, and unsafe-code exceptions.

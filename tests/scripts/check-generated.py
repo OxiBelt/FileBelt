@@ -25,7 +25,26 @@ def main() -> int:
         print("error: pinned buf is required when schemas exist", file=sys.stderr)
         return 1
     subprocess.run(["buf", "lint"], cwd=protocol, check=True)
-    subprocess.run(["buf", "generate"], cwd=protocol, check=True)
+    subprocess.run(
+        [
+            sys.executable,
+            str(protocol / "generate.py"),
+            "--repo-root",
+            str(root),
+        ],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(protocol / "generate-openapi-client.py"),
+            "--repo-root",
+            str(root),
+        ],
+        cwd=root,
+        check=True,
+    )
     subprocess.run(["git", "diff", "--exit-code", "--", "protocol", "source", "ui"], cwd=root, check=True)
     return 0
 

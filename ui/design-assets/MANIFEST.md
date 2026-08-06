@@ -2,5 +2,9 @@
 
 # Design asset manifest
 
-No design asset is present in Phase 0. Future original and generated assets
-must record source, author, SPDX expression, generator, and regeneration steps.
+| Asset | Source | Author | License | Generator |
+|---|---|---|---|---|
+| `generated/filebelt-mark.svg` | `source/filebelt-mark.svg` | FileBelt contributors | Apache-2.0 | Manual path cleanup; copy after reviewing that no scripts, handlers, external references, or raster data are present |
+
+The mark is original FileBelt artwork. It depicts a file crossing a belt-like
+horizon and does not derive from Lucide, Fluent, or another product mark.

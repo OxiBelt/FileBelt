@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.storage.v1;
+
+// A capability is signed over the exact deterministic encoding of these claims.
+message CapabilityClaims {
+  string capability_id = 1;
+  string audience = 2;
+  CapabilityOperation operation = 3;
+  string tenant_id = 4;
+  string principal_id = 5;
+  string session_id = 6;
+  string resource_id = 7;
+  string upload_id = 8;
+  string payload_id = 9;
+  uint64 part_number = 10;
+  uint64 range_start = 11;
+  uint64 range_end = 12;
+  uint64 resource_acl_generation = 13;
+  uint64 membership_generation = 14;
+  uint64 namespace_generation = 15;
+  uint64 fencing_token = 16;
+  bytes nonce = 17;
+  int64 issued_at_unix_seconds = 18;
+  int64 expires_at_unix_seconds = 19;
+  uint64 drive_acl_generation = 20;
+  string grant_id = 21;
+}
+
+enum CapabilityOperation {
+  CAPABILITY_OPERATION_UNSPECIFIED = 0;
+  CAPABILITY_OPERATION_UPLOAD_PART = 1;
+  CAPABILITY_OPERATION_FINALIZE_UPLOAD = 2;
+  CAPABILITY_OPERATION_DOWNLOAD = 3;
+  CAPABILITY_OPERATION_DELETE_PAYLOAD = 4;
+  CAPABILITY_OPERATION_SCRUB_PAYLOAD = 5;
+}
+
+message SignedCapability {
+  uint32 key_generation = 1;
+  bytes claims = 2;
+  bytes signature = 3;
+}

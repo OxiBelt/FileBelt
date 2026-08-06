@@ -7,7 +7,19 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit --composite false --incremental false"
+  },
+  "dependencies": {
+    "@fluentui/react-components": "9.74.5",
+    "lucide-react": "1.28.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
   }
 }

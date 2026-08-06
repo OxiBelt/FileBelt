@@ -18,8 +18,16 @@ components:
 
 The complete MIT license text is distributed as `LICENSES/MIT.txt`, and the
 Apache-2.0 text is distributed as `LICENSES/Apache-2.0.txt`. Rust role image
-labels use the aggregate expression `Apache-2.0 AND MIT`. The Apache-only web
-artifact does not ship this Rust-specific notice or the MIT license text.
+labels include those terms. API and I/O worker images also contain unmodified
+WebPKI certificate data under CDLA-Permissive-2.0. Maintenance and tools images
+add unmodified `option-ext` code under MPL-2.0 through the Apache Iggy client.
+Those images carry the applicable exact license text and a versioned source or
+data pointer under `notices/`. Media controller and MCP broker images remain
+`Apache-2.0 AND MIT`.
+
+The web artifact carries Apache-2.0, MIT, ISC, and 0BSD content and ships its
+browser and OxiBelt notices separately. It does not ship this Rust-specific
+notice.
 
 Builder images and build tools are build-time inputs and are not copied into
 the final `scratch` images. Dependency admission evidence is maintained under

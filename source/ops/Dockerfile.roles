@@ -85,16 +85,53 @@ RUN case "${TARGETARCH}" in \
     test "$(printf '%s\n' "${rust_notice}" | wc -l)" -eq 1 && \
     install -D -m 0644 "${rust_notice}" /out/notices/Rust-COPYRIGHT-library.html
 
+FROM role-builder AS runtime-rootfs
+
+RUN install -d -m 0755 \
+      /out/rootfs/etc \
+      /out/rootfs/usr \
+      /out/rootfs/usr/local \
+      /out/rootfs/usr/local/bin \
+      /out/rootfs/usr/share \
+      /out/rootfs/usr/share/licenses \
+      /out/rootfs/usr/share/licenses/FileBelt \
+      /out/rootfs/usr/share/licenses/FileBelt/LICENSES \
+      /out/rootfs/usr/share/licenses/FileBelt/notices && \
+    install -m 0644 source/ops/runtime/passwd /out/rootfs/etc/passwd && \
+    install -m 0644 source/ops/runtime/group /out/rootfs/etc/group && \
+    install -m 0644 LICENSE /out/rootfs/usr/share/licenses/FileBelt/LICENSE && \
+    install -m 0644 LICENSES/Apache-2.0.txt \
+      /out/rootfs/usr/share/licenses/FileBelt/LICENSES/Apache-2.0.txt && \
+    install -m 0644 LICENSES/MIT.txt \
+      /out/rootfs/usr/share/licenses/FileBelt/LICENSES/MIT.txt && \
+    install -m 0644 THIRD_PARTY_NOTICES.md \
+      /out/rootfs/usr/share/licenses/FileBelt/THIRD_PARTY_NOTICES.md && \
+    install -m 0644 /out/notices/Rust-COPYRIGHT-library.html \
+      /out/rootfs/usr/share/licenses/FileBelt/notices/Rust-COPYRIGHT-library.html && \
+    install -m 0644 source/ops/runtime/musl-COPYRIGHT \
+      /out/rootfs/usr/share/licenses/FileBelt/notices/musl-COPYRIGHT && \
+    case "${FILEBELT_ROLE}" in \
+      filebelt-api|filebelt-worker-io|filebelt-worker-maintenance|filebelt-tools) \
+        webpki_license=$(find /usr/local/cargo/registry/src -path '*/webpki-roots-1.0.9/LICENSE' -type f); \
+        test "$(printf '%s\n' "${webpki_license}" | wc -l)" -eq 1; \
+        install -m 0644 "${webpki_license}" \
+          /out/rootfs/usr/share/licenses/FileBelt/LICENSES/CDLA-Permissive-2.0.txt; \
+        install -m 0644 source/ops/runtime/webpki-roots-SOURCE.txt \
+          /out/rootfs/usr/share/licenses/FileBelt/notices/webpki-roots-SOURCE.txt ;; \
+    esac && \
+    case "${FILEBELT_ROLE}" in \
+      filebelt-worker-maintenance|filebelt-tools) \
+        option_ext_license=$(find /usr/local/cargo/registry/src -path '*/option-ext-0.2.0/LICENSE.txt' -type f); \
+        test "$(printf '%s\n' "${option_ext_license}" | wc -l)" -eq 1; \
+        install -m 0644 "${option_ext_license}" \
+          /out/rootfs/usr/share/licenses/FileBelt/LICENSES/MPL-2.0.txt; \
+        install -m 0644 source/ops/runtime/option-ext-SOURCE.txt \
+          /out/rootfs/usr/share/licenses/FileBelt/notices/option-ext-SOURCE.txt ;; \
+    esac
+
 FROM scratch AS runtime-files
 
-COPY --chmod=0644 source/ops/runtime/passwd /etc/passwd
-COPY --chmod=0644 source/ops/runtime/group /etc/group
-COPY --chmod=0644 LICENSE /usr/share/licenses/FileBelt/LICENSE
-COPY --chmod=0644 LICENSES/Apache-2.0.txt /usr/share/licenses/FileBelt/LICENSES/Apache-2.0.txt
-COPY --chmod=0644 LICENSES/MIT.txt /usr/share/licenses/FileBelt/LICENSES/MIT.txt
-COPY --chmod=0644 THIRD_PARTY_NOTICES.md /usr/share/licenses/FileBelt/THIRD_PARTY_NOTICES.md
-COPY --from=role-builder --chmod=0644 /out/notices/Rust-COPYRIGHT-library.html /usr/share/licenses/FileBelt/notices/Rust-COPYRIGHT-library.html
-COPY --chmod=0644 source/ops/runtime/musl-COPYRIGHT /usr/share/licenses/FileBelt/notices/musl-COPYRIGHT
+COPY --from=runtime-rootfs /out/rootfs/ /
 
 FROM runtime-files AS filebelt-api
 ARG FILEBELT_BUILD_VERSION
@@ -111,7 +148,7 @@ LABEL org.opencontainers.image.title="filebelt-api" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
       org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
       org.opencontainers.image.created="${FILEBELT_CREATED}" \
-      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND CDLA-Permissive-2.0" \
       io.filebelt.image.role="filebelt-api" \
       io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
       io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
@@ -134,7 +171,7 @@ LABEL org.opencontainers.image.title="filebelt-worker-io" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
       org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
       org.opencontainers.image.created="${FILEBELT_CREATED}" \
-      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND CDLA-Permissive-2.0" \
       io.filebelt.image.role="filebelt-worker-io" \
       io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
       io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
@@ -157,7 +194,7 @@ LABEL org.opencontainers.image.title="filebelt-worker-maintenance" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
       org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
       org.opencontainers.image.created="${FILEBELT_CREATED}" \
-      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0" \
       io.filebelt.image.role="filebelt-worker-maintenance" \
       io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
       io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
@@ -226,7 +263,7 @@ LABEL org.opencontainers.image.title="filebelt-tools" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
       org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
       org.opencontainers.image.created="${FILEBELT_CREATED}" \
-      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0" \
       io.filebelt.image.role="filebelt-tools" \
       io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
       io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \

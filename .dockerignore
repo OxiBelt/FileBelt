@@ -7,3 +7,4 @@ artifacts
 **/node_modules
 target
 tmp
+deploy/compose/.state*

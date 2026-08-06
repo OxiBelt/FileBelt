@@ -1,0 +1,7 @@
+SPDX-License-Identifier: Apache-2.0
+
+Corresponding source for the unmodified MPL-2.0 option-ext helper:
+
+- option-ext 0.2.0
+  https://crates.io/api/v1/crates/option-ext/0.2.0/download
+  SHA-256: 04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d

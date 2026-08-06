@@ -7,18 +7,24 @@ TypeScript. The project is Kubernetes-first, uses PostgreSQL as authoritative
 metadata state, and applies one application-level Virtual ACL model across web
 and protocol access paths.
 
-This repository has a Phase 1 build-and-release skeleton. The packages remain
-identity probes rather than usable services, but the repository can build and
-validate seven read-only Docker image archives with OCI identity labels for
-AMD64, ARM64, and RISC-V. No database schema, application API, registry
-publication, or production deployment is implemented yet. The Phase 1 Helm
-chart is a strict image-values contract and intentionally renders no Kubernetes
-object.
+This repository implements the Phase 2 Apache core foundation: a tenant-scoped
+PostgreSQL namespace and Virtual ACL, OIDC browser sessions, immutable file
+versions, UUID-addressed whole/chunk payload storage, capability-limited I/O
+workers, sharing and revocation, durable jobs/outbox, optional Apache Iggy
+notifications, and an accessible React web drive behind OxiBelt.
 
-The image and evidence contract is defined by
-[ADR-0007](docs/adr/0007-oci-build-and-release-evidence.md). Image validation is
-dry-run only: repository workflows never push to GHCR, create releases, or mint
-attestations.
+The supported Phase 2 runtime is a Docker development/integration topology.
+It includes two-user TLS-edge acceptance and restart reconciliation, plus
+fault-injection support and a documented quiesced backup/restore procedure. It
+is not a production deployment and makes no HA, PITR, RPO, or RTO claim. The Helm
+chart remains a strict image-values contract and intentionally renders no
+Kubernetes object until Phase 3.
+
+The Phase 1 image evidence contract remains in
+[ADR-0007](docs/adr/0007-oci-build-and-release-evidence.md) and its Phase 2
+runtime extension is [ADR-0011](docs/adr/0011-phase-two-runtime-images-and-evidence.md).
+Image validation remains dry-run only: repository workflows never push to
+GHCR, create releases, or mint attestations.
 
 ## Repository regions
 
@@ -58,24 +64,44 @@ pnpm build
 Additional supply-chain checks are described in
 [`docs/SupplyChain.md`](docs/SupplyChain.md).
 
-## Phase 1 image checks
+## Core architecture
+
+- PostgreSQL is authoritative for identity, metadata, policy, versions, jobs,
+  audit, and outbox state.
+- The payload plane uses opaque UUIDv4 locators on one validated POSIX storage
+  root; host filesystem ownership never represents a FileBelt user.
+- Every access resolves an internal principal and enforces the common Virtual
+  ACL. The API issues short-lived operation capabilities but does not mount
+  payload storage.
+- Apache Iggy accelerates wake-ups and invalidation. The same operations remain
+  correct through PostgreSQL polling when Iggy is absent or unavailable.
+- OxiBelt terminates public TLS and serves/proxies the SPA, REST API, uploads,
+  and Range downloads. Backend services remain on an isolated network.
+
+Read [the ADR index](docs/adr/README.md),
+[threat model](docs/ThreatModel.md), and
+[Phase 2 operator guide](docs/operations/phase2.md) before changing these
+boundaries.
+
+## Image checks
 
 Build the TypeScript planning tools, create an immutable build plan, and run a
 native platform matrix with:
 
 ```sh
 pnpm --filter @filebelt/devops build
-tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase1/image-plan.json
-tests/scripts/run-image-matrix.sh --plan artifacts/phase1/image-plan.json --platform linux/amd64 --output-dir artifacts/phase1/amd64
+tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase2/image-plan.json
+tests/scripts/run-image-matrix.sh --plan artifacts/phase2/image-plan.json --platform linux/amd64 --output-dir artifacts/phase2/amd64
 tests/scripts/check-helm-chart.sh
 ```
 
 The matrix creates local Docker image archives and evidence under `artifacts/`,
 which is ignored by Git and safe to discard. Use a native ARM64 host for
-`linux/arm64`. The CI RISC-V job cross-compiles the static probes and executes
-them through the repository's rootless, digest-pinned QEMU helper. Smoke tests
-refuse to replace a pre-existing local tag and remove every image tag they load
-or build.
+`linux/arm64`. The CI RISC-V job cross-compiles active Rust roles and executes a
+bounded smoke suite through the repository's rootless, digest-pinned QEMU
+helper; optional Iggy behavior uses the PostgreSQL polling fallback on that
+architecture. Smoke tests refuse to replace a pre-existing local tag and
+remove every image tag they load or build.
 
 ## License
 

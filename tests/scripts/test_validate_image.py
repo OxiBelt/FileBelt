@@ -109,6 +109,29 @@ class ImageOverlayTests(unittest.TestCase):
             ):
                 VALIDATOR.load_archive(archive)
 
+    def test_root_confined_symlink_is_recorded_without_following_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "image.tar"
+            symlink = tarfile.TarInfo("bin/tool")
+            symlink.type = tarfile.SYMTYPE
+            symlink.linkname = "../usr/bin/tool"
+            write_docker_archive(archive, [layer_bytes([(symlink, None)])])
+
+            _, files, _ = VALIDATOR.load_archive(archive)
+
+            self.assertEqual(files["/bin/tool"].link_target, "/usr/bin/tool")
+
+    def test_symlink_that_escapes_rootfs_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "image.tar"
+            symlink = tarfile.TarInfo("bin/tool")
+            symlink.type = tarfile.SYMTYPE
+            symlink.linkname = "../../outside"
+            write_docker_archive(archive, [layer_bytes([(symlink, None)])])
+
+            with self.assertRaisesRegex(VALIDATOR.ValidationError, "escapes the rootfs"):
+                VALIDATOR.load_archive(archive)
+
     def test_required_file_rejects_mutable_or_non_root_metadata(self) -> None:
         for entry, message in [
             (VALIDATOR.FileEntry(0o666, 0, 0, b"data"), "mode"),

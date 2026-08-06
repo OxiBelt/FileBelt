@@ -17,6 +17,12 @@ cargo_audit = "0.22.2"
 cargo_deny = "0.20.2"
 cargo_vet = "0.10.2"
 
+[protocol_generation]
+prost_plugin = "buf.build/community/neoeinstein-prost:v0.5.0"
+prost_plugin_revision = 1
+openapi_typescript = "7.13.0"
+openapi_fetch = "0.17.0"
+
 [platforms]
 native_full = ["linux/amd64", "linux/arm64"]
 qemu_smoke = ["linux/riscv64"]

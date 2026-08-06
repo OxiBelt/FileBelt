@@ -1,0 +1,13 @@
+SPDX-License-Identifier: Apache-2.0
+
+Corresponding data and source provenance for the unmodified WebPKI root data:
+
+- webpki-roots 0.26.11
+  https://crates.io/api/v1/crates/webpki-roots/0.26.11/download
+  SHA-256: 521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9
+- webpki-roots 1.0.9
+  https://crates.io/api/v1/crates/webpki-roots/1.0.9/download
+  SHA-256: 7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a
+- webpki-root-certs 1.0.9, the generator input for the root data
+  https://crates.io/api/v1/crates/webpki-root-certs/1.0.9/download
+  SHA-256: b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b

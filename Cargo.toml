@@ -14,6 +14,8 @@ members = [
   "source/crates/filebelt-domain",
   "source/crates/filebelt-authz",
   "source/crates/filebelt-database",
+  "source/crates/filebelt-events-protocol",
+  "source/crates/filebelt-storage",
   "source/crates/filebelt-storage-protocol",
   "source/crates/filebelt-vfs-protocol",
   "source/crates/filebelt-document-protocol",
@@ -40,6 +42,48 @@ rust-version = "1.97.1"
 license = "Apache-2.0"
 repository = "https://github.com/OxiBelt/FileBelt"
 publish = false
+
+[workspace.dependencies]
+anyhow = "=1.0.104"
+argon2 = { version = "=0.5.3", features = ["std"] }
+aws-lc-rs = { version = "=1.17.3", default-features = false }
+axum = { version = "=0.8.9", features = ["http1", "http2", "json", "macros", "tokio"] }
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+blake3 = "=1.8.6"
+bytes = "=1.12.1"
+clap = { version = "=4.6.5", features = ["derive"] }
+filebelt-authz = { version = "=0.1.0", path = "source/crates/filebelt-authz" }
+filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-database" }
+filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }
+filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
+filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-events-protocol" }
+filebelt-storage = { version = "=0.1.0", path = "source/crates/filebelt-storage" }
+filebelt-storage-protocol = { version = "=0.1.0", path = "source/crates/filebelt-storage-protocol" }
+futures-util = "=0.3.33"
+fs2 = "=0.4.3"
+getrandom = "=0.4.3"
+http = "=1.5.0"
+http-body-util = "=0.1.4"
+iggy = "=0.8.0"
+openidconnect = { version = "=4.0.1", default-features = false, features = ["reqwest"] }
+prost = "=0.14.4"
+reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sqlx = { version = "=0.9.0", default-features = false, features = ["json", "macros", "migrate", "postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid"] }
+subtle = "=2.6.1"
+tempfile = "=3.27.0"
+thiserror = "=2.0.18"
+tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "=0.7.19", features = ["io"] }
+toml = "=1.1.4"
+tower-http = { version = "=0.7.0", features = ["catch-panic", "cors", "limit", "request-id", "trace"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "std"] }
+url = { version = "=2.5.8", features = ["serde"] }
+uuid = { version = "=1.24.0", features = ["serde", "v4"] }
+zeroize = "=1.9.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

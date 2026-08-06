@@ -36,7 +36,7 @@ def planned_components(image: dict[str, Any], platform: str) -> list[dict[str, A
     artifact = image.get("artifact")
     if not isinstance(artifact, dict):
         raise ValueError("image-plan artifact is malformed")
-    if artifact.get("kind") == "static-web":
+    if artifact.get("kind") == "oxibelt-edge":
         return []
     if artifact.get("kind") != "rust-binary":
         raise ValueError("image-plan artifact kind is unsupported")

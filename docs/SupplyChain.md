@@ -14,6 +14,80 @@ linting, typechecking, tests, and build checks. GitHub Actions are pinned by
 commit and run with read-only permissions during pull-request validation.
 The Node license admission step compares pnpm's resolved report with
 `supply-chain/node-policy.toml` and fails closed on every unknown license.
+Cargo Vet consumes locked public audit evidence from Google, Mozilla, the
+Bytecode Alliance, ISRG, Zcash, Embark Studios, and the OxiBelt upstream
+repository; locally asserted audits remain reviewable in
+`supply-chain/audits.toml`. Updating imports changes the committed lock and is
+a dependency-policy review, not an implicit network trust decision at build
+time.
+
+## Phase 2 dependency admission
+
+Phase 2 retains exact Cargo and pnpm resolution and adds runtime dependencies
+only after source, feature, native-link, license, vulnerability, maintenance,
+and three-architecture review. OIDC, database, and first-party Rust HTTP TLS
+use Rustls with the AWS-LC provider and Ed25519. The exact optional Iggy 0.8.0
+client is an explicit upstream exception that also links Ring for its
+notification-only transports; Iggy remains outside authorization and
+durability correctness. Admission evidence includes every enabled Cargo feature,
+`build.rs` output, bundled source, `*-sys` crate, compiler/linker input, final
+ELF dependency, license/notice, and RISC-V musl bindgen requirement. Embedded
+public WebPKI roots and an optional mounted custom CA bundle are the only trust
+root sources.
+
+The resolved graph admits two non-baseline license families with narrow,
+recorded reasons. `webpki-roots` and `webpki-root-certs` carry
+`CDLA-Permissive-2.0` certificate data used by Rustls clients. The exact Iggy
+client reaches unmodified `option-ext@0.2.0` under `MPL-2.0`; FileBelt does not
+copy or modify that crate, and binary distributions retain its license and a
+corresponding-source pointer to the exact crates.io archive. These admissions
+do not change the Apache-2.0 license of FileBelt source, but final-image labels,
+notices, and SBOMs must include the resolved runtime composition.
+
+`RUSTSEC-2023-0071` is ignored only for `rsa@0.9.10` reached through
+`openidconnect@4.0.1`: FileBelt verifies public issuer signatures and never
+loads or operates on an RSA private key, so the advisory's private-key timing
+sink is absent. A change that introduces RSA signing/decryption or swaps the
+OIDC library invalidates this reachability exception.
+
+`RUSTSEC-2026-0235` is reached only through Iggy's byte-unit formatting graph.
+FileBelt is producer-only and never constructs, accepts, or validates an rkyv
+archive, including an archive containing `Rc` or `Arc`; therefore the affected
+archive-validation entry point is absent. Enabling an Iggy consumer, using
+rkyv serialization, or changing the Iggy client invalidates this exception.
+
+OpenAPI 3.1 and Protobuf schemas are committed inputs. Generated Rust and
+TypeScript clients record source, exact generator, regeneration command, and
+license, and `check-generated.py` fails a drifted tree. Browser packages use
+frozen pnpm installation with lifecycle scripts disabled; a required script is
+an explicit, narrowly reviewed exception rather than an install default. The
+Node allowlist admits `0BSD` specifically for Fluent UI's resolved
+`tslib@2.8.1` runtime helper; that package remains lockfile-pinned and is not a
+general exception for unreviewed browser dependencies. It also admits the
+exact SPDX choice `(MIT OR CC0-1.0)` for `type-fest@4.41.0`, reached only by the
+lockfile-pinned OpenAPI TypeScript generator; FileBelt elects its MIT option and
+does not ship that development-only package in the browser image.
+
+The immutable external integration inputs are:
+
+| Input | Accepted version and digest | Distribution role |
+| --- | --- | --- |
+| OxiBelt | `0.7.1-beta.2`, `ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030` | Base of `filebelt-web`; prerelease exception |
+| PostgreSQL | `18.4`, `docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4` | Docker integration helper only |
+| Apache Iggy | `0.8.0`, `docker.io/apache/iggy@sha256:99b42016a898381d4bab3c2d4613456eb04ad06a7a0688314823d798a685636b` | Optional Docker integration helper only |
+| Iggy Rust client | exact crate `0.8.0` | Optional notification publisher/consumer |
+
+Changing one of these versions or digests requires a focused dependency
+review. OxiBelt review repeats source-revision, prerelease rationale, route
+behavior, architecture, SBOM, vulnerability, license, and notice checks.
+FileBelt never copies from or builds the local reference checkout. PostgreSQL
+and Iggy helpers are not republished as FileBelt images.
+
+The pinned Iggy helper alone receives its documented `SYS_NICE`, unlimited
+memlock, and seccomp exception. Image and Compose contract tests fail if that
+exception reaches a FileBelt container or another profile service.
+
+## OCI evidence
 
 Phase 1 image builds use digest-pinned Dockerfile frontends and bases and create
 local Docker image archives only. Each of the seven roles is checked against an
@@ -45,8 +119,8 @@ Trivy reports no package records for the `scratch` filesystem. Runtime records
 use `required` scope, while build tools use `excluded` scope and are omitted
 from the image subject's dependency edge. Rust images use the aggregate license
 expression `Apache-2.0 AND MIT` and ship upstream Rust and musl copyright
-manifests. The static web image remains `Apache-2.0` and excludes those
-Rust-only notices.
+manifests. The Phase 1 static web artifact remains `Apache-2.0` and excludes
+those Rust-only notices; ADR-0011 defines the later OxiBelt-derived composition.
 
 Unexcepted `HIGH` or `CRITICAL` vulnerabilities fail the gate. Exceptions in
 `supply-chain/image-vulnerability-exceptions.json` must match the role,
@@ -62,13 +136,42 @@ Normalized rebuild verification compares the root filesystem, modes, numeric
 ownership, selected image config and labels, embedded identity, and SBOM
 content while excluding archive transport bookkeeping.
 
+For Phase 2, `filebelt-api`, `filebelt-worker-io`,
+`filebelt-worker-maintenance`, `filebelt-tools`, and `filebelt-web` replace
+their probe contracts with role-specific runtime contracts. Evidence adds:
+
+- the typed configuration-schema identity and public-origin/secret-file checks;
+- exposed ports, required networks, mounts, writable paths, and dropped Linux
+  capabilities;
+- the absence of payload storage from the API and of signing keys from the I/O
+  worker;
+- the native crypto provider, final ELF linkage, trusted-root inputs, and
+  per-platform build provenance;
+- role-specific health, configuration failure, non-root startup, and clean
+  shutdown; and
+- the exact OxiBelt base/source/route relationship for `filebelt-web`.
+
+The media-controller and MCP-broker images remain probe-only and their evidence
+must continue to say so. Rust and OxiBelt-derived images use the role-specific
+aggregate expressions in the license map: WebPKI consumers include CDLA,
+Iggy-client roles also include MPL-2.0, and the web role includes ISC and 0BSD.
+Every upstream copyright and notice discovered from the final image and
+dependency graph is shipped and mapped to the SBOM.
+
+AMD64 and ARM64 run native runtime and Docker behavior tests. RISC-V
+cross-compiles and runs bounded rootless-QEMU smoke tests, including native
+crypto initialization. The official Iggy helper is not required on RISC-V;
+that job validates the PostgreSQL polling fallback and must not substitute an
+unreviewed Iggy image.
+
 The read-only pull-request matrix validates all roles on native AMD64 and
 ARM64. Default-branch, scheduled, and manual checks also validate RISC-V by
 cross-compiling the static probes and running the extracted binaries in a
 rootless, digest-pinned QEMU helper container. The release dry run covers all
 21 role/platform combinations and an AMD64 normalized rebuild.
 
-No Phase 1 workflow has package, release, or attestation write permission.
+No Phase 1 or Phase 2 workflow has package, release, or attestation write
+permission.
 Archives and reports are downloadable CI evidence, not published releases.
 Signed release tags are verified in a temporary keyring containing only the
 [tracked authorized signers](../supply-chain/release-tag-signers/README.md),
@@ -80,3 +183,9 @@ rollback consists of disabling the image workflow calls and discarding local or
 CI `artifacts/` output. Native smoke tests remove the archive tag they load, and
 RISC-V smoke tests remove their temporary helper image, so the matrix leaves no
 role or helper tag in the local daemon. There is no registry artifact to revoke.
+
+Database volumes, payloads, backups, test user data, TLS keys, OIDC credentials,
+cookies, CSRF tokens, capabilities, and signing/hash keysets never enter build
+contexts or retained evidence. Docker and browser logs redact these values.
+Fault and restore artifacts are sensitive local test output and use
+deterministic cleanup.

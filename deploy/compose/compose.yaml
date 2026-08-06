@@ -1,0 +1,412 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: filebelt-phase2
+
+x-filebelt-build-args: &filebelt-build-args
+  FILEBELT_BUILD_VERSION: ${FILEBELT_BUILD_VERSION:-0.1.0-build.compose}
+  FILEBELT_BUILD_REVISION: ${FILEBELT_BUILD_REVISION:-0000000000000000000000000000000000000000}
+  FILEBELT_BUILD_SOURCE_REF: ${FILEBELT_BUILD_SOURCE_REF:-refs/heads/main}
+  FILEBELT_BUILD_DIRTY: ${FILEBELT_BUILD_DIRTY:-true}
+  FILEBELT_BUILD_KIND: ${FILEBELT_BUILD_KIND:-local}
+  FILEBELT_CREATED: ${FILEBELT_CREATED:-1970-01-01T00:00:00Z}
+
+x-filebelt-build: &filebelt-build
+  context: ../..
+  dockerfile: source/ops/Dockerfile.roles
+  args: *filebelt-build-args
+
+x-filebelt-service: &filebelt-service
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  init: true
+  pids_limit: 256
+  stop_grace_period: 35s
+
+x-filebelt-profiles: &filebelt-profiles [core]
+
+services:
+  postgres:
+    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    profiles: *filebelt-profiles
+    environment:
+      POSTGRES_DB: filebelt
+      POSTGRES_USER: filebelt_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-owner-password
+      PGDATA: /var/lib/postgresql/18/docker
+    secrets: [postgres-owner-password]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks: [control]
+    user: "999:999"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /run/postgresql:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready --dbname=$$POSTGRES_DB --username=$$POSTGRES_USER"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    stop_grace_period: 30s
+
+  filebelt-oidc:
+    build:
+      context: ../../tests/docker/oidc
+      dockerfile: Dockerfile
+    image: filebelt-oidc-fixture:phase2
+    profiles: *filebelt-profiles
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    secrets: [oidc-client-secret]
+    networks: [control, edge]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8083/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  filebelt-migrate:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-tools
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-tools
+    image: filebelt-tools:phase2
+    profiles: *filebelt-profiles
+    command: [database, migrate, --config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/migrator-database-url
+    secrets: [migrator-database-url]
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    networks: [control]
+    depends_on:
+      postgres-migrator-role: {condition: service_completed_successfully}
+    restart: "no"
+
+  postgres-migrator-role:
+    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    profiles: *filebelt-profiles
+    entrypoint: [/opt/filebelt/bootstrap-database-roles.sh]
+    command: [migrator]
+    secrets:
+      - postgres-owner-password
+      - migrator-database-password
+    configs:
+      - source: postgres-database-role-script
+        target: /opt/filebelt/bootstrap-database-roles.sh
+        mode: 0555
+      - source: postgres-role-definitions
+        target: /opt/filebelt/postgres/roles.sql
+        mode: 0444
+    networks: [control]
+    user: "999:999"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  postgres-runtime-roles:
+    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    profiles: *filebelt-profiles
+    entrypoint: [/opt/filebelt/bootstrap-database-roles.sh]
+    command: [runtime]
+    secrets:
+      - postgres-owner-password
+      - api-database-password
+      - io-database-password
+      - maintenance-database-password
+    configs:
+      - source: postgres-database-role-script
+        target: /opt/filebelt/bootstrap-database-roles.sh
+        mode: 0555
+      - source: postgres-runtime-grants
+        target: /opt/filebelt/postgres/grants.sql
+        mode: 0444
+    networks: [control]
+    user: "999:999"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    depends_on:
+      filebelt-migrate: {condition: service_completed_successfully}
+    restart: "no"
+
+  filebelt-payload-init:
+    <<: *filebelt-service
+    build:
+      context: ../../tests/docker/oidc
+      dockerfile: Dockerfile
+    image: filebelt-oidc-fixture:phase2
+    profiles: [core, fault]
+    entrypoint:
+      - node
+      - -e
+      - "const f=require('node:fs');const p='/var/lib/filebelt/payloads/.filebelt-write-check';f.writeFileSync(p,'ready',{mode:0o600});f.unlinkSync(p)"
+    volumes:
+      - payload-data:/var/lib/filebelt/payloads
+    network_mode: none
+    restart: "no"
+
+  filebelt-bootstrap:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-tools
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-tools
+    image: filebelt-tools:phase2
+    profiles: *filebelt-profiles
+    command: [tenant, bootstrap, --config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/api-database-url
+    secrets: [api-database-url]
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    networks: [control]
+    depends_on:
+      postgres-runtime-roles: {condition: service_completed_successfully}
+    restart: "no"
+
+  filebelt-api:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-api
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-api
+    image: filebelt-api:phase2
+    profiles: *filebelt-profiles
+    command: [--config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/api-database-url
+      FILEBELT_PUBLIC_ORIGIN: ${FILEBELT_PUBLIC_ORIGIN:-https://filebelt.localhost:8443/}
+    secrets:
+      - api-database-url
+      - oidc-client-secret
+      - capability-private-key
+      - capability-public-keyset
+      - digest-key
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    networks: [control, edge]
+    depends_on:
+      filebelt-bootstrap: {condition: service_completed_successfully}
+      filebelt-payload-init: {condition: service_completed_successfully}
+      filebelt-oidc: {condition: service_healthy}
+    expose: ["8080"]
+    restart: unless-stopped
+
+  filebelt-worker-io:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-worker-io
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-worker-io
+    image: filebelt-worker-io:phase2
+    profiles: *filebelt-profiles
+    command: [serve, --config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/io-database-url
+    secrets:
+      - io-database-url
+      - capability-public-keyset
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    volumes:
+      - payload-data:/var/lib/filebelt/payloads
+    networks: [control, edge]
+    depends_on:
+      filebelt-bootstrap: {condition: service_completed_successfully}
+      filebelt-payload-init: {condition: service_completed_successfully}
+    expose: ["8081"]
+    restart: unless-stopped
+
+  filebelt-worker-maintenance:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-worker-maintenance
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-worker-maintenance
+    image: filebelt-worker-maintenance:phase2
+    profiles: *filebelt-profiles
+    command: [serve, --config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/maintenance-database-url
+    secrets: [maintenance-database-url]
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    volumes:
+      - payload-data:/var/lib/filebelt/payloads
+    networks: [control]
+    depends_on:
+      filebelt-bootstrap: {condition: service_completed_successfully}
+      filebelt-payload-init: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  filebelt-web:
+    <<: *filebelt-service
+    build:
+      context: ../..
+      dockerfile: ui/web/Dockerfile
+      target: filebelt-web
+      args:
+        FILEBELT_BUILD_VERSION: ${FILEBELT_BUILD_VERSION:-0.1.0-build.compose}
+        FILEBELT_BUILD_REVISION: ${FILEBELT_BUILD_REVISION:-0000000000000000000000000000000000000000}
+        FILEBELT_BUILD_SOURCE_REF: ${FILEBELT_BUILD_SOURCE_REF:-refs/heads/main}
+        FILEBELT_BUILD_DIRTY: ${FILEBELT_BUILD_DIRTY:-true}
+        FILEBELT_BUILD_KIND: ${FILEBELT_BUILD_KIND:-local}
+        FILEBELT_CREATED: ${FILEBELT_CREATED:-1970-01-01T00:00:00Z}
+    image: filebelt-web:phase2
+    profiles: *filebelt-profiles
+    secrets:
+      - source: filebelt-tls-certificate
+        target: /etc/oxibelt/cert/filebelt.crt
+        mode: 0444
+      - source: filebelt-tls-private-key
+        target: /etc/oxibelt/cert/filebelt.key
+        mode: 0444
+    configs:
+      - source: filebelt-acceptance-edge-config
+        target: /etc/oxibelt/config/oxibelt.toml
+        mode: 0444
+    networks: [edge]
+    depends_on:
+      filebelt-api: {condition: service_started}
+      filebelt-worker-io: {condition: service_started}
+    ports:
+      - ${FILEBELT_HTTPS_BIND_ADDRESS:-127.0.0.1}:${FILEBELT_HTTPS_PORT:-8443}:8443/tcp
+    restart: unless-stopped
+
+  filebelt-iggy:
+    image: docker.io/apache/iggy@sha256:99b42016a898381d4bab3c2d4613456eb04ad06a7a0688314823d798a685636b
+    profiles: [iggy]
+    environment:
+      IGGY_SYSTEM_PATH: /local_data
+      IGGY_HTTP_ENABLED: "false"
+      IGGY_QUIC_ENABLED: "false"
+      IGGY_WEBSOCKET_ENABLED: "false"
+      IGGY_TCP_ADDRESS: 0.0.0.0:8090
+    volumes:
+      - iggy-data:/local_data
+    networks: [control]
+    cap_add: [SYS_NICE]
+    security_opt: [seccomp:unconfined, no-new-privileges:true]
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+    stop_grace_period: 30s
+
+  filebelt-io-database-unavailable:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-worker-io
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-worker-io
+    image: filebelt-worker-io:phase2
+    profiles: [fault]
+    command: [serve, --config, /etc/filebelt/filebelt.toml]
+    environment:
+      FILEBELT_DATABASE_URL_FILE: /run/secrets/io-database-url
+    secrets:
+      - io-database-url
+      - capability-public-keyset
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    volumes:
+      - payload-data:/var/lib/filebelt/payloads
+    network_mode: none
+    depends_on:
+      filebelt-payload-init: {condition: service_completed_successfully}
+    restart: "no"
+
+networks:
+  control: {internal: true}
+  edge: {internal: true}
+
+volumes:
+  postgres-data: {}
+  payload-data: {}
+  iggy-data: {}
+
+configs:
+  filebelt-config:
+    file: ${FILEBELT_CONFIG_FILE:-./filebelt.toml}
+  filebelt-acceptance-edge-config:
+    file: ${FILEBELT_EDGE_CONFIG_FILE:-../../ui/web/edge/oxibelt.acceptance.toml}
+  postgres-database-role-script:
+    file: ${FILEBELT_POSTGRES_ROLE_SCRIPT_FILE:-./postgres/bootstrap-runtime-roles.sh}
+  postgres-role-definitions:
+    file: ${FILEBELT_POSTGRES_ROLES_FILE:-../../source/migrations/postgres/roles.sql}
+  postgres-runtime-grants:
+    file: ${FILEBELT_POSTGRES_GRANTS_FILE:-../../source/migrations/postgres/grants.sql}
+
+secrets:
+  postgres-owner-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/postgres-owner-password
+  migrator-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/migrator-database-url
+  migrator-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/migrator-database-password
+  api-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-database-password
+  io-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/io-database-password
+  maintenance-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-password
+  api-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-database-url
+  io-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/io-database-url
+  maintenance-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-url
+  oidc-client-secret:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret
+  capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-private-key
+  capability-public-keyset:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-public-keyset
+  digest-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/digest-key
+  filebelt-tls-certificate:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/filebelt.crt
+  filebelt-tls-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/filebelt.key

@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg fill="none" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><path d="M9 4.5h12l6 6V29a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 7 29V7a2.5 2.5 0 0 1 2-2.45Z" stroke="currentColor" stroke-linejoin="round" stroke-width="2"/><path d="M21 4.8V11h6" stroke="currentColor" stroke-linejoin="round" stroke-width="2"/><path d="M4 20.5h28" stroke="currentColor" stroke-linecap="round" stroke-width="5"/><path d="M5 20.5h26" stroke="var(--fb-brand-cut, #121212)" stroke-dasharray="2.5 3" stroke-linecap="round" stroke-width="1.5"/></svg>

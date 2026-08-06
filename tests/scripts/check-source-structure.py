@@ -35,6 +35,8 @@ EXPECTED_RUST_MEMBERS = {
     "source/crates/filebelt-domain",
     "source/crates/filebelt-authz",
     "source/crates/filebelt-database",
+    "source/crates/filebelt-events-protocol",
+    "source/crates/filebelt-storage",
     "source/crates/filebelt-storage-protocol",
     "source/crates/filebelt-vfs-protocol",
     "source/crates/filebelt-document-protocol",

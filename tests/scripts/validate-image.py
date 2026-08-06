@@ -19,8 +19,26 @@ EXPECTED_LABELS = {
     "org.opencontainers.image.source": "https://github.com/OxiBelt/FileBelt",
     "org.opencontainers.image.url": "https://github.com/OxiBelt/FileBelt",
 }
-RUST_IMAGE_LICENSE = "Apache-2.0 AND MIT"
-WEB_IMAGE_LICENSE = "Apache-2.0"
+RUST_IMAGE_LICENSES = {
+    "filebelt-api": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
+    "filebelt-worker-io": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
+    "filebelt-worker-maintenance": (
+        "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0"
+    ),
+    "filebelt-media-controller": "Apache-2.0 AND MIT",
+    "filebelt-mcp-broker": "Apache-2.0 AND MIT",
+    "filebelt-tools": "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0",
+}
+WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD"
+OXIBELT_IMAGE = (
+    "ghcr.io/oxibelt/oxibelt@"
+    "sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030"
+)
+OXIBELT_ENTRYPOINT = [
+    "/usr/local/bin/oxibelt",
+    "--config",
+    "/etc/oxibelt/config/oxibelt.toml",
+]
 MACHINES = {"linux/amd64": 62, "linux/arm64": 183, "linux/riscv64": 243}
 ARCHITECTURES = {
     "linux/amd64": "amd64",
@@ -47,6 +65,7 @@ class FileEntry:
     uid: int
     gid: int
     data: bytes
+    link_target: str | None = None
 
 
 def load_json(path: Path) -> Any:
@@ -58,6 +77,27 @@ def normalized_path(name: str) -> str:
     if ".." in path.parts:
         raise ValidationError(f"archive contains traversal path: {name}")
     return path.as_posix()
+
+
+def normalized_link_target(path_name: str, link_name: str, *, hardlink: bool) -> str:
+    if not link_name or "\x00" in link_name:
+        raise ValidationError(f"archive contains an invalid link target: {path_name}")
+    raw = PurePosixPath("/" + link_name.lstrip("/")) if hardlink else (
+        PurePosixPath(link_name)
+        if link_name.startswith("/")
+        else PurePosixPath(path_name).parent / link_name
+    )
+    parts: list[str] = []
+    for part in raw.parts:
+        if part in ("", "/", "."):
+            continue
+        if part == "..":
+            if not parts:
+                raise ValidationError(f"archive link escapes the rootfs: {path_name}")
+            parts.pop()
+            continue
+        parts.append(part)
+    return "/" + "/".join(parts)
 
 
 def load_archive(path: Path) -> tuple[dict[str, Any], dict[str, FileEntry], str]:
@@ -126,6 +166,20 @@ def load_archive(path: Path) -> tuple[dict[str, Any], dict[str, FileEntry], str]
                         files[path_name] = FileEntry(
                             member.mode & 0o7777, member.uid, member.gid, content.read()
                         )
+                    elif member.issym() or member.islnk():
+                        prefix = f"{path_name}/"
+                        for existing in list(files):
+                            if existing == path_name or existing.startswith(prefix):
+                                files.pop(existing, None)
+                        files[path_name] = FileEntry(
+                            member.mode & 0o7777,
+                            member.uid,
+                            member.gid,
+                            b"",
+                            normalized_link_target(
+                                path_name, member.linkname, hardlink=member.islnk()
+                            ),
+                        )
                     elif member.isdir():
                         files.pop(path_name, None)
                     else:
@@ -141,6 +195,8 @@ def required_file(
     entry = files.get(path)
     if entry is None:
         raise ValidationError(f"required image file is missing: {path}")
+    if entry.link_target is not None:
+        raise ValidationError(f"required image file must not be a link: {path}")
     if entry.uid != 0 or entry.gid != 0:
         raise ValidationError(f"required image file must be owned by 0:0: {path}")
     if entry.mode != mode:
@@ -225,31 +281,75 @@ def validate(
     ]
     for required in common_files:
         required_file(files, required)
-    if b"filebelt:x:10001:10001:" not in required_file(files, "/etc/passwd").data:
-        raise ValidationError("image passwd does not declare the service user")
-    if b"filebelt:x:10001:" not in required_file(files, "/etc/group").data:
-        raise ValidationError("image group does not declare the service group")
-
     if role == "filebelt-web":
+        if b"oxibelt:x:10001:10001:" not in required_file(files, "/etc/passwd").data:
+            raise ValidationError("web image passwd does not declare the OxiBelt service user")
+        if b"oxibelt:x:10001:" not in required_file(files, "/etc/group").data:
+            raise ValidationError("web image group does not declare the OxiBelt service group")
         if image.get("license") != WEB_IMAGE_LICENSE:
-            raise ValidationError("static web artifact must remain Apache-2.0-only")
-        if runtime.get("Entrypoint") not in (None, []) or runtime.get("Cmd") not in (None, []):
-            raise ValidationError("static web artifact must not declare an entrypoint or command")
-        for asset in ("/srv/filebelt/web/index.js", "/srv/filebelt/markdown/index.js"):
+            raise ValidationError("web edge license must cover OxiBelt and bundled UI code")
+        if runtime.get("Entrypoint") != OXIBELT_ENTRYPOINT or runtime.get("Cmd") not in (None, []):
+            raise ValidationError("web image must start the pinned OxiBelt edge configuration")
+        if runtime.get("ExposedPorts") != {"8443/tcp": {}, "8443/udp": {}}:
+            raise ValidationError("web image must retain only OxiBelt's declared edge ports")
+        expected_base_labels = {
+            "org.opencontainers.image.base.name": OXIBELT_IMAGE,
+            "org.opencontainers.image.base.digest": OXIBELT_IMAGE.split("@", 1)[1],
+            "io.filebelt.upstream.oxibelt.version": "0.7.1-beta.2",
+            "io.filebelt.upstream.oxibelt.revision": "bf40172e40298325775ca9d708162a9d8d14e6d4",
+        }
+        for key, value in expected_base_labels.items():
+            if labels.get(key) != value:
+                raise ValidationError(f"web label {key} is not bound to the admitted OxiBelt base")
+        for asset in ("/srv/filebelt/web/index.html", "/srv/filebelt/markdown/index.js"):
             if not required_file(files, asset).data:
-                raise ValidationError(f"static web artifact is missing: {asset}")
-        rust_only_evidence = [
+                raise ValidationError(f"web artifact is missing: {asset}")
+        edge_config = required_file(files, "/etc/oxibelt/config/oxibelt.toml").data
+        for contract in [
+            b'path_prefix = "/api/v1"',
+            b'path_prefix = "/io/v1"',
+            b'path_prefix = "/public/v1"',
+            b'mode = "overwrite"',
+            b'retry_non_idempotent = false',
+            b'value = "no-store"',
+            b'spa_fallback = "/index.html"',
+            b'http3 = false',
+        ]:
+            if contract not in edge_config:
+                raise ValidationError(f"web edge config is missing contract: {contract!r}")
+        for forbidden_contract in [
+            b"filebelt-development-oidc",
+            b"/_filebelt-test-oidc/authorize",
+            b'js = "public, max-age=31536000, immutable"',
+        ]:
+            if forbidden_contract in edge_config:
+                raise ValidationError(
+                    f"release web edge config contains development contract: {forbidden_contract!r}"
+                )
+        for evidence in [
             "/usr/share/licenses/FileBelt/LICENSES/MIT.txt",
             "/usr/share/licenses/FileBelt/THIRD_PARTY_NOTICES.md",
-            "/usr/share/licenses/FileBelt/notices/Rust-COPYRIGHT-library.html",
-            "/usr/share/licenses/FileBelt/notices/musl-COPYRIGHT",
-        ]
-        if any(path in files for path in rust_only_evidence):
-            raise ValidationError("static web artifact contains Rust-only license evidence")
-        executable = None
+            "/usr/share/licenses/FileBelt/notices/OXIBELT_NOTICE.md",
+            "/usr/share/licenses/FileBelt/notices/web/lucide-ISC.txt",
+            "/usr/share/licenses/FileBelt/notices/web/tslib-0BSD.txt",
+            "/usr/share/licenses/FileBelt/notices/web/web-production-licenses.json",
+        ]:
+            required_file(files, evidence)
+        notice = required_file(
+            files, "/usr/share/licenses/FileBelt/notices/OXIBELT_NOTICE.md"
+        ).data
+        if OXIBELT_IMAGE.split("@", 1)[1].encode() not in notice:
+            raise ValidationError("OxiBelt notice is not bound to the admitted image digest")
+        executable = "/usr/local/bin/oxibelt"
+        assert_static_elf(required_file(files, executable, mode=0o755).data, platform)
     else:
-        if image.get("license") != RUST_IMAGE_LICENSE:
-            raise ValidationError("static Rust artifact license must include Apache-2.0 and MIT")
+        if b"filebelt:x:10001:10001:" not in required_file(files, "/etc/passwd").data:
+            raise ValidationError("image passwd does not declare the service user")
+        if b"filebelt:x:10001:" not in required_file(files, "/etc/group").data:
+            raise ValidationError("image group does not declare the service group")
+        expected_license = RUST_IMAGE_LICENSES.get(role)
+        if image.get("license") != expected_license:
+            raise ValidationError(f"static Rust artifact license is incorrect for {role}")
         executable = BINARIES.get(role)
         if executable is None:
             raise ValidationError(f"unknown executable role: {role}")
@@ -268,6 +368,26 @@ def validate(
             "/usr/share/licenses/FileBelt/THIRD_PARTY_NOTICES.md",
         ]:
             required_file(files, required)
+        if "CDLA-Permissive-2.0" in expected_license:
+            cdla = required_file(
+                files,
+                "/usr/share/licenses/FileBelt/LICENSES/CDLA-Permissive-2.0.txt",
+            )
+            required_file(
+                files,
+                "/usr/share/licenses/FileBelt/notices/webpki-roots-SOURCE.txt",
+            )
+            if b"Community Data License Agreement" not in cdla.data:
+                raise ValidationError("Rust image has invalid WebPKI CDLA evidence")
+        if "MPL-2.0" in expected_license:
+            mpl = required_file(
+                files, "/usr/share/licenses/FileBelt/LICENSES/MPL-2.0.txt"
+            )
+            required_file(
+                files, "/usr/share/licenses/FileBelt/notices/option-ext-SOURCE.txt"
+            )
+            if b"Mozilla Public License Version 2.0" not in mpl.data:
+                raise ValidationError("Rust image has invalid option-ext MPL evidence")
         if b"Copyright notices for The Rust Standard Library" not in rust_notice.data:
             raise ValidationError("Rust image has invalid Rust copyright evidence")
         if (

@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Primary OpenPGP fingerprints authorized to sign FileBelt release tags.
+F4CED383110CA1847CE9E9174D41B82B06DFFDBC

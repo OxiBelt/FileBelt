@@ -12,6 +12,7 @@ fn canonical_license_files_are_vendored() {
         "GPL-3.0-or-later",
         "LGPL-3.0-or-later",
         "AGPL-3.0-only",
+        "MIT",
     ] {
         assert!(
             root.join(format!("LICENSES/{license}.txt")).is_file(),

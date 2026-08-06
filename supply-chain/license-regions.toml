@@ -10,6 +10,12 @@ license = "Apache-2.0"
 workspace = "root-rust"
 
 [[regions]]
+path = "source/ops/runtime/musl-COPYRIGHT"
+license = "MIT"
+workspace = "none"
+third_party_notice = true
+
+[[regions]]
 path = "protocol"
 license = "Apache-2.0"
 workspace = "root-rust"

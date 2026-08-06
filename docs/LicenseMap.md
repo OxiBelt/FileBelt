@@ -8,6 +8,7 @@ is `supply-chain/license-regions.toml`.
 | Paths | First-party SPDX expression | Owner | Boundary |
 | --- | --- | --- | --- |
 | Root files, `.cargo/`, `.github/`, `source/`, `protocol/`, `ui/`, `devops/`, `deploy/`, `tests/`, `docs/`, `supply-chain/`, `fuzz/`, `tools/` | Apache-2.0 | `@PiQuark6046` | Root Apache workspaces |
+| `source/ops/runtime/musl-COPYRIGHT` | MIT | musl contributors | Reviewed upstream notice only; not a Cargo package or source dependency |
 | `adapters/smb/` | GPL-3.0-or-later | `@PiQuark6046` | Separate workspace/process/image |
 | `adapters/ftp-ftps/` | GPL-3.0-or-later | `@PiQuark6046` | Separate workspace/process/image |
 | `adapters/onlyoffice/` | AGPL-3.0-only | `@PiQuark6046` | Separate workspace/process/image; network source access required |

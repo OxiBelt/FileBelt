@@ -9,6 +9,7 @@ SPDX-PackageDownloadLocation = "https://github.com/OxiBelt/FileBelt"
 path = [
   ".cargo/**",
   ".github/**",
+  ".dockerignore",
   ".gitignore",
   ".node-version",
   ".npmrc",
@@ -46,6 +47,12 @@ path = [
 precedence = "override"
 SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["source/ops/runtime/musl-COPYRIGHT"]
+precedence = "override"
+SPDX-FileCopyrightText = "2005-2020 Rich Felker and musl contributors"
+SPDX-License-Identifier = "MIT"
 
 [[annotations]]
 path = ["adapters/smb/**", "adapters/ftp-ftps/**"]

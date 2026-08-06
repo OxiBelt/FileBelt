@@ -9,6 +9,9 @@ version = "0.1.0"
 [[package]]
 name = "filebelt-api"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]
 
 [[package]]
 name = "filebelt-authz"
@@ -33,6 +36,9 @@ version = "0.1.0"
 [[package]]
 name = "filebelt-deployment-diagnostics"
 version = "0.1.0"
+dependencies = [
+ "filebelt-build-identity",
+]
 
 [[package]]
 name = "filebelt-document-protocol"
@@ -49,6 +55,9 @@ version = "0.1.0"
 [[package]]
 name = "filebelt-mcp-broker"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]
 
 [[package]]
 name = "filebelt-mcp-policy"
@@ -57,6 +66,9 @@ version = "0.1.0"
 [[package]]
 name = "filebelt-media-controller"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]
 
 [[package]]
 name = "filebelt-repository-tests"
@@ -77,11 +89,20 @@ version = "0.1.0"
 [[package]]
 name = "filebelt-worker-io"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]
 
 [[package]]
 name = "filebelt-worker-maintenance"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]
 
 [[package]]
 name = "filebeltctl"
 version = "0.1.0"
+dependencies = [
+ "filebelt-deployment-diagnostics",
+]

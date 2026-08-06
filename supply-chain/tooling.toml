@@ -20,3 +20,17 @@ cargo_vet = "0.10.2"
 [platforms]
 native_full = ["linux/amd64", "linux/arm64"]
 qemu_smoke = ["linux/riscv64"]
+
+[image_build.native]
+builder = "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488"
+debian_snapshot = "20260713T000000Z"
+binutils = "2.44-3"
+gcc = "14.2.0-19"
+musl = "1.2.5-3.1~deb13u1"
+
+[image_build.riscv64]
+builder = "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488"
+cross_toolchain = "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl@sha256:60372bf6ad955bc04ac9b0689476b05955b4e90fc2030d311be687025672cc6d"
+binutils = "2.45"
+gcc = "14.3.0"
+musl = "1.2.5"

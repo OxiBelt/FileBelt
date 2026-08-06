@@ -1,4 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Indicates that the DevOps package contains no release behavior yet. */
-export const BOOTSTRAP_ONLY = true as const;
+export {
+  IMAGE_PLATFORMS,
+  IMAGE_PLAN_SCHEMA_VERSION,
+  IMAGE_REGISTRY,
+  IMAGE_ROLES,
+  RUNTIME_IDENTITY,
+  RUST_IMAGE_LICENSE,
+  SOURCE_URL,
+  WEB_IMAGE_LICENSE,
+  createImagePlan,
+  createLocalBuildTag,
+  isReleaseTag,
+  serializeImagePlan,
+  validateImagePlan,
+  type ImageArtifact,
+  type ImageComponent,
+  type ImageLicense,
+  type ImagePlanChannel,
+  type ImagePlanSource,
+  type ImagePlanV1,
+  type ImagePlatform,
+  type ImageRole,
+  type ImageRow,
+  type PlatformComponentInventory,
+  type ComponentRelationship,
+  type SourceKind,
+} from "./image-plan.js";
+
+export {
+  VULNERABILITY_POLICY_SCHEMA_VERSION,
+  VULNERABILITY_SEVERITIES,
+  evaluateVulnerabilityPolicy,
+  serializeVulnerabilityPolicy,
+  validateVulnerabilityFindings,
+  validateVulnerabilityPolicy,
+  type VulnerabilityException,
+  type VulnerabilityFinding,
+  type VulnerabilityIdentity,
+  type VulnerabilityPolicyDecision,
+  type VulnerabilityPolicyV1,
+  type VulnerabilitySeverity,
+} from "./vulnerability-policy.js";

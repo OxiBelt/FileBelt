@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! FileBelt maintenance worker role placeholder.
+//! FileBelt maintenance worker role smoke probe.
 
 #![deny(unsafe_code)]
 
-fn main() {}
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    filebelt_deployment_diagnostics::run_probe("filebelt-worker-maintenance")
+}

@@ -1,0 +1,9 @@
+.git
+.agents
+.codex
+adapters
+artifacts
+**/dist
+**/node_modules
+target
+tmp

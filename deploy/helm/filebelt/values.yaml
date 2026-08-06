@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Phase 1 is a configuration contract only. The chart renders no Kubernetes
+# objects and these values do not deploy a usable service.
+global:
+  # A mirror overrides only the registry authority. An empty mirror falls back
+  # to registry. Per-role registryMirror values take precedence over this one.
+  registry: ghcr.io
+  registryMirror: ""
+  platformIntent:
+    - linux/amd64
+    - linux/arm64
+    - linux/riscv64
+  runAsUser: 10001
+  runAsGroup: 10001
+
+# Every role selects exactly one immutable tag or digest. These dry-run defaults
+# identify a schema-valid development build; Phase 1 publishes no such tag.
+images:
+  filebelt-api:
+    repository: oxibelt/filebelt-api
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-worker-io:
+    repository: oxibelt/filebelt-worker-io
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-worker-maintenance:
+    repository: oxibelt/filebelt-worker-maintenance
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-media-controller:
+    repository: oxibelt/filebelt-media-controller
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-mcp-broker:
+    repository: oxibelt/filebelt-mcp-broker
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-tools:
+    repository: oxibelt/filebelt-tools
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000
+  filebelt-web:
+    repository: oxibelt/filebelt-web
+    registryMirror: ""
+    tag: 0.1.0-build.000000000000

@@ -1,0 +1,5 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+FileBelt Phase 1 validates only the image configuration contract.
+
+This chart intentionally creates no Kubernetes resources. It does not install
+a service, controller, workload, credential, policy, or storage object.

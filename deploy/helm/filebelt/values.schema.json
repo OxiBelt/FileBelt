@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "FileBelt Phase 1 image configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["global", "images"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry",
+        "registryMirror",
+        "platformIntent",
+        "runAsUser",
+        "runAsGroup"
+      ],
+      "properties": {
+        "registry": {
+          "$ref": "#/definitions/registry"
+        },
+        "registryMirror": {
+          "$ref": "#/definitions/optionalRegistry"
+        },
+        "platformIntent": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["linux/amd64", "linux/arm64", "linux/riscv64"]
+          },
+          "allOf": [
+            { "contains": { "const": "linux/amd64" } },
+            { "contains": { "const": "linux/arm64" } },
+            { "contains": { "const": "linux/riscv64" } }
+          ]
+        },
+        "runAsUser": {
+          "const": 10001
+        },
+        "runAsGroup": {
+          "const": 10001
+        }
+      }
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filebelt-api",
+        "filebelt-worker-io",
+        "filebelt-worker-maintenance",
+        "filebelt-media-controller",
+        "filebelt-mcp-broker",
+        "filebelt-tools",
+        "filebelt-web"
+      ],
+      "properties": {
+        "filebelt-api": {
+          "$ref": "#/definitions/filebeltApi"
+        },
+        "filebelt-worker-io": {
+          "$ref": "#/definitions/filebeltWorkerIo"
+        },
+        "filebelt-worker-maintenance": {
+          "$ref": "#/definitions/filebeltWorkerMaintenance"
+        },
+        "filebelt-media-controller": {
+          "$ref": "#/definitions/filebeltMediaController"
+        },
+        "filebelt-mcp-broker": {
+          "$ref": "#/definitions/filebeltMcpBroker"
+        },
+        "filebelt-tools": {
+          "$ref": "#/definitions/filebeltTools"
+        },
+        "filebelt-web": {
+          "$ref": "#/definitions/filebeltWeb"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "registry": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"
+    },
+    "optionalRegistry": {
+      "type": "string",
+      "pattern": "^(?:|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)$"
+    },
+    "versionTag": {
+      "type": "string",
+      "pattern": "^(?:(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?|0\\.1\\.0-build\\.[0-9a-f]{12})$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "imageSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "registryMirror"],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "registryMirror": {
+          "$ref": "#/definitions/optionalRegistry"
+        },
+        "tag": {
+          "$ref": "#/definitions/versionTag"
+        },
+        "digest": {
+          "$ref": "#/definitions/digest"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["tag"],
+          "not": { "required": ["digest"] }
+        },
+        {
+          "required": ["digest"],
+          "not": { "required": ["tag"] }
+        }
+      ]
+    },
+    "filebeltApi": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-api" }
+          }
+        }
+      ]
+    },
+    "filebeltWorkerIo": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-worker-io" }
+          }
+        }
+      ]
+    },
+    "filebeltWorkerMaintenance": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-worker-maintenance" }
+          }
+        }
+      ]
+    },
+    "filebeltMediaController": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-media-controller" }
+          }
+        }
+      ]
+    },
+    "filebeltMcpBroker": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-mcp-broker" }
+          }
+        }
+      ]
+    },
+    "filebeltTools": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-tools" }
+          }
+        }
+      ]
+    },
+    "filebeltWeb": {
+      "allOf": [
+        { "$ref": "#/definitions/imageSelection" },
+        {
+          "properties": {
+            "repository": { "const": "oxibelt/filebelt-web" }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: filebelt
+description: Configuration contract for the FileBelt Phase 1 image matrix
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/OxiBelt/FileBelt
+sources:
+  - https://github.com/OxiBelt/FileBelt
+annotations:
+  artifacthub.io/license: Apache-2.0

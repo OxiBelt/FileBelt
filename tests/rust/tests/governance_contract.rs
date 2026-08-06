@@ -8,7 +8,7 @@ use filebelt_repository_tests::repository_root;
 fn required_adrs_are_accepted_and_closed() {
     let root = repository_root();
     let directory = root.join("docs/adr");
-    for number in 1..=6 {
+    for number in 1..=7 {
         let prefix = format!("{number:04}-");
         let matches = fs::read_dir(&directory)
             .expect("ADR directory")

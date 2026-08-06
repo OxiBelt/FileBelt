@@ -14,3 +14,4 @@ formatting or references; changed decisions require a superseding ADR.
 | [0004](0004-protobuf-and-generated-code.md) | Accepted | Protocol IDL and generated code |
 | [0005](0005-postgresql-migrations.md) | Accepted | PostgreSQL migrations and compatibility |
 | [0006](0006-image-roles-and-platforms.md) | Accepted | Image roles, versioning, and platforms |
+| [0007](0007-oci-build-and-release-evidence.md) | Accepted | OCI build and release evidence |

@@ -53,7 +53,7 @@ EXPECTED_NODE_PACKAGES = {
     "ui/mcp-settings": "@filebelt/mcp-settings",
     "ui/web": "@filebelt/web",
 }
-REQUIRED_ADRS = range(1, 7)
+REQUIRED_ADRS = range(1, 8)
 SPDX_EXTENSIONS = {".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
 TOOL_OWNED_SPDX_FILES = {
     "supply-chain/audits.toml",
@@ -101,6 +101,23 @@ def check(root: Path) -> list[str]:
         "tests/scripts/check-node-licenses.py",
         ".github/CODEOWNERS",
         ".github/workflows/check-filebelt.yml",
+        ".github/workflows/release-dry-run.yml",
+        "source/ops/Dockerfile.roles",
+        "ui/web/Dockerfile",
+        "deploy/helm/filebelt/Chart.yaml",
+        "deploy/helm/filebelt/values.schema.json",
+        "supply-chain/image-vulnerability-exceptions.json",
+        "supply-chain/tooling.toml",
+        "supply-chain/release-tag-signers.txt",
+        "supply-chain/release-tag-signers/F4CED383110CA1847CE9E9174D41B82B06DFFDBC.asc",
+        "tests/scripts/build-docker-image-artifact.sh",
+        "tests/scripts/check-helm-chart.sh",
+        "tests/scripts/validate-image-evidence.py",
+        "tests/scripts/validate-image.py",
+        "tests/scripts/run-image-matrix.sh",
+        "tests/scripts/normalize-cyclonedx.py",
+        "tests/scripts/verify-release-tag.sh",
+        "tests/docker/qemu-riscv64/Dockerfile",
     ]
     for relative in required_files:
         if not (root / relative).is_file():
@@ -239,6 +256,8 @@ def check(root: Path) -> list[str]:
                 failures.append(f"forbidden pull_request_target in {workflow.name}")
             if re.search(r"packages:\s*write", content):
                 failures.append(f"package write permission in PR workflow {workflow.name}")
+            if re.search(r"(?:contents|id-token|attestations):\s*write", content):
+                failures.append(f"write permission in dry-run workflow {workflow.name}")
             for uses in re.findall(r"uses:\s*([^\s#]+)", content):
                 if uses.startswith("./"):
                     continue

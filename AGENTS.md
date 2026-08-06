@@ -38,6 +38,28 @@ and rollback notes whenever their boundary changes. Preserve deterministic
 resource naming and cleanup in tests. Never make an event stream the sole
 record of committed state.
 
+`CONTRIBUTING.md` is the source of truth for contributor workflow and
+commit-message format. Follow its
+[commit-message requirements](CONTRIBUTING.md#commit-messages) before making or
+reviewing changes. If this file and `CONTRIBUTING.md` diverge on Conventional
+Commits requirements, follow `CONTRIBUTING.md`.
+
+## Agent commit message guidance
+
+Commit messages must contain portable, repository-relevant context. Do not
+include session-specific command aliases, absolute host paths, or local-only
+environment data and artifacts. For example, do not cite files under
+`.agents/temp`; describe the portable result instead, such as whether the
+relevant validation or performance benchmarks were run.
+
+When additional context is useful, prefer stable sources that readers can
+access publicly, such as tracked repository files, public GitHub projects,
+issues, pull requests, commits, published security advisories, and official
+documentation. If no suitable public source exists, explain the necessary
+context inline without citing inaccessible local material. Sanitize the
+description and do not expose secrets, personal data, or undisclosed
+vulnerability details.
+
 ## Required bootstrap checks
 
 ```sh

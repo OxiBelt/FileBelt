@@ -159,33 +159,6 @@ impl Database {
         registration_from_row(&row)
     }
 
-    pub async fn mcp_update_registration_configuration(
-        &self,
-        input: &RegistrationConfigurationUpdate<'_>,
-    ) -> Result<McpRegistrationRecord, DatabaseError> {
-        if input.display_name.is_empty()
-            || input.display_name.len() > 255
-            || input.description.len() > 1000
-            || !input.policy.is_object()
-        {
-            return Err(DatabaseError::InvalidPersistedValue);
-        }
-        let row = sqlx::query("UPDATE filebelt_mcp.registrations SET display_name=$4,description=$5,endpoint_uri=$6,trust_profile=$7,catalog_entry=$8,policy=$9,enabled=false,validation_state='never_tested',authentication_state='required',capability_state='undiscovered',quarantine_state='clear',protocol_version=NULL,credential_kind='none',revision=revision+1,revocation_generation=revocation_generation+1,credential_generation=credential_generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND revision=$3 AND revoked_at IS NULL AND deleted_at IS NULL RETURNING *,revoked_at IS NOT NULL AS is_revoked,created_at::text AS created_at_text,updated_at::text AS updated_at_text")
-            .bind(input.tenant_id)
-            .bind(input.registration_id)
-            .bind(input.expected_revision)
-            .bind(input.display_name)
-            .bind(input.description)
-            .bind(input.endpoint_uri)
-            .bind(input.trust_profile)
-            .bind(input.catalog_entry)
-            .bind(input.policy)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(DatabaseError::Conflict)?;
-        registration_from_row(&row)
-    }
-
     pub async fn mcp_delete_registration(
         &self,
         tenant_id: Uuid,

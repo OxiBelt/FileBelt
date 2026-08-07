@@ -499,28 +499,6 @@ impl Database {
         Ok(registration)
     }
 
-    pub async fn mcp_cryptographically_erase_registration(
-        &self,
-        tenant_id: Uuid,
-        registration_id: Uuid,
-        owner_principal_id: Uuid,
-    ) -> Result<McpRegistrationRecord, DatabaseError> {
-        let expected_revision: i64 = sqlx::query_scalar("SELECT revision FROM filebelt_mcp.registrations WHERE tenant_id=$1 AND id=$2 AND owner_principal_id=$3 AND deleted_at IS NULL")
-            .bind(tenant_id)
-            .bind(registration_id)
-            .bind(owner_principal_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(DatabaseError::NotFound)?;
-        self.mcp_cryptographically_erase_registration_at_revision(
-            tenant_id,
-            registration_id,
-            owner_principal_id,
-            expected_revision,
-        )
-        .await
-    }
-
     pub async fn mcp_cryptographically_erase_registration_at_revision(
         &self,
         tenant_id: Uuid,

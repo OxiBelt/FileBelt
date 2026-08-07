@@ -328,8 +328,18 @@ async fn mcp_schema_enforces_tenant_isolation_and_secret_privileges() {
         Err(DatabaseError::NotFound)
     ));
 
+    let erase_revision = database
+        .mcp_registration(tenant_id, user_principal_id, registration_id)
+        .await
+        .expect("registration before erase")
+        .revision;
     let erased = database
-        .mcp_cryptographically_erase_registration(tenant_id, registration_id, user_principal_id)
+        .mcp_cryptographically_erase_registration_at_revision(
+            tenant_id,
+            registration_id,
+            user_principal_id,
+            erase_revision,
+        )
         .await
         .expect("cryptographic erase");
     assert!(!erased.state.enabled);

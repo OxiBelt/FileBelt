@@ -90,6 +90,18 @@ forbidden_package_prefixes = []
 filebelt-control-protocol = []
 
 [[graph_profiles]]
+label = "shared service runtime"
+package = "filebelt-runtime"
+manifest = "source/crates/filebelt-runtime/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-control-protocol = []
+filebelt-runtime = []
+
+[[graph_profiles]]
 label = "controller"
 package = "filebelt-controller"
 manifest = "source/apps/filebelt-controller/Cargo.toml"
@@ -268,6 +280,7 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-runtime = []
 filebelt-storage-protocol = []
 
 [[graph_profiles]]
@@ -285,6 +298,7 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-runtime = []
 filebelt-storage = []
 filebelt-storage-protocol = []
 filebelt-worker-io = []
@@ -304,8 +318,9 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-runtime = []
 filebelt-storage = []
-filebelt-worker-maintenance = []
+filebelt-worker-maintenance = ["default", "service-runtime"]
 
 [[graph_profiles]]
 label = "operator CLI"
@@ -344,6 +359,7 @@ packages = [
   "filebelt-mcp-broker",
   "filebelt-mcp-policy",
   "filebelt-media-controller",
+  "filebelt-runtime",
   "filebelt-storage",
   "filebelt-storage-protocol",
   "filebelt-vfs-protocol",
@@ -463,6 +479,12 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-control-protocol"
 crate_root = "source/crates/filebelt-control-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-runtime"
+crate_root = "source/crates/filebelt-runtime/src/lib.rs"
 public_modules = []
 wildcard_reexports = []
 

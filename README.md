@@ -7,24 +7,25 @@ TypeScript. The project is Kubernetes-first, uses PostgreSQL as authoritative
 metadata state, and applies one application-level Virtual ACL model across web
 and protocol access paths.
 
-This repository implements the Phase 2 Apache core foundation: a tenant-scoped
+This repository implements the Phase 3 Apache core production boundary: a tenant-scoped
 PostgreSQL namespace and Virtual ACL, OIDC browser sessions, immutable file
 versions, UUID-addressed whole/chunk payload storage, capability-limited I/O
 workers, sharing and revocation, durable jobs/outbox, optional Apache Iggy
 notifications, and an accessible React web drive behind OxiBelt.
 
-The supported Phase 2 runtime is a Docker development/integration topology.
-It includes two-user TLS-edge acceptance and restart reconciliation, plus
-fault-injection support and a documented quiesced backup/restore procedure. It
-is not a production deployment and makes no HA, PITR, RPO, or RTO claim. The Helm
-chart remains a strict image-values contract and intentionally renders no
-Kubernetes object until Phase 3.
+Docker remains the development/integration topology. Production uses the
+hardened Helm chart on Kubernetes 1.34-1.36 with external PostgreSQL, OIDC,
+optional Iggy, operator Secrets, an existing RWX POSIX claim, default-deny
+networking, and backend mTLS. FileBelt makes no HA, online-backup, PITR, numeric
+RPO, or numeric RTO claim.
 
 The Phase 1 image evidence contract remains in
-[ADR-0007](docs/adr/0007-oci-build-and-release-evidence.md) and its Phase 2
-runtime extension is [ADR-0011](docs/adr/0011-phase-two-runtime-images-and-evidence.md).
-Image validation remains dry-run only: repository workflows never push to
-GHCR, create releases, or mint attestations.
+[ADR-0007](docs/adr/0007-oci-build-and-release-evidence.md), its Phase 2
+runtime extension is [ADR-0011](docs/adr/0011-phase-two-runtime-images-and-evidence.md),
+and the production/release boundary is
+[ADR-0012](docs/adr/0012-kubernetes-and-operational-maturity.md).
+Pull-request validation remains read-only; authorized signed SemVer tags may
+promote the five active images and Helm chart with attestations.
 
 ## Repository regions
 
@@ -78,11 +79,12 @@ Additional supply-chain checks are described in
 - Apache Iggy accelerates wake-ups and invalidation. The same operations remain
   correct through PostgreSQL polling when Iggy is absent or unavailable.
 - OxiBelt terminates public TLS and serves/proxies the SPA, REST API, uploads,
-  and Range downloads. Backend services remain on an isolated network.
+  and Range downloads. Kubernetes backends require native mTLS and
+  NetworkPolicy isolation.
 
 Read [the ADR index](docs/adr/README.md),
 [threat model](docs/ThreatModel.md), and
-[Phase 2 operator guide](docs/operations/phase2.md) before changing these
+[Kubernetes operator guide](docs/operations/kubernetes.md) before changing these
 boundaries.
 
 ## Image checks
@@ -92,8 +94,8 @@ native platform matrix with:
 
 ```sh
 pnpm --filter @filebelt/devops build
-tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase2/image-plan.json
-tests/scripts/run-image-matrix.sh --plan artifacts/phase2/image-plan.json --platform linux/amd64 --output-dir artifacts/phase2/amd64
+tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase3/image-plan.json
+tests/scripts/run-image-matrix.sh --plan artifacts/phase3/image-plan.json --platform linux/amd64 --output-dir artifacts/phase3/amd64
 tests/scripts/check-helm-chart.sh
 ```
 

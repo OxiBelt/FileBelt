@@ -19,3 +19,4 @@ formatting or references; changed decisions require a superseding ADR.
 | [0009](0009-http-edge-and-worker-capabilities.md) | Accepted | HTTP edge and worker capabilities |
 | [0010](0010-postgresql-storage-and-job-durability.md) | Accepted | PostgreSQL, storage, and job durability |
 | [0011](0011-phase-two-runtime-images-and-evidence.md) | Accepted | Phase 2 runtime images and evidence |
+| [0012](0012-kubernetes-and-operational-maturity.md) | Accepted | Kubernetes and operational maturity |

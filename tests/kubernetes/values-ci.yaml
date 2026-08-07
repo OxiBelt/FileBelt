@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Shared Kind/Minikube values contract. Acceptance runners must additionally:
+#
+# - replace every image digest with the digest of the validated local archive;
+# - pass their complete fixture configuration with
+#   `--set-file configuration.filebelt=<file>` and
+#   `--set-file configuration.oxibelt=<file>`;
+# - create the named namespaces, Secrets, and RWX test PVC before Helm runs;
+# - label fixture Pods exactly as selected below; and
+# - delete every run-owned namespace and cluster on exit.
+#
+# Keeping certificate-bearing fixture configuration outside this values file
+# ensures this tracked contract never becomes a credential store.
+
+storage:
+  existingClaim: filebelt-payloads-ci
+
+secrets:
+  apiDatabase: {name: filebelt-api-database-ci, key: database-url, generation: ci-1}
+  ioDatabase: {name: filebelt-io-database-ci, key: database-url, generation: ci-1}
+  maintenanceDatabase: {name: filebelt-maintenance-database-ci, key: database-url, generation: ci-1}
+  migratorDatabase: {name: filebelt-migrator-database-ci, key: database-url, generation: ci-1}
+  auditDatabase: {name: filebelt-audit-database-ci, key: database-url, generation: ci-1}
+  recoveryDatabase: {name: filebelt-recovery-database-ci, key: database-url, generation: ci-1}
+  oidcClient: {name: filebelt-oidc-client-ci, key: client-secret, generation: ci-1}
+  oidcCa: {name: filebelt-oidc-ca-ci, key: ca.crt, generation: ci-1}
+  capabilityPrivateKey: {name: filebelt-capability-private-ci, key: private-key, generation: ci-1}
+  capabilityPublicKeyset: {name: filebelt-capability-public-ci, key: public-keyset, generation: ci-1}
+  digestKey: {name: filebelt-digest-key-ci, key: digest-key, generation: ci-1}
+  publicTls: {name: filebelt-public-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, generation: ci-1}
+  apiServerTls: {name: filebelt-api-server-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: ci-1}
+  ioServerTls: {name: filebelt-io-server-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: ci-1}
+  apiClientTls: {name: filebelt-api-client-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: ci-1}
+  ioClientTls: {name: filebelt-io-client-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: ci-1}
+
+networkPolicy:
+  publicIngress:
+    from:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-clients}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-client}
+  monitoring:
+    from:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-monitoring}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-monitor}
+  postgres:
+    port: 5432
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-dependencies}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-postgresql}
+  oidcGateway:
+    port: 8080
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-dependencies}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-oidc-egress}
+  iggy:
+    enabled: true
+    port: 8090
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-dependencies}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-iggy}
+  otlp:
+    enabled: true
+    port: 4318
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ci-monitoring}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ci-otel}

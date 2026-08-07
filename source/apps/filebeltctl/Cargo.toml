@@ -17,7 +17,7 @@ filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-storage.workspace = true
-filebelt-worker-maintenance = { version = "=0.1.0", path = "../filebelt-worker-maintenance" }
+filebelt-worker-maintenance = { version = "=0.1.0", path = "../filebelt-worker-maintenance", default-features = false }
 serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true

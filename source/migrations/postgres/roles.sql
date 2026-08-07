@@ -16,6 +16,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_maintenance') THEN
     CREATE ROLE filebelt_maintenance NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_audit_exporter') THEN
+    CREATE ROLE filebelt_audit_exporter NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_recovery') THEN
+    CREATE ROLE filebelt_recovery NOLOGIN;
+  END IF;
 END
 $$;
 

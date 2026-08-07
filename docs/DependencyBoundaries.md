@@ -58,6 +58,10 @@ adapters ──process boundary──> Apache protocol contract
   path.
 - `filebeltctl` composes explicit operator commands. It must not make a library
   package depend on CLI types or silently widen a service's database role.
+- `filebelt-runtime` owns transport TLS, operations endpoints, bounded metrics,
+  and telemetry export shared by serving roles. It may consume typed control
+  configuration but does not contain domain policy, SQL, storage, Kubernetes,
+  or service-specific application behavior.
 - `@filebelt/web` and `@filebelt/admin` consume one generated OpenAPI client.
   Admin UI is a lazy route, not a separate authority; hiding a control is not
   authorization.
@@ -79,6 +83,21 @@ jobs, outbox, and audit. Iggy consumers read PostgreSQL after a notification;
 an event payload cannot overwrite committed truth. Payload bytes are
 authoritative only in conjunction with their committed PostgreSQL version and
 manifest state.
+
+## Phase 3 deployment direction
+
+Kubernetes and Helm types remain in deployment templates, tests, and operator
+documentation. They do not enter domain, authorization, database, storage, or
+protocol types. Native applications consume the versioned generic runtime
+configuration and TLS/telemetry libraries; they do not query the Kubernetes
+API. OxiBelt remains a replaceable process boundary and its client-certificate
+support is consumed only through generated configuration and HTTPS.
+
+The chart mounts the existing payload claim only into I/O, maintenance, and
+explicit storage recovery Jobs. API and web remain storage-library- and
+payload-mount-free. Database migration, audit export, and recovery use separate
+group roles; adding an operator command never widens a serving role. Prometheus
+and OTLP are output protocols and cannot become policy or durability inputs.
 
 ## Change review
 

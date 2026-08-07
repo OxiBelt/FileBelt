@@ -19,7 +19,7 @@ Apache packages may expose protocol-neutral schemas used by adapters. They may
 not import, link, or path-depend on adapter implementation code. Every image
 must carry a license expression matching its actual contents.
 
-## Phase 2 runtime composition
+## Phase 3 runtime composition
 
 The source-region expression and final-image expression answer different
 questions. Original code under `source/`, `protocol/`, `ui/`, and `devops/`
@@ -36,6 +36,7 @@ licenses and notices of its linked runtime and copied upstream contents.
 | PostgreSQL 18.4 helper | Upstream PostgreSQL License | External Docker integration process; retain upstream label/notices; never republish as a FileBelt image |
 | Apache Iggy 0.8.0 helper and client | Upstream Apache-2.0 evidence | Optional external event process and reviewed generic client; never authoritative and never republished as a FileBelt image |
 | OIDC test provider | Exact upstream composition recorded by the Docker plan | External integration fixture only; not a FileBelt release image |
+| Rustls/OTLP/Prometheus runtime support | Apache-2.0 and compatible MIT/ISC dependencies recorded in `Cargo.lock` | Shared only through the Apache-2.0 `filebelt-runtime` crate; exact graph, notice, SBOM, vulnerability, and Cargo Vet admission are required before promotion |
 
 The OxiBelt prerelease and digest, PostgreSQL digest, Iggy digest/client, native
 AWS-LC composition, Cargo features, Node packages, and generated-client
@@ -48,3 +49,12 @@ cross a license region. Apache core must remain usable without an adapter and
 must not deserialize Samba, FTP server, ONLYOFFICE, NFS-Ganesha, or FFmpeg
 implementation structures. Container separation is operational evidence, not
 the sole license analysis.
+
+Helm templates, Kubernetes and NetworkPolicy manifests, operational scripts,
+Prometheus rules, Grafana dashboards, and OpenTelemetry examples are original
+Apache-2.0 repository content. They introduce no source link from Apache core
+to an adapter. PostgreSQL, Iggy, OIDC, the egress gateway, CSI provider,
+certificate issuer, and monitoring services remain external processes and are
+not redistributed by the FileBelt chart. New Rust TLS, metrics, and telemetry
+crates must appear in the exact Cargo graph, image SBOM, notices, Cargo Vet,
+Cargo Deny, and vulnerability evidence before their images can be promoted.

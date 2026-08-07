@@ -30,10 +30,10 @@ include regression coverage and upgrade or mitigation guidance.
 Security review covers repository and release supply chain, identity and
 Virtual ACL, tenant separation, storage integrity, protocol adapters, browser
 rendering, integrations, secrets, Kubernetes isolation, and recovery behavior.
-The Phase 2 core exposes an OIDC-authenticated browser/API, authenticated
+The Phase 3 core exposes an OIDC-authenticated browser/API, authenticated
 principal-to-principal shares, capability-limited payload streaming,
-PostgreSQL state, and optional Iggy notifications through a Docker
-development/integration topology.
+PostgreSQL state, and optional Iggy notifications through a Kubernetes
+production topology and a Docker development/integration topology.
 See the [current threat model](docs/ThreatModel.md) and accepted
 [architecture decisions](docs/adr/README.md).
 
@@ -49,13 +49,12 @@ Security-sensitive invariants include:
 
 ## Deployment expectations
 
-Docker profiles are for development, integration, and fault verification. A
-quiesced backup and restore procedure is documented for operator rehearsal,
-but it is not an automated acceptance profile. The topology is not a supported
-production deployment and makes no HA, online-backup, PITR, RPO, or RTO claim.
-Kubernetes production is deferred until the Phase 3 workload, NetworkPolicy,
-storage, migration, upgrade, and recovery contracts are accepted and
-implemented.
+Docker profiles are for development, integration, and fault verification.
+Kubernetes 1.34-1.36 with Helm 4.2.3 is the supported production topology after
+the Phase 3 acceptance gates pass. Production requires the shipped hardened
+chart, external PostgreSQL/OIDC/optional Iggy, an operator OIDC egress gateway,
+operator-managed Secrets, and an existing RWX POSIX claim. It makes no HA,
+online-backup, PITR, numeric RPO, or numeric RTO claim.
 
 Operators must use a standards-compliant OIDC issuer, configure exact
 administrator issuer/subject pairs, provide trusted TLS and key material via
@@ -63,10 +62,12 @@ secret files, use PostgreSQL 18, and use a POSIX storage filesystem that passes
 the startup fsync/rename/no-follow probes. Volume/provider encryption protects
 data at rest; Phase 2 does not implement application-layer payload encryption.
 
-OxiBelt is the public TLS edge. API and worker backend ports must remain on the
-isolated application network. Never expose them directly or trust client
-identity headers. Apache Iggy is optional; only its digest-pinned helper may
-receive its documented `SYS_NICE`, memlock, and seccomp settings.
+OxiBelt is the public TLS edge. API and I/O backend ports require native mTLS
+with distinct exact OxiBelt client identities and remain isolated by
+NetworkPolicy. Never expose them directly or trust client identity headers. No
+FileBelt Pod receives general Internet egress, a Kubernetes API token, or an
+unnecessary payload mount. Apache Iggy is optional; only its digest-pinned
+helper may receive its documented `SYS_NICE`, memlock, and seccomp settings.
 
 ## Incident containment
 
@@ -83,7 +84,7 @@ receive its documented `SYS_NICE`, memlock, and seccomp settings.
   operator-directed scrub/recovery.
 - Suspected database/storage inconsistency: quiesce writes, snapshot both
   planes, run read-only diagnostics, and follow the
-  [Phase 2 rollback runbook](docs/operations/phase2-rollback.md).
+  [Kubernetes rollback runbook](docs/operations/kubernetes-rollback.md).
 
 Do not include raw cookies, OIDC codes, CSRF values, share tokens,
 capabilities, signing/hash keys, database credentials, private payloads, or

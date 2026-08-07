@@ -1,0 +1,43 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- $root := . -}}
+{{- range $service := list (dict "component" "web" "name" "web" "portName" "https" "port" 8443) (dict "component" "api" "name" "api" "portName" "api" "port" 8080) (dict "component" "io" "name" "worker-io" "portName" "io" "port" 8081) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $service.name }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $service.component) | indent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: filebelt
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: {{ $service.component }}
+  ports:
+    - name: {{ $service.portName }}
+      port: {{ $service.port }}
+      targetPort: {{ $service.portName }}
+      protocol: TCP
+---
+{{- end }}
+{{- range $component := list "web" "api" "io" "maintenance" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $component }}-metrics
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $component) | indent 4 }}
+    filebelt.dev/metrics: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: filebelt
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: {{ $component }}
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: {{ if eq $component "web" }}metrics{{ else }}operations{{ end }}
+      protocol: TCP
+---
+{{- end }}

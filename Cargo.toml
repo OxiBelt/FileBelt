@@ -21,6 +21,7 @@ members = [
   "source/crates/filebelt-document-protocol",
   "source/crates/filebelt-mcp-policy",
   "source/crates/filebelt-control-protocol",
+  "source/crates/filebelt-runtime",
   "source/crates/filebelt-deployment-diagnostics",
   "fuzz",
   "tests/rust",
@@ -57,6 +58,7 @@ filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-databas
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }
 filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
 filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-events-protocol" }
+filebelt-runtime = { version = "=0.1.0", path = "source/crates/filebelt-runtime" }
 filebelt-storage = { version = "=0.1.0", path = "source/crates/filebelt-storage" }
 filebelt-storage-protocol = { version = "=0.1.0", path = "source/crates/filebelt-storage-protocol" }
 futures-util = "=0.3.33"
@@ -66,9 +68,14 @@ http = "=1.5.0"
 http-body-util = "=0.1.4"
 iggy = "=0.8.0"
 openidconnect = { version = "=4.0.1", default-features = false, features = ["reqwest"] }
+opentelemetry = { version = "=0.31.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["http-proto", "reqwest-client", "trace"] }
+opentelemetry_sdk = { version = "=0.31.0", default-features = false, features = ["trace"] }
+prometheus-client = "=0.24.0"
+rcgen = "=0.14.8"
 prost = "=0.14.4"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider"] }
-rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sqlx = { version = "=0.9.0", default-features = false, features = ["json", "macros", "migrate", "postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid"] }
@@ -78,13 +85,16 @@ tempfile = "=3.27.0"
 thiserror = "=2.0.18"
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "=0.7.19", features = ["io"] }
+tokio-rustls = "=0.26.4"
 toml = "=1.1.4"
 tower-http = { version = "=0.7.0", features = ["catch-panic", "cors", "limit", "request-id", "trace"] }
 tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "std"] }
+tracing-opentelemetry = { version = "=0.32.0", default-features = false }
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json", "std"] }
 url = { version = "=2.5.8", features = ["serde"] }
 uuid = { version = "=1.24.0", features = ["serde", "v4"] }
 zeroize = "=1.9.0"
+x509-parser = "=0.18.1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

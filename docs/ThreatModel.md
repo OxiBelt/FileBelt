@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 2 Core Threat Model
+# Phase 3 Kubernetes Threat Model
 
-- Date: 2026-08-06
+- Date: 2026-08-07
 - Owner: `@PiQuark6046`
 - Scope: repository and image supply chain, OIDC and browser sessions, tenant
   administration, namespace and Virtual ACL, REST and authenticated sharing,
   OxiBelt, capability-limited storage workers, PostgreSQL, UUID payload
-  storage, durable jobs, optional Iggy, audit, and Docker recovery tests
-- Excluded: registry publication and attestations, Kubernetes runtime and
-  NetworkPolicy, HA/PITR and production RPO/RTO, adapters, MCP, media,
-  Markdown editing, ONLYOFFICE, WebTransport, and application encryption
+  storage, durable jobs, optional Iggy, audit, Kubernetes 1.34-1.36,
+  NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
+- Excluded: managed-cluster/provider internals, online backup, HA/PITR and
+  numeric production RPO/RTO, adapters, MCP, media, Markdown editing,
+  ONLYOFFICE, WebTransport, and application encryption
 
 ## Assets and security objectives
 
@@ -30,30 +31,38 @@
   unauthorized publication, silent loss, or premature deletion.
 - Iggy loss, delay, duplication, or compromise cannot alter committed state or
   make revocation depend solely on event delivery.
-- Build and Docker test inputs cannot cross license regions, publish artifacts,
-  or broaden a FileBelt container's privileges.
+- Pull-request inputs cannot cross license regions, publish artifacts, or
+  broaden a FileBelt Pod's privileges. Tag-only promotion publishes only
+  previously validated immutable subjects.
 
 ## Trust boundaries and data flow
 
 ```text
-OIDC issuer ──code+PKCE──> browser ──TLS/session+CSRF──> OxiBelt
-                                                       │
-                                static SPA <────────────┤
-                                                       ├──> API ──> PostgreSQL
-                                                       │      │
-                                                       │      └── signed capability
-                                                       └──> I/O worker ──> payload root
+OIDC issuer <──TLS CONNECT── egress gateway <── NetworkPolicy ── API
+       │                                                        │
+       └──code+PKCE──> browser ──TLS/session+CSRF──> OxiBelt    ├──> PostgreSQL
+                                                   │           └── signed capability
+                                                   ├──mTLS──> API
+                                                   └──mTLS──> I/O worker ──> RWX payload root
 
 PostgreSQL outbox ──> publisher ──optional──> Iggy ──wake/invalidate──> workers
 PostgreSQL jobs  <──────────────────── five-second polling fallback ────────┘
 ```
 
-OxiBelt terminates public TLS. Backend HTTP is permitted only on an isolated
-Docker integration network. The API has PostgreSQL access and signing keys but
-no payload mount. The I/O worker has the payload mount, verification keys, and
-narrow database access but cannot mutate namespace or ACL state. Maintenance
-uses a distinct database role and payload mount. Iggy is an untrusted,
-at-least-once notification path.
+OxiBelt terminates public TLS. Kubernetes API and I/O backends require TLS 1.3
+client identity and are also isolated by NetworkPolicy. The API has PostgreSQL
+access and signing keys but no payload mount. The I/O worker has the shared
+payload mount, verification keys, and narrow database access but cannot mutate
+namespace or ACL state. Maintenance uses a distinct database role and the same
+RWX root. Iggy is an untrusted, at-least-once notification path.
+
+The production namespace is one trusted FileBelt deployment and tenant.
+Adjacent Pods and compromised public clients are hostile. The Kubernetes
+control plane, cluster and node administrators, CNI, CSI/storage provider,
+database operator, certificate issuer, OIDC issuer, and egress-gateway operator
+remain powerful trusted parties. Namespace isolation does not protect against
+a compromised node or cluster administrator. ServiceAccount tokens are absent
+because no FileBelt workload needs the Kubernetes API.
 
 ## Threats and controls
 
@@ -74,6 +83,13 @@ at-least-once notification path.
 | Object existence leaks across ACL boundary | Unauthorized lookup uses indistinguishable `404`; share resolution is minimal-reveal | Cross-user response equivalence tests |
 | Recursive operation skips a descendant check | One generation snapshot, per-node authorization, 1,000-node request bound, fenced durable path above it | Bulk race and rollback tests |
 | Client or proxy forges an internal principal | Resolve local session only; strip identity/internal headers; never authorize from proxy identity metadata | Header-smuggling tests |
+| Adjacent Pod connects directly to a backend | Namespace default-deny plus per-role allowlist; backend TLS 1.3 requires the exact OxiBelt API or I/O client URI SAN | Calico/Cilium denial and mTLS-negative tests |
+| Compromised web client identity reaches the other backend | Separate client certificates and exact URI SAN allowlists for API and I/O; one retiring identity allowed only during rotation | Cross-upstream certificate and rotation tests |
+| Kubelet cannot authenticate to an mTLS application listener | Separate low-information operations listener; never expose it publicly; metrics ingress restricted to configured monitoring peers | Probe and NetworkPolicy tests |
+| Mutable Secret changes without a controlled restart | Existing key-filtered Secret projections plus an explicit generation in the Pod template; configuration and trust load only at startup | Secret/certificate rollout tests |
+| ServiceAccount token or RBAC expands a compromised Pod | Per-role token automount disabled on ServiceAccount and Pod; no Role/Binding is rendered | Static manifests and `kubectl auth can-i` tests |
+| API bypasses the OIDC egress allowlist | Dedicated OIDC HTTP client uses an explicit in-cluster CONNECT gateway; NetworkPolicy permits only its namespace/pod/port; gateway allowlists the issuer | Direct-Internet denial and gateway destination tests |
+| DNS or external dependency addressing creates catch-all egress | Explicit DNS peer and dependency namespace/pod/IPBlock values; chart rejects IPv4/IPv6 default routes | Schema/helper and live policy tests |
 | Proxy retries a non-idempotent write | OxiBelt write retries disabled; allocation/commit require scoped idempotency records | Lost-response and duplicate-write tests |
 | Edge cache serves another user's content | Authenticated content and reserved public routes are never cached; only non-JavaScript hashed static assets are immutable | Cache-control and cross-user tests |
 | Stolen capability is replayed or used for another object | `fbcap1` audience/operation/ID/bounds/generation/fence/nonce/expiry signature; upload nonce replay record | Capability mutation and replay tests |
@@ -92,10 +108,16 @@ at-least-once notification path.
 | Duplicate or forged event mutates truth | Consumers treat events as hints, validate version/topic, deduplicate, and read authority from PostgreSQL | Duplicate/malformed event tests |
 | Audit reveals secrets or can be edited | Structured allowlisted fields, keyed actor/resource references, redaction, append-only grants, bounded retention | Audit mutation/redaction tests |
 | Backup restores mismatched database and payload state | Quiesce/fence, shared watermark, fresh-volume restore, reconcile, manifest/BLAKE3 verification | Backup/restore acceptance test |
+| Helm migration races replicas or silently skips owner grants | Non-hook migration under the migrator role, explicit DBA `grants.sql` pause, grant/schema verification, then workload rollout; APIs never migrate | Staged upgrade and privilege-matrix tests |
+| Administrative Job combines owner, runtime, and payload authority | No owner Secret; operation-specific DB Secret and volume projection; one explicit Job per revision | Rendered Job/mount/egress tests |
+| Metrics, traces, or Job evidence disclose identities or content | Bounded label/attribute vocabulary, structured redaction, private listeners, synthetic-only retained recovery artifacts | Observability asset and log-redaction tests |
+| Quiesce checkpoint races active Pods | Separate Helm revision first scales every writer to zero; a later revision runs checkpoint while still quiesced | Restore orchestration test |
+| RWX provider violates POSIX durability or changes ownership | Existing claim only, UID/GID 10001 provisioning, startup and pre-rollout fsync/rename/no-follow probe, no privileged chown init container | Storage probe and chart contract tests |
 | Real Iggy helper broadens stack privileges | `SYS_NICE`, memlock, and seccomp exception apply only to the digest-pinned Iggy container | Compose/container inspection |
 | OxiBelt prerelease or native crypto input is substituted | Exact version/digest, source map, lockfile, SBOM, notice, vulnerability, ELF, and three-platform evidence | Supply-chain and image tests |
 | Cargo Vet acceptance is mistaken for a source audit or silently broadened | Exact locked-version exemptions only; no trusted publishers or ranges; independent audit, deny, lockfile, and import-lock gates | Cargo Vet policy tests and `cargo vet --locked` |
-| Pull request publishes an untrusted image | Read-only workflow permissions and dry-run archive-only contract | Workflow-integrity tests |
+| Pull request or manual run publishes an untrusted image | Read-only validation workflows; tag-only promotion job consumes validated archives, verifies an authorized signed tag, attests and reads back immutable digests | Workflow-integrity and release dry-run tests |
+| Promotion rebuilds or moves a tag after validation | Promotion cannot build; it assembles validated per-platform archives, publishes only version tags, verifies manifest/chart digests, and emits attestations | Release artifact/digest tests |
 | Apache core imports an adapter implementation | Workspace and resolved dependency enforcement; generic protocol process boundary | Dependency-boundary tests |
 
 ## Audit and privacy
@@ -109,24 +131,25 @@ default durable retention is 365 days and the user-visible privacy subset is
 
 ## Residual risk
 
-The single maintainer and configured OIDC issuer remain concentrations of
-trust. A compromised API signing key can issue byte capabilities until the key
+The single maintainer, cluster/operator plane, storage/database providers,
+certificate issuer, egress gateway, and configured OIDC issuer remain
+concentrations of trust. A compromised API signing key can issue byte capabilities until the key
 generation is retired, although the claims and worker generation checks limit
 scope and time. A storage or database administrator can deny service and may
 observe unencrypted-at-application-layer data; encryption at rest is delegated
 to the volume/provider.
 
 Open byte streams can retain access for up to the configured 60-second check
-interval. The documented quiesced Docker restore procedure defines a
-consistency mechanism; it does not claim an automated restore proof, production
-availability, online backup, PITR, or an RPO/RTO. Backend HTTP depends on Docker
-network isolation until Phase 3 adds Kubernetes network and service identity
-controls. Dependency scans and signed source mappings reduce known supply-chain
-risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
+interval. The Kubernetes recovery procedure proves a coordinated quiesced
+restore into fresh targets, but it does not claim production availability,
+online backup, PITR, HA, or an RPO/RTO. Standard NetworkPolicy cannot identify
+an Internet FQDN, so OIDC depends on the correctness of the operator gateway.
+Dependency scans, attestations, and signed source mappings reduce known
+supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so
 their review debt remains until equivalent audit evidence replaces them.
 
-The threat model must be extended before enabling registry publication,
-Kubernetes production objects, a second issuer, an adapter, WebTransport, MCP,
-media, application encryption/deduplication, multi-root storage, or online
-backup.
+The threat model must be extended before enabling a second issuer, another
+tenant per deployment, a service mesh, a controller, an adapter, WebTransport,
+MCP, media, application encryption/deduplication, multi-root/RWO storage, or
+online backup.

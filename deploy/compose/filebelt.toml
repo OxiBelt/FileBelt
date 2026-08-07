@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 1
+version = 2
 public_origin = "https://filebelt.localhost:8443/"
+
+[deployment]
+mode = "development"
 
 [tenant]
 slug = "development"
@@ -34,7 +37,12 @@ current_generation = 1
 [listeners]
 api = "0.0.0.0:8080"
 io = "0.0.0.0:8081"
+operations = "0.0.0.0:9090"
 allow_container_wildcard = true
+
+[telemetry]
+log_format = "text"
+prometheus_enabled = true
 
 [limits]
 whole_threshold_bytes = 33554432

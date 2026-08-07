@@ -68,7 +68,7 @@ fn rust_boundary_job_is_advisory_for_size_and_blocks_the_bootstrap_gate() {
 }
 
 #[test]
-fn phase1_workflows_are_read_only_and_cover_the_image_matrix() {
+fn validation_is_read_only_and_release_promotion_is_tag_only() {
     let root = repository_root();
     let checks = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
         .expect("check workflow");
@@ -102,6 +102,74 @@ fn phase1_workflows_are_read_only_and_cover_the_image_matrix() {
     assert!(checks.contains("python3 -m unittest discover -s tests/scripts -p 'test_*.py'"));
     assert!(dry_run.contains("normalized-rebuild:"));
     assert!(dry_run.contains("retention-days: 30"));
+    assert!(dry_run.contains("on:\n  workflow_dispatch:"));
+    assert!(!dry_run.contains("tags:"));
+
+    let release =
+        fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");
+    assert!(release.contains("tags:\n      - \"[0-9]*.[0-9]*.[0-9]*\""));
+    assert!(!release.contains("workflow_dispatch:"));
+    assert!(!release.contains("pull_request:"));
+    assert_eq!(release.matches("packages: write").count(), 1);
+    assert_eq!(release.matches("contents: write").count(), 1);
+    assert_eq!(release.matches("id-token: write").count(), 1);
+    assert_eq!(release.matches("attestations: write").count(), 1);
+    let promote = release.find("\n  promote:\n").expect("promotion job");
+    for permission in [
+        "packages: write",
+        "contents: write",
+        "id-token: write",
+        "attestations: write",
+    ] {
+        assert!(
+            release
+                .find(permission)
+                .is_some_and(|index| index > promote)
+        );
+    }
+    assert!(release.contains("tests/scripts/promote-release-artifacts.sh"));
+    assert!(release.contains("tests/scripts/run-kubernetes-release-gate.sh"));
+    assert!(release.contains("tests/scripts/run-kubernetes-kind-compatibility.sh"));
+    assert!(release.contains("helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc"));
+    for node_image in [
+        "kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256",
+        "kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95",
+        "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5",
+    ] {
+        assert!(release.contains(node_image));
+    }
+    assert!(release.contains("oci://ghcr.io/oxibelt/charts"));
+    assert!(release.contains("actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d"));
+    assert!(release.contains("sha256sum --check SHA256SUMS"));
+    assert!(release.contains("refusing to replace existing Helm release"));
+    assert!(release.contains("--verify-tag"));
+
+    let exact_artifact =
+        fs::read_to_string(root.join("tests/scripts/run-kubernetes-release-gate.sh"))
+            .expect("release acceptance script");
+    assert!(exact_artifact.contains("docker load --input"));
+    assert!(exact_artifact.contains("FILEBELT_ACCEPTANCE_SKIP_BUILD=1"));
+    assert!(exact_artifact.contains("tests/docker/phase2/run-acceptance.sh"));
+    assert!(!exact_artifact.contains("run-image-matrix.sh"));
+    let active_start = exact_artifact
+        .find("active_roles=(")
+        .expect("release active-role allowlist");
+    let active_end = exact_artifact[active_start..]
+        .find("\n)")
+        .map(|offset| active_start + offset)
+        .expect("release active-role allowlist end");
+    let active_roles = &exact_artifact[active_start..active_end];
+    for active in [
+        "filebelt-api",
+        "filebelt-worker-io",
+        "filebelt-worker-maintenance",
+        "filebelt-tools",
+        "filebelt-web",
+    ] {
+        assert!(active_roles.contains(active));
+    }
+    assert!(!active_roles.contains("filebelt-media-controller"));
+    assert!(!active_roles.contains("filebelt-mcp-broker"));
 }
 
 #[test]

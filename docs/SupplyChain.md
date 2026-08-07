@@ -231,3 +231,48 @@ cookies, CSRF tokens, capabilities, and signing/hash keysets never enter build
 contexts or retained evidence. Docker and browser logs redact these values.
 Fault and restore artifacts are sensitive local test output and use
 deterministic cleanup.
+
+## Phase 3 Kubernetes and publication evidence
+
+Phase 3 retains the seven-role build and evidence matrix but admits only five
+deployable/publishable roles: API, I/O, maintenance, tools, and web. The media
+controller and MCP broker remain probe-only, have no Helm workload, and are not
+promoted to GHCR. The Helm chart creates no PostgreSQL, Iggy, OIDC, certificate
+issuer, monitoring stack, Secret, or PVC; cluster-test fixtures retain their
+upstream names, licenses, and immutable digests and are not FileBelt release
+artifacts.
+
+The OxiBelt input must advance to an immutable release that supports a separate
+outbound client certificate per upstream. Before the FileBelt pin changes, its
+source revision, route/cache/retry behavior, server-name validation,
+client-key handling, architecture set, license/notices, SBOM, and vulnerability
+evidence are reviewed again. FileBelt still does not copy from or build the
+local reference checkout.
+
+Kubernetes acceptance uses digest-pinned Kind node images for the supported
+1.34, 1.35, and 1.36 lines; pinned Minikube, kubectl, Helm, CNI, fixture, and
+probe inputs; locally loaded validated FileBelt archives; deterministic
+namespaces; and ownership-checked cleanup. Test-only fault-injection builds are
+never publishable, and production archive validation proves that their control
+surface is absent.
+
+A dedicated tag-only release workflow may hold write permission only in its
+promotion job. It verifies an authorized signed annotated SemVer tag, consumes
+the same-run validated per-platform archives without rebuilding, assembles and
+pushes immutable multi-architecture manifests, publishes the versioned Helm OCI
+artifact, attaches GitHub build-provenance attestations, and reads every digest
+back. It creates no `latest` or other mutable alias. Pull-request, manual, and
+ordinary default-branch jobs remain read-only.
+
+The Helm chart is published at `oci://ghcr.io/oxibelt/charts/filebelt`. Its
+`version` and `appVersion` match the release tag. The GitHub Release contains
+the exact chart package, checksums, admitted SBOM/evidence, and a checksummed
+PostgreSQL administrator bundle containing the canonical role/grant scripts.
+Registry subjects and release assets contain no database URL, Secret, backup,
+payload, test identity, cookie, capability, private key, or unredacted cluster
+diagnostic.
+
+Artifact rollback selects a previous verified digest. The project does not
+move version tags or automatically delete packages/attestations; a compromised
+artifact is withdrawn only through a separately reviewed administrator
+incident procedure and replaced by a new SemVer release.

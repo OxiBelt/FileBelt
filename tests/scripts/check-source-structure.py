@@ -42,6 +42,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/crates/filebelt-document-protocol",
     "source/crates/filebelt-mcp-policy",
     "source/crates/filebelt-control-protocol",
+    "source/crates/filebelt-runtime",
     "source/crates/filebelt-deployment-diagnostics",
     "fuzz",
     "tests/rust",
@@ -55,7 +56,7 @@ EXPECTED_NODE_PACKAGES = {
     "ui/mcp-settings": "@filebelt/mcp-settings",
     "ui/web": "@filebelt/web",
 }
-REQUIRED_ADRS = range(1, 8)
+REQUIRED_ADRS = range(1, 13)
 SPDX_EXTENSIONS = {".cmake", ".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
 TOOL_OWNED_SPDX_FILES = {
     "supply-chain/audits.toml",
@@ -109,6 +110,7 @@ def check(root: Path) -> list[str]:
         ".github/CODEOWNERS",
         ".github/workflows/check-filebelt.yml",
         ".github/workflows/release-dry-run.yml",
+        ".github/workflows/release.yml",
         "source/ops/Dockerfile.roles",
         "source/ops/riscv64-musl-toolchain.cmake",
         "ui/web/Dockerfile",
@@ -123,6 +125,10 @@ def check(root: Path) -> list[str]:
         "tests/scripts/validate-image-evidence.py",
         "tests/scripts/validate-image.py",
         "tests/scripts/run-image-matrix.sh",
+        "tests/scripts/package-release-assets.sh",
+        "tests/scripts/promote-release-artifacts.sh",
+        "tests/scripts/run-kubernetes-kind-compatibility.sh",
+        "tests/scripts/run-kubernetes-release-gate.sh",
         "tests/scripts/normalize-cyclonedx.py",
         "tests/scripts/verify-release-tag.sh",
         "tests/docker/qemu-riscv64/Dockerfile",
@@ -262,10 +268,39 @@ def check(root: Path) -> list[str]:
             content = workflow.read_text(encoding="utf-8")
             if "pull_request_target:" in content:
                 failures.append(f"forbidden pull_request_target in {workflow.name}")
-            if re.search(r"packages:\s*write", content):
-                failures.append(f"package write permission in PR workflow {workflow.name}")
-            if re.search(r"(?:contents|id-token|attestations):\s*write", content):
-                failures.append(f"write permission in dry-run workflow {workflow.name}")
+            write_permissions = re.findall(
+                r"(?:packages|contents|id-token|attestations):\s*write", content
+            )
+            if workflow.name != "release.yml" and write_permissions:
+                failures.append(f"write permission outside release workflow {workflow.name}")
+            if workflow.name == "release.yml":
+                if "workflow_dispatch:" in content or "pull_request:" in content:
+                    failures.append("release workflow must be tag-only")
+                expected = {
+                    "packages: write",
+                    "contents: write",
+                    "id-token: write",
+                    "attestations: write",
+                }
+                if len(write_permissions) != len(expected) or set(write_permissions) != expected:
+                    failures.append("release promotion permissions differ from the allowlist")
+                promote = content.find("\n  promote:\n")
+                if promote < 0 or any(
+                    content.find(permission) < promote for permission in expected
+                ):
+                    failures.append("release write permissions must be scoped to promotion")
+                if not re.search(
+                    r'on:\s*\n  push:\s*\n    tags:\s*\n      - "\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*"',
+                    content,
+                ) or re.search(r"\n  (?:schedule|workflow_call):", content):
+                    failures.append("release workflow trigger differs from signed tags only")
+                if promote >= 0:
+                    promotion = content[promote:]
+                    for inactive in ["filebelt-media-controller", "filebelt-mcp-broker"]:
+                        if inactive in promotion:
+                            failures.append(
+                                f"inactive role is present in release promotion: {inactive}"
+                            )
             for uses in re.findall(r"uses:\s*([^\s#]+)", content):
                 if uses.startswith("./"):
                     continue

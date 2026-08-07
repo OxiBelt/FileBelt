@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -8,15 +7,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context as _, Result, anyhow, bail};
 use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::routing;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use filebelt_control_protocol::{Config, read_secret_string};
+use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::Database;
+use filebelt_runtime::{
+    MtlsListener, OperationsState, certificate_not_after_unix_seconds, observe_request,
+    operations_router, trace_request, wait_for_shutdown,
+};
 use openidconnect::core::{CoreClient, CoreClientAuthMethod, CoreProviderMetadata};
 use openidconnect::{AuthType, ClientId, ClientSecret, IssuerUrl, RedirectUrl};
 use subtle::ConstantTimeEq as _;
@@ -59,11 +61,8 @@ impl AppState {
     }
 }
 
-pub(crate) async fn serve(config_path: &Path) -> Result<()> {
-    let config = Arc::new(Config::load(config_path).context("invalid FileBelt configuration")?);
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .map_err(|_| anyhow!("a conflicting Rustls crypto provider is already installed"))?;
+pub(crate) async fn serve(config: Config) -> Result<()> {
+    let config = Arc::new(config);
     let database_url = read_secret_string(&config.database.url_file)
         .context("cannot read the database URL secret")?;
     let database = Database::connect(&database_url, config.database.max_connections)
@@ -97,7 +96,7 @@ pub(crate) async fn serve(config_path: &Path) -> Result<()> {
     let public_origin = config.public_origin.origin().ascii_serialization();
     let listener = config.listeners.api;
     let state = AppState {
-        config,
+        config: config.clone(),
         database,
         tenant_id,
         oidc: Arc::new(tokio::sync::RwLock::new(oidc)),
@@ -108,22 +107,127 @@ pub(crate) async fn serve(config_path: &Path) -> Result<()> {
         digest_key,
     };
     tokio::spawn(refresh_oidc(state.clone()));
-    let application = router(state);
-    let tcp = tokio::net::TcpListener::bind(listener)
+    let ready_database = state.database.clone();
+    let operations = OperationsState::new(
+        "filebelt-api",
+        state.config.telemetry.prometheus_enabled,
+        move || {
+            let database = ready_database.clone();
+            async move { database.health().await.is_ok() }
+        },
+    );
+    let database_ready = operations.register_gauge(
+        "database_ready",
+        "Whether PostgreSQL is available to this role.",
+    );
+    database_ready.set(1);
+    let observed_database = state.database.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            database_ready.set(i64::from(observed_database.health().await.is_ok()));
+        }
+    });
+    let oidc_age = operations.register_gauge(
+        "oidc_metadata_age_seconds",
+        "Age of the active OIDC provider metadata.",
+    );
+    let refreshed_at = state.oidc_refreshed_at.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            let now = unix_time().unwrap_or_default();
+            let age = now.saturating_sub(refreshed_at.load(Ordering::Acquire));
+            oidc_age.set(age.max(0));
+        }
+    });
+    if let Some(tls) = state.config.backend_tls.as_ref() {
+        let expiry = certificate_not_after_unix_seconds(&tls.api).map_err(anyhow::Error::msg)?;
+        operations
+            .register_gauge(
+                "tls_certificate_not_after_seconds",
+                "Unix timestamp when the backend server certificate expires.",
+            )
+            .set(expiry);
+    }
+    let application = router(state, operations.clone());
+    let operations_listener = tokio::net::TcpListener::bind(config.listeners.operations)
         .await
-        .with_context(|| format!("cannot bind API listener {listener}"))?;
+        .with_context(|| {
+            format!(
+                "cannot bind operations listener {}",
+                config.listeners.operations
+            )
+        })?;
+    let (operations_stop, operations_stopped) = tokio::sync::oneshot::channel();
+    let operations_state = operations.clone();
+    let operations_server = tokio::spawn(async move {
+        axum::serve(operations_listener, operations_router(operations_state))
+            .with_graceful_shutdown(async move {
+                let _ = operations_stopped.await;
+            })
+            .await
+            .map_err(|error| error.to_string())
+    });
+    let (application_stop, application_stopped) = tokio::sync::oneshot::channel();
+    let mut application_server = match config.deployment.mode {
+        DeploymentMode::Development => {
+            let tcp = tokio::net::TcpListener::bind(listener)
+                .await
+                .with_context(|| format!("cannot bind API listener {listener}"))?;
+            tokio::spawn(async move {
+                axum::serve(tcp, application)
+                    .with_graceful_shutdown(async move {
+                        let _ = application_stopped.await;
+                    })
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        }
+        DeploymentMode::Kubernetes => {
+            let tls = config
+                .backend_tls
+                .as_ref()
+                .ok_or_else(|| anyhow!("Kubernetes backend TLS configuration is absent"))?;
+            let listener = MtlsListener::bind(listener, &tls.api)
+                .await
+                .map_err(anyhow::Error::msg)?;
+            tokio::spawn(async move {
+                axum::serve(listener, application)
+                    .with_graceful_shutdown(async move {
+                        let _ = application_stopped.await;
+                    })
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        }
+    };
     tracing::info!(address = %listener, "FileBelt API is ready");
-    axum::serve(tcp, application)
-        .with_graceful_shutdown(shutdown_signal())
+    tokio::select! {
+        result = &mut application_server => {
+            let _ = operations_stop.send(());
+            result.context("API server task failed")?.map_err(anyhow::Error::msg)?;
+        }
+        () = wait_for_shutdown() => {
+            operations.begin_draining();
+            let _ = application_stop.send(());
+            if tokio::time::timeout(Duration::from_secs(45), &mut application_server).await.is_err() {
+                application_server.abort();
+            }
+            let _ = operations_stop.send(());
+        }
+    }
+    operations_server
         .await
-        .context("API server failed")?;
+        .context("operations server task failed")?
+        .map_err(anyhow::Error::msg)?;
     Ok(())
 }
 
-fn router(state: AppState) -> Router {
+fn router(state: AppState, operations: OperationsState) -> Router {
     Router::new()
-        .route("/health/live", routing::get(live))
-        .route("/health/ready", routing::get(ready))
         .nest(
             "/api/v1",
             Router::new()
@@ -132,19 +236,9 @@ fn router(state: AppState) -> Router {
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(security_headers))
+        .layer(middleware::from_fn(trace_request))
+        .layer(middleware::from_fn_with_state(operations, observe_request))
         .with_state(state)
-}
-
-async fn live() -> StatusCode {
-    StatusCode::NO_CONTENT
-}
-
-async fn ready(State(state): State<AppState>) -> StatusCode {
-    if state.database.health().await.is_ok() {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    }
 }
 
 async fn security_headers(request: axum::extract::Request, next: Next) -> Response {
@@ -163,7 +257,9 @@ async fn security_headers(request: axum::extract::Request, next: Next) -> Respon
 }
 
 fn oidc_http_client(config: &Config) -> Result<reqwest::Client> {
-    let mut builder = reqwest::ClientBuilder::new().redirect(reqwest::redirect::Policy::none());
+    let mut builder = reqwest::ClientBuilder::new()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
     if !config.oidc.development_allow_insecure {
         builder = builder.https_only(true);
     }
@@ -174,6 +270,11 @@ fn oidc_http_client(config: &Config) -> Result<reqwest::Client> {
         for certificate in certificates {
             builder = builder.add_root_certificate(certificate);
         }
+    }
+    if let Some(proxy) = &config.oidc.egress_proxy_url {
+        builder = builder.proxy(
+            reqwest::Proxy::all(proxy.as_str()).context("OIDC egress proxy URL is invalid")?,
+        );
     }
     builder
         .build()
@@ -268,29 +369,6 @@ fn validate_public_key(config: &Config, signer: &Ed25519KeyPair) -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        if tokio::signal::ctrl_c().await.is_err() {
-            std::future::pending::<()>().await;
-        }
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(_) => std::future::pending::<()>().await,
-        }
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
-    }
-}
-
 fn unix_time() -> Result<i64> {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -306,8 +384,8 @@ mod tests {
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
     use base64::Engine as _;
     use filebelt_control_protocol::{
-        Config, DatabaseConfig, ExternalSubject, KeyConfig, LimitConfig, ListenerConfig,
-        OidcConfig, StorageConfig, TenantConfig,
+        Config, DatabaseConfig, DeploymentConfig, DeploymentMode, ExternalSubject, KeyConfig,
+        LimitConfig, ListenerConfig, OidcConfig, StorageConfig, TelemetryConfig, TenantConfig,
     };
     use openidconnect::AuthType;
     use openidconnect::core::CoreClientAuthMethod;
@@ -351,7 +429,10 @@ mod tests {
         )
         .unwrap();
         let config = Config {
-            version: 1,
+            version: 2,
+            deployment: DeploymentConfig {
+                mode: DeploymentMode::Development,
+            },
             public_origin: Url::parse("https://files.example.test/").unwrap(),
             tenant: TenantConfig {
                 slug: "test".into(),
@@ -371,6 +452,7 @@ mod tests {
                 callback_path: "/api/v1/auth/callback".into(),
                 required_acr: None,
                 custom_ca_file: None,
+                egress_proxy_url: None,
                 development_allow_insecure: false,
             },
             storage: StorageConfig {
@@ -383,6 +465,8 @@ mod tests {
                 digest_key_file: "/run/secrets/digest-key".into(),
                 current_generation: 7,
             },
+            backend_tls: None,
+            telemetry: TelemetryConfig::default(),
             listeners: ListenerConfig::default(),
             limits: LimitConfig::default(),
             iggy: None,

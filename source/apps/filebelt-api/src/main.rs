@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use filebelt_control_protocol::Config;
+use filebelt_runtime::{init_telemetry, install_crypto_provider};
 
 mod app;
 mod auth;
@@ -39,14 +41,24 @@ fn main() -> ExitCode {
     }
     let arguments = Arguments::parse();
     let _command = arguments.command.unwrap_or(Command::Serve);
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    let config = match Config::load(&arguments.config) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("filebelt-api: invalid FileBelt configuration: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = install_crypto_provider() {
+        eprintln!("filebelt-api: {error}");
+        return ExitCode::FAILURE;
+    }
+    let _telemetry = match init_telemetry(&config.telemetry, "filebelt-api") {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("filebelt-api: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -57,7 +69,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(app::serve(&arguments.config)) {
+    match runtime.block_on(app::serve(config)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(error = %error, "FileBelt API stopped");

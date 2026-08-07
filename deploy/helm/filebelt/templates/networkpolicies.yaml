@@ -1,0 +1,158 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- $root := . -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-default-deny
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-web-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "web") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{ toYaml .Values.networkPolicy.publicIngress.from | indent 8 }}
+      ports: [{port: https, protocol: TCP}]
+---
+{{- range $component := list "api" "io" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $component }}-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $component) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: web}
+      ports: [{port: {{ $component }}, protocol: TCP}]
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-metrics-ingress
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [web, api, io, maintenance]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{ toYaml .Values.networkPolicy.monitoring.from | indent 8 }}
+      ports: [{port: 9090, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-web-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "web") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+  policyTypes: [Egress]
+  egress:
+    - to:
+{{ toYaml .Values.networkPolicy.dns.to | indent 8 }}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}
+      ports: [{port: api, protocol: TCP}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}
+      ports: [{port: io, protocol: TCP}]
+    {{- if .Values.networkPolicy.otlp.enabled }}
+    - to:
+{{ toYaml .Values.networkPolicy.otlp.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.otlp.port }}, protocol: TCP}]
+    {{- end }}
+---
+{{- range $component := list "api" "io" "maintenance" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $component }}-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $component) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+{{ toYaml $root.Values.networkPolicy.dns.to | indent 8 }}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+{{ toYaml $root.Values.networkPolicy.postgres.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.postgres.port }}, protocol: TCP}]
+    {{- if eq $component "api" }}
+    - to:
+{{ toYaml $root.Values.networkPolicy.oidcGateway.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.oidcGateway.port }}, protocol: TCP}]
+    {{- end }}
+    {{- if and (eq $component "maintenance") $root.Values.networkPolicy.iggy.enabled }}
+    - to:
+{{ toYaml $root.Values.networkPolicy.iggy.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.iggy.port }}, protocol: TCP}]
+    {{- end }}
+    {{- if $root.Values.networkPolicy.otlp.enabled }}
+    - to:
+{{ toYaml $root.Values.networkPolicy.otlp.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.otlp.port }}, protocol: TCP}]
+    {{- end }}
+---
+{{- end }}
+{{- if ne .Values.operation.type "none" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-operation-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "tools-operation") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tools-operation}
+  policyTypes: [Egress]
+  {{- if eq .Values.operation.type "storage-probe" }}
+  egress: []
+  {{- else }}
+  egress:
+    - to:
+{{ toYaml .Values.networkPolicy.dns.to | indent 8 }}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+{{ toYaml .Values.networkPolicy.postgres.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.postgres.port }}, protocol: TCP}]
+  {{- end }}
+{{- end }}

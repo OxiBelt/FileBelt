@@ -1,0 +1,91 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "filebelt.name" . }}
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+{{- with .Values.monitoring.serviceMonitor.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: filebelt
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      filebelt.dev/metrics: "true"
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      path: /metrics
+      scheme: http
+{{- end }}
+{{- if and .Values.monitoring.serviceMonitor.enabled .Values.monitoring.prometheusRule.enabled }}
+---
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "filebelt.name" . }}
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+{{- with .Values.monitoring.prometheusRule.labels }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+  groups:
+    - name: filebelt.availability
+      rules:
+        - alert: FileBeltDatabaseUnavailable
+          expr: min(filebelt_database_ready) == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: FileBelt cannot reach authoritative PostgreSQL
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltHttpErrorRateHigh
+          expr: (sum(rate(filebelt_http_failures_total[10m])) / sum(rate(filebelt_http_requests_total[10m]))) > 0.05 and sum(increase(filebelt_http_requests_total[10m])) >= 20
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: FileBelt HTTP 5xx responses exceed five percent
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltOidcMetadataStale
+          expr: filebelt_oidc_metadata_age_seconds > 129600
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: FileBelt OIDC metadata is older than 36 hours
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltStorageCapacityLow
+          expr: filebelt_storage_capacity_bytes{kind="free"} / filebelt_storage_capacity_bytes{kind="total"} < 0.15
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: FileBelt payload storage has less than 15 percent free
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltMaintenanceJobFailures
+          expr: increase(filebelt_maintenance_job_cycle_failures_total[5m]) > 0
+          labels: {severity: critical}
+          annotations:
+            summary: FileBelt maintenance failed a durable job execution
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltIggyPublishFailures
+          expr: increase(filebelt_maintenance_outbox_publish_failures_total[10m]) > 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: Optional Iggy notification publication is failing
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        - alert: FileBeltTlsCertificateExpiring
+          expr: filebelt_tls_certificate_not_after_seconds - time() < 1209600
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: A FileBelt TLS certificate expires within 14 days
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+{{- end }}

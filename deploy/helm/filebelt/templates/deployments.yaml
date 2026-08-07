@@ -1,0 +1,347 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- $root := . -}}
+{{- $quiescedReplicas := ternary 0 .Values.workloads.web.replicas .Values.deployment.quiesced -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" . }}-web
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "web") | indent 4 }}
+spec:
+  replicas: {{ $quiescedReplicas }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: filebelt
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "web") | indent 8 }}
+      annotations:
+        checksum/config: {{ .Values.configuration.oxibelt | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.publicTls.generation .Values.secrets.apiClientTls.generation .Values.secrets.ioClientTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-web
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workloads.web.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+      containers:
+        - name: web
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-web") }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: https, containerPort: 8443, protocol: TCP}
+            - {name: metrics, containerPort: 9090, protocol: TCP}
+            - {name: health, containerPort: 9091, protocol: TCP}
+          startupProbe:
+            httpGet: {path: /live, port: health}
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: {path: /live, port: health}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /ready, port: health}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workloads.web.resources | indent 12 }}
+          volumeMounts:
+            - {name: oxibelt-config, mountPath: /etc/oxibelt/config, readOnly: true}
+            - {name: public-tls, mountPath: /run/secrets/public-tls, readOnly: true}
+            - {name: api-client-tls, mountPath: /run/secrets/api-client-tls, readOnly: true}
+            - {name: io-client-tls, mountPath: /run/secrets/io-client-tls, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: oxibelt-config
+          configMap:
+            name: {{ include "filebelt.oxibeltConfigName" . }}
+            defaultMode: 0444
+            items: [{key: oxibelt.toml, path: oxibelt.toml}]
+        - name: public-tls
+          secret:
+            secretName: {{ .Values.secrets.publicTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.publicTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.publicTls.privateKeyKey }}, path: tls.key}
+        - name: api-client-tls
+          secret:
+            secretName: {{ .Values.secrets.apiClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.apiClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.apiClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.apiClientTls.caKey }}, path: server-ca.crt}
+        - name: io-client-tls
+          secret:
+            secretName: {{ .Values.secrets.ioClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.ioClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.ioClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.ioClientTls.caKey }}, path: server-ca.crt}
+{{ include "filebelt.tmpVolume" . | indent 8 }}
+---
+{{- $quiescedReplicas = ternary 0 .Values.workloads.api.replicas .Values.deployment.quiesced }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" . }}-api
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "api") | indent 4 }}
+spec:
+  replicas: {{ $quiescedReplicas }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "api") | indent 8 }}
+      annotations:
+        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.apiDatabase.generation .Values.secrets.oidcClient.generation .Values.secrets.oidcCa.generation .Values.secrets.capabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.digestKey.generation .Values.secrets.apiServerTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workloads.api.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}}}
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}
+      containers:
+        - name: api
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-api") }}
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/filebelt/filebelt.toml"]
+          env:
+            - {name: FILEBELT_DATABASE_URL_FILE, value: /run/secrets/database-url}
+          ports:
+            - {name: api, containerPort: 8080, protocol: TCP}
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workloads.api.resources | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
+            - {name: oidc-client, mountPath: /run/secrets/oidc-client-secret, subPath: oidc-client-secret, readOnly: true}
+            - {name: oidc-ca, mountPath: /run/secrets/oidc-ca/ca.crt, subPath: ca.crt, readOnly: true}
+            - {name: capability-private, mountPath: /run/secrets/capability-private-key, subPath: capability-private-key, readOnly: true}
+            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: digest-key, mountPath: /run/secrets/digest-key, subPath: digest-key, readOnly: true}
+            - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
+        - name: database
+          secret: {secretName: {{ .Values.secrets.apiDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiDatabase.key }}, path: database-url}]}
+        - name: oidc-client
+          secret: {secretName: {{ .Values.secrets.oidcClient.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.oidcClient.key }}, path: oidc-client-secret}]}
+        - name: oidc-ca
+          secret: {secretName: {{ .Values.secrets.oidcCa.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.oidcCa.key }}, path: ca.crt}]}
+        - name: capability-private
+          secret: {secretName: {{ .Values.secrets.capabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPrivateKey.key }}, path: capability-private-key}]}
+        - name: capability-public
+          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: digest-key
+          secret: {secretName: {{ .Values.secrets.digestKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.digestKey.key }}, path: digest-key}]}
+        - name: backend-tls
+          secret:
+            secretName: {{ .Values.secrets.apiServerTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.apiServerTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.apiServerTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.apiServerTls.caKey }}, path: client-ca.crt}
+{{ include "filebelt.tmpVolume" . | indent 8 }}
+---
+{{- $quiescedReplicas = ternary 0 .Values.workloads.io.replicas .Values.deployment.quiesced }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" . }}-io
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "io") | indent 4 }}
+spec:
+  replicas: {{ $quiescedReplicas }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "io") | indent 8 }}
+      annotations:
+        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.ioDatabase.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.ioServerTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-io
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workloads.io.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}}}
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}
+      containers:
+        - name: io
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-worker-io") }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]
+          env: [{name: FILEBELT_DATABASE_URL_FILE, value: /run/secrets/database-url}]
+          ports:
+            - {name: io, containerPort: 8081, protocol: TCP}
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workloads.io.resources | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
+            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
+            - {name: payloads, mountPath: {{ .Values.storage.mountPath }}}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
+        - name: database
+          secret: {secretName: {{ .Values.secrets.ioDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.ioDatabase.key }}, path: database-url}]}
+        - name: capability-public
+          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: backend-tls
+          secret:
+            secretName: {{ .Values.secrets.ioServerTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.ioServerTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.ioServerTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.ioServerTls.caKey }}, path: client-ca.crt}
+        - name: payloads
+          persistentVolumeClaim: {claimName: {{ .Values.storage.existingClaim }}}
+{{ include "filebelt.tmpVolume" . | indent 8 }}
+---
+{{- $quiescedReplicas = ternary 0 .Values.workloads.maintenance.replicas .Values.deployment.quiesced }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" . }}-maintenance
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "maintenance") | indent 4 }}
+spec:
+  replicas: {{ $quiescedReplicas }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: maintenance}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "maintenance") | indent 8 }}
+      annotations:
+        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/secrets: {{ .Values.secrets.maintenanceDatabase.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-maintenance
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workloads.maintenance.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: maintenance
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-worker-maintenance") }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]
+          env: [{name: FILEBELT_DATABASE_URL_FILE, value: /run/secrets/database-url}]
+          ports: [{name: operations, containerPort: 9090, protocol: TCP}]
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workloads.maintenance.resources | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
+            - {name: payloads, mountPath: {{ .Values.storage.mountPath }}}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
+        - name: database
+          secret: {secretName: {{ .Values.secrets.maintenanceDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.maintenanceDatabase.key }}, path: database-url}]}
+        - name: payloads
+          persistentVolumeClaim: {claimName: {{ .Values.storage.existingClaim }}}
+{{ include "filebelt.tmpVolume" . | indent 8 }}

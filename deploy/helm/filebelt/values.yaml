@@ -1,47 +1,420 @@
 # SPDX-License-Identifier: Apache-2.0
 
-# Phase 1 is a configuration contract only. The chart renders no Kubernetes
-# objects and these values do not deploy a usable service.
 global:
-  # A mirror overrides only the registry authority. An empty mirror falls back
-  # to registry. Per-role registryMirror values take precedence over this one.
   registry: ghcr.io
   registryMirror: ""
-  platformIntent:
-    - linux/amd64
-    - linux/arm64
-    - linux/riscv64
+  platformIntent: [linux/amd64, linux/arm64, linux/riscv64]
   runAsUser: 10001
   runAsGroup: 10001
 
-# Every role selects exactly one immutable tag or digest. These dry-run defaults
-# identify a schema-valid development build; Phase 1 publishes no such tag.
+# Production workloads are digest-only. The all-zero defaults make the chart
+# renderable for static validation but are deliberately rejected by the live
+# installation runbook.
 images:
   filebelt-api:
     repository: oxibelt/filebelt-api
     registryMirror: ""
-    tag: 0.1.0-build.000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-worker-io:
     repository: oxibelt/filebelt-worker-io
     registryMirror: ""
-    tag: 0.1.0-build.000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-worker-maintenance:
     repository: oxibelt/filebelt-worker-maintenance
     registryMirror: ""
-    tag: 0.1.0-build.000000000000
-  filebelt-media-controller:
-    repository: oxibelt/filebelt-media-controller
-    registryMirror: ""
-    tag: 0.1.0-build.000000000000
-  filebelt-mcp-broker:
-    repository: oxibelt/filebelt-mcp-broker
-    registryMirror: ""
-    tag: 0.1.0-build.000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-tools:
     repository: oxibelt/filebelt-tools
     registryMirror: ""
-    tag: 0.1.0-build.000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-web:
     repository: oxibelt/filebelt-web
     registryMirror: ""
-    tag: 0.1.0-build.000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+deployment:
+  quiesced: false
+  revisionHistoryLimit: 5
+  minReadySeconds: 10
+
+configuration:
+  # The chart owns immutable, content-addressed ConfigMaps. Secret material is
+  # never accepted here; only absolute paths to projected Secret keys appear.
+  filebelt: |
+    version = 2
+    public_origin = "https://filebelt.example.invalid/"
+
+    [deployment]
+    mode = "kubernetes"
+
+    [tenant]
+    slug = "replace-me"
+
+    [[tenant.administrator]]
+    issuer = "https://issuer.example.invalid/"
+    subject = "replace-me"
+
+    [database]
+    url_file = "/run/secrets/database-url"
+    max_connections = 16
+
+    [oidc]
+    issuer = "https://issuer.example.invalid/"
+    client_id = "filebelt"
+    client_secret_file = "/run/secrets/oidc-client-secret"
+    custom_ca_file = "/run/secrets/oidc-ca/ca.crt"
+    callback_path = "/api/v1/auth/callback"
+    egress_proxy_url = "http://filebelt-oidc-egress.filebelt-egress.svc:8080/"
+
+    [storage]
+    root = "/var/lib/filebelt/payloads"
+    backend_id = "00000000-0000-4000-8000-000000000001"
+
+    [keys]
+    capability_private_key_file = "/run/secrets/capability-private-key"
+    capability_public_key_file = "/run/secrets/capability-public-keyset"
+    digest_key_file = "/run/secrets/digest-key"
+    current_generation = 1
+
+    [listeners]
+    api = "0.0.0.0:8080"
+    io = "0.0.0.0:8081"
+    operations = "0.0.0.0:9090"
+    allow_container_wildcard = true
+
+    [backend_tls.api]
+    certificate_chain_file = "/run/secrets/backend-tls/tls.crt"
+    private_key_file = "/run/secrets/backend-tls/tls.key"
+    client_ca_file = "/run/secrets/backend-tls/client-ca.crt"
+    allowed_client_uri_sans = ["spiffe://filebelt/web/api"]
+
+    [backend_tls.io]
+    certificate_chain_file = "/run/secrets/backend-tls/tls.crt"
+    private_key_file = "/run/secrets/backend-tls/tls.key"
+    client_ca_file = "/run/secrets/backend-tls/client-ca.crt"
+    allowed_client_uri_sans = ["spiffe://filebelt/web/io"]
+
+    [telemetry]
+    log_format = "json"
+    prometheus_enabled = true
+    trace_sample_ratio = 0.0
+
+    [limits]
+    whole_threshold_bytes = 33554432
+    chunk_size_bytes = 16777216
+    max_parts = 65536
+    max_file_bytes = 1099511627776
+    upload_ttl_seconds = 604800
+    generation_recheck_seconds = 60
+    orphan_grace_seconds = 86400
+    expired_part_grace_seconds = 86400
+    private_drive_quota_bytes = 1099511627776
+    shared_drive_quota_bytes = 10995116277760
+  oxibelt: |
+    [config]
+    strict_unknown_fields = true
+    warn_on_deprecated_fields = true
+    lb_policy_compat_profile = "strict"
+
+    [logging]
+    level = "info"
+
+    [runtime]
+    linux_only = true
+    read_only_rootfs_compatible = true
+    memory_only_state = true
+    unprivileged_mode = true
+    worker_threads = "auto"
+
+    [runtime.drain]
+    graceful_timeout_ms = 45000
+    long_connection_close_delay_ms = 45000
+    shutdown_delay_ms = 0
+
+    [listeners]
+    https_binds = ["0.0.0.0:8443"]
+    http1 = true
+    http2 = true
+    http3 = false
+
+    [health]
+    enabled = true
+    bind = "0.0.0.0:9091"
+    ready_path = "/ready"
+    live_path = "/live"
+
+    [metrics]
+    enabled = true
+    bind = "0.0.0.0:9090"
+    format = "prometheus"
+    detail = "basic"
+
+    [tls]
+    cert_chain = "/run/secrets/public-tls/tls.crt"
+    private_key = "/run/secrets/public-tls/tls.key"
+    server_names = ["filebelt.example.invalid"]
+    require_sni = true
+    reject_unknown_sni = true
+    min_version = "tls1.3"
+    max_version = "tls1.3"
+    ssl_early_data = "off"
+
+    [proxy]
+    trusted_ca_certs = []
+
+    [proxy.forwarded_headers]
+    mode = "overwrite"
+    client_ip_source = "resolved"
+
+    [proxy.real_ip]
+    enabled = false
+    trusted_proxies = []
+    header = "x-forwarded-for"
+    recursive = true
+    fail_on_untrusted_forwarded_headers = true
+
+    [proxy.retry]
+    enabled = false
+    tries = 1
+    timeout_ms = 5000
+    retry_non_idempotent = false
+
+    [[upstreams]]
+    name = "filebelt-api"
+    origin = "https://filebelt-api:8080"
+    max_http_version = "h1"
+    connect_timeout_ms = 3000
+    request_timeout_ms = 30000
+    first_byte_timeout_ms = 30000
+    read_timeout_ms = 30000
+    send_timeout_ms = 30000
+    idle_timeout_ms = 45000
+    pool_max_idle_per_host = 64
+    preserve_host = false
+    websocket = false
+    webrtc = false
+    webtransport = false
+    [upstreams.tls]
+    server_name = "filebelt-api"
+    trust = "exclusive"
+    trusted_ca_certs = ["/run/secrets/api-client-tls/server-ca.crt"]
+    # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
+    trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
+    client_certificate = "/run/secrets/api-client-tls/tls.crt"
+    client_private_key = "/run/secrets/api-client-tls/tls.key"
+    [upstreams.tls.ech]
+    mode = "disabled"
+
+    [[upstreams]]
+    name = "filebelt-io"
+    origin = "https://filebelt-worker-io:8081"
+    max_http_version = "h1"
+    connect_timeout_ms = 3000
+    request_timeout_ms = 30000
+    first_byte_timeout_ms = 30000
+    read_timeout_ms = 75000
+    send_timeout_ms = 75000
+    idle_timeout_ms = 75000
+    pool_max_idle_per_host = 64
+    preserve_host = false
+    websocket = false
+    webrtc = false
+    webtransport = false
+    [upstreams.tls]
+    server_name = "filebelt-worker-io"
+    trust = "exclusive"
+    trusted_ca_certs = ["/run/secrets/io-client-tls/server-ca.crt"]
+    # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
+    trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
+    client_certificate = "/run/secrets/io-client-tls/tls.crt"
+    client_private_key = "/run/secrets/io-client-tls/tls.key"
+    [upstreams.tls.ech]
+    mode = "disabled"
+
+    [[routes]]
+    name = "filebelt-api-v1"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/api/v1"
+    upstream = "filebelt-api"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 10485760
+    [routes.actions.request_headers]
+    remove = ["x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+
+    [[routes]]
+    name = "filebelt-io-v1"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/io/v1"
+    upstream = "filebelt-io"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 1099511627776
+    [routes.actions.request_headers]
+    remove = ["x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+
+    [[routes]]
+    name = "filebelt-public-v1"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/public/v1"
+    upstream = "filebelt-api"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 10485760
+    [routes.actions.request_headers]
+    remove = ["x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+
+    [[routes]]
+    name = "filebelt-spa"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/"
+    static_root = "/srv/filebelt/web"
+    compression = "default"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+
+    [routes.static_files]
+    directory_index = ["index.html"]
+    try_files = ["{path}", "/index.html"]
+    spa_fallback = "/index.html"
+    precompressed = ["br", "zstd", "gzip"]
+    cache_control = "no-store"
+
+workloads:
+  web:
+    replicas: 2
+    terminationGracePeriodSeconds: 45
+    resources:
+      requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+      limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
+  api:
+    replicas: 2
+    terminationGracePeriodSeconds: 45
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 1Gi}
+  io:
+    replicas: 2
+    terminationGracePeriodSeconds: 75
+    resources:
+      requests: {cpu: 500m, memory: 512Mi, ephemeral-storage: 256Mi}
+      limits: {cpu: "4", memory: 2Gi, ephemeral-storage: 2Gi}
+  maintenance:
+    replicas: 1
+    terminationGracePeriodSeconds: 90
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 256Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 2Gi}
+  operation:
+    resources:
+      database:
+        requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+        limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
+      storage:
+        requests: {cpu: 500m, memory: 512Mi, ephemeral-storage: 256Mi}
+        limits: {cpu: "4", memory: 2Gi, ephemeral-storage: 2Gi}
+
+storage:
+  existingClaim: filebelt-payloads
+  mountPath: /var/lib/filebelt/payloads
+
+secrets:
+  apiDatabase: {name: filebelt-api-database, key: database-url, generation: "1"}
+  ioDatabase: {name: filebelt-io-database, key: database-url, generation: "1"}
+  maintenanceDatabase: {name: filebelt-maintenance-database, key: database-url, generation: "1"}
+  migratorDatabase: {name: filebelt-migrator-database, key: database-url, generation: "1"}
+  auditDatabase: {name: filebelt-audit-database, key: database-url, generation: "1"}
+  recoveryDatabase: {name: filebelt-recovery-database, key: database-url, generation: "1"}
+  oidcClient: {name: filebelt-oidc-client, key: client-secret, generation: "1"}
+  oidcCa: {name: filebelt-oidc-ca, key: ca.crt, generation: "1"}
+  capabilityPrivateKey: {name: filebelt-capability-private, key: private-key, generation: "1"}
+  capabilityPublicKeyset: {name: filebelt-capability-public, key: public-keyset, generation: "1"}
+  digestKey: {name: filebelt-digest-key, key: digest-key, generation: "1"}
+  publicTls: {name: filebelt-public-tls, certificateKey: tls.crt, privateKeyKey: tls.key, generation: "1"}
+  apiServerTls: {name: filebelt-api-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  ioServerTls: {name: filebelt-io-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  apiClientTls: {name: filebelt-api-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  ioClientTls: {name: filebelt-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+
+networkPolicy:
+  publicIngress:
+    from:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-ingress}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-ingress}
+  monitoring:
+    from:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: monitoring}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: prometheus}
+  dns:
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: kube-system}
+        podSelector:
+          matchLabels: {k8s-app: kube-dns}
+  postgres:
+    port: 5432
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-data}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-postgresql}
+  oidcGateway:
+    port: 8080
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-egress}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-oidc-egress}
+  iggy:
+    enabled: false
+    port: 8090
+    to: []
+  otlp:
+    enabled: false
+    port: 4318
+    to: []
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+  prometheusRule:
+    enabled: false
+    labels: {}
+
+# Exactly one explicit, non-hook Job may be rendered. operationId makes every
+# execution name and evidence record unique and must be a UUID when type != none.
+operation:
+  type: none
+  operationId: ""
+  tenantSlugConfirmation: ""
+  payloadId: ""
+  args: []
+  checkpoint:
+    secretName: ""
+    key: checkpoint.json

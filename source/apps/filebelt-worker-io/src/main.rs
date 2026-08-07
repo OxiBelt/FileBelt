@@ -26,8 +26,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
-use filebelt_control_protocol::{Config, read_secret_string};
+use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::{Database, DatabaseError, UploadRecord};
+use filebelt_runtime::{
+    MtlsListener, OperationsState, certificate_not_after_unix_seconds, init_telemetry,
+    install_crypto_provider, observe_request, operations_router, trace_request, wait_for_shutdown,
+};
 use filebelt_storage::{DownloadSegment, StorageError, StorageLayout};
 use filebelt_storage_protocol::{
     CapabilityClaims, CapabilityOperation, VerificationKey, unix_time_now, verify_capability,
@@ -36,7 +40,6 @@ use futures_util::StreamExt as _;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 use tracing::{error, info, warn};
-use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 const ROLE: &str = "filebelt-worker-io";
@@ -125,7 +128,6 @@ async fn main() -> ExitCode {
     if matches!(raw_refs.as_slice(), ["--version"] | ["--build-info=json"]) {
         return filebelt_deployment_diagnostics::run_probe(ROLE);
     }
-    init_tracing();
     let arguments = match Arguments::try_parse() {
         Ok(arguments) => arguments,
         Err(error) => {
@@ -134,7 +136,15 @@ async fn main() -> ExitCode {
         }
     };
     let result = match arguments.command {
-        Command::Serve { config } => serve(&config).await,
+        Command::Serve { config } => match Config::load(&config) {
+            Ok(config) => match install_crypto_provider()
+                .and_then(|()| init_telemetry(&config.telemetry, ROLE))
+            {
+                Ok(_guard) => serve(config).await,
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error.to_string()),
+        },
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -145,13 +155,7 @@ async fn main() -> ExitCode {
     }
 }
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
-}
-
-async fn serve(config_path: &FilePath) -> Result<(), String> {
-    let config = Config::load(config_path).map_err(|error| error.to_string())?;
+async fn serve(config: Config) -> Result<(), String> {
     let database_url =
         read_secret_string(&config.database.url_file).map_err(|error| error.to_string())?;
     let database = Database::connect(&database_url, config.database.max_connections)
@@ -164,7 +168,7 @@ async fn serve(config_path: &FilePath) -> Result<(), String> {
         .map_err(|error| format!("configured tenant is unavailable: {error}"))?;
     let storage = StorageLayout::new(config.storage.root.clone());
     storage.probe().await.map_err(|error| error.to_string())?;
-    report_capacity(
+    let (initial_total, initial_free) = report_capacity(
         &database,
         tenant_id,
         config.storage.backend_id,
@@ -186,17 +190,104 @@ async fn serve(config_path: &FilePath) -> Result<(), String> {
         backend_id: config.storage.backend_id,
         storage_ready: storage_ready.clone(),
     };
+    let ready_database = state.database.clone();
+    let ready_storage = state.storage_ready.clone();
+    let operations = OperationsState::new(ROLE, config.telemetry.prometheus_enabled, move || {
+        let database = ready_database.clone();
+        let storage = ready_storage.clone();
+        async move { storage.load(Ordering::Acquire) && database.health().await.is_ok() }
+    });
+    let database_ready = operations.register_gauge(
+        "database_ready",
+        "Whether PostgreSQL is available to this role.",
+    );
+    database_ready.set(1);
+    let observed_database = state.database.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            database_ready.set(i64::from(observed_database.health().await.is_ok()));
+        }
+    });
+    let storage_ready_metric = operations.register_gauge(
+        "storage_ready",
+        "Whether the payload storage probe is healthy.",
+    );
+    storage_ready_metric.set(1);
+    let capacity = operations.register_gauge_family(
+        "storage_capacity_bytes",
+        "Last observed payload storage capacity.",
+        "kind",
+        &["total", "free"],
+    );
+    let capacity_total = capacity[0].clone();
+    let capacity_free = capacity[1].clone();
+    capacity_total.set(i64::try_from(initial_total).unwrap_or(i64::MAX));
+    capacity_free.set(i64::try_from(initial_free).unwrap_or(i64::MAX));
+    if let Some(tls) = config.backend_tls.as_ref() {
+        operations
+            .register_gauge(
+                "tls_certificate_not_after_seconds",
+                "Unix timestamp when the backend server certificate expires.",
+            )
+            .set(certificate_not_after_unix_seconds(&tls.io)?);
+    }
     let application = Router::new()
-        .route("/health/live", get(live))
-        .route("/health/ready", get(ready))
         .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
         .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
         .route("/io/v1/downloads/{grant_id}", get(download).head(download))
         .fallback(not_found)
+        .layer(axum::middleware::from_fn(trace_request))
+        .layer(axum::middleware::from_fn_with_state(
+            operations.clone(),
+            observe_request,
+        ))
         .with_state(state.clone());
-    let listener = tokio::net::TcpListener::bind(config.listeners.io)
+    let operations_listener = tokio::net::TcpListener::bind(config.listeners.operations)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("cannot bind operations listener: {error}"))?;
+    let (operations_stop, operations_stopped) = tokio::sync::oneshot::channel();
+    let operations_state = operations.clone();
+    let operations_server = tokio::spawn(async move {
+        axum::serve(operations_listener, operations_router(operations_state))
+            .with_graceful_shutdown(async move {
+                let _ = operations_stopped.await;
+            })
+            .await
+            .map_err(|error| error.to_string())
+    });
+    let (application_stop, application_stopped) = tokio::sync::oneshot::channel();
+    let mut application_server = match config.deployment.mode {
+        DeploymentMode::Development => {
+            let listener = tokio::net::TcpListener::bind(config.listeners.io)
+                .await
+                .map_err(|error| error.to_string())?;
+            tokio::spawn(async move {
+                axum::serve(listener, application)
+                    .with_graceful_shutdown(async move {
+                        let _ = application_stopped.await;
+                    })
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        }
+        DeploymentMode::Kubernetes => {
+            let tls = config
+                .backend_tls
+                .as_ref()
+                .ok_or_else(|| "Kubernetes backend TLS configuration is absent".to_owned())?;
+            let listener = MtlsListener::bind(config.listeners.io, &tls.io).await?;
+            tokio::spawn(async move {
+                axum::serve(listener, application)
+                    .with_graceful_shutdown(async move {
+                        let _ = application_stopped.await;
+                    })
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+        }
+    };
     info!(listener = %config.listeners.io, "I/O worker ready");
     let capacity_database = state.database.clone();
     let capacity_root = state.storage.root().to_path_buf();
@@ -215,9 +306,15 @@ async fn serve(config_path: &FilePath) -> Result<(), String> {
             )
             .await
             {
-                Ok(()) => storage_ready.store(true, Ordering::Release),
+                Ok((total, free)) => {
+                    storage_ready.store(true, Ordering::Release);
+                    storage_ready_metric.set(1);
+                    capacity_total.set(i64::try_from(total).unwrap_or(i64::MAX));
+                    capacity_free.set(i64::try_from(free).unwrap_or(i64::MAX));
+                }
                 Err(error) => {
                     storage_ready.store(false, Ordering::Release);
+                    storage_ready_metric.set(0);
                     let _ = capacity_database
                         .mark_storage_unready(tenant_id, config.storage.backend_id)
                         .await;
@@ -226,10 +323,22 @@ async fn serve(config_path: &FilePath) -> Result<(), String> {
             }
         }
     });
-    let result = axum::serve(listener, application)
-        .with_graceful_shutdown(shutdown_signal())
+    let result = tokio::select! {
+        result = &mut application_server => result
+            .map_err(|_| "I/O server task failed".to_owned())?,
+        () = wait_for_shutdown() => {
+            operations.begin_draining();
+            let _ = application_stop.send(());
+            if tokio::time::timeout(Duration::from_secs(75), &mut application_server).await.is_err() {
+                application_server.abort();
+            }
+            Ok(())
+        }
+    };
+    let _ = operations_stop.send(());
+    operations_server
         .await
-        .map_err(|error| error.to_string());
+        .map_err(|_| "operations server task failed".to_owned())??;
     capacity_task.abort();
     result
 }
@@ -240,7 +349,7 @@ async fn report_capacity(
     backend_id: Uuid,
     root: &FilePath,
     ready: bool,
-) -> Result<(), String> {
+) -> Result<(u64, u64), String> {
     let root = root.to_path_buf();
     let (total, free) = tokio::task::spawn_blocking(move || {
         Ok::<_, std::io::Error>((fs2::total_space(&root)?, fs2::available_space(&root)?))
@@ -258,43 +367,8 @@ async fn report_capacity(
             ready,
         )
         .await
-        .map_err(|error| error.to_string())
-}
-
-async fn shutdown_signal() {
-    let control_c = async {
-        if tokio::signal::ctrl_c().await.is_err() {
-            warn!("failed to install Ctrl-C handler");
-        }
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(error) => warn!(%error, "failed to install termination handler"),
-        }
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! { () = control_c => {}, () = terminate => {} }
-}
-
-async fn live() -> &'static str {
-    "live\n"
-}
-
-async fn ready(State(state): State<AppState>) -> Result<&'static str, AppError> {
-    if !state.storage_ready.load(Ordering::Acquire) {
-        return Err(AppError::Unavailable);
-    }
-    state
-        .database
-        .health()
-        .await
-        .map_err(|_| AppError::Unavailable)?;
-    Ok("ready\n")
+        .map_err(|error| error.to_string())?;
+    Ok((total, free))
 }
 
 async fn not_found() -> AppError {

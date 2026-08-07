@@ -43,6 +43,8 @@ jobs:
         run: tests/scripts/verify-release-tag.sh --check-trust
       - name: Check Helm image contract
         run: tests/scripts/check-helm-chart.sh
+      - name: Check Kubernetes acceptance contracts
+        run: tests/kubernetes/check-acceptance-contract.sh
       - name: Install REUSE
         run: >-
           python3 -m pip install --disable-pip-version-check
@@ -326,4 +328,191 @@ jobs:
             test "$RISCV64" = skipped
           else
             test "$RISCV64" = success
+          fi
+
+  phase3-kind-current:
+    name: Kubernetes v1.36.1 compatibility (PR)
+    if: github.event_name == 'pull_request'
+    needs: bootstrap-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Install pinned Kind and kubectl
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: v1.36.3
+          install_only: true
+      - name: Verify Kubernetes client tools
+        env:
+          KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+        run: |
+          kind version | grep -F '0.32.0'
+          printf '%s  %s\n' "$KIND_SHA256" "$(command -v kind)" | sha256sum --check --status
+          kubectl version --client
+      - name: Run current Kubernetes lifecycle acceptance
+        env:
+          FILEBELT_KUBERNETES_TIMEOUT_SECONDS: "420"
+        run: >-
+          tests/scripts/run-kubernetes-kind-compatibility.sh
+          --node-image
+          kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+
+  phase3-kind-supported:
+    name: Kubernetes ${{ matrix.kubernetes }} compatibility
+    if: github.event_name != 'pull_request'
+    needs: bootstrap-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kubernetes: v1.34.8
+            kubectl: v1.34.10
+            node_image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+          - kubernetes: v1.35.5
+            kubectl: v1.35.7
+            node_image: kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95
+          - kubernetes: v1.36.1
+            kubectl: v1.36.3
+            node_image: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Install pinned Kind and kubectl
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: ${{ matrix.kubectl }}
+          install_only: true
+      - name: Verify Kubernetes client tools
+        env:
+          KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+        run: |
+          kind version | grep -F '0.32.0'
+          printf '%s  %s\n' "$KIND_SHA256" "$(command -v kind)" | sha256sum --check --status
+          kubectl version --client
+      - name: Run supported Kubernetes lifecycle acceptance
+        env:
+          FILEBELT_KUBERNETES_TIMEOUT_SECONDS: "420"
+        run: >-
+          tests/scripts/run-kubernetes-kind-compatibility.sh
+          --node-image
+          ${{ matrix.node_image }}
+
+  phase3-network-calico:
+    name: Kubernetes NetworkPolicy (Calico)
+    needs: bootstrap-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Install pinned Kubernetes client
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: v1.34.10
+          install_only: true
+      - name: Install checksum-pinned Minikube
+        env:
+          MINIKUBE_VERSION: v1.38.1
+          MINIKUBE_SHA256: 099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e
+        run: |
+          install_root="${RUNNER_TEMP}/minikube"
+          mkdir -p "${install_root}/bin"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            "https://github.com/kubernetes/minikube/releases/download/${MINIKUBE_VERSION}/minikube-linux-amd64" \
+            --output "${install_root}/minikube"
+          printf '%s  %s\n' "${MINIKUBE_SHA256}" "${install_root}/minikube" | sha256sum --check --status
+          install -m 0755 "${install_root}/minikube" "${install_root}/bin/minikube"
+          echo "${install_root}/bin" >> "${GITHUB_PATH}"
+      - name: Run Calico policy acceptance
+        env:
+          FILEBELT_KUBERNETES_TIMEOUT_SECONDS: "600"
+        run: tests/scripts/run-kubernetes-network-policy.sh --cni calico
+
+  phase3-network-cilium:
+    name: Kubernetes NetworkPolicy (Cilium)
+    if: github.event_name != 'pull_request'
+    needs: bootstrap-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Install pinned Kubernetes client
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: v1.34.10
+          install_only: true
+      - name: Install checksum-pinned Minikube
+        env:
+          MINIKUBE_VERSION: v1.38.1
+          MINIKUBE_SHA256: 099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e
+        run: |
+          install_root="${RUNNER_TEMP}/minikube"
+          mkdir -p "${install_root}/bin"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            "https://github.com/kubernetes/minikube/releases/download/${MINIKUBE_VERSION}/minikube-linux-amd64" \
+            --output "${install_root}/minikube"
+          printf '%s  %s\n' "${MINIKUBE_SHA256}" "${install_root}/minikube" | sha256sum --check --status
+          install -m 0755 "${install_root}/minikube" "${install_root}/bin/minikube"
+          echo "${install_root}/bin" >> "${GITHUB_PATH}"
+      - name: Run Cilium policy acceptance
+        env:
+          FILEBELT_KUBERNETES_TIMEOUT_SECONDS: "600"
+        run: tests/scripts/run-kubernetes-network-policy.sh --cni cilium
+
+  phase3-gate:
+    name: Phase 3 gate
+    if: always()
+    needs:
+      - phase1-gate
+      - phase3-kind-current
+      - phase3-kind-supported
+      - phase3-network-calico
+      - phase3-network-cilium
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the event-appropriate Kubernetes matrix
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PHASE1: ${{ needs.phase1-gate.result }}
+          KIND_CURRENT: ${{ needs.phase3-kind-current.result }}
+          KIND_SUPPORTED: ${{ needs.phase3-kind-supported.result }}
+          CALICO: ${{ needs.phase3-network-calico.result }}
+          CILIUM: ${{ needs.phase3-network-cilium.result }}
+        run: |
+          test "$PHASE1" = success
+          test "$CALICO" = success
+          if test "$EVENT_NAME" = pull_request; then
+            test "$KIND_CURRENT" = success
+            test "$KIND_SUPPORTED" = skipped
+            test "$CILIUM" = skipped
+          else
+            test "$KIND_CURRENT" = skipped
+            test "$KIND_SUPPORTED" = success
+            test "$CILIUM" = success
           fi

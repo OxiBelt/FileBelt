@@ -1,0 +1,378 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image-platforms:
+    name: Validate release images (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            artifact-arch: amd64
+            qemu-arguments: ""
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            artifact-arch: arm64
+            qemu-arguments: ""
+          - runner: ubuntu-24.04
+            platform: linux/riscv64
+            artifact-arch: riscv64
+            qemu-arguments: "--qemu-mode rootless"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: Activate pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+      - name: Build image-plan tooling
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @filebelt/devops build
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.73.0
+          cache: false
+      - name: Prepare signed release plan
+        run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
+      - name: Build and validate all seven role contracts
+        run: >-
+          tests/scripts/run-image-matrix.sh
+          --plan artifacts/phase3/image-plan.json
+          --platform ${{ matrix.platform }}
+          ${{ matrix.qemu-arguments }}
+          --output-dir artifacts/phase3/${{ matrix.artifact-arch }}
+      - name: Upload validated release subjects
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-${{ matrix.artifact-arch }}
+          path: artifacts/phase3
+          if-no-files-found: error
+          retention-days: 30
+
+  normalized-rebuild:
+    name: Verify normalized AMD64 rebuild
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: Activate pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+      - name: Build image-plan tooling
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @filebelt/devops build
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.73.0
+          cache: false
+      - name: Prepare signed release plan
+        run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
+      - name: Compare normalized rebuilds
+        run: >-
+          tests/scripts/verify-image-rebuild.sh
+          --plan artifacts/phase3/image-plan.json
+          --platform linux/amd64
+          --output-dir artifacts/phase3/rebuild
+      - name: Upload rebuild evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-rebuild-amd64
+          path: artifacts/phase3
+          if-no-files-found: error
+          retention-days: 30
+
+  package-assets:
+    name: Validate and package Helm/admin assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: Verify the authorized release tag
+        run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
+      - name: Package release assets
+        run: tests/scripts/package-release-assets.sh --output-dir artifacts/release
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-assets
+          path: artifacts/release
+          if-no-files-found: error
+          retention-days: 30
+
+  phase3-acceptance:
+    name: Exercise exact AMD64 release archives
+    needs: image-platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Download AMD64 image evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-amd64
+          path: artifacts/phase3/amd64-download
+      - name: Run exact-artifact Docker acceptance without rebuilding FileBelt
+        run: tests/scripts/run-kubernetes-release-gate.sh --image-dir artifacts/phase3/amd64-download
+
+  kubernetes-compatibility:
+    name: Kubernetes ${{ matrix.kubernetes }} compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kubernetes: v1.34.8
+            kubectl: v1.34.10
+            node_image: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+          - kubernetes: v1.35.5
+            kubectl: v1.35.7
+            node_image: kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e940429c2ce42fa3a5619ec2bbc60b949c0ac95
+          - kubernetes: v1.36.1
+            kubectl: v1.36.3
+            node_image: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Install pinned Kind and kubectl
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: ${{ matrix.kubectl }}
+          install_only: true
+      - name: Run live API compatibility and rollback gate
+        run: >-
+          tests/scripts/run-kubernetes-kind-compatibility.sh
+          --node-image ${{ matrix.node_image }}
+
+  release-gate:
+    name: Require every release check
+    if: always()
+    needs: [image-platforms, normalized-rebuild, package-assets, phase3-acceptance, kubernetes-compatibility]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require successful immutable inputs
+        env:
+          IMAGES: ${{ needs.image-platforms.result }}
+          REBUILD: ${{ needs.normalized-rebuild.result }}
+          ASSETS: ${{ needs.package-assets.result }}
+          ACCEPTANCE: ${{ needs.phase3-acceptance.result }}
+          KUBERNETES: ${{ needs.kubernetes-compatibility.result }}
+        run: |
+          test "$IMAGES" = success
+          test "$REBUILD" = success
+          test "$ASSETS" = success
+          test "$ACCEPTANCE" = success
+          test "$KUBERNETES" = success
+
+  promote:
+    name: Promote validated immutable subjects
+    needs: release-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Download validated AMD64 subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-amd64
+          path: artifacts/downloads/amd64
+      - name: Download validated ARM64 subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-arm64
+          path: artifacts/downloads/arm64
+      - name: Download validated RISC-V subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-riscv64
+          path: artifacts/downloads/riscv64
+      - name: Download packaged release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-assets
+          path: artifacts/release
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.2.3
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.19.0"
+      - name: Verify tag and locate release plan
+        id: plan
+        run: |
+          tests/scripts/prepare-image-plan.sh --channel release --output artifacts/release-plan.json
+          echo "version=$(jq -er '.tag' artifacts/release-plan.json)" >> "$GITHUB_OUTPUT"
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Verify packaged checksums before publication
+        run: cd artifacts/release && sha256sum --check SHA256SUMS
+      - name: Promote image archives without rebuilding
+        id: subjects
+        run: |
+          tests/scripts/promote-release-artifacts.sh \
+            --plan artifacts/release-plan.json \
+            --artifacts-root artifacts/downloads \
+            --registry ghcr.io \
+            --output artifacts/release/image-subjects.json
+          for item in \
+            api:filebelt-api \
+            io:filebelt-worker-io \
+            maintenance:filebelt-worker-maintenance \
+            tools:filebelt-tools \
+            web:filebelt-web; do
+            key=${item%%:*}
+            role=${item#*:}
+            digest=$(jq -er --arg role "$role" '.subjects[] | select(.role == $role) | .digest' artifacts/release/image-subjects.json)
+            echo "$key=$digest" >> "$GITHUB_OUTPUT"
+          done
+      - name: Publish and read back Helm chart
+        id: chart
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          if helm show chart oci://ghcr.io/oxibelt/charts/filebelt --version "$VERSION" >/dev/null 2>&1; then
+            echo "refusing to replace existing Helm release ${VERSION}" >&2
+            exit 1
+          fi
+          output=$(helm push "artifacts/release/filebelt-${VERSION}.tgz" oci://ghcr.io/oxibelt/charts)
+          digest=$(awk '$1 == "Digest:" { print $2 }' <<<"$output")
+          test "${digest#sha256:}" != "$digest"
+          mkdir -p artifacts/release/readback
+          helm pull oci://ghcr.io/oxibelt/charts/filebelt --version "$VERSION" --destination artifacts/release/readback
+          cmp "artifacts/release/filebelt-${VERSION}.tgz" "artifacts/release/readback/filebelt-${VERSION}.tgz"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Complete release checksums
+        run: |
+          cd artifacts/release
+          sha256sum image-subjects.json >>SHA256SUMS
+      - name: Attest API image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-api
+          subject-digest: ${{ steps.subjects.outputs.api }}
+          push-to-registry: false
+      - name: Attest I/O image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-worker-io
+          subject-digest: ${{ steps.subjects.outputs.io }}
+          push-to-registry: false
+      - name: Attest maintenance image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-worker-maintenance
+          subject-digest: ${{ steps.subjects.outputs.maintenance }}
+          push-to-registry: false
+      - name: Attest tools image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-tools
+          subject-digest: ${{ steps.subjects.outputs.tools }}
+          push-to-registry: false
+      - name: Attest web image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-web
+          subject-digest: ${{ steps.subjects.outputs.web }}
+          push-to-registry: false
+      - name: Attest Helm OCI subject
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/charts/filebelt
+          subject-digest: ${{ steps.chart.outputs.digest }}
+          push-to-registry: false
+      - name: Create immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: >-
+          gh release create "$VERSION"
+          "artifacts/release/filebelt-${VERSION}.tgz"
+          "artifacts/release/filebelt-postgresql-admin-${VERSION}.tar.gz"
+          "artifacts/release/SHA256SUMS"
+          "artifacts/release/image-subjects.json"
+          --verify-tag
+          --title "FileBelt ${VERSION}"
+          --generate-notes

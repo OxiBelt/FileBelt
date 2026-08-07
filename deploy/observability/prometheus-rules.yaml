@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: Apache-2.0
+
+groups:
+  - name: filebelt-availability
+    rules:
+      - alert: FileBeltRoleUnavailable
+        expr: min by (namespace, pod) (filebelt_ready) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: A FileBelt role is not ready
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltDatabaseUnavailable
+        expr: min by (namespace, pod) (filebelt_database_ready) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: A FileBelt role cannot safely use PostgreSQL
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltApiErrorRatioHigh
+        expr: >-
+          sum(rate(filebelt_http_failures_total[10m]))
+          /
+          clamp_min(sum(rate(filebelt_http_requests_total[10m])), 0.000001)
+          > 0.05
+          and
+          sum(increase(filebelt_http_requests_total[10m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: FileBelt HTTP failures exceed five percent
+          runbook_url: docs/operations/observability.md#initial-questions-and-signals
+  - name: filebelt-identity-storage
+    rules:
+      - alert: FileBeltOidcMetadataStale
+        expr: filebelt_oidc_metadata_age_seconds > 129600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: OIDC metadata is more than 36 hours old
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltOidcMetadataRejected
+        expr: filebelt_oidc_metadata_age_seconds >= 172800
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: OIDC metadata reached the fail-closed age
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltStorageLow
+        expr: >-
+          max(filebelt_storage_capacity_bytes{kind="free"})
+          /
+          clamp_min(max(filebelt_storage_capacity_bytes{kind="total"}), 1)
+          < 0.15
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: FileBelt payload storage is below fifteen percent free
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltStorageCritical
+        expr: >-
+          max(filebelt_storage_capacity_bytes{kind="free"})
+          /
+          clamp_min(max(filebelt_storage_capacity_bytes{kind="total"}), 1)
+          < 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: FileBelt payload storage is below five percent free
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltBackendCertificateExpiring
+        expr: filebelt_tls_certificate_not_after_seconds - time() < 1209600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: A FileBelt backend certificate expires within fourteen days
+          runbook_url: docs/operations/kubernetes.md#certificate-rotation
+      - alert: FileBeltBackendCertificateCritical
+        expr: filebelt_tls_certificate_not_after_seconds - time() < 259200
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: A FileBelt backend certificate expires within three days
+          runbook_url: docs/operations/kubernetes.md#certificate-rotation
+  - name: filebelt-maintenance
+    rules:
+      - alert: FileBeltMaintenanceReconciliationFailing
+        expr: increase(filebelt_maintenance_reconciliation_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: FileBelt reconciliation failed
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltMaintenanceJobCycleFailing
+        expr: increase(filebelt_maintenance_job_cycle_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: FileBelt maintenance job execution is failing
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+      - alert: FileBeltIggyPublicationFailing
+        expr: increase(filebelt_maintenance_outbox_publish_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: FileBelt cannot publish optional Iggy notifications
+          runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis

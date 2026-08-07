@@ -9,6 +9,15 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["service-runtime"]
+service-runtime = ["dep:filebelt-runtime", "dep:prometheus-client"]
+
+[[bin]]
+name = "filebelt-worker-maintenance"
+path = "src/main.rs"
+required-features = ["service-runtime"]
+
 [dependencies]
 axum.workspace = true
 blake3.workspace = true
@@ -18,9 +27,11 @@ filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-events-protocol = { version = "=0.1.0", path = "../../crates/filebelt-events-protocol" }
+filebelt-runtime = { workspace = true, optional = true }
 filebelt-storage.workspace = true
 iggy.workspace = true
 prost.workspace = true
+prometheus-client = { workspace = true, optional = true }
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror = "2.0.18"

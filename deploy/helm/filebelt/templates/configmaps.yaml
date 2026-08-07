@@ -1,0 +1,27 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- include "filebelt.validate" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "filebelt.filebeltConfigName" . }}
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+  annotations:
+    filebelt.dev/config-digest: {{ .Values.configuration.filebelt | sha256sum | quote }}
+immutable: true
+data:
+  filebelt.toml: |
+{{ .Values.configuration.filebelt | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "filebelt.oxibeltConfigName" . }}
+  labels:
+{{ include "filebelt.labels" . | indent 4 }}
+  annotations:
+    filebelt.dev/config-digest: {{ .Values.configuration.oxibelt | sha256sum | quote }}
+immutable: true
+data:
+  oxibelt.toml: |
+{{ .Values.configuration.oxibelt | indent 4 }}

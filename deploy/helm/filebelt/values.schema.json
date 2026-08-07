@@ -1,201 +1,256 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "FileBelt Phase 1 image configuration",
+  "title": "FileBelt Phase 3 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["global", "images"],
+  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "networkPolicy", "monitoring", "operation"],
   "properties": {
     "global": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "registry",
-        "registryMirror",
-        "platformIntent",
-        "runAsUser",
-        "runAsGroup"
-      ],
+      "required": ["registry", "registryMirror", "platformIntent", "runAsUser", "runAsGroup"],
       "properties": {
-        "registry": {
-          "$ref": "#/definitions/registry"
-        },
-        "registryMirror": {
-          "$ref": "#/definitions/optionalRegistry"
-        },
+        "registry": {"$ref": "#/definitions/registry"},
+        "registryMirror": {"$ref": "#/definitions/optionalRegistry"},
         "platformIntent": {
-          "type": "array",
-          "minItems": 3,
-          "maxItems": 3,
-          "uniqueItems": true,
-          "items": {
-            "enum": ["linux/amd64", "linux/arm64", "linux/riscv64"]
-          },
+          "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true,
+          "items": {"enum": ["linux/amd64", "linux/arm64", "linux/riscv64"]},
           "allOf": [
-            { "contains": { "const": "linux/amd64" } },
-            { "contains": { "const": "linux/arm64" } },
-            { "contains": { "const": "linux/riscv64" } }
+            {"contains": {"const": "linux/amd64"}},
+            {"contains": {"const": "linux/arm64"}},
+            {"contains": {"const": "linux/riscv64"}}
           ]
         },
-        "runAsUser": {
-          "const": 10001
-        },
-        "runAsGroup": {
-          "const": 10001
-        }
+        "runAsUser": {"const": 10001},
+        "runAsGroup": {"const": 10001}
       }
     },
     "images": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "filebelt-api",
-        "filebelt-worker-io",
-        "filebelt-worker-maintenance",
-        "filebelt-media-controller",
-        "filebelt-mcp-broker",
-        "filebelt-tools",
-        "filebelt-web"
-      ],
+      "type": "object", "additionalProperties": false,
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web"],
       "properties": {
-        "filebelt-api": {
-          "$ref": "#/definitions/filebeltApi"
-        },
-        "filebelt-worker-io": {
-          "$ref": "#/definitions/filebeltWorkerIo"
-        },
-        "filebelt-worker-maintenance": {
-          "$ref": "#/definitions/filebeltWorkerMaintenance"
-        },
-        "filebelt-media-controller": {
-          "$ref": "#/definitions/filebeltMediaController"
-        },
-        "filebelt-mcp-broker": {
-          "$ref": "#/definitions/filebeltMcpBroker"
-        },
-        "filebelt-tools": {
-          "$ref": "#/definitions/filebeltTools"
-        },
-        "filebelt-web": {
-          "$ref": "#/definitions/filebeltWeb"
+        "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
+        "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
+        "filebelt-worker-maintenance": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-maintenance"}}}]},
+        "filebelt-tools": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-tools"}}}]},
+        "filebelt-web": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-web"}}}]}
+      }
+    },
+    "deployment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["quiesced", "revisionHistoryLimit", "minReadySeconds"],
+      "properties": {
+        "quiesced": {"type": "boolean"},
+        "revisionHistoryLimit": {"type": "integer", "minimum": 1, "maximum": 20},
+        "minReadySeconds": {"type": "integer", "minimum": 0, "maximum": 300}
+      }
+    },
+    "configuration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["filebelt", "oxibelt"],
+      "properties": {
+        "filebelt": {"type": "string", "minLength": 1, "maxLength": 131072},
+        "oxibelt": {"type": "string", "minLength": 1, "maxLength": 262144}
+      }
+    },
+    "workloads": {
+      "type": "object", "additionalProperties": false,
+      "required": ["web", "api", "io", "maintenance", "operation"],
+      "properties": {
+        "web": {"$ref": "#/definitions/servingWorkload"},
+        "api": {"$ref": "#/definitions/servingWorkload"},
+        "io": {"$ref": "#/definitions/servingWorkload"},
+        "maintenance": {"$ref": "#/definitions/servingWorkload"},
+        "operation": {
+          "type": "object", "additionalProperties": false,
+          "required": ["resources"],
+          "properties": {
+            "resources": {
+              "type": "object", "additionalProperties": false,
+              "required": ["database", "storage"],
+              "properties": {
+                "database": {"$ref": "#/definitions/resources"},
+                "storage": {"$ref": "#/definitions/resources"}
+              }
+            }
+          }
         }
       }
+    },
+    "storage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["existingClaim", "mountPath"],
+      "properties": {
+        "existingClaim": {"$ref": "#/definitions/dnsLabel"},
+        "mountPath": {"type": "string", "pattern": "^/.*$", "maxLength": 1024}
+      }
+    },
+    "secrets": {
+      "type": "object", "additionalProperties": false,
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "capabilityPrivateKey", "capabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls"],
+      "properties": {
+        "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "maintenanceDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "migratorDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "auditDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "recoveryDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "oidcClient": {"$ref": "#/definitions/singleKeySecret"},
+        "oidcCa": {"$ref": "#/definitions/singleKeySecret"},
+        "capabilityPrivateKey": {"$ref": "#/definitions/singleKeySecret"},
+        "capabilityPublicKeyset": {"$ref": "#/definitions/singleKeySecret"},
+        "digestKey": {"$ref": "#/definitions/singleKeySecret"},
+        "publicTls": {"$ref": "#/definitions/keyPairSecret"},
+        "apiServerTls": {"$ref": "#/definitions/tlsSecret"},
+        "ioServerTls": {"$ref": "#/definitions/tlsSecret"},
+        "apiClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "ioClientTls": {"$ref": "#/definitions/tlsSecret"}
+      }
+    },
+    "networkPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["publicIngress", "monitoring", "dns", "postgres", "oidcGateway", "iggy", "otlp"],
+      "properties": {
+        "publicIngress": {"$ref": "#/definitions/fromList"},
+        "monitoring": {"$ref": "#/definitions/fromList"},
+        "dns": {
+          "type": "object", "additionalProperties": false, "required": ["to"],
+          "properties": {"to": {"$ref": "#/definitions/peers"}}
+        },
+        "postgres": {"$ref": "#/definitions/destination"},
+        "oidcGateway": {"$ref": "#/definitions/destination"},
+        "iggy": {"$ref": "#/definitions/optionalDestination"},
+        "otlp": {"$ref": "#/definitions/optionalDestination"}
+      }
+    },
+    "monitoring": {
+      "type": "object", "additionalProperties": false,
+      "required": ["serviceMonitor", "prometheusRule"],
+      "properties": {
+        "serviceMonitor": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "interval", "labels"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval": {"type": "string", "pattern": "^[1-9][0-9]*(?:ms|s|m|h)$"},
+            "labels": {"$ref": "#/definitions/labels"}
+          }
+        },
+        "prometheusRule": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "labels"],
+          "properties": {"enabled": {"type": "boolean"}, "labels": {"$ref": "#/definitions/labels"}}
+        }
+      }
+    },
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "operationId", "tenantSlugConfirmation", "payloadId", "args", "checkpoint"],
+      "properties": {
+        "type": {"enum": ["none", "migrate", "bootstrap", "verify-grants", "storage-probe", "storage-scrub-start", "storage-scrub-status", "storage-scrub-verify", "recovery-checkpoint", "recovery-verify", "audit-export"]},
+        "operationId": {"type": "string", "pattern": "^(?:|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"},
+        "tenantSlugConfirmation": {"type": "string", "maxLength": 63, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"},
+        "payloadId": {"type": "string", "pattern": "^(?:|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"},
+        "args": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 4096}},
+        "checkpoint": {
+          "type": "object", "additionalProperties": false, "required": ["secretName", "key"],
+          "properties": {
+            "secretName": {"type": "string", "maxLength": 63, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"},
+            "key": {"$ref": "#/definitions/secretKey"}
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "none"}}}, "then": {"properties": {"operationId": {"const": ""}, "tenantSlugConfirmation": {"const": ""}, "payloadId": {"const": ""}, "args": {"maxItems": 0}, "checkpoint": {"properties": {"secretName": {"const": ""}}}}}},
+        {"if": {"properties": {"type": {"not": {"const": "none"}}}}, "then": {"properties": {"operationId": {"minLength": 36}}}},
+        {
+          "if": {"properties": {"type": {"const": "storage-scrub-start"}, "payloadId": {"const": ""}}},
+          "then": {"properties": {"tenantSlugConfirmation": {"minLength": 1}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "storage-scrub-start"}, "payloadId": {"minLength": 1}}},
+          "then": {"properties": {"tenantSlugConfirmation": {"const": ""}}}
+        },
+        {"if": {"properties": {"type": {"const": "recovery-verify"}}}, "then": {"properties": {"checkpoint": {"properties": {"secretName": {"minLength": 1}}}}}}
+      ]
     }
   },
   "definitions": {
-    "registry": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"
-    },
-    "optionalRegistry": {
-      "type": "string",
-      "pattern": "^(?:|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)$"
-    },
-    "versionTag": {
-      "type": "string",
-      "pattern": "^(?:(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?|0\\.1\\.0-build\\.[0-9a-f]{12})$"
-    },
-    "digest": {
-      "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
-    },
-    "imageSelection": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repository", "registryMirror"],
+    "registry": {"type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"},
+    "optionalRegistry": {"type": "string", "pattern": "^(?:|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "dnsLabel": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"},
+    "image": {
+      "type": "object", "additionalProperties": false, "required": ["repository", "registryMirror", "digest"],
       "properties": {
-        "repository": {
-          "type": "string"
-        },
-        "registryMirror": {
-          "$ref": "#/definitions/optionalRegistry"
-        },
-        "tag": {
-          "$ref": "#/definitions/versionTag"
-        },
-        "digest": {
-          "$ref": "#/definitions/digest"
-        }
-      },
-      "oneOf": [
-        {
-          "required": ["tag"],
-          "not": { "required": ["digest"] }
-        },
-        {
-          "required": ["digest"],
-          "not": { "required": ["tag"] }
-        }
-      ]
+        "repository": {"type": "string"},
+        "registryMirror": {"$ref": "#/definitions/optionalRegistry"},
+        "digest": {"$ref": "#/definitions/digest"}
+      }
     },
-    "filebeltApi": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
+    "quantity": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[0-9]+(?:m|Ki|Mi|Gi|Ti)?$"},
+    "resourceValues": {
+      "type": "object", "additionalProperties": false, "required": ["cpu", "memory", "ephemeral-storage"],
+      "properties": {"cpu": {"$ref": "#/definitions/quantity"}, "memory": {"$ref": "#/definitions/quantity"}, "ephemeral-storage": {"$ref": "#/definitions/quantity"}}
+    },
+    "resources": {
+      "type": "object", "additionalProperties": false, "required": ["requests", "limits"],
+      "properties": {"requests": {"$ref": "#/definitions/resourceValues"}, "limits": {"$ref": "#/definitions/resourceValues"}}
+    },
+    "servingWorkload": {
+      "type": "object", "additionalProperties": false, "required": ["replicas", "terminationGracePeriodSeconds", "resources"],
+      "properties": {
+        "replicas": {"type": "integer", "minimum": 1, "maximum": 100},
+        "terminationGracePeriodSeconds": {"type": "integer", "minimum": 30, "maximum": 600},
+        "resources": {"$ref": "#/definitions/resources"}
+      }
+    },
+    "generation": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "secretKey": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9._-]+$"},
+    "singleKeySecret": {
+      "type": "object", "additionalProperties": false, "required": ["name", "key", "generation"],
+      "properties": {"name": {"$ref": "#/definitions/dnsLabel"}, "key": {"$ref": "#/definitions/secretKey"}, "generation": {"$ref": "#/definitions/generation"}}
+    },
+    "keyPairSecret": {
+      "type": "object", "additionalProperties": false, "required": ["name", "certificateKey", "privateKeyKey", "generation"],
+      "properties": {"name": {"$ref": "#/definitions/dnsLabel"}, "certificateKey": {"$ref": "#/definitions/secretKey"}, "privateKeyKey": {"$ref": "#/definitions/secretKey"}, "generation": {"$ref": "#/definitions/generation"}}
+    },
+    "tlsSecret": {
+      "type": "object", "additionalProperties": false, "required": ["name", "certificateKey", "privateKeyKey", "caKey", "generation"],
+      "properties": {"name": {"$ref": "#/definitions/dnsLabel"}, "certificateKey": {"$ref": "#/definitions/secretKey"}, "privateKeyKey": {"$ref": "#/definitions/secretKey"}, "caKey": {"$ref": "#/definitions/secretKey"}, "generation": {"$ref": "#/definitions/generation"}}
+    },
+    "labels": {"type": "object", "propertyNames": {"type": "string", "maxLength": 253}, "additionalProperties": {"type": "string", "maxLength": 63}},
+    "selector": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "properties": {"matchLabels": {"$ref": "#/definitions/labels"}}
+    },
+    "peer": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "properties": {
+        "namespaceSelector": {"$ref": "#/definitions/selector"},
+        "podSelector": {"$ref": "#/definitions/selector"},
+        "ipBlock": {
+          "type": "object", "additionalProperties": false, "required": ["cidr"],
           "properties": {
-            "repository": { "const": "oxibelt/filebelt-api" }
+            "cidr": {"type": "string", "minLength": 3, "maxLength": 49},
+            "except": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 3, "maxLength": 49}}
           }
         }
-      ]
+      }
     },
-    "filebeltWorkerIo": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-worker-io" }
-          }
-        }
-      ]
+    "peers": {"type": "array", "maxItems": 16, "items": {"$ref": "#/definitions/peer"}},
+    "fromList": {
+      "type": "object", "additionalProperties": false, "required": ["from"],
+      "properties": {"from": {"$ref": "#/definitions/peers"}}
     },
-    "filebeltWorkerMaintenance": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-worker-maintenance" }
-          }
-        }
-      ]
+    "destination": {
+      "type": "object", "additionalProperties": false, "required": ["port", "to"],
+      "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}, "to": {"$ref": "#/definitions/peers"}}
     },
-    "filebeltMediaController": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-media-controller" }
-          }
-        }
-      ]
-    },
-    "filebeltMcpBroker": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-mcp-broker" }
-          }
-        }
-      ]
-    },
-    "filebeltTools": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-tools" }
-          }
-        }
-      ]
-    },
-    "filebeltWeb": {
-      "allOf": [
-        { "$ref": "#/definitions/imageSelection" },
-        {
-          "properties": {
-            "repository": { "const": "oxibelt/filebelt-web" }
-          }
-        }
-      ]
+    "optionalDestination": {
+      "type": "object", "additionalProperties": false, "required": ["enabled", "port", "to"],
+      "properties": {"enabled": {"type": "boolean"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "to": {"$ref": "#/definitions/peers"}},
+      "allOf": [{"if": {"properties": {"enabled": {"const": true}}}, "then": {"properties": {"to": {"minItems": 1}}}}]
     }
   }
 }

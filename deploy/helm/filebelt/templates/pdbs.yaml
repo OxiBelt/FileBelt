@@ -1,0 +1,18 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- $root := . -}}
+{{- range $component := list "web" "api" "io" }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $component }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $component) | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: filebelt
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+---
+{{- end }}

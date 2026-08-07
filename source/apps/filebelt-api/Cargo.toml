@@ -21,6 +21,7 @@ filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-domain.workspace = true
+filebelt-runtime.workspace = true
 filebelt-storage-protocol.workspace = true
 getrandom.workspace = true
 openidconnect.workspace = true

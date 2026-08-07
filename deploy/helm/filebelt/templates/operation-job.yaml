@@ -1,0 +1,175 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if ne .Values.operation.type "none" }}
+{{- $type := .Values.operation.type -}}
+{{- $storageOperation := has $type (list "storage-probe" "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
+{{- $payloadOperation := eq $type "storage-probe" -}}
+{{- $databaseSecret := "" -}}
+{{- if eq $type "migrate" -}}
+{{- $databaseSecret = .Values.secrets.migratorDatabase.name -}}
+{{- else if eq $type "bootstrap" -}}
+{{- $databaseSecret = .Values.secrets.migratorDatabase.name -}}
+{{- else if eq $type "verify-grants" -}}
+{{- $databaseSecret = .Values.secrets.migratorDatabase.name -}}
+{{- else if eq $type "audit-export" -}}
+{{- $databaseSecret = .Values.secrets.auditDatabase.name -}}
+{{- else if has $type (list "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
+{{- $databaseSecret = .Values.secrets.maintenanceDatabase.name -}}
+{{- else if ne $type "storage-probe" -}}
+{{- $databaseSecret = .Values.secrets.recoveryDatabase.name -}}
+{{- end -}}
+{{- $databaseKey := "" -}}
+{{- if eq $type "migrate" -}}
+{{- $databaseKey = .Values.secrets.migratorDatabase.key -}}
+{{- else if eq $type "bootstrap" -}}
+{{- $databaseKey = .Values.secrets.migratorDatabase.key -}}
+{{- else if eq $type "verify-grants" -}}
+{{- $databaseKey = .Values.secrets.migratorDatabase.key -}}
+{{- else if eq $type "audit-export" -}}
+{{- $databaseKey = .Values.secrets.auditDatabase.key -}}
+{{- else if has $type (list "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
+{{- $databaseKey = .Values.secrets.maintenanceDatabase.key -}}
+{{- else if ne $type "storage-probe" -}}
+{{- $databaseKey = .Values.secrets.recoveryDatabase.key -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s-%s" (include "filebelt.name" .) $type (.Values.operation.operationId | trunc 12) | trunc 63 | trimSuffix "-" }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "tools-operation") | indent 4 }}
+    filebelt.dev/operation-type: {{ $type | quote }}
+  annotations:
+    filebelt.dev/operation-id: {{ .Values.operation.operationId | quote }}
+spec:
+  backoffLimit: 0
+  completions: 1
+  parallelism: 1
+  activeDeadlineSeconds: 21600
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "tools-operation") | indent 8 }}
+        filebelt.dev/operation-type: {{ $type | quote }}
+      annotations:
+        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/secret-generations: {{ include "filebelt.secretGenerationDigest" . | quote }}
+        filebelt.dev/operation-id: {{ .Values.operation.operationId | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-tools
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 90
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: operation
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-tools") }}
+          imagePullPolicy: IfNotPresent
+          args:
+          {{- if eq $type "migrate" }}
+            - database
+            - migrate
+          {{- else if eq $type "bootstrap" }}
+            - tenant
+            - bootstrap
+          {{- else if eq $type "verify-grants" }}
+            - database
+            - verify-grants
+          {{- else if eq $type "storage-probe" }}
+            - storage
+            - probe
+          {{- else if eq $type "storage-scrub-start" }}
+            - storage
+            - scrub
+            - start
+            - --run-id
+            - {{ .Values.operation.operationId | quote }}
+            {{- if .Values.operation.payloadId }}
+            - --payload-id
+            - {{ .Values.operation.payloadId | quote }}
+            {{- else }}
+            - --confirm-tenant
+            - {{ .Values.operation.tenantSlugConfirmation | quote }}
+            {{- end }}
+            - --batch-size
+            - "1000"
+          {{- else if eq $type "storage-scrub-status" }}
+            - storage
+            - scrub
+            - status
+            - --run-id
+            - {{ .Values.operation.operationId | quote }}
+            {{- if .Values.operation.payloadId }}
+            - --payload-id
+            - {{ .Values.operation.payloadId | quote }}
+            {{- end }}
+          {{- else if eq $type "storage-scrub-verify" }}
+            - storage
+            - scrub
+            - verify
+            - --run-id
+            - {{ .Values.operation.operationId | quote }}
+            {{- if .Values.operation.payloadId }}
+            - --payload-id
+            - {{ .Values.operation.payloadId | quote }}
+            {{- end }}
+          {{- else if eq $type "recovery-checkpoint" }}
+            - recovery
+            - checkpoint
+          {{- else if eq $type "recovery-verify" }}
+            - recovery
+            - verify
+            - --checkpoint
+            - /run/input/checkpoint.json
+          {{- else if eq $type "audit-export" }}
+            - audit
+            - export
+          {{- end }}
+            - --config
+            - /etc/filebelt/filebelt.toml
+          {{- range .Values.operation.args }}
+            - {{ . | quote }}
+          {{- end }}
+          {{- if $databaseSecret }}
+          env:
+            - {name: FILEBELT_DATABASE_URL_FILE, value: /run/secrets/database-url}
+          {{- end }}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml (ternary .Values.workloads.operation.resources.storage .Values.workloads.operation.resources.database $storageOperation) | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            {{- if $databaseSecret }}
+            - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
+            {{- end }}
+            {{- if $payloadOperation }}
+            - {name: payloads, mountPath: {{ .Values.storage.mountPath }}}
+            {{- end }}
+            {{- if eq $type "recovery-verify" }}
+            - {name: checkpoint, mountPath: /run/input, readOnly: true}
+            {{- end }}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
+        {{- if $databaseSecret }}
+        - name: database
+          secret:
+            secretName: {{ $databaseSecret }}
+            defaultMode: 0440
+            items: [{key: {{ $databaseKey }}, path: database-url}]
+        {{- end }}
+        {{- if $payloadOperation }}
+        - name: payloads
+          persistentVolumeClaim: {claimName: {{ .Values.storage.existingClaim }}}
+        {{- end }}
+        {{- if eq $type "recovery-verify" }}
+        - name: checkpoint
+          secret:
+            secretName: {{ .Values.operation.checkpoint.secretName }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.operation.checkpoint.key }}, path: checkpoint.json}]
+        {{- end }}
+{{ include "filebelt.tmpVolume" . | indent 8 }}
+{{- end }}

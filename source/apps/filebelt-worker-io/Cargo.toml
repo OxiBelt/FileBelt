@@ -18,6 +18,7 @@ clap.workspace = true
 filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
+filebelt-runtime.workspace = true
 filebelt-storage.workspace = true
 filebelt-storage-protocol.workspace = true
 fs2.workspace = true

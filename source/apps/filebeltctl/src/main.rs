@@ -4,6 +4,11 @@
 
 #![deny(unsafe_code)]
 
+mod audit;
+mod grants;
+mod recovery;
+mod scrub;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -33,6 +38,10 @@ struct Arguments {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Audit {
+        #[command(subcommand)]
+        command: AuditCommand,
+    },
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
@@ -57,6 +66,22 @@ enum Command {
         #[command(subcommand)]
         command: JobCommand,
     },
+    Recovery {
+        #[command(subcommand)]
+        command: RecoveryCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditCommand {
+    Export {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        after: Option<String>,
+        #[arg(long, default_value_t = 1_000, value_parser = clap::value_parser!(u32).range(1..=10_000))]
+        limit: u32,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -70,6 +95,10 @@ enum ConfigCommand {
 #[derive(Debug, Subcommand)]
 enum DatabaseCommand {
     Migrate {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+    },
+    VerifyGrants {
         #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
         config: PathBuf,
     },
@@ -108,6 +137,56 @@ enum StorageCommand {
         config: PathBuf,
         #[arg(long, default_value_t = 32)]
         max_jobs: u32,
+    },
+    Scrub {
+        #[command(subcommand)]
+        command: ScrubCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ScrubCommand {
+    Start {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        run_id: Uuid,
+        #[arg(long)]
+        payload_id: Option<Uuid>,
+        #[arg(long)]
+        confirm_tenant: Option<String>,
+        #[arg(long, default_value_t = 1_000, value_parser = clap::value_parser!(u32).range(1..=10_000))]
+        batch_size: u32,
+    },
+    Status {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        run_id: Uuid,
+        #[arg(long)]
+        payload_id: Option<Uuid>,
+    },
+    Verify {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        run_id: Uuid,
+        #[arg(long)]
+        payload_id: Option<Uuid>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RecoveryCommand {
+    Checkpoint {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+    },
+    Verify {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        checkpoint: PathBuf,
     },
 }
 
@@ -163,6 +242,23 @@ async fn main() -> ExitCode {
 
 async fn execute(command: Command) -> Result<String, String> {
     match command {
+        Command::Audit {
+            command:
+                AuditCommand::Export {
+                    config,
+                    after,
+                    limit,
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            audit::export(
+                &database,
+                &configuration.tenant.slug,
+                after.as_deref(),
+                limit,
+            )
+            .await
+        }
         Command::Config {
             command: ConfigCommand::Validate { config },
         } => {
@@ -181,6 +277,12 @@ async fn execute(command: Command) -> Result<String, String> {
                 "database schema is current for tenant {}",
                 configuration.tenant.slug
             ))
+        }
+        Command::Database {
+            command: DatabaseCommand::VerifyGrants { config },
+        } => {
+            let (_, database) = configured_database(&config).await?;
+            grants::verify(&database).await
         }
         Command::Tenant {
             command: TenantCommand::Bootstrap { config },
@@ -257,6 +359,73 @@ async fn execute(command: Command) -> Result<String, String> {
                 report.orphan_jobs_created,
                 report.finalized_staging_sets_removed,
             ))
+        }
+        Command::Storage {
+            command:
+                StorageCommand::Scrub {
+                    command:
+                        ScrubCommand::Start {
+                            config,
+                            run_id,
+                            payload_id,
+                            confirm_tenant,
+                            batch_size,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            scrub::start(
+                &database,
+                &configuration.tenant.slug,
+                configuration.storage.backend_id,
+                run_id,
+                payload_id,
+                confirm_tenant.as_deref(),
+                batch_size,
+            )
+            .await
+        }
+        Command::Storage {
+            command:
+                StorageCommand::Scrub {
+                    command:
+                        ScrubCommand::Status {
+                            config,
+                            run_id,
+                            payload_id,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            scrub::status(
+                &database,
+                &configuration.tenant.slug,
+                configuration.storage.backend_id,
+                run_id,
+                payload_id,
+            )
+            .await
+        }
+        Command::Storage {
+            command:
+                StorageCommand::Scrub {
+                    command:
+                        ScrubCommand::Verify {
+                            config,
+                            run_id,
+                            payload_id,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            scrub::verify(
+                &database,
+                &configuration.tenant.slug,
+                configuration.storage.backend_id,
+                run_id,
+                payload_id,
+            )
+            .await
         }
         Command::Jobs {
             command: JobCommand::RunOne { config },
@@ -363,6 +532,18 @@ async fn execute(command: Command) -> Result<String, String> {
             Ok(format!(
                 "retry job {retry_id} queued for terminal job {job_id}"
             ))
+        }
+        Command::Recovery {
+            command: RecoveryCommand::Checkpoint { config },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            recovery::checkpoint(&database, &configuration).await
+        }
+        Command::Recovery {
+            command: RecoveryCommand::Verify { config, checkpoint },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            recovery::verify(&database, &configuration, &checkpoint).await
         }
     }
 }

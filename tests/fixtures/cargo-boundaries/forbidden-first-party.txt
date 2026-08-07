@@ -1,0 +1,4 @@
+filebelt-authz v0.1.0 (/workspace/source/crates/filebelt-authz)|
+filebelt-database v0.1.0 (/workspace/source/crates/filebelt-database)|
+filebelt-domain v0.1.0 (/workspace/source/crates/filebelt-domain)|
+filebelt-events-protocol v0.1.0 (/workspace/source/crates/filebelt-events-protocol)|

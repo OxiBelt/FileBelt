@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "filebelt-example-adapter"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]

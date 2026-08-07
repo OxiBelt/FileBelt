@@ -1,0 +1,563 @@
+# SPDX-License-Identifier: Apache-2.0
+
+schema_version = 1
+
+[repository]
+production_source_roots = [
+  "source/src",
+  "source/apps",
+  "source/crates",
+  "adapters",
+]
+excluded_source_roots = [
+  "protocol/generated/rust",
+  "tests",
+  "fuzz",
+  "tests/unsafe-harness",
+]
+apache_manifest_roots = [
+  "source/Cargo.toml",
+  "source/apps",
+  "source/crates",
+]
+adapter_root = "adapters"
+# Adding an adapter manifest requires an explicit, license-reviewed registration.
+registered_adapter_manifests = []
+
+[[graph_profiles]]
+label = "integrated development composition"
+package = "filebelt"
+manifest = "source/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt = []
+
+[[graph_profiles]]
+label = "authorization policy"
+package = "filebelt-authz"
+manifest = "source/crates/filebelt-authz/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "http-body",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-authz = []
+filebelt-domain = []
+
+[[graph_profiles]]
+label = "build identity"
+package = "filebelt-build-identity"
+manifest = "source/crates/filebelt-build-identity/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+
+[[graph_profiles]]
+label = "control protocol"
+package = "filebelt-control-protocol"
+manifest = "source/crates/filebelt-control-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-control-protocol = []
+
+[[graph_profiles]]
+label = "controller"
+package = "filebelt-controller"
+manifest = "source/apps/filebelt-controller/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-controller = []
+
+[[graph_profiles]]
+label = "database repository"
+package = "filebelt-database"
+manifest = "source/crates/filebelt-database/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-database = []
+filebelt-domain = []
+filebelt-events-protocol = []
+
+[[graph_profiles]]
+label = "deployment diagnostics"
+package = "filebelt-deployment-diagnostics"
+manifest = "source/crates/filebelt-deployment-diagnostics/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-deployment-diagnostics = []
+
+[[graph_profiles]]
+label = "document protocol"
+package = "filebelt-document-protocol"
+manifest = "source/crates/filebelt-document-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-document-protocol = []
+
+[[graph_profiles]]
+label = "domain model"
+package = "filebelt-domain"
+manifest = "source/crates/filebelt-domain/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "http-body",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-domain = []
+
+[[graph_profiles]]
+label = "events protocol"
+package = "filebelt-events-protocol"
+manifest = "source/crates/filebelt-events-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-events-protocol = []
+
+[[graph_profiles]]
+label = "MCP broker"
+package = "filebelt-mcp-broker"
+manifest = "source/apps/filebelt-mcp-broker/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-deployment-diagnostics = []
+filebelt-mcp-broker = []
+
+[[graph_profiles]]
+label = "MCP policy"
+package = "filebelt-mcp-policy"
+manifest = "source/crates/filebelt-mcp-policy/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-mcp-policy = []
+
+[[graph_profiles]]
+label = "media controller"
+package = "filebelt-media-controller"
+manifest = "source/apps/filebelt-media-controller/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-deployment-diagnostics = []
+filebelt-media-controller = []
+
+[[graph_profiles]]
+label = "storage mechanics"
+package = "filebelt-storage"
+manifest = "source/crates/filebelt-storage/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-database = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-storage = []
+
+[[graph_profiles]]
+label = "storage protocol"
+package = "filebelt-storage-protocol"
+manifest = "source/crates/filebelt-storage-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-storage-protocol = []
+
+[[graph_profiles]]
+label = "VFS protocol"
+package = "filebelt-vfs-protocol"
+manifest = "source/crates/filebelt-vfs-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-vfs-protocol = []
+
+[[graph_profiles]]
+label = "control-plane API"
+package = "filebelt-api"
+manifest = "source/apps/filebelt-api/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-api = []
+filebelt-authz = []
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-storage-protocol = []
+
+[[graph_profiles]]
+label = "I/O worker"
+package = "filebelt-worker-io"
+manifest = "source/apps/filebelt-worker-io/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-storage = []
+filebelt-storage-protocol = []
+filebelt-worker-io = []
+
+[[graph_profiles]]
+label = "maintenance worker"
+package = "filebelt-worker-maintenance"
+manifest = "source/apps/filebelt-worker-maintenance/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-storage = []
+filebelt-worker-maintenance = []
+
+[[graph_profiles]]
+label = "operator CLI"
+package = "filebeltctl"
+manifest = "source/apps/filebeltctl/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-storage = []
+filebelt-worker-maintenance = []
+filebeltctl = []
+
+# Rust paths use identifier spelling, so Cargo package hyphens become underscores.
+[[source_boundaries]]
+label = "Apache packages cannot import adapter implementation namespaces"
+packages = [
+  "filebelt",
+  "filebelt-api",
+  "filebelt-authz",
+  "filebelt-build-identity",
+  "filebelt-control-protocol",
+  "filebelt-controller",
+  "filebelt-database",
+  "filebelt-deployment-diagnostics",
+  "filebelt-document-protocol",
+  "filebelt-domain",
+  "filebelt-events-protocol",
+  "filebelt-mcp-broker",
+  "filebelt-mcp-policy",
+  "filebelt-media-controller",
+  "filebelt-storage",
+  "filebelt-storage-protocol",
+  "filebelt-vfs-protocol",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+  "filebeltctl",
+]
+forbidden_paths = ["adapters"]
+
+[[source_boundaries]]
+label = "domain and authorization remain infrastructure independent"
+packages = ["filebelt-authz", "filebelt-domain"]
+forbidden_paths = [
+  "async_std",
+  "axum",
+  "diesel",
+  "http",
+  "http_body",
+  "hyper",
+  "iggy",
+  "k8s_openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "std::fs",
+  "std::net",
+  "std::process",
+  "tokio",
+  "tokio_postgres",
+  "tower",
+]
+
+[[source_boundaries]]
+label = "database repository cannot depend on authorization or applications"
+packages = ["filebelt-database"]
+forbidden_paths = [
+  "filebelt_api",
+  "filebelt_authz",
+  "filebelt_controller",
+  "filebelt_mcp_broker",
+  "filebelt_media_controller",
+  "filebelt_worker_io",
+  "filebelt_worker_maintenance",
+  "filebeltctl",
+]
+
+[[source_boundaries]]
+label = "API cannot absorb storage mechanics or workers"
+packages = ["filebelt-api"]
+forbidden_paths = [
+  "filebelt_storage",
+  "filebelt_worker_io",
+  "filebelt_worker_maintenance",
+]
+
+[[source_boundaries]]
+label = "workers cannot absorb API authentication or sessions"
+packages = ["filebelt-worker-io", "filebelt-worker-maintenance"]
+forbidden_paths = [
+  "filebelt_api",
+  "filebelt_authz",
+  "oauth2",
+  "openidconnect",
+]
+
+[[source_boundaries]]
+label = "protocol packages remain transport and persistence neutral"
+packages = [
+  "filebelt-document-protocol",
+  "filebelt-events-protocol",
+  "filebelt-storage-protocol",
+  "filebelt-vfs-protocol",
+]
+forbidden_paths = [
+  "iggy",
+  "k8s_openapi",
+  "kube",
+  "sqlx",
+  "std::fs",
+]
+
+[[public_surfaces]]
+package = "filebelt"
+crate_root = "source/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt"
+crate_root = "source/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-api"
+crate_root = "source/apps/filebelt-api/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-authz"
+crate_root = "source/crates/filebelt-authz/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-build-identity"
+crate_root = "source/crates/filebelt-build-identity/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-control-protocol"
+crate_root = "source/crates/filebelt-control-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-controller"
+crate_root = "source/apps/filebelt-controller/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-database"
+crate_root = "source/crates/filebelt-database/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-deployment-diagnostics"
+crate_root = "source/crates/filebelt-deployment-diagnostics/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-document-protocol"
+crate_root = "source/crates/filebelt-document-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-domain"
+crate_root = "source/crates/filebelt-domain/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-events-protocol"
+crate_root = "source/crates/filebelt-events-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-mcp-broker"
+crate_root = "source/apps/filebelt-mcp-broker/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-mcp-policy"
+crate_root = "source/crates/filebelt-mcp-policy/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-media-controller"
+crate_root = "source/apps/filebelt-media-controller/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-storage"
+crate_root = "source/crates/filebelt-storage/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-storage-protocol"
+crate_root = "source/crates/filebelt-storage-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-vfs-protocol"
+crate_root = "source/crates/filebelt-vfs-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-worker-io"
+crate_root = "source/apps/filebelt-worker-io/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-worker-maintenance"
+crate_root = "source/apps/filebelt-worker-maintenance/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-worker-maintenance"
+crate_root = "source/apps/filebelt-worker-maintenance/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebeltctl"
+crate_root = "source/apps/filebeltctl/src/main.rs"
+public_modules = []
+wildcard_reexports = []

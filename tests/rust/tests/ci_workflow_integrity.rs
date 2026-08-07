@@ -15,6 +15,7 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
     for job in [
         "source-structure:",
         "rust:",
+        "rust-boundaries:",
         "supply-chain:",
         "node:",
         "protocol:",
@@ -26,6 +27,44 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
     ] {
         assert!(workflow.contains(job), "workflow is missing {job}");
     }
+}
+
+#[test]
+fn rust_boundary_job_is_advisory_for_size_and_blocks_the_bootstrap_gate() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("bootstrap workflow");
+    let boundary_start = workflow
+        .find("\n  rust-boundaries:\n")
+        .expect("Rust boundary job");
+    let boundary_end = workflow[boundary_start..]
+        .find("\n  supply-chain:\n")
+        .map(|offset| boundary_start + offset)
+        .expect("job after Rust boundaries");
+    let boundary = &workflow[boundary_start..boundary_end];
+
+    let script_tests = boundary
+        .find("python3 tests/scripts/test_check_rust_module_size.py")
+        .expect("module-size checker tests");
+    let advisory = boundary
+        .find("tests/scripts/check-rust-module-size.sh --warn")
+        .expect("advisory module-size check");
+    let cargo_graph = boundary
+        .find("tests/scripts/check-cargo-boundaries.sh")
+        .expect("Cargo boundary check");
+    let source_contract = boundary
+        .find("--test module_decomposition_contract")
+        .expect("source-boundary contract");
+
+    assert!(!boundary.contains("check-rust-module-size.sh --enforce"));
+    assert!(script_tests < advisory);
+    assert!(advisory < cargo_graph);
+    assert!(cargo_graph < source_contract);
+    assert!(workflow.contains(
+        "needs: [source-structure, rust, rust-boundaries, supply-chain, node, protocol, dco]"
+    ));
+    assert!(workflow.contains("RUST_BOUNDARIES: ${{ needs.rust-boundaries.result }}"));
+    assert!(workflow.contains("test \"$RUST_BOUNDARIES\" = success"));
 }
 
 #[test]

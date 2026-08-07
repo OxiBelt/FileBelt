@@ -66,6 +66,8 @@ vulnerability details.
 python3 tests/scripts/check-source-structure.py --repo-root .
 python3 tests/scripts/check-markdown-links.py --repo-root .
 python3 tests/scripts/check-generated.py --repo-root .
+tests/scripts/check-rust-module-size.sh --warn
+tests/scripts/check-cargo-boundaries.sh
 reuse lint
 cargo fmt --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

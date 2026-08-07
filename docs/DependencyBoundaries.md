@@ -91,3 +91,32 @@ package's license and records its schema and generator provenance.
 Repository contract tests validate workspace membership, resolved path
 dependencies, package license metadata, generated-code provenance, database
 role use, image/mount contracts, and unsafe-code exceptions.
+
+## Automated enforcement
+
+The reviewed production graph and crate-root public surface live in
+`supply-chain/cargo-boundaries-v1.toml`. The policy records every production
+manifest, its allowed transitive first-party packages and activated features,
+narrow forbidden dependency families, public root modules, and wildcard
+re-exports. `tests/scripts/check-cargo-boundaries.sh` compares that policy with
+locked `cargo metadata` and package-scoped `cargo tree` results. Unknown local
+packages, path dependencies, features, or adapter manifests fail closed.
+
+The source contract parses production Rust with `syn` so aliases, nested use
+trees, relative imports, and public re-exports cannot bypass the documented
+direction. It scans reserved adapter roots for Rust syntax even though adapters
+remain outside the Apache workspace. Generated Rust is compiled through its
+owning protocol crate and checked for deterministic regeneration; it is not
+treated as a hand-authored module or public-surface declaration.
+
+`tests/scripts/check-rust-module-size.sh --warn` reports files above 750
+physical lines in `source/src`, `source/apps`, `source/crates`, and `adapters`.
+The limit is an advisory decomposition signal, not permission to mix roles or
+an automatic reason to split cohesive code. `--enforce` is available for a
+focused cleanup once the affected responsibilities and compatibility tests are
+under review.
+
+Changing a reviewed graph or public-surface entry requires an explicit policy
+diff and the normal ADR review whenever it also changes a public contract,
+runtime trust, persistence, native linkage, or license boundary. The checker
+does not provide an automatic baseline-update mode.

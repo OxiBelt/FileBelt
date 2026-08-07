@@ -1756,6 +1756,10 @@ dependencies = [
 [[package]]
 name = "filebelt-repository-tests"
 version = "0.1.0"
+dependencies = [
+ "syn 3.0.3",
+ "toml 1.1.4+spec-1.1.0",
+]
 
 [[package]]
 name = "filebelt-storage"

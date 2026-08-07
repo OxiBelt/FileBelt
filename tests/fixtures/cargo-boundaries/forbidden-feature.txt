@@ -1,0 +1,2 @@
+filebelt-authz v0.1.0 (/workspace/source/crates/filebelt-authz)|default
+filebelt-domain v0.1.0 (/workspace/source/crates/filebelt-domain)|

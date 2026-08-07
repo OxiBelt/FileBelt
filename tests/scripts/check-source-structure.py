@@ -101,6 +101,7 @@ def check(root: Path) -> list[str]:
         "supply-chain/node-policy.toml",
         "supply-chain/imports.lock",
         "tests/scripts/check-node-licenses.py",
+        "tests/scripts/test_cargo_vet_policy.py",
         ".github/CODEOWNERS",
         ".github/workflows/check-filebelt.yml",
         ".github/workflows/release-dry-run.yml",

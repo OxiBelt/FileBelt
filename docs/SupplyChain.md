@@ -21,6 +21,24 @@ repository; locally asserted audits remain reviewable in
 a dependency-policy review, not an implicit network trust decision at build
 time.
 
+### Cargo Vet acceptance baseline
+
+`supply-chain/config.toml` contains a generated, minimal baseline for the exact
+third-party crate versions in `Cargo.lock`. Each exemption is limited to one
+crate version and `safe-to-deploy`; the configuration does not trust publishers
+or use wildcard version ranges. These records document acceptance of the
+current locked graph. They are not source audits and do not claim that FileBelt
+or an imported auditor reviewed every line of each crate.
+
+`cargo vet --locked` fails when a new crate or version lacks imported audit
+evidence, a local audit, or a deliberately reviewed exact exemption. Reviewers
+must inspect `cargo vet suggest`, the dependency purpose and features, native
+or build-script behavior, maintenance, and license and vulnerability results
+before updating the baseline. Prefer replacing exemptions with reviewable
+audits as that evidence becomes available. `cargo audit`, `cargo deny check`,
+the exact Cargo lockfile, and the locked import set remain independent required
+controls; an exemption weakens none of those gates.
+
 ## Phase 2 dependency admission
 
 Phase 2 retains exact Cargo and pnpm resolution and adds runtime dependencies

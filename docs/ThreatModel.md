@@ -94,6 +94,7 @@ at-least-once notification path.
 | Backup restores mismatched database and payload state | Quiesce/fence, shared watermark, fresh-volume restore, reconcile, manifest/BLAKE3 verification | Backup/restore acceptance test |
 | Real Iggy helper broadens stack privileges | `SYS_NICE`, memlock, and seccomp exception apply only to the digest-pinned Iggy container | Compose/container inspection |
 | OxiBelt prerelease or native crypto input is substituted | Exact version/digest, source map, lockfile, SBOM, notice, vulnerability, ELF, and three-platform evidence | Supply-chain and image tests |
+| Cargo Vet acceptance is mistaken for a source audit or silently broadened | Exact locked-version exemptions only; no trusted publishers or ranges; independent audit, deny, lockfile, and import-lock gates | Cargo Vet policy tests and `cargo vet --locked` |
 | Pull request publishes an untrusted image | Read-only workflow permissions and dry-run archive-only contract | Workflow-integrity tests |
 | Apache core imports an adapter implementation | Workspace and resolved dependency enforcement; generic protocol process boundary | Dependency-boundary tests |
 
@@ -120,8 +121,10 @@ interval. The documented quiesced Docker restore procedure defines a
 consistency mechanism; it does not claim an automated restore proof, production
 availability, online backup, PITR, or an RPO/RTO. Backend HTTP depends on Docker
 network isolation until Phase 3 adds Kubernetes network and service identity
-controls. Dependency scans and signed source mappings reduce
-known supply-chain risk but do not eliminate unknown vulnerabilities.
+controls. Dependency scans and signed source mappings reduce known supply-chain
+risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
+acceptance of the current locked graph rather than a complete source audit, so
+their review debt remains until equivalent audit evidence replaces them.
 
 The threat model must be extended before enabling registry publication,
 Kubernetes production objects, a second issuer, an adapter, WebTransport, MCP,

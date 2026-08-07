@@ -16,103 +16,103 @@ export type EntryKind = "file" | "folder";
 export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";
 
 export interface FileEntry {
-  id: string;
-  kind: EntryKind;
-  modifiedAt: string;
-  name: string;
-  owner: string;
-  shared: boolean;
-  size: number | null;
-  status: EntryStatus;
-  trashed: boolean;
-  version: number;
+  Id: string;
+  Kind: EntryKind;
+  ModifiedAt: string;
+  Name: string;
+  Owner: string;
+  Shared: boolean;
+  Size: number | null;
+  Status: EntryStatus;
+  Trashed: boolean;
+  Version: number;
 }
 
 export interface UploadRecord {
-  id: string;
-  name: string;
-  progress: number;
-  size: number;
-  state: "complete" | "failed" | "uploading";
+  Id: string;
+  Name: string;
+  Progress: number;
+  Size: number;
+  State: "complete" | "failed" | "uploading";
 }
 
 export interface VersionRecord {
-  author: string;
-  createdAt: string;
-  fileId: string;
-  id: string;
-  size: number;
-  version: number;
+  Author: string;
+  CreatedAt: string;
+  FileId: string;
+  Id: string;
+  Size: number;
+  Version: number;
 }
 
 export interface ShareRecord {
-  expiresAt?: string;
-  id: string;
-  kind: "direct" | "group" | "link";
-  permission: "Contributor" | "Manager" | "Viewer";
-  resourceId: string;
-  resourceName: string;
-  target: string;
+  ExpiresAt?: string;
+  Id: string;
+  Kind: "direct" | "group" | "link";
+  Permission: "Contributor" | "Manager" | "Viewer";
+  ResourceId: string;
+  ResourceName: string;
+  Target: string;
 }
 
 export interface SessionRecord {
-  current: boolean;
-  device: string;
-  id: string;
-  lastActiveAt: string;
-  location: string;
+  Current: boolean;
+  Device: string;
+  Id: string;
+  LastActiveAt: string;
+  Location: string;
 }
 
 export interface PrivacyEvent {
-  action: string;
-  actor: string;
-  createdAt: string;
-  id: string;
-  unread: boolean;
+  Action: string;
+  Actor: string;
+  CreatedAt: string;
+  Id: string;
+  Unread: boolean;
 }
 
 export interface AdminUser {
-  email: string;
-  id: string;
-  name: string;
-  status: "active" | "suspended";
+  Email: string;
+  Id: string;
+  Name: string;
+  Status: "active" | "suspended";
 }
 
 export interface AdminGroup {
-  id: string;
-  managerCount: number;
-  memberCount: number;
-  name: string;
+  Id: string;
+  ManagerCount: number;
+  MemberCount: number;
+  Name: string;
 }
 
 export interface AdminDrive {
-  id: string;
-  name: string;
-  quotaBytes: number;
-  usedBytes: number;
+  Id: string;
+  Name: string;
+  QuotaBytes: number;
+  UsedBytes: number;
 }
 
 export interface WorkspaceSnapshot {
-  admin: {
-    drives: AdminDrive[];
-    groups: AdminGroup[];
-    users: AdminUser[];
+  Admin: {
+    Drives: AdminDrive[];
+    Groups: AdminGroup[];
+    Users: AdminUser[];
   };
-  currentUser: {
-    displayName: string;
-    email: string;
-    isTenantAdmin: boolean;
+  CurrentUser: {
+    DisplayName: string;
+    Email: string;
+    IsTenantAdmin: boolean;
   };
-  entries: FileEntry[];
-  privacy: PrivacyEvent[];
-  sessions: SessionRecord[];
-  shares: ShareRecord[];
-  uploads: UploadRecord[];
-  versions: VersionRecord[];
+  Entries: FileEntry[];
+  Privacy: PrivacyEvent[];
+  Sessions: SessionRecord[];
+  Shares: ShareRecord[];
+  Uploads: UploadRecord[];
+  Versions: VersionRecord[];
 }
 
 export interface UploadCandidate {
-  data?: Blob;
-  name: string;
-  size: number;
+  Data?: Blob;
+  Name: string;
+  Size: number;
 }

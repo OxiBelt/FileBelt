@@ -5,54 +5,54 @@ import { describe, expect, it } from "vitest";
 
 import { SharesView } from "./ActivityViews.js";
 import type { FileEntry, ShareRecord } from "./model.js";
-import { en } from "./strings.js";
+import { En } from "./strings.js";
 
 describe("SharesView", () => {
   it("filters same-named shares by immutable resource identity", () => {
-    const selected: FileEntry = {
-      id: "00000000-0000-4000-8000-000000000101",
-      kind: "file",
-      modifiedAt: "2026-08-06T12:00:00Z",
-      name: "same-name.txt",
-      owner: "Owner",
-      shared: true,
-      size: 1,
-      status: "ready",
-      trashed: false,
-      version: 1,
+    const Selected: FileEntry = {
+      Id: "00000000-0000-4000-8000-000000000101",
+      Kind: "file",
+      ModifiedAt: "2026-08-06T12:00:00Z",
+      Name: "same-name.txt",
+      Owner: "Owner",
+      Shared: true,
+      Size: 1,
+      Status: "ready",
+      Trashed: false,
+      Version: 1,
     };
-    const shares: ShareRecord[] = [
+    const Shares: ShareRecord[] = [
       {
-        id: "share-selected",
-        kind: "direct",
-        permission: "Viewer",
-        resourceId: selected.id,
-        resourceName: selected.name,
-        target: "selected@example.test",
+        Id: "share-selected",
+        Kind: "direct",
+        Permission: "Viewer",
+        ResourceId: Selected.Id,
+        ResourceName: Selected.Name,
+        Target: "selected@example.test",
       },
       {
-        id: "share-other",
-        kind: "direct",
-        permission: "Viewer",
-        resourceId: "00000000-0000-4000-8000-000000000102",
-        resourceName: selected.name,
-        target: "other@example.test",
+        Id: "share-other",
+        Kind: "direct",
+        Permission: "Viewer",
+        ResourceId: "00000000-0000-4000-8000-000000000102",
+        ResourceName: Selected.Name,
+        Target: "other@example.test",
       },
     ];
 
-    const markup = renderToStaticMarkup(
+    const Markup = renderToStaticMarkup(
       <SharesView
-        file={selected}
+        File={Selected}
         onCreate={async () => undefined}
         onRevoke={async () => undefined}
-        shares={shares}
-        strings={en}
+        Shares={Shares}
+        Strings={En}
       />,
     );
 
-    expect(markup).toContain("selected@example.test");
-    expect(markup).not.toContain("other@example.test");
-    expect(markup).not.toContain(en.anonymousLink);
-    expect(markup).not.toContain(en.groupShare);
+    expect(Markup).toContain("selected@example.test");
+    expect(Markup).not.toContain("other@example.test");
+    expect(Markup).not.toContain(En.anonymousLink);
+    expect(Markup).not.toContain(En.groupShare);
   });
 });

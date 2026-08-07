@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const en = {
+export const En = {
   account: "Account",
   activeSession: "Current session",
   admin: "Administration",
@@ -13,15 +13,15 @@ export const en = {
   conflict: "Conflict",
   contributor: "Contributor",
   copyLink: "Copy link",
-  createdGroup: (name: string): string => `Created group ${name}`,
-  createdSharedDrive: (name: string): string => `Created shared drive ${name}`,
+  createdGroup: (Name: string): string => `Created group ${Name}`,
+  createdSharedDrive: (Name: string): string => `Created shared drive ${Name}`,
   current: "Current",
   createShare: "Create share",
   dark: "Dark",
   details: "Details",
   directShare: "Person",
-  deselectItem: (name: string): string => `Deselect ${name}`,
-  downloadStarted: (name: string): string => `Download started for ${name}`,
+  deselectItem: (Name: string): string => `Deselect ${Name}`,
+  downloadStarted: (Name: string): string => `Download started for ${Name}`,
   download: "Download",
   file: "File",
   fileCommands: "File commands",
@@ -73,8 +73,8 @@ export const en = {
   signInDescription: "Your FileBelt session is missing or has expired. Sign in again to continue.",
   signInRequired: "Sign in to FileBelt",
   selected: "selected",
-  selectedAnnouncement: (count: number): string => `${count} ${count === 1 ? "item" : "items"} selected`,
-  selectItem: (name: string): string => `Select ${name}`,
+  selectedAnnouncement: (Count: number): string => `${Count} ${Count === 1 ? "item" : "items"} selected`,
+  selectItem: (Name: string): string => `Select ${Name}`,
   sessions: "Sessions",
   sessionsDescription: "Review where your FileBelt account is signed in and revoke devices you no longer use.",
   sessionRevoked: "Session revoked",
@@ -93,7 +93,7 @@ export const en = {
   theme: "Theme",
   trash: "Trash",
   upload: "Upload",
-  uploadCompleted: (count: number): string => `${count} ${count === 1 ? "upload" : "uploads"} completed`,
+  uploadCompleted: (Count: number): string => `${Count} ${Count === 1 ? "upload" : "uploads"} completed`,
   uploadPrivacy: "Uploads remain resumable without storing account or capability tokens in this browser.",
   userStatusUpdated: "Updated account status",
   uploading: "Uploading",
@@ -111,4 +111,4 @@ export const en = {
   working: "Working…",
 } as const;
 
-export type Strings = typeof en;
+export type Strings = typeof En;

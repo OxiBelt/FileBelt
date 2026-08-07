@@ -9,9 +9,9 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: true,
     rollupOptions: {
-      onwarn(warning, warn) {
-        if (warning.code === "MODULE_LEVEL_DIRECTIVE" && warning.message.includes('"use client"')) return;
-        warn(warning);
+      onwarn(Warning, Warn) {
+        if (Warning.code === "MODULE_LEVEL_DIRECTIVE" && Warning.message.includes('"use client"')) return;
+        Warn(Warning);
       },
       output: {
         manualChunks: {

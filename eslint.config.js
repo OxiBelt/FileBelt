@@ -37,48 +37,20 @@ export default tseslint.config(
       "@typescript-eslint/naming-convention": [
         "error",
         {
-          selector: "import",
+          selector: ["function", "variable"],
+          filter: {
+            regex: "^use[A-Z][A-Za-z0-9]*$",
+            match: true,
+          },
           format: null,
         },
         {
-          selector: "variable",
-          modifiers: ["destructured"],
-          format: null,
-        },
-        {
-          selector: "variable",
-          modifiers: ["const"],
-          format: ["camelCase", "UPPER_CASE", "PascalCase"],
-          leadingUnderscore: "allow",
-        },
-        {
-          selector: "variable",
-          format: ["camelCase"],
-          leadingUnderscore: "allow",
-        },
-        {
-          selector: "function",
-          // PascalCase preserves exported React component and constructor APIs.
-          format: ["camelCase", "PascalCase"],
-          leadingUnderscore: "allow",
-        },
-        {
-          selector: "method",
-          format: ["camelCase"],
-          leadingUnderscore: "allow",
-        },
-        {
-          selector: "parameter",
-          format: ["camelCase"],
-          leadingUnderscore: "allow",
+          selector: ["variableLike", "parameterProperty", "classProperty", "typeProperty"],
+          format: ["PascalCase"],
         },
         {
           selector: "typeLike",
           format: ["PascalCase"],
-        },
-        {
-          selector: ["property", "parameterProperty"],
-          format: null,
         },
       ],
       "@typescript-eslint/no-explicit-any": "error",

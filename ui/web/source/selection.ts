@@ -1,51 +1,51 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface SelectionState {
-  anchorId: string | null;
-  focusedId: string | null;
-  selectedIds: ReadonlySet<string>;
+  AnchorId: string | null;
+  FocusedId: string | null;
+  SelectedIds: ReadonlySet<string>;
 }
 
 export type SelectionAction =
-  | { id: string; type: "focus" }
-  | { id: string; orderedIds: readonly string[]; type: "range" }
-  | { id: string; type: "replace" }
-  | { id: string; type: "toggle" }
-  | { orderedIds: readonly string[]; type: "all" }
-  | { type: "clear" };
+  | { Id: string; Type: "focus" }
+  | { Id: string; OrderedIds: readonly string[]; Type: "range" }
+  | { Id: string; Type: "replace" }
+  | { Id: string; Type: "toggle" }
+  | { OrderedIds: readonly string[]; Type: "all" }
+  | { Type: "clear" };
 
-export const emptySelection: SelectionState = {
-  anchorId: null,
-  focusedId: null,
-  selectedIds: new Set<string>(),
+export const EmptySelection: SelectionState = {
+  AnchorId: null,
+  FocusedId: null,
+  SelectedIds: new Set<string>(),
 };
 
-export function selectionReducer(state: SelectionState, action: SelectionAction): SelectionState {
-  switch (action.type) {
+export function SelectionReducer(State: SelectionState, Action: SelectionAction): SelectionState {
+  switch (Action.Type) {
     case "all":
       return {
-        anchorId: action.orderedIds[0] ?? null,
-        focusedId: state.focusedId ?? action.orderedIds[0] ?? null,
-        selectedIds: new Set(action.orderedIds),
+        AnchorId: Action.OrderedIds[0] ?? null,
+        FocusedId: State.FocusedId ?? Action.OrderedIds[0] ?? null,
+        SelectedIds: new Set(Action.OrderedIds),
       };
     case "clear":
-      return emptySelection;
+      return EmptySelection;
     case "focus":
-      return { ...state, focusedId: action.id };
+      return { ...State, FocusedId: Action.Id };
     case "range": {
-      const anchorIndex = Math.max(0, action.orderedIds.indexOf(state.anchorId ?? action.id));
-      const targetIndex = Math.max(0, action.orderedIds.indexOf(action.id));
-      const start = Math.min(anchorIndex, targetIndex);
-      const end = Math.max(anchorIndex, targetIndex);
-      return { ...state, focusedId: action.id, selectedIds: new Set(action.orderedIds.slice(start, end + 1)) };
+      const AnchorIndex = Math.max(0, Action.OrderedIds.indexOf(State.AnchorId ?? Action.Id));
+      const TargetIndex = Math.max(0, Action.OrderedIds.indexOf(Action.Id));
+      const Start = Math.min(AnchorIndex, TargetIndex);
+      const End = Math.max(AnchorIndex, TargetIndex);
+      return { ...State, FocusedId: Action.Id, SelectedIds: new Set(Action.OrderedIds.slice(Start, End + 1)) };
     }
     case "replace":
-      return { anchorId: action.id, focusedId: action.id, selectedIds: new Set([action.id]) };
+      return { AnchorId: Action.Id, FocusedId: Action.Id, SelectedIds: new Set([Action.Id]) };
     case "toggle": {
-      const selectedIds = new Set(state.selectedIds);
-      if (selectedIds.has(action.id)) selectedIds.delete(action.id);
-      else selectedIds.add(action.id);
-      return { anchorId: action.id, focusedId: action.id, selectedIds };
+      const SelectedIds = new Set(State.SelectedIds);
+      if (SelectedIds.has(Action.Id)) SelectedIds.delete(Action.Id);
+      else SelectedIds.add(Action.Id);
+      return { AnchorId: Action.Id, FocusedId: Action.Id, SelectedIds };
     }
   }
 }

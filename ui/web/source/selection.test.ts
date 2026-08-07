@@ -2,27 +2,27 @@
 
 import { describe, expect, it } from "vitest";
 
-import { emptySelection, selectionReducer } from "./selection.js";
+import { EmptySelection, SelectionReducer } from "./selection.js";
 
-const ids = ["one", "two", "three", "four"];
+const Ids = ["one", "two", "three", "four"];
 
 describe("selectionReducer", () => {
   it("supports additive keyboard selection", () => {
-    const one = selectionReducer(emptySelection, { id: "one", type: "toggle" });
-    const three = selectionReducer(one, { id: "three", type: "toggle" });
-    expect([...three.selectedIds]).toEqual(["one", "three"]);
+    const One = SelectionReducer(EmptySelection, { Id: "one", Type: "toggle" });
+    const Three = SelectionReducer(One, { Id: "three", Type: "toggle" });
+    expect([...Three.SelectedIds]).toEqual(["one", "three"]);
   });
 
   it("selects a contiguous range from its anchor", () => {
-    const anchored = selectionReducer(emptySelection, { id: "two", type: "replace" });
-    const ranged = selectionReducer(anchored, { id: "four", orderedIds: ids, type: "range" });
-    expect([...ranged.selectedIds]).toEqual(["two", "three", "four"]);
+    const Anchored = SelectionReducer(EmptySelection, { Id: "two", Type: "replace" });
+    const Ranged = SelectionReducer(Anchored, { Id: "four", OrderedIds: Ids, Type: "range" });
+    expect([...Ranged.SelectedIds]).toEqual(["two", "three", "four"]);
   });
 
   it("selects all rows without losing focus", () => {
-    const focused = selectionReducer(emptySelection, { id: "three", type: "focus" });
-    const all = selectionReducer(focused, { orderedIds: ids, type: "all" });
-    expect(all.focusedId).toBe("three");
-    expect(all.selectedIds.size).toBe(4);
+    const Focused = SelectionReducer(EmptySelection, { Id: "three", Type: "focus" });
+    const All = SelectionReducer(Focused, { OrderedIds: Ids, Type: "all" });
+    expect(All.FocusedId).toBe("three");
+    expect(All.SelectedIds.size).toBe(4);
   });
 });

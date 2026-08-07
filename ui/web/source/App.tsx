@@ -26,7 +26,7 @@ import {
   Moon,
   MoreHorizontal,
   RefreshCw,
-  Search,
+  Search as SearchIcon,
   Settings2,
   ShieldCheck,
   Sun,
@@ -43,7 +43,7 @@ import {
   FileBeltIcon,
   FileBeltProvider,
   StatusPill,
-  visuallyHiddenStyle,
+  VisuallyHiddenStyle,
 } from "@filebelt/design-system";
 import type { Density, ThemeChoice } from "@filebelt/design-system";
 
@@ -52,34 +52,36 @@ import { AuthenticationRequiredError } from "./client.js";
 import type { FileBeltClient } from "./client.js";
 import { FileTable } from "./FileTable.js";
 import type { FileEntry, RouteId, WorkspaceSnapshot } from "./model.js";
-import { emptySelection, selectionReducer } from "./selection.js";
-import { en } from "./strings.js";
+import { EmptySelection, SelectionReducer } from "./selection.js";
+import { En } from "./strings.js";
 
 const AdminPanel = lazy(() => import("@filebelt/admin"));
-const preferencesKey = "filebelt.appearance.v1";
+const PreferencesKey = "filebelt.appearance.v1";
 
 interface Preferences {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Existing `filebelt.appearance.v1` records persist this JSON key.
   density: Density;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Existing `filebelt.appearance.v1` records persist this JSON key.
   theme: ThemeChoice;
 }
 
-const defaultPreferences: Preferences = { density: "comfortable", theme: "system" };
+const DefaultPreferences: Preferences = { density: "comfortable", theme: "system" };
 
-function loadPreferences(): Preferences {
+function LoadPreferences(): Preferences {
   try {
-    const value = JSON.parse(localStorage.getItem(preferencesKey) ?? "null") as Partial<Preferences> | null;
-    const theme = value?.theme;
-    const density = value?.density;
+    const Value = JSON.parse(localStorage.getItem(PreferencesKey) ?? "null") as Partial<Preferences> | null;
+    const Theme = Value?.theme;
+    const Density = Value?.density;
     return {
-      density: density === "compact" || density === "comfortable" ? density : defaultPreferences.density,
-      theme: theme === "light" || theme === "dark" || theme === "system" ? theme : defaultPreferences.theme,
+      density: Density === "compact" || Density === "comfortable" ? Density : DefaultPreferences.density,
+      theme: Theme === "light" || Theme === "dark" || Theme === "system" ? Theme : DefaultPreferences.theme,
     };
   } catch {
-    return defaultPreferences;
+    return DefaultPreferences;
   }
 }
 
-const routePaths: Record<RouteId, string> = {
+const RoutePaths: Record<RouteId, string> = {
   drive: "/drive",
   "shared-drives": "/shared-drives",
   shared: "/shared",
@@ -92,249 +94,249 @@ const routePaths: Record<RouteId, string> = {
   privacy: "/privacy",
 };
 
-function routeFromPath(pathname: string): RouteId | "admin" {
-  if (pathname === "/admin" || pathname.startsWith("/admin/")) return "admin";
-  return (Object.entries(routePaths).find(([, path]) => pathname === path)?.[0] as RouteId | undefined) ?? "drive";
+function RouteFromPath(Pathname: string): RouteId | "admin" {
+  if (Pathname === "/admin" || Pathname.startsWith("/admin/")) return "admin";
+  return (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as RouteId | undefined) ?? "drive";
 }
 
-function useRoute(): [RouteId | "admin", (route: RouteId | "admin") => void] {
-  const [route, setRoute] = useState<RouteId | "admin">(() => routeFromPath(window.location.pathname));
+function useRoute(): [RouteId | "admin", (Route: RouteId | "admin") => void] {
+  const [Route, SetRoute] = useState<RouteId | "admin">(() => RouteFromPath(window.location.pathname));
   useEffect(() => {
-    const onPopState = (): void => setRoute(routeFromPath(window.location.pathname));
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    const OnPopState = (): void => SetRoute(RouteFromPath(window.location.pathname));
+    window.addEventListener("popstate", OnPopState);
+    return () => window.removeEventListener("popstate", OnPopState);
   }, []);
-  const navigate = (next: RouteId | "admin"): void => {
-    window.history.pushState({}, "", next === "admin" ? "/admin" : routePaths[next]);
-    setRoute(next);
+  const Navigate = (Next: RouteId | "admin"): void => {
+    window.history.pushState({}, "", Next === "admin" ? "/admin" : RoutePaths[Next]);
+    SetRoute(Next);
   };
-  return [route, navigate];
+  return [Route, Navigate];
 }
 
-function saveBlob(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.download = name;
-  anchor.href = url;
-  anchor.click();
-  URL.revokeObjectURL(url);
+function SaveBlob(Blob: Blob, Name: string): void {
+  const Url = URL.createObjectURL(Blob);
+  const Anchor = document.createElement("a");
+  Anchor.download = Name;
+  Anchor.href = Url;
+  Anchor.click();
+  URL.revokeObjectURL(Url);
 }
 
-function routeTitle(route: RouteId | "admin"): string {
-  const titles: Record<RouteId | "admin", string> = {
-    admin: en.admin,
-    drive: en.myDrive,
-    privacy: en.privacy,
-    recent: en.recent,
-    sessions: en.sessions,
-    shared: en.shared,
-    "shared-drives": en.sharedDrives,
-    shares: en.shares,
-    trash: en.trash,
-    uploads: en.uploads,
-    versions: en.versions,
+function RouteTitle(Route: RouteId | "admin"): string {
+  const Titles: Record<RouteId | "admin", string> = {
+    admin: En.admin,
+    drive: En.myDrive,
+    privacy: En.privacy,
+    recent: En.recent,
+    sessions: En.sessions,
+    shared: En.shared,
+    "shared-drives": En.sharedDrives,
+    shares: En.shares,
+    trash: En.trash,
+    uploads: En.uploads,
+    versions: En.versions,
   };
-  return titles[route];
+  return Titles[Route];
 }
 
 interface AppProps {
-  client: FileBeltClient;
+  Client: FileBeltClient;
 }
 
-export function oidcLoginHref(): string {
+export function OidcLoginHref(): string {
   return "/api/v1/auth/login?return_path=%2F";
 }
 
 export function SignInPrompt(): ReactNode {
   return (
     <section aria-labelledby="sign-in-heading" className="fb-loading">
-      <h1 id="sign-in-heading">{en.signInRequired}</h1>
-      <p>{en.signInDescription}</p>
-      <Button appearance="primary" as="a" href={oidcLoginHref()}>{en.signIn}</Button>
+      <h1 id="sign-in-heading">{En.signInRequired}</h1>
+      <p>{En.signInDescription}</p>
+      <Button appearance="primary" as="a" href={OidcLoginHref()}>{En.signIn}</Button>
     </section>
   );
 }
 
-export function App({ client }: AppProps): ReactNode {
-  const [route, navigate] = useRoute();
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
-  const [selection, dispatchSelection] = useReducer(selectionReducer, emptySelection);
-  const [search, setSearch] = useState("");
-  const [preferences, setPreferences] = useState(loadPreferences);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [authenticationRequired, setAuthenticationRequired] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
-  const [actionEntryId, setActionEntryId] = useState<string | null>(null);
-  const [navigationOpen, setNavigationOpen] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+export function App({ Client }: AppProps): ReactNode {
+  const [Route, Navigate] = useRoute();
+  const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
+  const [Search, SetSearch] = useState("");
+  const [Preferences, SetPreferences] = useState(LoadPreferences);
+  const [Busy, SetBusy] = useState(false);
+  const [ErrorMessage, SetError] = useState<string | null>(null);
+  const [AuthenticationRequired, SetAuthenticationRequired] = useState(false);
+  const [Announcement, SetAnnouncement] = useState("");
+  const [ActionEntryId, SetActionEntryId] = useState<string | null>(null);
+  const [NavigationOpen, SetNavigationOpen] = useState(false);
+  const FileInput = useRef<HTMLInputElement>(null);
 
-  const handleFailure = useCallback((cause: unknown): void => {
-    if (cause instanceof AuthenticationRequiredError) {
-      setAuthenticationRequired(true);
-      setSnapshot(null);
-      setError(null);
+  const HandleFailure = useCallback((Cause: unknown): void => {
+    if (Cause instanceof AuthenticationRequiredError) {
+      SetAuthenticationRequired(true);
+      SetSnapshot(null);
+      SetError(null);
       return;
     }
-    setError(cause instanceof Error ? cause.message : en.offline);
+    SetError(Cause instanceof Error ? Cause.message : En.offline);
   }, []);
 
-  const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
+  const Refresh = useCallback(async (Signal?: AbortSignal): Promise<void> => {
     try {
-      setError(null);
-      setSnapshot(await client.getWorkspace(signal));
-      setAuthenticationRequired(false);
-    } catch (cause) {
-      if (!(cause instanceof DOMException && cause.name === "AbortError")) handleFailure(cause);
+      SetError(null);
+      SetSnapshot(await Client.getWorkspace(Signal));
+      SetAuthenticationRequired(false);
+    } catch (Cause) {
+      if (!(Cause instanceof DOMException && Cause.name === "AbortError")) HandleFailure(Cause);
     }
-  }, [client, handleFailure]);
+  }, [Client, HandleFailure]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void refresh(controller.signal);
-    return () => controller.abort();
-  }, [refresh]);
+    const Controller = new AbortController();
+    void Refresh(Controller.signal);
+    return () => Controller.abort();
+  }, [Refresh]);
 
   useEffect(() => {
-    localStorage.setItem(preferencesKey, JSON.stringify(preferences));
-  }, [preferences]);
+    localStorage.setItem(PreferencesKey, JSON.stringify(Preferences));
+  }, [Preferences]);
 
   useEffect(() => {
-    setAnnouncement(en.selectedAnnouncement(selection.selectedIds.size));
-  }, [selection.selectedIds]);
+    SetAnnouncement(En.selectedAnnouncement(Selection.SelectedIds.size));
+  }, [Selection.SelectedIds]);
 
-  const mutate = async (operation: () => Promise<void>, message: string): Promise<void> => {
-    setBusy(true);
-    setError(null);
+  const Mutate = async (Operation: () => Promise<void>, Message: string): Promise<void> => {
+    SetBusy(true);
+    SetError(null);
     try {
-      await operation();
-      await refresh();
-      setAnnouncement(message);
-    } catch (cause) {
-      handleFailure(cause);
+      await Operation();
+      await Refresh();
+      SetAnnouncement(Message);
+    } catch (Cause) {
+      HandleFailure(Cause);
     } finally {
-      setBusy(false);
+      SetBusy(false);
     }
   };
 
-  const entries = useMemo(() => {
-    if (snapshot === null) return [];
-    let result = snapshot.entries;
-    if (route === "trash") result = result.filter(({ trashed }) => trashed);
-    else result = result.filter(({ trashed }) => !trashed);
-    if (route === "shared") result = result.filter(({ owner }) => owner !== snapshot.currentUser.displayName);
-    if (route === "shared-drives") result = result.filter(({ shared }) => shared);
-    if (route === "recent") result = [...result].sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt));
-    const normalizedSearch = search.trim().toLocaleLowerCase();
-    if (normalizedSearch.length > 0) result = result.filter(({ name }) => name.toLocaleLowerCase().includes(normalizedSearch));
-    return result;
-  }, [route, search, snapshot]);
+  const Entries = useMemo(() => {
+    if (Snapshot === null) return [];
+    let Result = Snapshot.Entries;
+    if (Route === "trash") Result = Result.filter(({ Trashed }) => Trashed);
+    else Result = Result.filter(({ Trashed }) => !Trashed);
+    if (Route === "shared") Result = Result.filter(({ Owner }) => Owner !== Snapshot.CurrentUser.DisplayName);
+    if (Route === "shared-drives") Result = Result.filter(({ Shared }) => Shared);
+    if (Route === "recent") Result = [...Result].sort((Left, Right) => Right.ModifiedAt.localeCompare(Left.ModifiedAt));
+    const NormalizedSearch = Search.trim().toLocaleLowerCase();
+    if (NormalizedSearch.length > 0) Result = Result.filter(({ Name }) => Name.toLocaleLowerCase().includes(NormalizedSearch));
+    return Result;
+  }, [Route, Search, Snapshot]);
 
-  const selectedEntries = snapshot?.entries.filter(({ id }) => selection.selectedIds.has(id)) ?? [];
-  const primarySelection = selectedEntries.at(-1);
-  const actionEntry = snapshot?.entries.find(({ id }) => id === actionEntryId);
+  const SelectedEntries = Snapshot?.Entries.filter(({ Id }) => Selection.SelectedIds.has(Id)) ?? [];
+  const PrimarySelection = SelectedEntries.at(-1);
+  const ActionEntry = Snapshot?.Entries.find(({ Id }) => Id === ActionEntryId);
 
-  const onFiles = (event: ChangeEvent<HTMLInputElement>): void => {
-    const candidates = [...(event.currentTarget.files ?? [])].map((file) => ({ data: file, name: file.name, size: file.size }));
-    event.currentTarget.value = "";
-    if (candidates.length > 0) void mutate(() => client.upload(candidates), en.uploadCompleted(candidates.length));
+  const OnFiles = (Event: ChangeEvent<HTMLInputElement>): void => {
+    const Candidates = [...(Event.currentTarget.files ?? [])].map((File) => ({ Data: File, Name: File.name, Size: File.size }));
+    Event.currentTarget.value = "";
+    if (Candidates.length > 0) void Mutate(() => Client.upload(Candidates), En.uploadCompleted(Candidates.length));
   };
 
-  const downloadEntry = async (entry: FileEntry): Promise<void> => {
-    if (entry.kind !== "file") return;
-    setBusy(true);
+  const DownloadEntry = async (Entry: FileEntry): Promise<void> => {
+    if (Entry.Kind !== "file") return;
+    SetBusy(true);
     try {
-      saveBlob(await client.download(entry.id), entry.name);
-      setAnnouncement(en.downloadStarted(entry.name));
-    } catch (cause) {
-      handleFailure(cause);
+      SaveBlob(await Client.download(Entry.Id), Entry.Name);
+      SetAnnouncement(En.downloadStarted(Entry.Name));
+    } catch (Cause) {
+      HandleFailure(Cause);
     } finally {
-      setBusy(false);
+      SetBusy(false);
     }
   };
 
-  const changePreference = (patch: Partial<Preferences>): void => setPreferences((current) => ({ ...current, ...patch }));
+  const ChangePreference = (Patch: Partial<Preferences>): void => SetPreferences((Current) => ({ ...Current, ...Patch }));
 
-  const navigation: ReadonlyArray<{ icon: typeof Files; id: RouteId | "admin"; label: string }> = [
-    { icon: Files, id: "drive", label: en.myDrive },
-    { icon: HardDrive, id: "shared-drives", label: en.sharedDrives },
-    { icon: Users, id: "shared", label: en.shared },
-    { icon: Clock3, id: "recent", label: en.recent },
-    { icon: Trash2, id: "trash", label: en.trash },
-    { icon: CloudUpload, id: "uploads", label: en.uploads },
-    { icon: History, id: "versions", label: en.versions },
-    { icon: Link2, id: "shares", label: en.shares },
-    { icon: ShieldCheck, id: "sessions", label: en.sessions },
-    { icon: Bell, id: "privacy", label: en.privacy },
-    ...(snapshot?.currentUser.isTenantAdmin === true ? [{ icon: Settings2, id: "admin" as const, label: en.admin }] : []),
+  const Navigation: ReadonlyArray<{ Icon: typeof Files; Id: RouteId | "admin"; Label: string }> = [
+    { Icon: Files, Id: "drive", Label: En.myDrive },
+    { Icon: HardDrive, Id: "shared-drives", Label: En.sharedDrives },
+    { Icon: Users, Id: "shared", Label: En.shared },
+    { Icon: Clock3, Id: "recent", Label: En.recent },
+    { Icon: Trash2, Id: "trash", Label: En.trash },
+    { Icon: CloudUpload, Id: "uploads", Label: En.uploads },
+    { Icon: History, Id: "versions", Label: En.versions },
+    { Icon: Link2, Id: "shares", Label: En.shares },
+    { Icon: ShieldCheck, Id: "sessions", Label: En.sessions },
+    { Icon: Bell, Id: "privacy", Label: En.privacy },
+    ...(Snapshot?.CurrentUser.IsTenantAdmin === true ? [{ Icon: Settings2, Id: "admin" as const, Label: En.admin }] : []),
   ];
 
   return (
-    <FileBeltProvider density={preferences.density} themeChoice={preferences.theme}>
+    <FileBeltProvider Density={Preferences.density} ThemeChoice={Preferences.theme}>
       <div className="fb-app-shell">
-        <a className="fb-skip-link" href="#main-content">{en.skipToContent}</a>
+        <a className="fb-skip-link" href="#main-content">{En.skipToContent}</a>
         <header className="fb-topbar">
-          <Button aria-label={en.mainNavigation} appearance="subtle" className="fb-mobile-menu" icon={<MenuIcon />} onClick={() => setNavigationOpen((open) => !open)} />
-          <button className="fb-brand" onClick={() => navigate("drive")} type="button"><BrandMark /><span>{en.appName}</span></button>
-          <Input className="fb-search" contentBefore={<Search aria-hidden="true" size={18} strokeWidth={1.75} />} onChange={(_, data) => setSearch(data.value)} placeholder={en.search} type="search" value={search} />
+          <Button aria-label={En.mainNavigation} appearance="subtle" className="fb-mobile-menu" icon={<MenuIcon />} onClick={() => SetNavigationOpen((Open) => !Open)} />
+          <button className="fb-brand" onClick={() => Navigate("drive")} type="button"><BrandMark /><span>{En.appName}</span></button>
+          <Input className="fb-search" contentBefore={<SearchIcon aria-hidden="true" size={18} strokeWidth={1.75} />} onChange={(Ignored, Data) => SetSearch(Data.value)} placeholder={En.search} type="search" value={Search} />
           <Menu>
-            <MenuTrigger disableButtonEnhancement><Button aria-label={en.userMenu} appearance="subtle"><span className="fb-avatar" aria-hidden="true">AM</span><span className="fb-user-name">{snapshot?.currentUser.displayName ?? en.account}</span></Button></MenuTrigger>
+            <MenuTrigger disableButtonEnhancement><Button aria-label={En.userMenu} appearance="subtle"><span className="fb-avatar" aria-hidden="true">AM</span><span className="fb-user-name">{Snapshot?.CurrentUser.DisplayName ?? En.account}</span></Button></MenuTrigger>
             <MenuPopover><MenuList>
-              <MenuItem disabled>{en.theme}</MenuItem>
-              <MenuItem icon={<Settings2 />} onClick={() => changePreference({ theme: "system" })}>{en.system}</MenuItem>
-              <MenuItem icon={<Sun />} onClick={() => changePreference({ theme: "light" })}>{en.light}</MenuItem>
-              <MenuItem icon={<Moon />} onClick={() => changePreference({ theme: "dark" })}>{en.dark}</MenuItem>
-              <MenuItem disabled>{en.viewSettings}</MenuItem>
-              <MenuItem onClick={() => changePreference({ density: "comfortable" })}>{en.comfortable}</MenuItem>
-              <MenuItem onClick={() => changePreference({ density: "compact" })}>{en.compact}</MenuItem>
+              <MenuItem disabled>{En.theme}</MenuItem>
+              <MenuItem icon={<Settings2 />} onClick={() => ChangePreference({ theme: "system" })}>{En.system}</MenuItem>
+              <MenuItem icon={<Sun />} onClick={() => ChangePreference({ theme: "light" })}>{En.light}</MenuItem>
+              <MenuItem icon={<Moon />} onClick={() => ChangePreference({ theme: "dark" })}>{En.dark}</MenuItem>
+              <MenuItem disabled>{En.viewSettings}</MenuItem>
+              <MenuItem onClick={() => ChangePreference({ density: "comfortable" })}>{En.comfortable}</MenuItem>
+              <MenuItem onClick={() => ChangePreference({ density: "compact" })}>{En.compact}</MenuItem>
             </MenuList></MenuPopover>
           </Menu>
         </header>
 
-        <nav aria-label={en.mainNavigation} className={navigationOpen ? "fb-navigation is-open" : "fb-navigation"}>
-          {navigation.map((item) => (
-            <button aria-current={route === item.id ? "page" : undefined} className={route === item.id ? "fb-nav-item is-active" : "fb-nav-item"} key={item.id} onClick={() => { navigate(item.id); setNavigationOpen(false); }} type="button">
-              <FileBeltIcon icon={item.icon} /><span>{item.label}</span>
+        <nav aria-label={En.mainNavigation} className={NavigationOpen ? "fb-navigation is-open" : "fb-navigation"}>
+          {Navigation.map((Item) => (
+            <button aria-current={Route === Item.Id ? "page" : undefined} className={Route === Item.Id ? "fb-nav-item is-active" : "fb-nav-item"} key={Item.Id} onClick={() => { Navigate(Item.Id); SetNavigationOpen(false); }} type="button">
+              <FileBeltIcon Icon={Item.Icon} /><span>{Item.Label}</span>
             </button>
           ))}
         </nav>
 
         <main className="fb-main" id="main-content" tabIndex={-1}>
-          {error === null ? null : <div className="fb-error" role="alert"><span>{error}</span><Button appearance="transparent" onClick={() => void refresh()}>{en.refresh}</Button></div>}
-          {authenticationRequired ? <SignInPrompt /> : snapshot === null ? <div className="fb-loading"><Spinner label={en.loading} /></div> : (
+          {ErrorMessage === null ? null : <div className="fb-error" role="alert"><span>{ErrorMessage}</span><Button appearance="transparent" onClick={() => void Refresh()}>{En.refresh}</Button></div>}
+          {AuthenticationRequired ? <SignInPrompt /> : Snapshot === null ? <div className="fb-loading"><Spinner label={En.loading} /></div> : (
             <>
-              {route === "admin" && snapshot.currentUser.isTenantAdmin ? (
-                <Suspense fallback={<Spinner label={en.loading} />}>
+              {Route === "admin" && Snapshot.CurrentUser.IsTenantAdmin ? (
+                <Suspense fallback={<Spinner label={En.loading} />}>
                   <AdminPanel
-                    drives={snapshot.admin.drives}
-                    groups={snapshot.admin.groups}
-                    onCreateGroup={(name) => mutate(() => client.createGroup(name), en.createdGroup(name))}
-                    onCreateSharedDrive={(name) => mutate(() => client.createSharedDrive(name), en.createdSharedDrive(name))}
-                    onToggleUserSuspension={(id) => mutate(() => client.suspendUser(id), en.userStatusUpdated)}
-                    users={snapshot.admin.users}
+                    Drives={Snapshot.Admin.Drives}
+                    Groups={Snapshot.Admin.Groups}
+                    onCreateGroup={(Name) => Mutate(() => Client.createGroup(Name), En.createdGroup(Name))}
+                    onCreateSharedDrive={(Name) => Mutate(() => Client.createSharedDrive(Name), En.createdSharedDrive(Name))}
+                    onToggleUserSuspension={(Id) => Mutate(() => Client.suspendUser(Id), En.userStatusUpdated)}
+                    Users={Snapshot.Admin.Users}
                   />
                 </Suspense>
               ) : null}
-              {route === "admin" && !snapshot.currentUser.isTenantAdmin ? <div className="fb-error" role="alert">{en.permissionDenied}</div> : null}
-              {route === "uploads" ? <UploadsView strings={en} uploads={snapshot.uploads} /> : null}
-              {route === "versions" ? <VersionsView file={primarySelection} onRestore={(id) => mutate(() => client.restoreVersion(id), en.versionRestored)} strings={en} versions={snapshot.versions} /> : null}
-              {route === "shares" ? <SharesView file={primarySelection} onCreate={(input) => mutate(() => client.createShare(input), en.shareCreated)} onRevoke={(id) => mutate(() => client.revokeShare(id), en.shareRevoked)} shares={snapshot.shares} strings={en} /> : null}
-              {route === "sessions" ? <SessionsView onRevoke={(id) => mutate(() => client.revokeSession(id), en.sessionRevoked)} sessions={snapshot.sessions} strings={en} /> : null}
-              {route === "privacy" ? <PrivacyView events={snapshot.privacy} onMarkRead={() => mutate(() => client.markPrivacyRead(), en.privacyRead)} strings={en} /> : null}
-              {["drive", "shared-drives", "shared", "recent", "trash"].includes(route) ? (
+              {Route === "admin" && !Snapshot.CurrentUser.IsTenantAdmin ? <div className="fb-error" role="alert">{En.permissionDenied}</div> : null}
+              {Route === "uploads" ? <UploadsView Strings={En} Uploads={Snapshot.Uploads} /> : null}
+              {Route === "versions" ? <VersionsView File={PrimarySelection} onRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)} Strings={En} Versions={Snapshot.Versions} /> : null}
+              {Route === "shares" ? <SharesView File={PrimarySelection} onCreate={(Input) => Mutate(() => Client.createShare(Input), En.shareCreated)} onRevoke={(Id) => Mutate(() => Client.revokeShare(Id), En.shareRevoked)} Shares={Snapshot.Shares} Strings={En} /> : null}
+              {Route === "sessions" ? <SessionsView onRevoke={(Id) => Mutate(() => Client.revokeSession(Id), En.sessionRevoked)} Sessions={Snapshot.Sessions} Strings={En} /> : null}
+              {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
+              {["drive", "shared-drives", "shared", "recent", "trash"].includes(Route) ? (
                 <section aria-labelledby="files-heading" className="fb-files-view">
-                  <header className="fb-page-heading"><div><p className="fb-eyebrow">{en.files}</p><h1 id="files-heading">{routeTitle(route)}</h1></div><div className="fb-heading-actions"><Tooltip content={en.refresh} relationship="label"><Button appearance="subtle" icon={<RefreshCw />} onClick={() => void refresh()} /></Tooltip><Button appearance="primary" icon={<Upload />} onClick={() => fileInput.current?.click()}>{en.upload}</Button><input accept="*/*" aria-label={en.uploadHint} hidden multiple onChange={onFiles} ref={fileInput} type="file" /></div></header>
-                  <div aria-label={en.fileCommands} className="fb-commandbar" role="toolbar">
-                    <span>{en.selectedAnnouncement(selection.selectedIds.size)}</span>
-                    <Button disabled={primarySelection?.kind !== "file" || busy} icon={<Download />} onClick={() => primarySelection === undefined ? undefined : void downloadEntry(primarySelection)}>{en.download}</Button>
-                    <Button disabled={selectedEntries.length === 0 || busy} icon={route === "trash" ? <FolderInput /> : <Trash2 />} onClick={() => void mutate(() => route === "trash" ? client.restoreEntries(selectedEntries.map(({ id }) => id)) : client.trashEntries(selectedEntries.map(({ id }) => id)), route === "trash" ? en.itemsRestored : en.itemsTrashed)}>{route === "trash" ? en.restore : en.moveToTrash}</Button>
-                    <Button disabled={primarySelection === undefined} icon={<History />} onClick={() => navigate("versions")}>{en.versions}</Button>
-                    <Button disabled={primarySelection === undefined} icon={<Link2 />} onClick={() => navigate("shares")}>{en.shares}</Button>
+                  <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.files}</p><h1 id="files-heading">{RouteTitle(Route)}</h1></div><div className="fb-heading-actions"><Tooltip content={En.refresh} relationship="label"><Button appearance="subtle" icon={<RefreshCw />} onClick={() => void Refresh()} /></Tooltip><Button appearance="primary" icon={<Upload />} onClick={() => FileInput.current?.click()}>{En.upload}</Button><input accept="*/*" aria-label={En.uploadHint} hidden multiple onChange={OnFiles} ref={FileInput} type="file" /></div></header>
+                  <div aria-label={En.fileCommands} className="fb-commandbar" role="toolbar">
+                    <span>{En.selectedAnnouncement(Selection.SelectedIds.size)}</span>
+                    <Button disabled={PrimarySelection?.Kind !== "file" || Busy} icon={<Download />} onClick={() => PrimarySelection === undefined ? undefined : void DownloadEntry(PrimarySelection)}>{En.download}</Button>
+                    <Button disabled={SelectedEntries.length === 0 || Busy} icon={Route === "trash" ? <FolderInput /> : <Trash2 />} onClick={() => void Mutate(() => Route === "trash" ? Client.restoreEntries(SelectedEntries.map(({ Id }) => Id)) : Client.trashEntries(SelectedEntries.map(({ Id }) => Id)), Route === "trash" ? En.itemsRestored : En.itemsTrashed)}>{Route === "trash" ? En.restore : En.moveToTrash}</Button>
+                    <Button disabled={PrimarySelection === undefined} icon={<History />} onClick={() => Navigate("versions")}>{En.versions}</Button>
+                    <Button disabled={PrimarySelection === undefined} icon={<Link2 />} onClick={() => Navigate("shares")}>{En.shares}</Button>
                   </div>
                   <div className="fb-content-split">
-                    <FileTable dispatchSelection={dispatchSelection} entries={entries} onOpenActions={(entry) => { dispatchSelection({ id: entry.id, type: "replace" }); setActionEntryId(entry.id); }} selection={selection} strings={en} />
-                    <aside aria-label={en.details} className="fb-details-pane">
-                      {primarySelection === undefined ? <p className="fb-muted">{en.noSelection}</p> : <><div className="fb-details-icon"><FileBeltIcon icon={primarySelection.kind === "folder" ? FolderClock : Files} size={28} /></div><h2><BidiText>{primarySelection.name}</BidiText></h2><dl><div><dt>{en.owner}</dt><dd><BidiText>{primarySelection.owner}</BidiText></dd></div><div><dt>{en.version}</dt><dd>{primarySelection.version}</dd></div><div><dt>{en.status}</dt><dd><StatusPill kind="success">{en.ready}</StatusPill></dd></div></dl><Button appearance="secondary" icon={<MoreHorizontal />} onClick={() => setActionEntryId(primarySelection.id)}>{en.openMenu}</Button></>}
+                    <FileTable dispatchSelection={DispatchSelection} Entries={Entries} onOpenActions={(Entry) => { DispatchSelection({ Id: Entry.Id, Type: "replace" }); SetActionEntryId(Entry.Id); }} Selection={Selection} Strings={En} />
+                    <aside aria-label={En.details} className="fb-details-pane">
+                      {PrimarySelection === undefined ? <p className="fb-muted">{En.noSelection}</p> : <><div className="fb-details-icon"><FileBeltIcon Icon={PrimarySelection.Kind === "folder" ? FolderClock : Files} size={28} /></div><h2><BidiText>{PrimarySelection.Name}</BidiText></h2><dl><div><dt>{En.owner}</dt><dd><BidiText>{PrimarySelection.Owner}</BidiText></dd></div><div><dt>{En.version}</dt><dd>{PrimarySelection.Version}</dd></div><div><dt>{En.status}</dt><dd><StatusPill Kind="success">{En.ready}</StatusPill></dd></div></dl><Button appearance="secondary" icon={<MoreHorizontal />} onClick={() => SetActionEntryId(PrimarySelection.Id)}>{En.openMenu}</Button></>}
                     </aside>
                   </div>
                 </section>
@@ -342,16 +344,16 @@ export function App({ client }: AppProps): ReactNode {
             </>
           )}
         </main>
-        {busy ? <div className="fb-working" role="status"><Spinner size="tiny" /><span>{en.working}</span></div> : null}
-        <div aria-atomic="true" aria-live="polite" style={visuallyHiddenStyle}>{announcement}</div>
-        {actionEntry === undefined ? null : (
-          <div className="fb-action-backdrop" onClick={() => setActionEntryId(null)} role="presentation">
-            <div aria-label={en.selectionActions} className="fb-action-menu" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setActionEntryId(null); }} role="menu">
-              <strong><BidiText>{actionEntry.name}</BidiText></strong>
-              <Button appearance="subtle" disabled={actionEntry.kind !== "file"} icon={<Download />} onClick={() => { setActionEntryId(null); void downloadEntry(actionEntry); }} role="menuitem">{en.download}</Button>
-              <Button appearance="subtle" icon={<Link2 />} onClick={() => { setActionEntryId(null); navigate("shares"); }} role="menuitem">{en.shares}</Button>
-              <Button appearance="subtle" icon={actionEntry.trashed ? <FolderInput /> : <Trash2 />} onClick={() => { setActionEntryId(null); void mutate(() => actionEntry.trashed ? client.restoreEntries([actionEntry.id]) : client.trashEntries([actionEntry.id]), actionEntry.trashed ? en.itemsRestored : en.itemsTrashed); }} role="menuitem">{actionEntry.trashed ? en.restore : en.moveToTrash}</Button>
-              <Button appearance="secondary" onClick={() => setActionEntryId(null)} role="menuitem">{en.close}</Button>
+        {Busy ? <div className="fb-working" role="status"><Spinner size="tiny" /><span>{En.working}</span></div> : null}
+        <div aria-atomic="true" aria-live="polite" style={VisuallyHiddenStyle}>{Announcement}</div>
+        {ActionEntry === undefined ? null : (
+          <div className="fb-action-backdrop" onClick={() => SetActionEntryId(null)} role="presentation">
+            <div aria-label={En.selectionActions} className="fb-action-menu" onClick={(Event) => Event.stopPropagation()} onKeyDown={(Event) => { if (Event.key === "Escape") SetActionEntryId(null); }} role="menu">
+              <strong><BidiText>{ActionEntry.Name}</BidiText></strong>
+              <Button appearance="subtle" disabled={ActionEntry.Kind !== "file"} icon={<Download />} onClick={() => { SetActionEntryId(null); void DownloadEntry(ActionEntry); }} role="menuitem">{En.download}</Button>
+              <Button appearance="subtle" icon={<Link2 />} onClick={() => { SetActionEntryId(null); Navigate("shares"); }} role="menuitem">{En.shares}</Button>
+              <Button appearance="subtle" icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />} onClick={() => { SetActionEntryId(null); void Mutate(() => ActionEntry.Trashed ? Client.restoreEntries([ActionEntry.Id]) : Client.trashEntries([ActionEntry.Id]), ActionEntry.Trashed ? En.itemsRestored : En.itemsTrashed); }} role="menuitem">{ActionEntry.Trashed ? En.restore : En.moveToTrash}</Button>
+              <Button appearance="secondary" onClick={() => SetActionEntryId(null)} role="menuitem">{En.close}</Button>
             </div>
           </div>
         )}

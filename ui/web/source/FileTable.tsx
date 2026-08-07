@@ -11,136 +11,136 @@ import type { SelectionAction, SelectionState } from "./selection.js";
 import type { Strings } from "./strings.js";
 
 export interface FileTableProps {
-  dispatchSelection(action: SelectionAction): void;
-  entries: readonly FileEntry[];
-  onOpenActions(entry: FileEntry, anchor: HTMLElement): void;
-  selection: SelectionState;
-  strings: Strings;
+  dispatchSelection(Action: SelectionAction): void;
+  Entries: readonly FileEntry[];
+  onOpenActions(Entry: FileEntry, Anchor: HTMLElement): void;
+  Selection: SelectionState;
+  Strings: Strings;
 }
 
-function formatBytes(value: number | null): string {
-  if (value === null) return "—";
+function FormatBytes(Value: number | null): string {
+  if (Value === null) return "—";
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 1,
     notation: "compact",
     style: "unit",
     unit: "byte",
     unitDisplay: "narrow",
-  }).format(value);
+  }).format(Value);
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function FormatDate(Value: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Value));
 }
 
 export function FileTable({
-  dispatchSelection,
-  entries,
-  onOpenActions,
-  selection,
-  strings,
+  dispatchSelection: DispatchSelection,
+  Entries,
+  onOpenActions: OnOpenActions,
+  Selection,
+  Strings,
 }: FileTableProps): ReactNode {
-  const orderedIds = entries.map(({ id }) => id);
+  const OrderedIds = Entries.map(({ Id }) => Id);
 
-  const focusRow = (id: string): void => {
-    dispatchSelection({ id, type: "focus" });
-    requestAnimationFrame(() => document.getElementById(`file-row-${id}`)?.focus());
+  const FocusRow = (Id: string): void => {
+    DispatchSelection({ Id, Type: "focus" });
+    requestAnimationFrame(() => document.getElementById(`file-row-${Id}`)?.focus());
   };
 
-  const onRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, entry: FileEntry, index: number): void => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-      event.preventDefault();
-      dispatchSelection({ orderedIds, type: "all" });
+  const OnRowKeyDown = (Event: KeyboardEvent<HTMLTableRowElement>, Entry: FileEntry, Index: number): void => {
+    if ((Event.ctrlKey || Event.metaKey) && Event.key.toLowerCase() === "a") {
+      Event.preventDefault();
+      DispatchSelection({ OrderedIds, Type: "all" });
       return;
     }
-    if (event.key === " " || event.key === "Spacebar") {
-      event.preventDefault();
-      dispatchSelection({ id: entry.id, type: event.shiftKey ? "range" : "toggle", ...(event.shiftKey ? { orderedIds } : {}) } as SelectionAction);
+    if (Event.key === " " || Event.key === "Spacebar") {
+      Event.preventDefault();
+      DispatchSelection({ Id: Entry.Id, Type: Event.shiftKey ? "range" : "toggle", ...(Event.shiftKey ? { OrderedIds } : {}) } as SelectionAction);
       return;
     }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const offset = event.key === "ArrowDown" ? 1 : -1;
-      const target = entries[Math.max(0, Math.min(entries.length - 1, index + offset))];
-      if (target !== undefined) {
-        if (event.shiftKey) dispatchSelection({ id: target.id, orderedIds, type: "range" });
-        focusRow(target.id);
+    if (Event.key === "ArrowDown" || Event.key === "ArrowUp") {
+      Event.preventDefault();
+      const Offset = Event.key === "ArrowDown" ? 1 : -1;
+      const Target = Entries[Math.max(0, Math.min(Entries.length - 1, Index + Offset))];
+      if (Target !== undefined) {
+        if (Event.shiftKey) DispatchSelection({ Id: Target.Id, OrderedIds, Type: "range" });
+        FocusRow(Target.Id);
       }
       return;
     }
-    if (event.shiftKey && event.key === "F10") {
-      event.preventDefault();
-      onOpenActions(entry, event.currentTarget);
+    if (Event.shiftKey && Event.key === "F10") {
+      Event.preventDefault();
+      OnOpenActions(Entry, Event.currentTarget);
     }
   };
 
-  const onRowClick = (event: MouseEvent<HTMLTableRowElement>, entry: FileEntry): void => {
-    if (event.shiftKey) dispatchSelection({ id: entry.id, orderedIds, type: "range" });
-    else if (event.ctrlKey || event.metaKey) dispatchSelection({ id: entry.id, type: "toggle" });
-    else dispatchSelection({ id: entry.id, type: "replace" });
+  const OnRowClick = (Event: MouseEvent<HTMLTableRowElement>, Entry: FileEntry): void => {
+    if (Event.shiftKey) DispatchSelection({ Id: Entry.Id, OrderedIds, Type: "range" });
+    else if (Event.ctrlKey || Event.metaKey) DispatchSelection({ Id: Entry.Id, Type: "toggle" });
+    else DispatchSelection({ Id: Entry.Id, Type: "replace" });
   };
 
-  if (entries.length === 0) {
-    return <div className="fb-empty"><Folder aria-hidden="true" size={40} strokeWidth={1.5} /><p>{strings.noFiles}</p></div>;
+  if (Entries.length === 0) {
+    return <div className="fb-empty"><Folder aria-hidden="true" size={40} strokeWidth={1.5} /><p>{Strings.noFiles}</p></div>;
   }
 
   return (
     <div className="fb-table-scroll">
-      <table aria-label={strings.files} aria-multiselectable="true" className="fb-file-table" role="grid">
+      <table aria-label={Strings.files} aria-multiselectable="true" className="fb-file-table" role="grid">
         <thead>
           <tr role="row">
-            <th aria-label={strings.selected} className="fb-select-column" role="columnheader" />
-            <th role="columnheader">{strings.name}</th>
-            <th role="columnheader">{strings.owner}</th>
-            <th role="columnheader">{strings.modified}</th>
-            <th role="columnheader">{strings.size}</th>
-            <th role="columnheader">{strings.status}</th>
+            <th aria-label={Strings.selected} className="fb-select-column" role="columnheader" />
+            <th role="columnheader">{Strings.name}</th>
+            <th role="columnheader">{Strings.owner}</th>
+            <th role="columnheader">{Strings.modified}</th>
+            <th role="columnheader">{Strings.size}</th>
+            <th role="columnheader">{Strings.status}</th>
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry, index) => {
-            const selected = selection.selectedIds.has(entry.id);
-            const focused = selection.focusedId === entry.id || (selection.focusedId === null && index === 0);
+          {Entries.map((Entry, Index) => {
+            const Selected = Selection.SelectedIds.has(Entry.Id);
+            const Focused = Selection.FocusedId === Entry.Id || (Selection.FocusedId === null && Index === 0);
             return (
               <tr
-                aria-selected={selected}
-                className={selected ? "fb-file-row is-selected" : "fb-file-row"}
-                id={`file-row-${entry.id}`}
-                key={entry.id}
-                onClick={(event) => onRowClick(event, entry)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  if (!selected) dispatchSelection({ id: entry.id, type: "replace" });
-                  onOpenActions(entry, event.currentTarget);
+                aria-selected={Selected}
+                className={Selected ? "fb-file-row is-selected" : "fb-file-row"}
+                id={`file-row-${Entry.Id}`}
+                key={Entry.Id}
+                onClick={(Event) => OnRowClick(Event, Entry)}
+                onContextMenu={(Event) => {
+                  Event.preventDefault();
+                  if (!Selected) DispatchSelection({ Id: Entry.Id, Type: "replace" });
+                  OnOpenActions(Entry, Event.currentTarget);
                 }}
-                onFocus={() => dispatchSelection({ id: entry.id, type: "focus" })}
-                onKeyDown={(event) => onRowKeyDown(event, entry, index)}
+                onFocus={() => DispatchSelection({ Id: Entry.Id, Type: "focus" })}
+                onKeyDown={(Event) => OnRowKeyDown(Event, Entry, Index)}
                 role="row"
-                tabIndex={focused ? 0 : -1}
+                tabIndex={Focused ? 0 : -1}
               >
                 <td className="fb-select-column" role="gridcell">
                   <Checkbox
-                    aria-label={selected ? strings.deselectItem(entry.name) : strings.selectItem(entry.name)}
-                    checked={selected}
-                    onChange={() => dispatchSelection({ id: entry.id, type: "toggle" })}
-                    onClick={(event) => event.stopPropagation()}
+                    aria-label={Selected ? Strings.deselectItem(Entry.Name) : Strings.selectItem(Entry.Name)}
+                    checked={Selected}
+                    onChange={() => DispatchSelection({ Id: Entry.Id, Type: "toggle" })}
+                    onClick={(Event) => Event.stopPropagation()}
                   />
                 </td>
                 <td role="gridcell">
                   <span className="fb-name-cell">
-                    <FileBeltIcon icon={entry.kind === "folder" ? Folder : File} />
-                    <BidiText>{entry.name}</BidiText>
-                    {entry.shared ? <FileBeltIcon icon={Share2} size={16} /> : null}
+                    <FileBeltIcon Icon={Entry.Kind === "folder" ? Folder : File} />
+                    <BidiText>{Entry.Name}</BidiText>
+                    {Entry.Shared ? <FileBeltIcon Icon={Share2} size={16} /> : null}
                   </span>
                 </td>
-                <td role="gridcell"><BidiText>{entry.owner}</BidiText></td>
-                <td role="gridcell"><time dateTime={entry.modifiedAt}>{formatDate(entry.modifiedAt)}</time></td>
-                <td role="gridcell">{formatBytes(entry.size)}</td>
+                <td role="gridcell"><BidiText>{Entry.Owner}</BidiText></td>
+                <td role="gridcell"><time dateTime={Entry.ModifiedAt}>{FormatDate(Entry.ModifiedAt)}</time></td>
+                <td role="gridcell">{FormatBytes(Entry.Size)}</td>
                 <td role="gridcell">
-                  {entry.status === "conflict" ? <StatusPill kind="warning"><FileBeltIcon icon={AlertTriangle} size={16} /> {strings.conflict}</StatusPill> : null}
-                  {entry.status === "quarantined" ? <StatusPill kind="danger"><FileBeltIcon icon={LockKeyhole} size={16} /> {strings.quarantined}</StatusPill> : null}
-                  {entry.status === "ready" ? <StatusPill kind="success">{strings.ready}</StatusPill> : null}
-                  {entry.status === "uploading" ? <StatusPill kind="informative">{strings.uploading}</StatusPill> : null}
+                  {Entry.Status === "conflict" ? <StatusPill Kind="warning"><FileBeltIcon Icon={AlertTriangle} size={16} /> {Strings.conflict}</StatusPill> : null}
+                  {Entry.Status === "quarantined" ? <StatusPill Kind="danger"><FileBeltIcon Icon={LockKeyhole} size={16} /> {Strings.quarantined}</StatusPill> : null}
+                  {Entry.Status === "ready" ? <StatusPill Kind="success">{Strings.ready}</StatusPill> : null}
+                  {Entry.Status === "uploading" ? <StatusPill Kind="informative">{Strings.uploading}</StatusPill> : null}
                 </td>
               </tr>
             );

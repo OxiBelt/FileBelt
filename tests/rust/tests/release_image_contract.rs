@@ -35,7 +35,7 @@ fn image_plan_contract_fixes_roles_platforms_and_registry() {
     assert!(plan.contains("Apache-2.0 AND MIT"));
     assert!(plan.contains("Apache-2.0 AND MIT AND CDLA-Permissive-2.0"));
     assert!(plan.contains("Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0"));
-    assert!(plan.contains("WEB_IMAGE_LICENSE = \"Apache-2.0 AND MIT AND ISC AND 0BSD\""));
+    assert!(plan.contains("WebImageLicense = \"Apache-2.0 AND MIT AND ISC AND 0BSD\""));
     assert!(plan.contains(
         "ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030"
     ));
@@ -54,8 +54,8 @@ fn image_plan_contract_fixes_roles_platforms_and_registry() {
     ] {
         assert!(plan.contains(&format!("\"{component}\"")));
     }
-    assert!(plan.contains("`pkg:cargo/${packageName}@${FILEBELT_PACKAGE_VERSION}`"));
-    assert!(plan.contains("`Cargo.lock#${packageName}@${FILEBELT_PACKAGE_VERSION}`"));
+    assert!(plan.contains("`pkg:cargo/${PackageName}@${FileBeltPackageVersion}`"));
+    assert!(plan.contains("`Cargo.lock#${PackageName}@${FileBeltPackageVersion}`"));
 }
 
 #[test]

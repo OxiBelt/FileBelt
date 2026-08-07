@@ -5,21 +5,21 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App.js";
 import { HttpFileBeltClient } from "./http-client.js";
-import { PublicShareApp, takePublicShareFragment } from "./PublicShareApp.js";
+import { PublicShareApp, TakePublicShareFragment } from "./PublicShareApp.js";
 import "./styles.css";
 
-const root = document.querySelector<HTMLElement>("#root");
+const Root = document.querySelector<HTMLElement>("#root");
 
-if (root === null) {
+if (Root === null) {
   throw new Error("FileBelt application root is missing");
 }
 
-const client = new HttpFileBeltClient();
-const isPublicShare = window.location.pathname.startsWith("/public/share");
-const fragmentToken = isPublicShare ? takePublicShareFragment() : "";
+const Client = new HttpFileBeltClient();
+const IsPublicShare = window.location.pathname.startsWith("/public/share");
+const FragmentToken = IsPublicShare ? TakePublicShareFragment() : "";
 
-createRoot(root).render(
+createRoot(Root).render(
   <StrictMode>
-    {isPublicShare ? <PublicShareApp client={client} fragmentToken={fragmentToken} /> : <App client={client} />}
+    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} />}
   </StrictMode>,
 );

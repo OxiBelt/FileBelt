@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const IMAGE_PLAN_SCHEMA_VERSION = 1 as const;
-export const IMAGE_REGISTRY = "ghcr.io/oxibelt" as const;
-export const SOURCE_URL = "https://github.com/OxiBelt/FileBelt" as const;
-export const RUNTIME_IDENTITY = Object.freeze({ uid: 10001, gid: 10001 });
-export const RUST_IMAGE_LICENSE = "Apache-2.0 AND MIT" as const;
-export const RUST_CDLA_IMAGE_LICENSE =
+export const ImagePlanSchemaVersion = 1 as const;
+export const ImageRegistry = "ghcr.io/oxibelt" as const;
+export const SourceUrl = "https://github.com/OxiBelt/FileBelt" as const;
+export const RuntimeIdentity = Object.freeze({ uid: 10001, gid: 10001 });
+export const RustImageLicense = "Apache-2.0 AND MIT" as const;
+export const RustCdlaImageLicense =
   "Apache-2.0 AND MIT AND CDLA-Permissive-2.0" as const;
-export const RUST_IGGY_IMAGE_LICENSE =
+export const RustIggyImageLicense =
   "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0" as const;
-export const WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD" as const;
-export const OXIBELT_IMAGE =
+export const WebImageLicense = "Apache-2.0 AND MIT AND ISC AND 0BSD" as const;
+export const OxibeltImage =
   "ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030" as const;
-export const OXIBELT_VERSION = "0.7.1-beta.2" as const;
-export const OXIBELT_REVISION = "bf40172e40298325775ca9d708162a9d8d14e6d4" as const;
+export const OxibeltVersion = "0.7.1-beta.2" as const;
+export const OxibeltRevision = "bf40172e40298325775ca9d708162a9d8d14e6d4" as const;
 
-export const IMAGE_ROLES = [
+export const ImageRoles = [
   "filebelt-api",
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
@@ -25,24 +25,25 @@ export const IMAGE_ROLES = [
   "filebelt-web",
 ] as const;
 
-export type ImageRole = (typeof IMAGE_ROLES)[number];
+export type ImageRole = (typeof ImageRoles)[number];
 
-export const IMAGE_PLATFORMS = [
+export const ImagePlatforms = [
   "linux/amd64",
   "linux/arm64",
   "linux/riscv64",
 ] as const;
 
-export type ImagePlatform = (typeof IMAGE_PLATFORMS)[number];
+export type ImagePlatform = (typeof ImagePlatforms)[number];
 export type ImagePlanChannel = "build" | "release";
 export type SourceKind = "local" | "ci" | "release" | "rebuild";
 export type ImageLicense =
-  | typeof RUST_IMAGE_LICENSE
-  | typeof RUST_CDLA_IMAGE_LICENSE
-  | typeof RUST_IGGY_IMAGE_LICENSE
-  | typeof WEB_IMAGE_LICENSE;
+  | typeof RustImageLicense
+  | typeof RustCdlaImageLicense
+  | typeof RustIggyImageLicense
+  | typeof WebImageLicense;
 export type ComponentRelationship = "runtime" | "build-tool";
 
+/* eslint-disable @typescript-eslint/naming-convention -- These properties are stable image-plan schema v1 JSON keys. */
 export interface ImageComponent {
   readonly type: "application" | "library";
   readonly name: string;
@@ -58,7 +59,7 @@ export type PlatformComponentInventory = Readonly<
 >;
 
 export interface ImagePlanSource {
-  readonly url: typeof SOURCE_URL;
+  readonly url: typeof SourceUrl;
   readonly ref: string;
   readonly revision: string;
   readonly created: string;
@@ -76,9 +77,9 @@ export type ImageArtifact =
     readonly kind: "oxibelt-edge";
     readonly packages: readonly ["ui/web", "ui/markdown"];
     readonly base: {
-      readonly image: typeof OXIBELT_IMAGE;
-      readonly version: typeof OXIBELT_VERSION;
-      readonly revision: typeof OXIBELT_REVISION;
+      readonly image: typeof OxibeltImage;
+      readonly version: typeof OxibeltVersion;
+      readonly revision: typeof OxibeltRevision;
     };
   };
 
@@ -97,41 +98,42 @@ export interface ImageRow {
 }
 
 export interface ImagePlanV1 {
-  readonly schemaVersion: typeof IMAGE_PLAN_SCHEMA_VERSION;
+  readonly schemaVersion: typeof ImagePlanSchemaVersion;
   readonly channel: ImagePlanChannel;
   readonly version: string;
   readonly tag: string;
   readonly source: ImagePlanSource;
-  readonly runtime: typeof RUNTIME_IDENTITY;
+  readonly runtime: typeof RuntimeIdentity;
   readonly images: readonly ImageRow[];
 }
+/* eslint-enable @typescript-eslint/naming-convention */
 
 export interface CreateImagePlanInput {
-  readonly channel: ImagePlanChannel;
-  readonly version: string;
-  readonly source: ImagePlanSource;
+  readonly Channel: ImagePlanChannel;
+  readonly Version: string;
+  readonly Source: ImagePlanSource;
 }
 
 interface RoleDefinition {
-  readonly role: ImageRole;
-  readonly dockerfile: ImageRow["build"]["dockerfile"];
-  readonly license: ImageLicense;
-  readonly artifact: ImageArtifact;
+  readonly Role: ImageRole;
+  readonly Dockerfile: ImageRow["build"]["dockerfile"];
+  readonly License: ImageLicense;
+  readonly Artifact: ImageArtifact;
 }
 
-const RUST_BUILDER_EVIDENCE =
+const RustBuilderEvidence =
   "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488";
-const NATIVE_SNAPSHOT_EVIDENCE =
+const NativeSnapshotEvidence =
   "https://snapshot.debian.org/archive/debian/20260713T000000Z";
-const RISCV64_BUILDER_SNAPSHOT_EVIDENCE =
+const Riscv64BuilderSnapshotEvidence =
   "https://snapshot.debian.org/archive/debian/20260713T000000Z";
-const RISCV64_TOOLCHAIN_EVIDENCE =
+const Riscv64ToolchainEvidence =
   "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl@sha256:60372bf6ad955bc04ac9b0689476b05955b4e90fc2030d311be687025672cc6d";
 
-const FILEBELT_PACKAGE_VERSION = "0.1.0" as const;
+const FileBeltPackageVersion = "0.1.0" as const;
 
-const WEBPKI_RUNTIME_COMPONENTS = [
-  component(
+const WebpkiRuntimeComponents = [
+  Component(
     "library",
     "webpki-roots",
     "0.26.11",
@@ -140,7 +142,7 @@ const WEBPKI_RUNTIME_COMPONENTS = [
     "runtime",
     "Cargo.lock#webpki-roots@0.26.11",
   ),
-  component(
+  Component(
     "library",
     "webpki-roots",
     "1.0.9",
@@ -151,9 +153,9 @@ const WEBPKI_RUNTIME_COMPONENTS = [
   ),
 ] as const;
 
-const IGGY_RUNTIME_COMPONENTS = [
-  ...WEBPKI_RUNTIME_COMPONENTS,
-  component(
+const IggyRuntimeComponents = [
+  ...WebpkiRuntimeComponents,
+  Component(
     "library",
     "option-ext",
     "0.2.0",
@@ -164,133 +166,133 @@ const IGGY_RUNTIME_COMPONENTS = [
   ),
 ] as const;
 
-const RUST_PLATFORM_COMPONENTS: PlatformComponentInventory = {
-  "linux/amd64": nativeComponents("amd64", "x86_64-unknown-linux-musl"),
-  "linux/arm64": nativeComponents("arm64", "aarch64-unknown-linux-musl"),
+const RustPlatformComponents: PlatformComponentInventory = {
+  "linux/amd64": NativeComponents("amd64", "x86_64-unknown-linux-musl"),
+  "linux/arm64": NativeComponents("arm64", "aarch64-unknown-linux-musl"),
   "linux/riscv64": [
-    component(
+    Component(
       "library",
       "rust-std",
       "1.97.1",
       "pkg:generic/rust-std@1.97.1?target=riscv64gc-unknown-linux-musl",
       "Apache-2.0 OR MIT",
       "runtime",
-      RUST_BUILDER_EVIDENCE,
+      RustBuilderEvidence,
     ),
-    component(
+    Component(
       "library",
       "musl",
       "1.2.5",
       "pkg:generic/musl@1.2.5?target=riscv64-unknown-linux-musl",
       "MIT",
       "runtime",
-      RISCV64_TOOLCHAIN_EVIDENCE,
+      Riscv64ToolchainEvidence,
     ),
-    component(
+    Component(
       "application",
       "rustc",
       "1.97.1",
       "pkg:generic/rustc@1.97.1?host=x86_64-unknown-linux-gnu",
       "Apache-2.0 OR MIT",
       "build-tool",
-      RUST_BUILDER_EVIDENCE,
+      RustBuilderEvidence,
     ),
-    component(
+    Component(
       "application",
       "cmake",
       "3.31.6-2",
       "pkg:deb/debian/cmake@3.31.6-2?arch=amd64",
       "BSD-3-Clause",
       "build-tool",
-      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#cmake=3.31.6-2`,
+      `${Riscv64BuilderSnapshotEvidence}#cmake=3.31.6-2`,
     ),
-    component(
+    Component(
       "application",
       "clang",
       "1:19.0-63",
       "pkg:deb/debian/clang@1%3A19.0-63?arch=amd64",
       "Apache-2.0 WITH LLVM-exception",
       "build-tool",
-      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#clang=1:19.0-63`,
+      `${Riscv64BuilderSnapshotEvidence}#clang=1:19.0-63`,
     ),
-    component(
+    Component(
       "library",
       "libclang-dev",
       "1:19.0-63",
       "pkg:deb/debian/libclang-dev@1%3A19.0-63?arch=amd64",
       "Apache-2.0 WITH LLVM-exception",
       "build-tool",
-      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#libclang-dev=1:19.0-63`,
+      `${Riscv64BuilderSnapshotEvidence}#libclang-dev=1:19.0-63`,
     ),
-    component(
+    Component(
       "application",
       "ninja-build",
       "1.12.1-1",
       "pkg:deb/debian/ninja-build@1.12.1-1?arch=amd64",
       "Apache-2.0",
       "build-tool",
-      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#ninja-build=1.12.1-1`,
+      `${Riscv64BuilderSnapshotEvidence}#ninja-build=1.12.1-1`,
     ),
-    component(
+    Component(
       "application",
       "gcc",
       "14.3.0",
       "pkg:generic/gcc@14.3.0?target=riscv64-unknown-linux-musl",
       "GPL-3.0-or-later",
       "build-tool",
-      RISCV64_TOOLCHAIN_EVIDENCE,
+      Riscv64ToolchainEvidence,
     ),
-    component(
+    Component(
       "application",
       "binutils",
       "2.45",
       "pkg:generic/binutils@2.45?target=riscv64-unknown-linux-musl",
       "GPL-3.0-or-later",
       "build-tool",
-      RISCV64_TOOLCHAIN_EVIDENCE,
+      Riscv64ToolchainEvidence,
     ),
   ],
 };
 
-const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
-  rustRole("filebelt-api", "filebelt-api", RUST_CDLA_IMAGE_LICENSE, WEBPKI_RUNTIME_COMPONENTS),
-  rustRole(
+const RoleDefinitions: readonly RoleDefinition[] = [
+  RustRole("filebelt-api", "filebelt-api", RustCdlaImageLicense, WebpkiRuntimeComponents),
+  RustRole(
     "filebelt-worker-io",
     "filebelt-worker-io",
-    RUST_CDLA_IMAGE_LICENSE,
-    WEBPKI_RUNTIME_COMPONENTS,
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
   ),
-  rustRole(
+  RustRole(
     "filebelt-worker-maintenance",
     "filebelt-worker-maintenance",
-    RUST_IGGY_IMAGE_LICENSE,
-    IGGY_RUNTIME_COMPONENTS,
+    RustIggyImageLicense,
+    IggyRuntimeComponents,
   ),
-  rustRole("filebelt-media-controller", "filebelt-media-controller"),
-  rustRole("filebelt-mcp-broker", "filebelt-mcp-broker"),
-  rustRole("filebelt-tools", "filebeltctl", RUST_IGGY_IMAGE_LICENSE, IGGY_RUNTIME_COMPONENTS),
+  RustRole("filebelt-media-controller", "filebelt-media-controller"),
+  RustRole("filebelt-mcp-broker", "filebelt-mcp-broker"),
+  RustRole("filebelt-tools", "filebeltctl", RustIggyImageLicense, IggyRuntimeComponents),
   {
-    role: "filebelt-web",
-    dockerfile: "ui/web/Dockerfile",
-    license: WEB_IMAGE_LICENSE,
-    artifact: {
+    Role: "filebelt-web",
+    Dockerfile: "ui/web/Dockerfile",
+    License: WebImageLicense,
+    Artifact: {
       kind: "oxibelt-edge",
       packages: ["ui/web", "ui/markdown"],
       base: {
-        image: OXIBELT_IMAGE,
-        version: OXIBELT_VERSION,
-        revision: OXIBELT_REVISION,
+        image: OxibeltImage,
+        version: OxibeltVersion,
+        revision: OxibeltRevision,
       },
     },
   },
 ];
 
-const RELEASE_TAG_PATTERN =
+const ReleaseTagPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
-const REVISION_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-const CREATED_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const RevisionPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const CreatedPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
-const ROLE_DESCRIPTIONS: Readonly<Record<ImageRole, string>> = {
+const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-api": "FileBelt API service",
   "filebelt-worker-io": "FileBelt I/O worker",
   "filebelt-worker-maintenance": "FileBelt maintenance worker",
@@ -300,300 +302,308 @@ const ROLE_DESCRIPTIONS: Readonly<Record<ImageRole, string>> = {
   "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };
 
-function rustRole(
-  role: ImageRole,
-  binary: string,
-  license: ImageLicense = RUST_IMAGE_LICENSE,
-  extraRuntimeComponents: readonly ImageComponent[] = [],
+function RustRole(
+  Role: ImageRole,
+  Binary: string,
+  License: ImageLicense = RustImageLicense,
+  ExtraRuntimeComponents: readonly ImageComponent[] = [],
 ): RoleDefinition {
   return {
-    role,
-    dockerfile: "source/ops/Dockerfile.roles",
-    license,
-    artifact: {
+    Role,
+    Dockerfile: "source/ops/Dockerfile.roles",
+    License,
+    Artifact: {
       kind: "rust-binary",
-      binary,
-      components: rustComponents(binary, extraRuntimeComponents),
+      binary: Binary,
+      components: RustComponents(Binary, ExtraRuntimeComponents),
     },
   };
 }
 
-function rustComponents(
-  packageName: string,
-  extraRuntimeComponents: readonly ImageComponent[],
+function RustComponents(
+  PackageName: string,
+  ExtraRuntimeComponents: readonly ImageComponent[],
 ): PlatformComponentInventory {
   return Object.fromEntries(
-    IMAGE_PLATFORMS.map((platform) => [
-      platform,
+    ImagePlatforms.map((Platform) => [
+      Platform,
       [
-        component(
+        Component(
           "application",
-          packageName,
-          FILEBELT_PACKAGE_VERSION,
-          `pkg:cargo/${packageName}@${FILEBELT_PACKAGE_VERSION}`,
+          PackageName,
+          FileBeltPackageVersion,
+          `pkg:cargo/${PackageName}@${FileBeltPackageVersion}`,
           "Apache-2.0",
           "runtime",
-          `Cargo.lock#${packageName}@${FILEBELT_PACKAGE_VERSION}`,
+          `Cargo.lock#${PackageName}@${FileBeltPackageVersion}`,
         ),
-        ...extraRuntimeComponents,
-        ...RUST_PLATFORM_COMPONENTS[platform],
+        ...ExtraRuntimeComponents,
+        ...RustPlatformComponents[Platform],
       ],
     ]),
   ) as unknown as PlatformComponentInventory;
 }
 
-function nativeComponents(
-  architecture: "amd64" | "arm64",
-  target: "x86_64-unknown-linux-musl" | "aarch64-unknown-linux-musl",
+function NativeComponents(
+  Architecture: "amd64" | "arm64",
+  Target: "x86_64-unknown-linux-musl" | "aarch64-unknown-linux-musl",
 ): readonly ImageComponent[] {
-  const host = architecture === "amd64" ? "x86_64-unknown-linux-gnu" : "aarch64-unknown-linux-gnu";
+  const Host = Architecture === "amd64" ? "x86_64-unknown-linux-gnu" : "aarch64-unknown-linux-gnu";
   return [
-    component(
+    Component(
       "library",
       "rust-std",
       "1.97.1",
-      `pkg:generic/rust-std@1.97.1?target=${target}`,
+      `pkg:generic/rust-std@1.97.1?target=${Target}`,
       "Apache-2.0 OR MIT",
       "runtime",
-      RUST_BUILDER_EVIDENCE,
+      RustBuilderEvidence,
     ),
-    component(
+    Component(
       "library",
       "musl",
       "1.2.5-3.1~deb13u1",
-      `pkg:deb/debian/musl-dev@1.2.5-3.1~deb13u1?arch=${architecture}`,
+      `pkg:deb/debian/musl-dev@1.2.5-3.1~deb13u1?arch=${Architecture}`,
       "MIT",
       "runtime",
-      `${NATIVE_SNAPSHOT_EVIDENCE}#musl-dev=1.2.5-3.1~deb13u1`,
+      `${NativeSnapshotEvidence}#musl-dev=1.2.5-3.1~deb13u1`,
     ),
-    component(
+    Component(
       "application",
       "rustc",
       "1.97.1",
-      `pkg:generic/rustc@1.97.1?host=${host}`,
+      `pkg:generic/rustc@1.97.1?host=${Host}`,
       "Apache-2.0 OR MIT",
       "build-tool",
-      RUST_BUILDER_EVIDENCE,
+      RustBuilderEvidence,
     ),
-    component(
+    Component(
       "application",
       "gcc",
       "14.2.0-19",
-      `pkg:deb/debian/gcc-14@14.2.0-19?arch=${architecture}`,
+      `pkg:deb/debian/gcc-14@14.2.0-19?arch=${Architecture}`,
       "GPL-3.0-or-later",
       "build-tool",
-      `${NATIVE_SNAPSHOT_EVIDENCE}#gcc-14=14.2.0-19`,
+      `${NativeSnapshotEvidence}#gcc-14=14.2.0-19`,
     ),
-    component(
+    Component(
       "application",
       "binutils",
       "2.44-3",
-      `pkg:deb/debian/binutils@2.44-3?arch=${architecture}`,
+      `pkg:deb/debian/binutils@2.44-3?arch=${Architecture}`,
       "GPL-3.0-or-later",
       "build-tool",
-      `${NATIVE_SNAPSHOT_EVIDENCE}#binutils=2.44-3`,
+      `${NativeSnapshotEvidence}#binutils=2.44-3`,
     ),
   ];
 }
 
-function component(
-  type: ImageComponent["type"],
-  name: string,
-  version: string,
-  purl: string,
-  license: string,
-  relationship: ComponentRelationship,
-  evidence: string,
+function Component(
+  Type: ImageComponent["type"],
+  Name: string,
+  Version: string,
+  Purl: string,
+  License: string,
+  Relationship: ComponentRelationship,
+  Evidence: string,
 ): ImageComponent {
-  return { type, name, version, purl, license, relationship, evidence };
-}
-
-export function isReleaseTag(value: string): boolean {
-  return RELEASE_TAG_PATTERN.test(value);
-}
-
-export function createLocalBuildTag(version: string, revision: string): string {
-  assertReleaseTag(version, "version");
-  assertRevision(revision);
-  return `${version}-build.${revision.slice(0, 12)}`;
-}
-
-export function createImagePlan(input: CreateImagePlanInput): ImagePlanV1 {
-  assertChannel(input.channel);
-  assertReleaseTag(input.version, "version");
-  validateSource(input.source, input.channel, input.version);
-
-  const tag =
-    input.channel === "release"
-      ? input.version
-      : createLocalBuildTag(input.version, input.source.revision);
-
   return {
-    schemaVersion: IMAGE_PLAN_SCHEMA_VERSION,
-    channel: input.channel,
-    version: input.version,
-    tag,
-    source: {
-      url: input.source.url,
-      ref: input.source.ref,
-      revision: input.source.revision,
-      created: input.source.created,
-      dirty: input.source.dirty,
-      kind: input.source.kind,
-    },
-    runtime: { uid: RUNTIME_IDENTITY.uid, gid: RUNTIME_IDENTITY.gid },
-    images: ROLE_DEFINITIONS.map(createImageRow),
+    type: Type,
+    name: Name,
+    version: Version,
+    purl: Purl,
+    license: License,
+    relationship: Relationship,
+    evidence: Evidence,
   };
 }
 
-export function validateImagePlan(value: unknown): ImagePlanV1 {
-  const plan = assertRecord(value, "image plan");
-  assertExactKeys(
-    plan,
+export function IsReleaseTag(Value: string): boolean {
+  return ReleaseTagPattern.test(Value);
+}
+
+export function CreateLocalBuildTag(Version: string, Revision: string): string {
+  AssertReleaseTag(Version, "version");
+  AssertRevision(Revision);
+  return `${Version}-build.${Revision.slice(0, 12)}`;
+}
+
+export function CreateImagePlan(Input: CreateImagePlanInput): ImagePlanV1 {
+  AssertChannel(Input.Channel);
+  AssertReleaseTag(Input.Version, "version");
+  ValidateSource(Input.Source, Input.Channel, Input.Version);
+
+  const Tag =
+    Input.Channel === "release"
+      ? Input.Version
+      : CreateLocalBuildTag(Input.Version, Input.Source.revision);
+
+  return {
+    schemaVersion: ImagePlanSchemaVersion,
+    channel: Input.Channel,
+    version: Input.Version,
+    tag: Tag,
+    source: {
+      url: Input.Source.url,
+      ref: Input.Source.ref,
+      revision: Input.Source.revision,
+      created: Input.Source.created,
+      dirty: Input.Source.dirty,
+      kind: Input.Source.kind,
+    },
+    runtime: { uid: RuntimeIdentity.uid, gid: RuntimeIdentity.gid },
+    images: RoleDefinitions.map(CreateImageRow),
+  };
+}
+
+export function ValidateImagePlan(Value: unknown): ImagePlanV1 {
+  const Plan = AssertRecord(Value, "image plan");
+  AssertExactKeys(
+    Plan,
     ["schemaVersion", "channel", "version", "tag", "source", "runtime", "images"],
     "image plan",
   );
-  if (plan.schemaVersion !== IMAGE_PLAN_SCHEMA_VERSION) {
-    throw new Error(`image plan schemaVersion must be ${IMAGE_PLAN_SCHEMA_VERSION}`);
+  if (Plan.schemaVersion !== ImagePlanSchemaVersion) {
+    throw new Error(`image plan schemaVersion must be ${ImagePlanSchemaVersion}`);
   }
-  assertChannel(plan.channel);
-  if (typeof plan.version !== "string") {
+  AssertChannel(Plan.channel);
+  if (typeof Plan.version !== "string") {
     throw new Error("image plan version must be a string");
   }
-  assertReleaseTag(plan.version, "version");
+  AssertReleaseTag(Plan.version, "version");
 
-  const source = validateSource(plan.source, plan.channel, plan.version);
-  const expectedTag =
-    plan.channel === "release"
-      ? plan.version
-      : createLocalBuildTag(plan.version, source.revision);
-  if (plan.tag !== expectedTag) {
-    throw new Error(`image plan tag must be ${expectedTag}`);
+  const Source = ValidateSource(Plan.source, Plan.channel, Plan.version);
+  const ExpectedTag =
+    Plan.channel === "release"
+      ? Plan.version
+      : CreateLocalBuildTag(Plan.version, Source.revision);
+  if (Plan.tag !== ExpectedTag) {
+    throw new Error(`image plan tag must be ${ExpectedTag}`);
   }
-  validateRuntime(plan.runtime);
-  validateImageRows(plan.images);
+  ValidateRuntime(Plan.runtime);
+  ValidateImageRows(Plan.images);
 
-  return createImagePlan({ channel: plan.channel, version: plan.version, source });
+  return CreateImagePlan({ Channel: Plan.channel, Version: Plan.version, Source });
 }
 
-export function serializeImagePlan(value: ImagePlanV1 | unknown): string {
-  return `${JSON.stringify(validateImagePlan(value), null, 2)}\n`;
+export function SerializeImagePlan(Value: ImagePlanV1 | unknown): string {
+  return `${JSON.stringify(ValidateImagePlan(Value), null, 2)}\n`;
 }
 
-function createImageRow(definition: RoleDefinition): ImageRow {
+function CreateImageRow(Definition: RoleDefinition): ImageRow {
   return {
-    role: definition.role,
-    repository: `${IMAGE_REGISTRY}/${definition.role}`,
-    title: definition.role,
-    description: ROLE_DESCRIPTIONS[definition.role],
-    platforms: [...IMAGE_PLATFORMS],
-    license: definition.license,
+    role: Definition.Role,
+    repository: `${ImageRegistry}/${Definition.Role}`,
+    title: Definition.Role,
+    description: RoleDescriptions[Definition.Role],
+    platforms: [...ImagePlatforms],
+    license: Definition.License,
     build: {
-      dockerfile: definition.dockerfile,
-      target: definition.role,
+      dockerfile: Definition.Dockerfile,
+      target: Definition.Role,
     },
     artifact:
-      definition.artifact.kind === "rust-binary"
+      Definition.Artifact.kind === "rust-binary"
         ? {
           kind: "rust-binary",
-          binary: definition.artifact.binary,
-          components: cloneComponentInventory(definition.artifact.components),
+          binary: Definition.Artifact.binary,
+          components: CloneComponentInventory(Definition.Artifact.components),
         }
         : {
           kind: "oxibelt-edge",
-          packages: [...definition.artifact.packages],
-          base: { ...definition.artifact.base },
+          packages: [...Definition.Artifact.packages],
+          base: { ...Definition.Artifact.base },
         },
   };
 }
 
-function cloneComponentInventory(
-  inventory: PlatformComponentInventory,
+function CloneComponentInventory(
+  Inventory: PlatformComponentInventory,
 ): PlatformComponentInventory {
   return Object.fromEntries(
-    IMAGE_PLATFORMS.map((platform) => [
-      platform,
-      inventory[platform].map((entry) => ({ ...entry })),
+    ImagePlatforms.map((Platform) => [
+      Platform,
+      Inventory[Platform].map((Entry) => ({ ...Entry })),
     ]),
   ) as unknown as PlatformComponentInventory;
 }
 
-function validateSource(
-  value: unknown,
-  channel: ImagePlanChannel,
-  version: string,
+function ValidateSource(
+  Value: unknown,
+  Channel: ImagePlanChannel,
+  Version: string,
 ): ImagePlanSource {
-  const source = assertRecord(value, "image plan source");
-  assertExactKeys(
-    source,
+  const Source = AssertRecord(Value, "image plan source");
+  AssertExactKeys(
+    Source,
     ["url", "ref", "revision", "created", "dirty", "kind"],
     "image plan source",
   );
-  if (source.url !== SOURCE_URL) {
-    throw new Error(`image plan source url must be ${SOURCE_URL}`);
+  if (Source.url !== SourceUrl) {
+    throw new Error(`image plan source url must be ${SourceUrl}`);
   }
-  if (typeof source.ref !== "string" || source.ref.length === 0) {
+  if (typeof Source.ref !== "string" || Source.ref.length === 0) {
     throw new Error("image plan source ref must be a non-empty string");
   }
-  if (typeof source.revision !== "string") {
+  if (typeof Source.revision !== "string") {
     throw new Error("image plan source revision must be a string");
   }
-  assertRevision(source.revision);
-  if (typeof source.created !== "string") {
+  AssertRevision(Source.revision);
+  if (typeof Source.created !== "string") {
     throw new Error("image plan source created must be a string");
   }
-  assertCreated(source.created);
-  if (typeof source.dirty !== "boolean") {
+  AssertCreated(Source.created);
+  if (typeof Source.dirty !== "boolean") {
     throw new Error("image plan source dirty must be a boolean");
   }
-  if (!isSourceKind(source.kind)) {
+  if (!IsSourceKind(Source.kind)) {
     throw new Error("image plan source kind is invalid");
   }
-  if (channel === "release") {
-    if (source.kind !== "release") {
+  if (Channel === "release") {
+    if (Source.kind !== "release") {
       throw new Error("release image plans require source kind release");
     }
-    if (source.dirty) {
+    if (Source.dirty) {
       throw new Error("release image plans require a clean source tree");
     }
-    if (source.ref !== `refs/tags/${version}`) {
-      throw new Error(`release image plans require source ref refs/tags/${version}`);
+    if (Source.ref !== `refs/tags/${Version}`) {
+      throw new Error(`release image plans require source ref refs/tags/${Version}`);
     }
-  } else if (source.kind === "release") {
+  } else if (Source.kind === "release") {
     throw new Error("build image plans cannot use source kind release");
   }
 
   return {
-    url: source.url,
-    ref: source.ref,
-    revision: source.revision,
-    created: source.created,
-    dirty: source.dirty,
-    kind: source.kind,
+    url: Source.url,
+    ref: Source.ref,
+    revision: Source.revision,
+    created: Source.created,
+    dirty: Source.dirty,
+    kind: Source.kind,
   };
 }
 
-function validateRuntime(value: unknown): void {
-  const runtime = assertRecord(value, "image plan runtime");
-  assertExactKeys(runtime, ["uid", "gid"], "image plan runtime");
-  if (runtime.uid !== RUNTIME_IDENTITY.uid || runtime.gid !== RUNTIME_IDENTITY.gid) {
+function ValidateRuntime(Value: unknown): void {
+  const Runtime = AssertRecord(Value, "image plan runtime");
+  AssertExactKeys(Runtime, ["uid", "gid"], "image plan runtime");
+  if (Runtime.uid !== RuntimeIdentity.uid || Runtime.gid !== RuntimeIdentity.gid) {
     throw new Error("image plan runtime UID and GID must both be 10001");
   }
 }
 
-function validateImageRows(value: unknown): void {
-  if (!Array.isArray(value)) {
+function ValidateImageRows(Value: unknown): void {
+  if (!Array.isArray(Value)) {
     throw new Error("image plan images must be an array");
   }
-  if (value.length !== ROLE_DEFINITIONS.length) {
-    throw new Error(`image plan must contain exactly ${ROLE_DEFINITIONS.length} images`);
+  if (Value.length !== RoleDefinitions.length) {
+    throw new Error(`image plan must contain exactly ${RoleDefinitions.length} images`);
   }
 
-  const seen = new Set<string>();
-  for (const [index, definition] of ROLE_DEFINITIONS.entries()) {
-    const row = assertRecord(value[index], `image plan image ${index}`);
-    assertExactKeys(
-      row,
+  const Seen = new Set<string>();
+  for (const [Index, Definition] of RoleDefinitions.entries()) {
+    const Row = AssertRecord(Value[Index], `image plan image ${Index}`);
+    AssertExactKeys(
+      Row,
       [
         "role",
         "repository",
@@ -604,85 +614,85 @@ function validateImageRows(value: unknown): void {
         "build",
         "artifact",
       ],
-      `image plan image ${index}`,
+      `image plan image ${Index}`,
     );
-    if (typeof row.role !== "string" || seen.has(row.role)) {
-      throw new Error(`image plan image ${index} has an invalid or duplicate role`);
+    if (typeof Row.role !== "string" || Seen.has(Row.role)) {
+      throw new Error(`image plan image ${Index} has an invalid or duplicate role`);
     }
-    seen.add(row.role);
-    if (row.role !== definition.role) {
-      throw new Error(`image plan image ${index} role must be ${definition.role}`);
+    Seen.add(Row.role);
+    if (Row.role !== Definition.Role) {
+      throw new Error(`image plan image ${Index} role must be ${Definition.Role}`);
     }
-    const expected = createImageRow(definition);
-    assertJsonEqual(row, expected, `image plan image ${definition.role}`);
+    const Expected = CreateImageRow(Definition);
+    AssertJsonEqual(Row, Expected, `image plan image ${Definition.Role}`);
   }
 }
 
-function assertJsonEqual(actual: unknown, expected: unknown, description: string): void {
-  if (JSON.stringify(sortObjectKeys(actual)) !== JSON.stringify(sortObjectKeys(expected))) {
-    throw new Error(`${description} does not match the fixed image contract`);
+function AssertJsonEqual(Actual: unknown, Expected: unknown, Description: string): void {
+  if (JSON.stringify(SortObjectKeys(Actual)) !== JSON.stringify(SortObjectKeys(Expected))) {
+    throw new Error(`${Description} does not match the fixed image contract`);
   }
 }
 
-function sortObjectKeys(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortObjectKeys);
+function SortObjectKeys(Value: unknown): unknown {
+  if (Array.isArray(Value)) {
+    return Value.map(SortObjectKeys);
   }
-  if (typeof value === "object" && value !== null) {
+  if (typeof Value === "object" && Value !== null) {
     return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nestedValue]) => [key, sortObjectKeys(nestedValue)]),
+      Object.entries(Value)
+        .sort(([Left], [Right]) => Left.localeCompare(Right))
+        .map(([Key, NestedValue]) => [Key, SortObjectKeys(NestedValue)]),
     );
   }
-  return value;
+  return Value;
 }
 
-function assertReleaseTag(value: string, description: string): void {
-  if (!isReleaseTag(value)) {
+function AssertReleaseTag(Value: string, Description: string): void {
+  if (!IsReleaseTag(Value)) {
     throw new Error(
-      `${description} must be an exact SemVer stable or prerelease value without a v prefix or build metadata`,
+      `${Description} must be an exact SemVer stable or prerelease value without a v prefix or build metadata`,
     );
   }
 }
 
-function assertRevision(value: string): void {
-  if (!REVISION_PATTERN.test(value)) {
+function AssertRevision(Value: string): void {
+  if (!RevisionPattern.test(Value)) {
     throw new Error("image plan source revision must be a full lowercase hexadecimal Git object ID");
   }
 }
 
-function assertCreated(value: string): void {
-  if (!CREATED_PATTERN.test(value) || new Date(value).toISOString() !== value.replace("Z", ".000Z")) {
+function AssertCreated(Value: string): void {
+  if (!CreatedPattern.test(Value) || new Date(Value).toISOString() !== Value.replace("Z", ".000Z")) {
     throw new Error("image plan source created must be an exact RFC 3339 UTC second");
   }
 }
 
-function assertChannel(value: unknown): asserts value is ImagePlanChannel {
-  if (value !== "build" && value !== "release") {
+function AssertChannel(Value: unknown): asserts Value is ImagePlanChannel {
+  if (Value !== "build" && Value !== "release") {
     throw new Error("image plan channel must be build or release");
   }
 }
 
-function isSourceKind(value: unknown): value is SourceKind {
-  return value === "local" || value === "ci" || value === "release" || value === "rebuild";
+function IsSourceKind(Value: unknown): Value is SourceKind {
+  return Value === "local" || Value === "ci" || Value === "release" || Value === "rebuild";
 }
 
-function assertRecord(value: unknown, description: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${description} must be an object`);
+function AssertRecord(Value: unknown, Description: string): Record<string, unknown> {
+  if (typeof Value !== "object" || Value === null || Array.isArray(Value)) {
+    throw new Error(`${Description} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return Value as Record<string, unknown>;
 }
 
-function assertExactKeys(
-  value: Record<string, unknown>,
-  expectedKeys: readonly string[],
-  description: string,
+function AssertExactKeys(
+  Value: Record<string, unknown>,
+  ExpectedKeys: readonly string[],
+  Description: string,
 ): void {
-  const actualKeys = Object.keys(value).sort();
-  const sortedExpected = [...expectedKeys].sort();
-  if (JSON.stringify(actualKeys) !== JSON.stringify(sortedExpected)) {
-    throw new Error(`${description} contains missing or unknown properties`);
+  const ActualKeys = Object.keys(Value).sort();
+  const SortedExpected = [...ExpectedKeys].sort();
+  if (JSON.stringify(ActualKeys) !== JSON.stringify(SortedExpected)) {
+    throw new Error(`${Description} contains missing or unknown properties`);
   }
 }

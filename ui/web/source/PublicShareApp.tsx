@@ -1,75 +1,75 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Spinner } from "@fluentui/react-components";
-import { Download, FileCheck2, ShieldCheck } from "lucide-react";
+import { Download as DownloadIcon, FileCheck2, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { BidiText, BrandMark, FileBeltIcon, FileBeltProvider } from "@filebelt/design-system";
 
 import type { PublicShareClient, PublicShareGrant } from "./client.js";
-import { en } from "./strings.js";
+import { En } from "./strings.js";
 
-function formatBytes(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(value);
+function FormatBytes(Value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(Value);
 }
 
-export function parsePublicShareFragment(fragment: string): string {
-  const value = fragment.startsWith("#") ? fragment.slice(1) : fragment;
-  const parameters = new URLSearchParams(value);
-  return parameters.get("token") ?? value;
+export function ParsePublicShareFragment(Fragment: string): string {
+  const Value = Fragment.startsWith("#") ? Fragment.slice(1) : Fragment;
+  const Parameters = new URLSearchParams(Value);
+  return Parameters.get("token") ?? Value;
 }
 
-export function takePublicShareFragment(): string {
-  const fragment = window.location.hash;
+export function TakePublicShareFragment(): string {
+  const Fragment = window.location.hash;
   window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
-  return parsePublicShareFragment(fragment);
+  return ParsePublicShareFragment(Fragment);
 }
 
-export function PublicShareApp({ client, fragmentToken }: { client: PublicShareClient; fragmentToken: string }): ReactNode {
-  const [grant, setGrant] = useState<PublicShareGrant | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
-  const exchangeStarted = useRef(false);
+export function PublicShareApp({ Client, FragmentToken }: { Client: PublicShareClient; FragmentToken: string }): ReactNode {
+  const [Grant, SetGrant] = useState<PublicShareGrant | null>(null);
+  const [Error, SetError] = useState<string | null>(null);
+  const [Busy, SetBusy] = useState(true);
+  const ExchangeStarted = useRef(false);
 
   useEffect(() => {
-    if (exchangeStarted.current) return;
-    exchangeStarted.current = true;
-    if (fragmentToken.length === 0) {
-      setError(en.publicExpired);
-      setBusy(false);
+    if (ExchangeStarted.current) return;
+    ExchangeStarted.current = true;
+    if (FragmentToken.length === 0) {
+      SetError(En.publicExpired);
+      SetBusy(false);
       return;
     }
-    void client.exchangePublicShare(fragmentToken).then(setGrant).catch(() => setError(en.publicExpired)).finally(() => setBusy(false));
-  }, [client, fragmentToken]);
+    void Client.exchangePublicShare(FragmentToken).then(SetGrant).catch(() => SetError(En.publicExpired)).finally(() => SetBusy(false));
+  }, [Client, FragmentToken]);
 
-  const download = async (): Promise<void> => {
-    if (grant === null) return;
-    setBusy(true);
+  const Download = async (): Promise<void> => {
+    if (Grant === null) return;
+    SetBusy(true);
     try {
-      const url = URL.createObjectURL(await client.downloadPublic(grant.exchangeId));
-      const anchor = document.createElement("a");
-      anchor.download = grant.name;
-      anchor.href = url;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      const Url = URL.createObjectURL(await Client.downloadPublic(Grant.ExchangeId));
+      const Anchor = document.createElement("a");
+      Anchor.download = Grant.Name;
+      Anchor.href = Url;
+      Anchor.click();
+      URL.revokeObjectURL(Url);
     } finally {
-      setBusy(false);
+      SetBusy(false);
     }
   };
 
   return (
-    <FileBeltProvider density="comfortable" themeChoice="system">
+    <FileBeltProvider Density="comfortable" ThemeChoice="system">
       <main className="fb-public-shell">
-        <div className="fb-public-brand"><BrandMark /><span>{en.appName}</span></div>
+        <div className="fb-public-brand"><BrandMark /><span>{En.appName}</span></div>
         <section aria-labelledby="public-share-heading" className="fb-public-card">
-          <div className="fb-public-icon"><FileBeltIcon icon={grant === null ? ShieldCheck : FileCheck2} size={36} /></div>
-          <p className="fb-eyebrow">{en.publicShare}</p>
-          <h1 id="public-share-heading">{busy && grant === null ? en.publicLoading : grant === null ? en.publicExpired : <BidiText>{grant.name}</BidiText>}</h1>
-          {busy && grant === null ? <Spinner label={en.publicLoading} /> : null}
-          {error === null ? null : <p className="fb-error" role="alert">{error}</p>}
-          {grant === null ? null : <><p className="fb-muted">{formatBytes(grant.size)} · expires <time dateTime={grant.expiresAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(grant.expiresAt))}</time></p><Button appearance="primary" disabled={busy} icon={<Download />} onClick={() => void download()}>{en.publicDownload}</Button></>}
-          <p className="fb-public-notice"><FileBeltIcon icon={ShieldCheck} size={16} /> {en.publicShareNotice}</p>
+          <div className="fb-public-icon"><FileBeltIcon Icon={Grant === null ? ShieldCheck : FileCheck2} size={36} /></div>
+          <p className="fb-eyebrow">{En.publicShare}</p>
+          <h1 id="public-share-heading">{Busy && Grant === null ? En.publicLoading : Grant === null ? En.publicExpired : <BidiText>{Grant.Name}</BidiText>}</h1>
+          {Busy && Grant === null ? <Spinner label={En.publicLoading} /> : null}
+          {Error === null ? null : <p className="fb-error" role="alert">{Error}</p>}
+          {Grant === null ? null : <><p className="fb-muted">{FormatBytes(Grant.Size)} · expires <time dateTime={Grant.ExpiresAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Grant.ExpiresAt))}</time></p><Button appearance="primary" disabled={Busy} icon={<DownloadIcon />} onClick={() => void Download()}>{En.publicDownload}</Button></>}
+          <p className="fb-public-notice"><FileBeltIcon Icon={ShieldCheck} size={16} /> {En.publicShareNotice}</p>
         </section>
       </main>
     </FileBeltProvider>

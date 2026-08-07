@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const adminEn = {
+export const AdminEn = {
   active: "Active",
   create: "Create",
   createGroup: "Create group",

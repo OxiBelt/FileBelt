@@ -10,22 +10,22 @@ import type {
 } from "./model.js";
 
 export interface CreateShareInput {
-  fileId: string;
-  kind: ShareRecord["kind"];
-  permission: ShareRecord["permission"];
-  target: string;
+  FileId: string;
+  Kind: ShareRecord["Kind"];
+  Permission: ShareRecord["Permission"];
+  Target: string;
 }
 
 export interface PublicShareGrant {
-  expiresAt: string;
-  exchangeId: string;
-  name: string;
-  size: number;
+  ExpiresAt: string;
+  ExchangeId: string;
+  Name: string;
+  Size: number;
 }
 
 export interface PublicShareClient {
-  downloadPublic(exchangeId: string): Promise<Blob>;
-  exchangePublicShare(fragmentToken: string): Promise<PublicShareGrant>;
+  downloadPublic(ExchangeId: string): Promise<Blob>;
+  exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant>;
 }
 
 /** Signals that the browser must start a fresh OIDC login flow. */
@@ -41,280 +41,280 @@ export class AuthenticationRequiredError extends Error {
  * this interface without exposing transport details to React components.
  */
 export interface FileBeltClient {
-  createGroup(name: string): Promise<void>;
-  createShare(input: CreateShareInput): Promise<void>;
-  createSharedDrive(name: string): Promise<void>;
-  download(entryId: string): Promise<Blob>;
-  getWorkspace(signal?: AbortSignal): Promise<WorkspaceSnapshot>;
+  createGroup(Name: string): Promise<void>;
+  createShare(Input: CreateShareInput): Promise<void>;
+  createSharedDrive(Name: string): Promise<void>;
+  download(EntryId: string): Promise<Blob>;
+  getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot>;
   markPrivacyRead(): Promise<void>;
-  restoreEntries(entryIds: readonly string[]): Promise<void>;
-  restoreVersion(versionId: string): Promise<void>;
-  revokeSession(sessionId: string): Promise<void>;
-  revokeShare(shareId: string): Promise<void>;
-  suspendUser(userId: string): Promise<void>;
-  trashEntries(entryIds: readonly string[]): Promise<void>;
-  upload(files: readonly UploadCandidate[]): Promise<void>;
+  restoreEntries(EntryIds: readonly string[]): Promise<void>;
+  restoreVersion(VersionId: string): Promise<void>;
+  revokeSession(SessionId: string): Promise<void>;
+  revokeShare(ShareId: string): Promise<void>;
+  suspendUser(UserId: string): Promise<void>;
+  trashEntries(EntryIds: readonly string[]): Promise<void>;
+  upload(Files: readonly UploadCandidate[]): Promise<void>;
 }
 
-const now = "2026-08-06T12:00:00Z";
+const Now = "2026-08-06T12:00:00Z";
 
-function uuid(suffix: string): string {
-  return `00000000-0000-4000-8000-${suffix.padStart(12, "0")}`;
+function Uuid(Suffix: string): string {
+  return `00000000-0000-4000-8000-${Suffix.padStart(12, "0")}`;
 }
 
-const initialSnapshot: WorkspaceSnapshot = {
-  currentUser: {
-    displayName: "Avery Morgan",
-    email: "avery@example.test",
-    isTenantAdmin: true,
+const InitialSnapshot: WorkspaceSnapshot = {
+  CurrentUser: {
+    DisplayName: "Avery Morgan",
+    Email: "avery@example.test",
+    IsTenantAdmin: true,
   },
-  entries: [
+  Entries: [
     {
-      id: uuid("101"),
-      kind: "folder",
-      modifiedAt: "2026-08-06T09:24:00Z",
-      name: "Launch documents",
-      owner: "Avery Morgan",
-      shared: true,
-      size: null,
-      status: "ready",
-      trashed: false,
-      version: 1,
+      Id: Uuid("101"),
+      Kind: "folder",
+      ModifiedAt: "2026-08-06T09:24:00Z",
+      Name: "Launch documents",
+      Owner: "Avery Morgan",
+      Shared: true,
+      Size: null,
+      Status: "ready",
+      Trashed: false,
+      Version: 1,
     },
     {
-      id: uuid("102"),
-      kind: "file",
-      modifiedAt: "2026-08-06T10:48:00Z",
-      name: "Q3 forecast.xlsx",
-      owner: "Avery Morgan",
-      shared: true,
-      size: 4_782_080,
-      status: "ready",
-      trashed: false,
-      version: 7,
+      Id: Uuid("102"),
+      Kind: "file",
+      ModifiedAt: "2026-08-06T10:48:00Z",
+      Name: "Q3 forecast.xlsx",
+      Owner: "Avery Morgan",
+      Shared: true,
+      Size: 4_782_080,
+      Status: "ready",
+      Trashed: false,
+      Version: 7,
     },
     {
-      id: uuid("103"),
-      kind: "file",
-      modifiedAt: "2026-08-05T16:12:00Z",
-      name: "Product brief.pdf",
-      owner: "Samir Haddad",
-      shared: false,
-      size: 1_843_200,
-      status: "ready",
-      trashed: false,
-      version: 3,
+      Id: Uuid("103"),
+      Kind: "file",
+      ModifiedAt: "2026-08-05T16:12:00Z",
+      Name: "Product brief.pdf",
+      Owner: "Samir Haddad",
+      Shared: false,
+      Size: 1_843_200,
+      Status: "ready",
+      Trashed: false,
+      Version: 3,
     },
     {
-      id: uuid("104"),
-      kind: "file",
-      modifiedAt: "2026-08-02T11:30:00Z",
-      name: "Archive notes.txt",
-      owner: "Avery Morgan",
-      shared: false,
-      size: 16_384,
-      status: "ready",
-      trashed: true,
-      version: 2,
+      Id: Uuid("104"),
+      Kind: "file",
+      ModifiedAt: "2026-08-02T11:30:00Z",
+      Name: "Archive notes.txt",
+      Owner: "Avery Morgan",
+      Shared: false,
+      Size: 16_384,
+      Status: "ready",
+      Trashed: true,
+      Version: 2,
     },
     {
-      id: uuid("105"),
-      kind: "file",
-      modifiedAt: "2026-08-06T08:05:00Z",
-      name: "‫خطة المشروع‬.pdf",
-      owner: "Layla Hassan",
-      shared: true,
-      size: 942_080,
-      status: "ready",
-      trashed: false,
-      version: 4,
-    },
-  ],
-  uploads: [
-    {
-      id: uuid("201"),
-      name: "Team photography.zip",
-      progress: 0.68,
-      size: 85_899_345,
-      state: "uploading",
-    },
-    {
-      id: uuid("202"),
-      name: "Roadmap.pdf",
-      progress: 1,
-      size: 2_048_000,
-      state: "complete",
+      Id: Uuid("105"),
+      Kind: "file",
+      ModifiedAt: "2026-08-06T08:05:00Z",
+      Name: "‫خطة المشروع‬.pdf",
+      Owner: "Layla Hassan",
+      Shared: true,
+      Size: 942_080,
+      Status: "ready",
+      Trashed: false,
+      Version: 4,
     },
   ],
-  versions: [
-    { author: "Avery Morgan", createdAt: now, fileId: uuid("102"), id: uuid("301"), size: 4_782_080, version: 7 },
-    { author: "Samir Haddad", createdAt: "2026-08-04T15:20:00Z", fileId: uuid("102"), id: uuid("302"), size: 4_701_184, version: 6 },
-    { author: "Avery Morgan", createdAt: "2026-08-01T08:00:00Z", fileId: uuid("102"), id: uuid("303"), size: 4_501_504, version: 5 },
+  Uploads: [
+    {
+      Id: Uuid("201"),
+      Name: "Team photography.zip",
+      Progress: 0.68,
+      Size: 85_899_345,
+      State: "uploading",
+    },
+    {
+      Id: Uuid("202"),
+      Name: "Roadmap.pdf",
+      Progress: 1,
+      Size: 2_048_000,
+      State: "complete",
+    },
   ],
-  shares: [
-    { id: uuid("401"), kind: "direct", permission: "Contributor", resourceId: uuid("102"), resourceName: "Q3 forecast.xlsx", target: "samir@example.test" },
-    { id: uuid("402"), kind: "group", permission: "Viewer", resourceId: uuid("101"), resourceName: "Launch documents", target: "Product group" },
-    { expiresAt: "2026-08-13T12:00:00Z", id: uuid("403"), kind: "link", permission: "Viewer", resourceId: uuid("103"), resourceName: "Product brief.pdf", target: "Anonymous link" },
+  Versions: [
+    { Author: "Avery Morgan", CreatedAt: Now, FileId: Uuid("102"), Id: Uuid("301"), Size: 4_782_080, Version: 7 },
+    { Author: "Samir Haddad", CreatedAt: "2026-08-04T15:20:00Z", FileId: Uuid("102"), Id: Uuid("302"), Size: 4_701_184, Version: 6 },
+    { Author: "Avery Morgan", CreatedAt: "2026-08-01T08:00:00Z", FileId: Uuid("102"), Id: Uuid("303"), Size: 4_501_504, Version: 5 },
   ],
-  sessions: [
-    { current: true, device: "Firefox on Linux", id: uuid("501"), lastActiveAt: now, location: "Current device" },
-    { current: false, device: "Firefox on Android", id: uuid("502"), lastActiveAt: "2026-08-05T19:11:00Z", location: "Berlin, DE" },
+  Shares: [
+    { Id: Uuid("401"), Kind: "direct", Permission: "Contributor", ResourceId: Uuid("102"), ResourceName: "Q3 forecast.xlsx", Target: "samir@example.test" },
+    { Id: Uuid("402"), Kind: "group", Permission: "Viewer", ResourceId: Uuid("101"), ResourceName: "Launch documents", Target: "Product group" },
+    { ExpiresAt: "2026-08-13T12:00:00Z", Id: Uuid("403"), Kind: "link", Permission: "Viewer", ResourceId: Uuid("103"), ResourceName: "Product brief.pdf", Target: "Anonymous link" },
   ],
-  privacy: [
-    { action: "Your quota was changed to 1 TB", actor: "Tenant administrator", createdAt: "2026-08-05T14:02:00Z", id: uuid("601"), unread: true },
-    { action: "A session was revoked", actor: "You", createdAt: "2026-07-29T10:40:00Z", id: uuid("602"), unread: false },
+  Sessions: [
+    { Current: true, Device: "Firefox on Linux", Id: Uuid("501"), LastActiveAt: Now, Location: "Current device" },
+    { Current: false, Device: "Firefox on Android", Id: Uuid("502"), LastActiveAt: "2026-08-05T19:11:00Z", Location: "Berlin, DE" },
   ],
-  admin: {
-    users: [
-      { email: "avery@example.test", id: uuid("701"), name: "Avery Morgan", status: "active" },
-      { email: "samir@example.test", id: uuid("702"), name: "Samir Haddad", status: "active" },
-      { email: "layla@example.test", id: uuid("703"), name: "Layla Hassan", status: "active" },
+  Privacy: [
+    { Action: "Your quota was changed to 1 TB", Actor: "Tenant administrator", CreatedAt: "2026-08-05T14:02:00Z", Id: Uuid("601"), Unread: true },
+    { Action: "A session was revoked", Actor: "You", CreatedAt: "2026-07-29T10:40:00Z", Id: Uuid("602"), Unread: false },
+  ],
+  Admin: {
+    Users: [
+      { Email: "avery@example.test", Id: Uuid("701"), Name: "Avery Morgan", Status: "active" },
+      { Email: "samir@example.test", Id: Uuid("702"), Name: "Samir Haddad", Status: "active" },
+      { Email: "layla@example.test", Id: Uuid("703"), Name: "Layla Hassan", Status: "active" },
     ],
-    groups: [
-      { id: uuid("801"), managerCount: 2, memberCount: 8, name: "Product group" },
-      { id: uuid("802"), managerCount: 1, memberCount: 4, name: "Finance group" },
+    Groups: [
+      { Id: Uuid("801"), ManagerCount: 2, MemberCount: 8, Name: "Product group" },
+      { Id: Uuid("802"), ManagerCount: 1, MemberCount: 4, Name: "Finance group" },
     ],
-    drives: [
-      { id: uuid("901"), name: "Product shared drive", quotaBytes: 10_995_116_277_760, usedBytes: 2_748_779_069_440 },
-      { id: uuid("902"), name: "Finance shared drive", quotaBytes: 5_497_558_138_880, usedBytes: 1_099_511_627_776 },
+    Drives: [
+      { Id: Uuid("901"), Name: "Product shared drive", QuotaBytes: 10_995_116_277_760, UsedBytes: 2_748_779_069_440 },
+      { Id: Uuid("902"), Name: "Finance shared drive", QuotaBytes: 5_497_558_138_880, UsedBytes: 1_099_511_627_776 },
     ],
   },
 };
 
-function cloneSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
-  return structuredClone(snapshot);
+function CloneSnapshot(Snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return structuredClone(Snapshot);
 }
 
 export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
-  readonly #snapshot = cloneSnapshot(initialSnapshot);
-  #sequence = 1_000;
+  readonly #Snapshot = CloneSnapshot(InitialSnapshot);
+  #Sequence = 1_000;
 
-  async getWorkspace(signal?: AbortSignal): Promise<WorkspaceSnapshot> {
-    if (signal?.aborted === true) {
+  async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
+    if (Signal?.aborted === true) {
       throw new DOMException("Request was aborted", "AbortError");
     }
-    return cloneSnapshot(this.#snapshot);
+    return CloneSnapshot(this.#Snapshot);
   }
 
-  async upload(files: readonly UploadCandidate[]): Promise<void> {
-    for (const file of files) {
-      const id = uuid(String(++this.#sequence));
-      this.#snapshot.entries.unshift({
-        id,
-        kind: "file",
-        modifiedAt: new Date().toISOString(),
-        name: file.name,
-        owner: this.#snapshot.currentUser.displayName,
-        shared: false,
-        size: file.size,
-        status: "ready",
-        trashed: false,
-        version: 1,
+  async upload(Files: readonly UploadCandidate[]): Promise<void> {
+    for (const File of Files) {
+      const Id = Uuid(String(++this.#Sequence));
+      this.#Snapshot.Entries.unshift({
+        Id,
+        Kind: "file",
+        ModifiedAt: new Date().toISOString(),
+        Name: File.Name,
+        Owner: this.#Snapshot.CurrentUser.DisplayName,
+        Shared: false,
+        Size: File.Size,
+        Status: "ready",
+        Trashed: false,
+        Version: 1,
       });
-      this.#snapshot.uploads.unshift({ id, name: file.name, progress: 1, size: file.size, state: "complete" });
+      this.#Snapshot.Uploads.unshift({ Id, Name: File.Name, Progress: 1, Size: File.Size, State: "complete" });
     }
   }
 
-  async download(entryId: string): Promise<Blob> {
-    const entry = this.#snapshot.entries.find(({ id }) => id === entryId);
-    if (entry === undefined || entry.kind !== "file") throw new Error("The file is unavailable.");
-    return new Blob([`FileBelt mock download for ${entry.name}\n`], { type: "text/plain" });
+  async download(EntryId: string): Promise<Blob> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
+    if (Entry === undefined || Entry.Kind !== "file") throw new Error("The file is unavailable.");
+    return new Blob([`FileBelt mock download for ${Entry.Name}\n`], { type: "text/plain" });
   }
 
-  async exchangePublicShare(fragmentToken: string): Promise<PublicShareGrant> {
-    if (fragmentToken.trim().length < 8) throw new Error("This share link is invalid or has expired.");
+  async exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant> {
+    if (FragmentToken.trim().length < 8) throw new Error("This share link is invalid or has expired.");
     return {
-      exchangeId: uuid(String(++this.#sequence)),
-      expiresAt: "2026-08-13T12:00:00Z",
-      name: "Product brief.pdf",
-      size: 1_843_200,
+      ExchangeId: Uuid(String(++this.#Sequence)),
+      ExpiresAt: "2026-08-13T12:00:00Z",
+      Name: "Product brief.pdf",
+      Size: 1_843_200,
     };
   }
 
-  async downloadPublic(exchangeId: string): Promise<Blob> {
-    if (exchangeId.length === 0) throw new Error("This share link is unavailable.");
+  async downloadPublic(ExchangeId: string): Promise<Blob> {
+    if (ExchangeId.length === 0) throw new Error("This share link is unavailable.");
     return new Blob(["FileBelt mock public-share download\n"], { type: "text/plain" });
   }
 
-  async trashEntries(entryIds: readonly string[]): Promise<void> {
-    this.#updateEntries(entryIds, (entry) => ({ ...entry, trashed: true }));
+  async trashEntries(EntryIds: readonly string[]): Promise<void> {
+    this.#updateEntries(EntryIds, (Entry) => ({ ...Entry, Trashed: true }));
   }
 
-  async restoreEntries(entryIds: readonly string[]): Promise<void> {
-    this.#updateEntries(entryIds, (entry) => ({ ...entry, trashed: false }));
+  async restoreEntries(EntryIds: readonly string[]): Promise<void> {
+    this.#updateEntries(EntryIds, (Entry) => ({ ...Entry, Trashed: false }));
   }
 
-  async createShare(input: CreateShareInput): Promise<void> {
-    const entry = this.#snapshot.entries.find(({ id }) => id === input.fileId);
-    if (entry === undefined) {
+  async createShare(Input: CreateShareInput): Promise<void> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.FileId);
+    if (Entry === undefined) {
       throw new Error("The selected resource is unavailable.");
     }
-    this.#snapshot.shares.unshift({
-      id: uuid(String(++this.#sequence)),
-      kind: input.kind,
-      permission: input.kind === "link" ? "Viewer" : input.permission,
-      resourceId: entry.id,
-      resourceName: entry.name,
-      target: input.kind === "link" ? "Anonymous link" : input.target,
-      ...(input.kind === "link" ? { expiresAt: "2026-08-13T12:00:00Z" } : {}),
+    this.#Snapshot.Shares.unshift({
+      Id: Uuid(String(++this.#Sequence)),
+      Kind: Input.Kind,
+      Permission: Input.Kind === "link" ? "Viewer" : Input.Permission,
+      ResourceId: Entry.Id,
+      ResourceName: Entry.Name,
+      Target: Input.Kind === "link" ? "Anonymous link" : Input.Target,
+      ...(Input.Kind === "link" ? { ExpiresAt: "2026-08-13T12:00:00Z" } : {}),
     });
-    entry.shared = true;
+    Entry.Shared = true;
   }
 
-  async revokeShare(shareId: string): Promise<void> {
-    const index = this.#snapshot.shares.findIndex(({ id }) => id === shareId);
-    if (index !== -1) this.#snapshot.shares.splice(index, 1);
+  async revokeShare(ShareId: string): Promise<void> {
+    const Index = this.#Snapshot.Shares.findIndex(({ Id }) => Id === ShareId);
+    if (Index !== -1) this.#Snapshot.Shares.splice(Index, 1);
   }
 
-  async restoreVersion(versionId: string): Promise<void> {
-    const version = this.#snapshot.versions.find(({ id }) => id === versionId);
-    const entry = this.#snapshot.entries.find(({ id }) => id === version?.fileId);
-    if (version === undefined || entry === undefined) return;
-    const nextVersion = Math.max(...this.#snapshot.versions.filter(({ fileId }) => fileId === entry.id).map(({ version: value }) => value)) + 1;
-    entry.version = nextVersion;
-    entry.modifiedAt = new Date().toISOString();
-    this.#snapshot.versions.unshift({
-      author: this.#snapshot.currentUser.displayName,
-      createdAt: entry.modifiedAt,
-      fileId: entry.id,
-      id: uuid(String(++this.#sequence)),
-      size: version.size,
-      version: nextVersion,
+  async restoreVersion(VersionId: string): Promise<void> {
+    const Version = this.#Snapshot.Versions.find(({ Id }) => Id === VersionId);
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Version?.FileId);
+    if (Version === undefined || Entry === undefined) return;
+    const NextVersion = Math.max(...this.#Snapshot.Versions.filter(({ FileId }) => FileId === Entry.Id).map(({ Version: Value }) => Value)) + 1;
+    Entry.Version = NextVersion;
+    Entry.ModifiedAt = new Date().toISOString();
+    this.#Snapshot.Versions.unshift({
+      Author: this.#Snapshot.CurrentUser.DisplayName,
+      CreatedAt: Entry.ModifiedAt,
+      FileId: Entry.Id,
+      Id: Uuid(String(++this.#Sequence)),
+      Size: Version.Size,
+      Version: NextVersion,
     });
   }
 
-  async revokeSession(sessionId: string): Promise<void> {
-    const index = this.#snapshot.sessions.findIndex(({ id }) => id === sessionId);
-    if (this.#snapshot.sessions[index]?.current === true) return;
-    if (index !== -1) this.#snapshot.sessions.splice(index, 1);
+  async revokeSession(SessionId: string): Promise<void> {
+    const Index = this.#Snapshot.Sessions.findIndex(({ Id }) => Id === SessionId);
+    if (this.#Snapshot.Sessions[Index]?.Current === true) return;
+    if (Index !== -1) this.#Snapshot.Sessions.splice(Index, 1);
   }
 
   async markPrivacyRead(): Promise<void> {
-    for (const event of this.#snapshot.privacy) event.unread = false;
+    for (const Event of this.#Snapshot.Privacy) Event.Unread = false;
   }
 
-  async suspendUser(userId: string): Promise<void> {
-    const user = this.#snapshot.admin.users.find(({ id }) => id === userId);
-    if (user !== undefined) user.status = user.status === "active" ? "suspended" : "active";
+  async suspendUser(UserId: string): Promise<void> {
+    const User = this.#Snapshot.Admin.Users.find(({ Id }) => Id === UserId);
+    if (User !== undefined) User.Status = User.Status === "active" ? "suspended" : "active";
   }
 
-  async createGroup(name: string): Promise<void> {
-    const group: AdminGroup = { id: uuid(String(++this.#sequence)), managerCount: 1, memberCount: 1, name };
-    this.#snapshot.admin.groups.push(group);
+  async createGroup(Name: string): Promise<void> {
+    const Group: AdminGroup = { Id: Uuid(String(++this.#Sequence)), ManagerCount: 1, MemberCount: 1, Name };
+    this.#Snapshot.Admin.Groups.push(Group);
   }
 
-  async createSharedDrive(name: string): Promise<void> {
-    const drive: AdminDrive = {
-      id: uuid(String(++this.#sequence)),
-      name,
-      quotaBytes: 10_995_116_277_760,
-      usedBytes: 0,
+  async createSharedDrive(Name: string): Promise<void> {
+    const Drive: AdminDrive = {
+      Id: Uuid(String(++this.#Sequence)),
+      Name,
+      QuotaBytes: 10_995_116_277_760,
+      UsedBytes: 0,
     };
-    this.#snapshot.admin.drives.push(drive);
+    this.#Snapshot.Admin.Drives.push(Drive);
   }
 
-  #updateEntries(entryIds: readonly string[], update: (entry: FileEntry) => FileEntry): void {
-    const wanted = new Set(entryIds);
-    this.#snapshot.entries = this.#snapshot.entries.map((entry) => wanted.has(entry.id) ? update(entry) : entry);
+  #updateEntries(EntryIds: readonly string[], Update: (Entry: FileEntry) => FileEntry): void {
+    const Wanted = new Set(EntryIds);
+    this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) => Wanted.has(Entry.Id) ? Update(Entry) : Entry);
   }
 }

@@ -11,24 +11,24 @@ import type { CreateShareInput } from "./client.js";
 import type { FileEntry, PrivacyEvent, SessionRecord, ShareRecord, UploadRecord, VersionRecord } from "./model.js";
 import type { Strings } from "./strings.js";
 
-function formatBytes(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(value);
+function FormatBytes(Value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(Value);
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+function FormatDate(Value: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Value));
 }
 
-export function UploadsView({ strings, uploads }: { strings: Strings; uploads: readonly UploadRecord[] }): ReactNode {
+export function UploadsView({ Strings, Uploads }: { Strings: Strings; Uploads: readonly UploadRecord[] }): ReactNode {
   return (
     <section aria-labelledby="uploads-heading" className="fb-activity-view">
-      <header className="fb-page-heading"><div><h1 id="uploads-heading">{strings.uploads}</h1><p className="fb-muted">{strings.uploadPrivacy}</p></div></header>
+      <header className="fb-page-heading"><div><h1 id="uploads-heading">{Strings.uploads}</h1><p className="fb-muted">{Strings.uploadPrivacy}</p></div></header>
       <div className="fb-card-list" role="list">
-        {uploads.map((upload) => (
-          <article className="fb-activity-card" key={upload.id} role="listitem">
-            <FileBeltIcon icon={UploadCloud} />
-            <div className="fb-grow"><strong><BidiText>{upload.name}</BidiText></strong><span className="fb-muted">{formatBytes(upload.size)}</span><ProgressBar aria-label={`${upload.name} ${strings.progress}`} max={1} value={upload.progress} /></div>
-            <StatusPill kind={upload.state === "complete" ? "success" : upload.state === "failed" ? "danger" : "informative"}>{upload.state === "complete" ? strings.ready : strings.uploading}</StatusPill>
+        {Uploads.map((Upload) => (
+          <article className="fb-activity-card" key={Upload.Id} role="listitem">
+            <FileBeltIcon Icon={UploadCloud} />
+            <div className="fb-grow"><strong><BidiText>{Upload.Name}</BidiText></strong><span className="fb-muted">{FormatBytes(Upload.Size)}</span><ProgressBar aria-label={`${Upload.Name} ${Strings.progress}`} max={1} value={Upload.Progress} /></div>
+            <StatusPill Kind={Upload.State === "complete" ? "success" : Upload.State === "failed" ? "danger" : "informative"}>{Upload.State === "complete" ? Strings.ready : Strings.uploading}</StatusPill>
           </article>
         ))}
       </div>
@@ -37,26 +37,26 @@ export function UploadsView({ strings, uploads }: { strings: Strings; uploads: r
 }
 
 export function VersionsView({
-  file,
-  onRestore,
-  strings,
-  versions,
+  File,
+  onRestore: OnRestore,
+  Strings,
+  Versions,
 }: {
-  file: FileEntry | undefined;
-  onRestore(versionId: string): Promise<void>;
-  strings: Strings;
-  versions: readonly VersionRecord[];
+  File: FileEntry | undefined;
+  onRestore(VersionId: string): Promise<void>;
+  Strings: Strings;
+  Versions: readonly VersionRecord[];
 }): ReactNode {
-  const matching = file === undefined ? [] : versions.filter(({ fileId }) => fileId === file.id);
+  const Matching = File === undefined ? [] : Versions.filter(({ FileId }) => FileId === File.Id);
   return (
     <section aria-labelledby="versions-heading" className="fb-activity-view">
-      <header className="fb-page-heading"><div><h1 id="versions-heading">{strings.versions}</h1><p className="fb-muted">{file === undefined ? strings.noVersions : <BidiText>{file.name}</BidiText>}</p></div></header>
+      <header className="fb-page-heading"><div><h1 id="versions-heading">{Strings.versions}</h1><p className="fb-muted">{File === undefined ? Strings.noVersions : <BidiText>{File.Name}</BidiText>}</p></div></header>
       <div className="fb-card-list" role="list">
-        {matching.map((version, index) => (
-          <article className="fb-activity-card" key={version.id} role="listitem">
-            <FileBeltIcon icon={Clock3} />
-            <div className="fb-grow"><strong>{strings.version} {version.version}</strong><span className="fb-muted">{strings.versionCreator}: <BidiText>{version.author}</BidiText> · <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time> · {formatBytes(version.size)}</span></div>
-            {index === 0 ? <StatusPill kind="brand">{strings.current}</StatusPill> : <Button appearance="secondary" icon={<RotateCcw aria-hidden="true" size={18} strokeWidth={1.75} />} onClick={() => void onRestore(version.id)}>{strings.restoreVersion}</Button>}
+        {Matching.map((Version, Index) => (
+          <article className="fb-activity-card" key={Version.Id} role="listitem">
+            <FileBeltIcon Icon={Clock3} />
+            <div className="fb-grow"><strong>{Strings.version} {Version.Version}</strong><span className="fb-muted">{Strings.versionCreator}: <BidiText>{Version.Author}</BidiText> · <time dateTime={Version.CreatedAt}>{FormatDate(Version.CreatedAt)}</time> · {FormatBytes(Version.Size)}</span></div>
+            {Index === 0 ? <StatusPill Kind="brand">{Strings.current}</StatusPill> : <Button appearance="secondary" icon={<RotateCcw aria-hidden="true" size={18} strokeWidth={1.75} />} onClick={() => void OnRestore(Version.Id)}>{Strings.restoreVersion}</Button>}
           </article>
         ))}
       </div>
@@ -65,69 +65,69 @@ export function VersionsView({
 }
 
 export function SharesView({
-  file,
-  onCreate,
-  onRevoke,
-  shares,
-  strings,
+  File,
+  onCreate: OnCreate,
+  onRevoke: OnRevoke,
+  Shares,
+  Strings,
 }: {
-  file: FileEntry | undefined;
-  onCreate(input: CreateShareInput): Promise<void>;
-  onRevoke(shareId: string): Promise<void>;
-  shares: readonly ShareRecord[];
-  strings: Strings;
+  File: FileEntry | undefined;
+  onCreate(Input: CreateShareInput): Promise<void>;
+  onRevoke(ShareId: string): Promise<void>;
+  Shares: readonly ShareRecord[];
+  Strings: Strings;
 }): ReactNode {
-  const [permission, setPermission] = useState<ShareRecord["permission"]>("Viewer");
-  const [target, setTarget] = useState("");
-  const [busy, setBusy] = useState(false);
-  const matching = file === undefined ? shares : shares.filter(({ resourceId }) => resourceId === file.id);
+  const [Permission, SetPermission] = useState<ShareRecord["Permission"]>("Viewer");
+  const [Target, SetTarget] = useState("");
+  const [Busy, SetBusy] = useState(false);
+  const Matching = File === undefined ? Shares : Shares.filter(({ ResourceId }) => ResourceId === File.Id);
 
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    if (file === undefined || target.trim().length === 0) return;
-    setBusy(true);
+  const Submit = async (Event: FormEvent): Promise<void> => {
+    Event.preventDefault();
+    if (File === undefined || Target.trim().length === 0) return;
+    SetBusy(true);
     try {
-      await onCreate({ fileId: file.id, kind: "direct", permission, target: target.trim() });
-      setTarget("");
+      await OnCreate({ FileId: File.Id, Kind: "direct", Permission, Target: Target.trim() });
+      SetTarget("");
     } finally {
-      setBusy(false);
+      SetBusy(false);
     }
   };
 
   return (
     <section aria-labelledby="shares-heading" className="fb-activity-view">
-      <header className="fb-page-heading"><div><h1 id="shares-heading">{strings.shares}</h1><p className="fb-muted">{file === undefined ? strings.noSelection : <BidiText>{file.name}</BidiText>}</p></div></header>
-      {file !== undefined ? (
-        <form className="fb-share-form" onSubmit={(event) => void submit(event)}>
-          <label>{strings.shareTarget}<Input onChange={(_, data) => setTarget(data.value)} value={target} /></label>
-          <label>{strings.sharePermission}<select onChange={(event) => setPermission(event.currentTarget.value as ShareRecord["permission"])} value={permission}><option value="Viewer">{strings.viewer}</option><option value="Contributor">{strings.contributor}</option><option value="Manager">{strings.manager}</option></select></label>
-          <Button appearance="primary" disabled={busy || target.trim().length === 0} type="submit">{strings.saveShare}</Button>
+      <header className="fb-page-heading"><div><h1 id="shares-heading">{Strings.shares}</h1><p className="fb-muted">{File === undefined ? Strings.noSelection : <BidiText>{File.Name}</BidiText>}</p></div></header>
+      {File !== undefined ? (
+        <form className="fb-share-form" onSubmit={(Event) => void Submit(Event)}>
+          <label>{Strings.shareTarget}<Input onChange={(Ignored, Data) => SetTarget(Data.value)} value={Target} /></label>
+          <label>{Strings.sharePermission}<select onChange={(Event) => SetPermission(Event.currentTarget.value as ShareRecord["Permission"])} value={Permission}><option value="Viewer">{Strings.viewer}</option><option value="Contributor">{Strings.contributor}</option><option value="Manager">{Strings.manager}</option></select></label>
+          <Button appearance="primary" disabled={Busy || Target.trim().length === 0} type="submit">{Strings.saveShare}</Button>
         </form>
       ) : null}
       <div className="fb-card-list" role="list">
-        {matching.map((share) => (
-          <article className="fb-activity-card" key={share.id} role="listitem">
-            <FileBeltIcon icon={Link2} />
-            <div className="fb-grow"><strong><BidiText>{share.resourceName}</BidiText></strong><span className="fb-muted"><BidiText>{share.target}</BidiText> · {share.permission}{share.expiresAt === undefined ? "" : ` · expires ${formatDate(share.expiresAt)}`}</span></div>
-            <Button appearance="secondary" onClick={() => void onRevoke(share.id)}>{strings.revoke}</Button>
+        {Matching.map((Share) => (
+          <article className="fb-activity-card" key={Share.Id} role="listitem">
+            <FileBeltIcon Icon={Link2} />
+            <div className="fb-grow"><strong><BidiText>{Share.ResourceName}</BidiText></strong><span className="fb-muted"><BidiText>{Share.Target}</BidiText> · {Share.Permission}{Share.ExpiresAt === undefined ? "" : ` · expires ${FormatDate(Share.ExpiresAt)}`}</span></div>
+            <Button appearance="secondary" onClick={() => void OnRevoke(Share.Id)}>{Strings.revoke}</Button>
           </article>
         ))}
-        {matching.length === 0 ? <p>{strings.noShares}</p> : null}
+        {Matching.length === 0 ? <p>{Strings.noShares}</p> : null}
       </div>
     </section>
   );
 }
 
-export function SessionsView({ onRevoke, sessions, strings }: { onRevoke(id: string): Promise<void>; sessions: readonly SessionRecord[]; strings: Strings }): ReactNode {
+export function SessionsView({ onRevoke: OnRevoke, Sessions, Strings }: { onRevoke(Id: string): Promise<void>; Sessions: readonly SessionRecord[]; Strings: Strings }): ReactNode {
   return (
     <section aria-labelledby="sessions-heading" className="fb-activity-view">
-      <header className="fb-page-heading"><div><h1 id="sessions-heading">{strings.sessions}</h1><p className="fb-muted">{strings.sessionsDescription}</p></div></header>
+      <header className="fb-page-heading"><div><h1 id="sessions-heading">{Strings.sessions}</h1><p className="fb-muted">{Strings.sessionsDescription}</p></div></header>
       <div className="fb-card-list" role="list">
-        {sessions.map((session) => (
-          <article className="fb-activity-card" key={session.id} role="listitem">
-            <FileBeltIcon icon={ShieldCheck} />
-            <div className="fb-grow"><strong><BidiText>{session.device}</BidiText></strong><span className="fb-muted"><BidiText>{session.location}</BidiText> · <time dateTime={session.lastActiveAt}>{formatDate(session.lastActiveAt)}</time></span></div>
-            {session.current ? <StatusPill kind="success">{strings.activeSession}</StatusPill> : <Button appearance="secondary" onClick={() => void onRevoke(session.id)}>{strings.revoke}</Button>}
+        {Sessions.map((Session) => (
+          <article className="fb-activity-card" key={Session.Id} role="listitem">
+            <FileBeltIcon Icon={ShieldCheck} />
+            <div className="fb-grow"><strong><BidiText>{Session.Device}</BidiText></strong><span className="fb-muted"><BidiText>{Session.Location}</BidiText> · <time dateTime={Session.LastActiveAt}>{FormatDate(Session.LastActiveAt)}</time></span></div>
+            {Session.Current ? <StatusPill Kind="success">{Strings.activeSession}</StatusPill> : <Button appearance="secondary" onClick={() => void OnRevoke(Session.Id)}>{Strings.revoke}</Button>}
           </article>
         ))}
       </div>
@@ -135,19 +135,19 @@ export function SessionsView({ onRevoke, sessions, strings }: { onRevoke(id: str
   );
 }
 
-export function PrivacyView({ events, onMarkRead, strings }: { events: readonly PrivacyEvent[]; onMarkRead(): Promise<void>; strings: Strings }): ReactNode {
+export function PrivacyView({ Events, onMarkRead: OnMarkRead, Strings }: { Events: readonly PrivacyEvent[]; onMarkRead(): Promise<void>; Strings: Strings }): ReactNode {
   return (
     <section aria-labelledby="privacy-heading" className="fb-activity-view">
-      <header className="fb-page-heading"><div><h1 id="privacy-heading">{strings.privacy}</h1><p className="fb-muted">{strings.privacyDescription}</p></div><Button appearance="secondary" disabled={!events.some(({ unread }) => unread)} onClick={() => void onMarkRead()}>{strings.markRead}</Button></header>
+      <header className="fb-page-heading"><div><h1 id="privacy-heading">{Strings.privacy}</h1><p className="fb-muted">{Strings.privacyDescription}</p></div><Button appearance="secondary" disabled={!Events.some(({ Unread }) => Unread)} onClick={() => void OnMarkRead()}>{Strings.markRead}</Button></header>
       <div className="fb-card-list" role="list">
-        {events.map((event) => (
-          <article className={event.unread ? "fb-activity-card is-unread" : "fb-activity-card"} key={event.id} role="listitem">
-            <FileBeltIcon icon={BellRing} />
-            <div className="fb-grow"><strong><BidiText>{event.action}</BidiText></strong><span className="fb-muted"><BidiText>{event.actor}</BidiText> · <time dateTime={event.createdAt}>{formatDate(event.createdAt)}</time></span></div>
-            {event.unread ? <span className="fb-unread-dot"><span className="fb-sr-only">Unread</span></span> : null}
+        {Events.map((Event) => (
+          <article className={Event.Unread ? "fb-activity-card is-unread" : "fb-activity-card"} key={Event.Id} role="listitem">
+            <FileBeltIcon Icon={BellRing} />
+            <div className="fb-grow"><strong><BidiText>{Event.Action}</BidiText></strong><span className="fb-muted"><BidiText>{Event.Actor}</BidiText> · <time dateTime={Event.CreatedAt}>{FormatDate(Event.CreatedAt)}</time></span></div>
+            {Event.Unread ? <span className="fb-unread-dot"><span className="fb-sr-only">Unread</span></span> : null}
           </article>
         ))}
-        {events.length === 0 ? <p>{strings.noPrivacyEvents}</p> : null}
+        {Events.length === 0 ? <p>{Strings.noPrivacyEvents}</p> : null}
       </div>
     </section>
   );

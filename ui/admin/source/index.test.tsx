@@ -7,19 +7,19 @@ import AdminPanel from "./index.js";
 
 describe("AdminPanel", () => {
   it("exposes tenant controls with labelled tabs and bidi-isolated user content", () => {
-    const markup = renderToStaticMarkup(
+    const Markup = renderToStaticMarkup(
       <AdminPanel
-        drives={[]}
-        groups={[]}
+        Drives={[]}
+        Groups={[]}
         onCreateGroup={async () => undefined}
         onCreateSharedDrive={async () => undefined}
         onToggleUserSuspension={async () => undefined}
-        users={[{ email: "layla@example.test", id: "user-1", name: "ليلى", status: "active" }]}
+        Users={[{ Email: "layla@example.test", Id: "user-1", Name: "ليلى", Status: "active" }]}
       />,
     );
 
-    expect(markup).toContain('aria-label="Tenant administration"');
-    expect(markup).toContain('<bdi dir="auto">ليلى</bdi>');
-    expect(markup).toContain("Sensitive changes require recent sign-in");
+    expect(Markup).toContain('aria-label="Tenant administration"');
+    expect(Markup).toContain('<bdi dir="auto">ليلى</bdi>');
+    expect(Markup).toContain("Sensitive changes require recent sign-in");
   });
 });

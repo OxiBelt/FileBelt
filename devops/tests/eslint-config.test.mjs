@@ -5,6 +5,7 @@ import { URL, fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { ESLint } from "eslint";
+import repositoryConfig from "../../eslint.config.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const eslint = new ESLint({
@@ -24,40 +25,78 @@ function ruleIds(result) {
   return new Set(result.messages.map(({ ruleId }) => ruleId));
 }
 
-test("accepts FileBelt style and the contract-safe naming matrix", async () => {
-  const result = await lintText(
-    `import { external_name } from "./external.js";
+test("exports the OxiBelt PascalCase selector matrix", () => {
+  const policy = repositoryConfig.find(({ rules }) =>
+    Array.isArray(rules?.["@typescript-eslint/naming-convention"]),
+  );
 
+  assert.ok(policy);
+  assert.deepEqual(policy.rules["@typescript-eslint/naming-convention"], [
+    "error",
+    {
+      selector: ["function", "variable"],
+      filter: {
+        regex: "^use[A-Z][A-Za-z0-9]*$",
+        match: true,
+      },
+      format: null,
+    },
+    {
+      selector: ["variableLike", "parameterProperty", "classProperty", "typeProperty"],
+      format: ["PascalCase"],
+    },
+    {
+      selector: "typeLike",
+      format: ["PascalCase"],
+    },
+  ]);
+});
+
+test("accepts PascalCase declarations and contract-safe boundaries", async () => {
+  const result = await lintText(
+    `import createClient, { external_name } from "./external.js";
+
+/* eslint-disable @typescript-eslint/naming-convention -- Wire fields retain their external spelling. */
 export interface WireShape {
   external_name: string;
 }
+/* eslint-enable @typescript-eslint/naming-convention */
 
-export const UPPER_CASE = 1;
-export const camelCaseBinding = 2;
+export interface InternalShape {
+  InternalProperty: string;
+}
+
 export const PascalCaseBinding = () => <div title="double quoted" />;
 
-export function camelCaseFunction(_inputValue: string): string {
-  return _inputValue;
+export function PascalCaseFunction(InputValue: string): string {
+  return InputValue;
 }
 
 export function PascalCaseComponent(): JSX.Element {
   return <span data-external_name="preserved">component</span>;
 }
 
+export function useExternalHook(): number {
+  return 1;
+}
+
 export class RequestHandler {
-  methodName(inputValue: string): string {
-    return inputValue;
+  PascalProperty = 1;
+
+  methodName(InputValue: string): string {
+    return InputValue;
   }
 }
 
 export class WirePayload {
-  constructor(public readonly external_name: string) {}
+  constructor(public readonly InternalValue: string) {}
 }
 
-export function readWireName(value: WireShape): string {
-  const { external_name } = value;
-  const wireObject = { external_name };
-  return wireObject.external_name;
+export function ReadWireName(Value: WireShape): string {
+  const { external_name: ExternalName } = Value;
+  const WireObject = { external_name: ExternalName };
+  void createClient;
+  return WireObject.external_name;
 }
 
 export { external_name };
@@ -69,13 +108,15 @@ export { external_name };
   assert.equal(result.warningCount, 0);
 });
 
-test("rejects style and identifier violations as errors", async () => {
+test("rejects non-PascalCase declarations as errors", async () => {
   const result = await lintText(
     `export interface bad_shape {
-  value: string;
+  bad_property: string;
 }
 
 export class bad_handler {
+  bad_field = 1;
+
   bad_method(input_value: string): string {
     return input_value;
   }
@@ -83,9 +124,13 @@ export class bad_handler {
 
 export function bad_name(input_value: string): string {
     let mutable_value = input_value
-    const local_value = 'bad'
-    mutable_value += local_value
+    const UPPER_CASE = 'bad'
+    mutable_value += UPPER_CASE
     return <span title='single quoted'>{mutable_value}</span>
+}
+
+export class PascalClass {
+  constructor(public bad_parameter_property: string) {}
 }
 `,
     "ui/web/source/eslint-policy-invalid.tsx",
@@ -106,18 +151,24 @@ export function bad_name(input_value: string): string {
     .map(({ message }) => message);
   for (const name of [
     "bad_shape",
+    "bad_property",
     "bad_handler",
-    "bad_method",
+    "bad_field",
     "input_value",
     "bad_name",
     "mutable_value",
-    "local_value",
+    "UPPER_CASE",
+    "bad_parameter_property",
   ]) {
     assert.ok(
       namingMessages.some((message) => message.includes(`\`${name}\``)),
       `expected a naming error for ${name}: ${JSON.stringify(result.messages)}`,
     );
   }
+  assert.ok(
+    !namingMessages.some((message) => message.includes("`bad_method`")),
+    `did not expect methods to be checked: ${JSON.stringify(namingMessages)}`,
+  );
   assert.equal(result.warningCount, 0);
 });
 

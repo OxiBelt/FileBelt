@@ -1,85 +1,88 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, Input, Tab, TabList } from "@fluentui/react-components";
-import { CircleGauge, HardDrive, Plus, ShieldCheck, Users } from "lucide-react";
+import { Badge, Button, Input, Tab as FluentTab, TabList } from "@fluentui/react-components";
+import { CircleGauge, HardDrive, Plus, ShieldCheck, Users as UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
-import { adminEn as strings } from "./strings.js";
+import { AdminEn as strings } from "./strings.js";
 
 export interface AdminUserView {
-  email: string;
-  id: string;
-  name: string;
-  status: "active" | "suspended";
+  Email: string;
+  Id: string;
+  Name: string;
+  Status: "active" | "suspended";
 }
 
 export interface AdminGroupView {
-  id: string;
-  managerCount: number;
-  memberCount: number;
-  name: string;
+  Id: string;
+  ManagerCount: number;
+  MemberCount: number;
+  Name: string;
 }
 
 export interface AdminDriveView {
-  id: string;
-  name: string;
-  quotaBytes: number;
-  usedBytes: number;
+  Id: string;
+  Name: string;
+  QuotaBytes: number;
+  UsedBytes: number;
 }
 
 export interface AdminPanelProps {
-  drives: readonly AdminDriveView[];
-  groups: readonly AdminGroupView[];
-  onCreateGroup(name: string): Promise<void>;
-  onCreateSharedDrive(name: string): Promise<void>;
-  onToggleUserSuspension(userId: string): Promise<void>;
-  users: readonly AdminUserView[];
+  Drives: readonly AdminDriveView[];
+  Groups: readonly AdminGroupView[];
+  onCreateGroup(Name: string): Promise<void>;
+  onCreateSharedDrive(Name: string): Promise<void>;
+  onToggleUserSuspension(UserId: string): Promise<void>;
+  Users: readonly AdminUserView[];
 }
 
 type AdminTab = "drives" | "groups" | "users";
 
-function formatBytes(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(value);
+function FormatBytes(Value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(Value);
 }
 
-function Bidi({ children }: { children: string }): ReactNode {
-  return <bdi dir="auto">{children}</bdi>;
+function Bidi({ children: Children }: {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
+  children: string;
+}): ReactNode {
+  return <bdi dir="auto">{Children}</bdi>;
 }
 
 function CreationForm({
-  label,
-  onCreate,
+  Label,
+  onCreate: OnCreate,
 }: {
-  label: string;
-  onCreate(value: string): Promise<void>;
+  Label: string;
+  onCreate(Value: string): Promise<void>;
 }): ReactNode {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [Name, SetName] = useState("");
+  const [Busy, SetBusy] = useState(false);
 
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    const trimmed = name.trim();
-    if (trimmed.length === 0) return;
-    setBusy(true);
+  const Submit = async (Event: FormEvent): Promise<void> => {
+    Event.preventDefault();
+    const Trimmed = Name.trim();
+    if (Trimmed.length === 0) return;
+    SetBusy(true);
     try {
-      await onCreate(trimmed);
-      setName("");
+      await OnCreate(Trimmed);
+      SetName("");
     } finally {
-      setBusy(false);
+      SetBusy(false);
     }
   };
 
   return (
-    <form className="fb-admin-create" onSubmit={(event) => void submit(event)}>
+    <form className="fb-admin-create" onSubmit={(Event) => void Submit(Event)}>
       <Input
-        aria-label={label}
-        disabled={busy}
-        onChange={(_, data) => setName(data.value)}
-        placeholder={label}
-        value={name}
+        aria-label={Label}
+        disabled={Busy}
+        onChange={(Ignored, Data) => SetName(Data.value)}
+        placeholder={Label}
+        value={Name}
       />
-      <Button appearance="primary" disabled={busy || name.trim().length === 0} icon={<Plus aria-hidden="true" size={20} strokeWidth={1.75} />} type="submit">
+      <Button appearance="primary" disabled={Busy || Name.trim().length === 0} icon={<Plus aria-hidden="true" size={20} strokeWidth={1.75} />} type="submit">
         {strings.create}
       </Button>
     </form>
@@ -87,22 +90,22 @@ function CreationForm({
 }
 
 export default function AdminPanel({
-  drives,
-  groups,
-  onCreateGroup,
-  onCreateSharedDrive,
-  onToggleUserSuspension,
-  users,
+  Drives,
+  Groups,
+  onCreateGroup: OnCreateGroup,
+  onCreateSharedDrive: OnCreateSharedDrive,
+  onToggleUserSuspension: OnToggleUserSuspension,
+  Users,
 }: AdminPanelProps): ReactNode {
-  const [tab, setTab] = useState<AdminTab>("users");
-  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [Tab, SetTab] = useState<AdminTab>("users");
+  const [BusyUserId, SetBusyUserId] = useState<string | null>(null);
 
-  const toggleUser = async (userId: string): Promise<void> => {
-    setBusyUserId(userId);
+  const ToggleUser = async (UserId: string): Promise<void> => {
+    SetBusyUserId(UserId);
     try {
-      await onToggleUserSuspension(userId);
+      await OnToggleUserSuspension(UserId);
     } finally {
-      setBusyUserId(null);
+      SetBusyUserId(null);
     }
   };
 
@@ -116,45 +119,45 @@ export default function AdminPanel({
         </div>
       </header>
 
-      <TabList aria-label={strings.heading} onTabSelect={(_, data) => setTab(data.value as AdminTab)} selectedValue={tab}>
-        <Tab icon={<Users aria-hidden="true" size={20} strokeWidth={1.75} />} value="users">{strings.users}</Tab>
-        <Tab icon={<CircleGauge aria-hidden="true" size={20} strokeWidth={1.75} />} value="groups">{strings.groups}</Tab>
-        <Tab icon={<HardDrive aria-hidden="true" size={20} strokeWidth={1.75} />} value="drives">{strings.drives}</Tab>
+      <TabList aria-label={strings.heading} onTabSelect={(Ignored, Data) => SetTab(Data.value as AdminTab)} selectedValue={Tab}>
+        <FluentTab icon={<UsersIcon aria-hidden="true" size={20} strokeWidth={1.75} />} value="users">{strings.users}</FluentTab>
+        <FluentTab icon={<CircleGauge aria-hidden="true" size={20} strokeWidth={1.75} />} value="groups">{strings.groups}</FluentTab>
+        <FluentTab icon={<HardDrive aria-hidden="true" size={20} strokeWidth={1.75} />} value="drives">{strings.drives}</FluentTab>
       </TabList>
 
-      {tab === "users" ? (
+      {Tab === "users" ? (
         <div className="fb-admin-cards" role="list">
-          {users.map((user) => (
-            <article className="fb-admin-card" key={user.id} role="listitem">
+          {Users.map((User) => (
+            <article className="fb-admin-card" key={User.Id} role="listitem">
               <div>
-                <h2><Bidi>{user.name}</Bidi></h2>
-                <p className="fb-muted"><Bidi>{user.email}</Bidi></p>
+                <h2><Bidi>{User.Name}</Bidi></h2>
+                <p className="fb-muted"><Bidi>{User.Email}</Bidi></p>
               </div>
-              <Badge appearance="tint" color={user.status === "active" ? "success" : "danger"}>
-                {user.status === "active" ? strings.active : strings.suspended}
+              <Badge appearance="tint" color={User.Status === "active" ? "success" : "danger"}>
+                {User.Status === "active" ? strings.active : strings.suspended}
               </Badge>
               <Button
-                appearance={user.status === "active" ? "secondary" : "primary"}
-                disabled={busyUserId === user.id}
-                onClick={() => void toggleUser(user.id)}
+                appearance={User.Status === "active" ? "secondary" : "primary"}
+                disabled={BusyUserId === User.Id}
+                onClick={() => void ToggleUser(User.Id)}
               >
-                {user.status === "active" ? strings.suspend : strings.resume}
+                {User.Status === "active" ? strings.suspend : strings.resume}
               </Button>
             </article>
           ))}
         </div>
       ) : null}
 
-      {tab === "groups" ? (
+      {Tab === "groups" ? (
         <div>
-          <CreationForm label={strings.createGroup} onCreate={onCreateGroup} />
+          <CreationForm Label={strings.createGroup} onCreate={OnCreateGroup} />
           <div className="fb-admin-cards" role="list">
-            {groups.map((group) => (
-              <article className="fb-admin-card" key={group.id} role="listitem">
-                <div><h2><Bidi>{group.name}</Bidi></h2></div>
+            {Groups.map((Group) => (
+              <article className="fb-admin-card" key={Group.Id} role="listitem">
+                <div><h2><Bidi>{Group.Name}</Bidi></h2></div>
                 <dl className="fb-inline-stats">
-                  <div><dt>{strings.memberCount}</dt><dd>{group.memberCount}</dd></div>
-                  <div><dt>{strings.managerCount}</dt><dd>{group.managerCount}</dd></div>
+                  <div><dt>{strings.memberCount}</dt><dd>{Group.MemberCount}</dd></div>
+                  <div><dt>{strings.managerCount}</dt><dd>{Group.ManagerCount}</dd></div>
                 </dl>
               </article>
             ))}
@@ -162,16 +165,16 @@ export default function AdminPanel({
         </div>
       ) : null}
 
-      {tab === "drives" ? (
+      {Tab === "drives" ? (
         <div>
-          <CreationForm label={strings.driveName} onCreate={onCreateSharedDrive} />
+          <CreationForm Label={strings.driveName} onCreate={OnCreateSharedDrive} />
           <div className="fb-admin-cards" role="list">
-            {drives.map((drive) => (
-              <article className="fb-admin-card" key={drive.id} role="listitem">
-                <div><h2><Bidi>{drive.name}</Bidi></h2><p className="fb-muted">{strings.quota}: {formatBytes(drive.quotaBytes)}</p></div>
+            {Drives.map((Drive) => (
+              <article className="fb-admin-card" key={Drive.Id} role="listitem">
+                <div><h2><Bidi>{Drive.Name}</Bidi></h2><p className="fb-muted">{strings.quota}: {FormatBytes(Drive.QuotaBytes)}</p></div>
                 <div className="fb-quota">
-                  <span>{strings.usage}: {formatBytes(drive.usedBytes)}</span>
-                  <progress aria-label={`${drive.name} ${strings.usage}`} max={drive.quotaBytes} value={drive.usedBytes} />
+                  <span>{strings.usage}: {FormatBytes(Drive.UsedBytes)}</span>
+                  <progress aria-label={`${Drive.Name} ${strings.usage}`} max={Drive.QuotaBytes} value={Drive.UsedBytes} />
                 </div>
               </article>
             ))}

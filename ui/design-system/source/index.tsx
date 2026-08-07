@@ -16,7 +16,7 @@ export type ThemeChoice = "system" | "light" | "dark";
 export type ResolvedTheme = Exclude<ThemeChoice, "system">;
 export type Density = "comfortable" | "compact";
 
-const fileBeltBrand: BrandVariants = {
+const FileBeltBrand: BrandVariants = {
   10: "#02050a",
   20: "#0b1727",
   30: "#102842",
@@ -35,129 +35,133 @@ const fileBeltBrand: BrandVariants = {
   160: "#f7faff",
 };
 
-const lightTheme = createLightTheme(fileBeltBrand);
-const darkTheme = createDarkTheme(fileBeltBrand);
+const LightTheme = createLightTheme(FileBeltBrand);
+const DarkTheme = createDarkTheme(FileBeltBrand);
 
-export function resolveTheme(
-  choice: ThemeChoice,
-  systemPrefersDark: boolean,
+export function ResolveTheme(
+  Choice: ThemeChoice,
+  SystemPrefersDark: boolean,
 ): ResolvedTheme {
-  return choice === "system" ? (systemPrefersDark ? "dark" : "light") : choice;
+  return Choice === "system" ? (SystemPrefersDark ? "dark" : "light") : Choice;
 }
 
 function useSystemTheme(): boolean {
-  const [prefersDark, setPrefersDark] = useState(() =>
+  const [PrefersDark, SetPrefersDark] = useState(() =>
     typeof window === "undefined"
       ? false
       : window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
 
   useEffect(() => {
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = (): void => setPrefersDark(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    const Query = window.matchMedia("(prefers-color-scheme: dark)");
+    const Update = (): void => SetPrefersDark(Query.matches);
+    Query.addEventListener("change", Update);
+    return () => Query.removeEventListener("change", Update);
   }, []);
 
-  return prefersDark;
+  return PrefersDark;
 }
 
 export interface FileBeltProviderProps extends PropsWithChildren {
-  density: Density;
-  themeChoice: ThemeChoice;
+  Density: Density;
+  ThemeChoice: ThemeChoice;
 }
 
 export function FileBeltProvider({
-  children,
-  density,
-  themeChoice,
+  children: Children,
+  Density,
+  ThemeChoice,
 }: FileBeltProviderProps): ReactNode {
-  const systemPrefersDark = useSystemTheme();
-  const resolved = resolveTheme(themeChoice, systemPrefersDark);
-  const theme = useMemo<Theme>(
-    () => (resolved === "dark" ? darkTheme : lightTheme),
-    [resolved],
+  const SystemPrefersDark = useSystemTheme();
+  const Resolved = ResolveTheme(ThemeChoice, SystemPrefersDark);
+  const Theme = useMemo<Theme>(
+    () => (Resolved === "dark" ? DarkTheme : LightTheme),
+    [Resolved],
   );
 
   useEffect(() => {
-    document.documentElement.dataset.theme = resolved;
-    document.documentElement.dataset.density = density;
-    document.documentElement.style.colorScheme = resolved;
-  }, [density, resolved]);
+    document.documentElement.dataset.theme = Resolved;
+    document.documentElement.dataset.density = Density;
+    document.documentElement.style.colorScheme = Resolved;
+  }, [Density, Resolved]);
 
   return (
-    <FluentProvider theme={theme} className="fb-provider">
-      {children}
+    <FluentProvider theme={Theme} className="fb-provider">
+      {Children}
     </FluentProvider>
   );
 }
 
 export interface FileBeltIconProps extends Omit<LucideProps, "ref"> {
-  icon: LucideIcon;
-  label?: string;
+  Icon: LucideIcon;
+  Label?: string;
 }
 
 export function FileBeltIcon({
-  icon,
-  label,
-  size = 20,
-  strokeWidth = 1.75,
-  ...props
+  Icon,
+  Label,
+  size: Size = 20,
+  strokeWidth: StrokeWidth = 1.75,
+  ...Props
 }: FileBeltIconProps): ReactNode {
-  const Icon = icon;
   return (
     <Icon
-      {...props}
-      aria-hidden={label === undefined ? true : undefined}
-      aria-label={label}
-      role={label === undefined ? undefined : "img"}
-      size={size}
-      strokeWidth={strokeWidth}
+      {...Props}
+      aria-hidden={Label === undefined ? true : undefined}
+      aria-label={Label}
+      role={Label === undefined ? undefined : "img"}
+      size={Size}
+      strokeWidth={StrokeWidth}
     />
   );
 }
 
 export interface BidiTextProps {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
   children: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `className` contract.
   className?: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `title` contract.
   title?: string;
 }
 
-export function BidiText({ children, className, title }: BidiTextProps): ReactNode {
+export function BidiText({ children: Children, className: ClassName, title: Title }: BidiTextProps): ReactNode {
   return (
-    <bdi className={className} dir="auto" title={title}>
-      {children}
+    <bdi className={ClassName} dir="auto" title={Title}>
+      {Children}
     </bdi>
   );
 }
 
 export interface StatusPillProps {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
   children: ReactNode;
-  kind?: "brand" | "danger" | "informative" | "subtle" | "success" | "warning";
+  Kind?: "brand" | "danger" | "informative" | "subtle" | "success" | "warning";
 }
 
-export function StatusPill({ children, kind = "subtle" }: StatusPillProps): ReactNode {
+export function StatusPill({ children: Children, Kind = "subtle" }: StatusPillProps): ReactNode {
   return (
-    <Badge appearance="tint" color={kind} size="small">
-      {children}
+    <Badge appearance="tint" color={Kind} size="small">
+      {Children}
     </Badge>
   );
 }
 
 export interface BrandMarkProps {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `className` contract.
   className?: string;
-  label?: string;
+  Label?: string;
 }
 
 /** Original FileBelt mark: a secured file folded through a belt-like horizon. */
-export function BrandMark({ className, label }: BrandMarkProps): ReactNode {
+export function BrandMark({ className: ClassName, Label }: BrandMarkProps): ReactNode {
   return (
     <svg
-      aria-hidden={label === undefined ? true : undefined}
-      aria-label={label}
-      className={mergeClasses("fb-brand-mark", className)}
+      aria-hidden={Label === undefined ? true : undefined}
+      aria-label={Label}
+      className={mergeClasses("fb-brand-mark", ClassName)}
       fill="none"
-      role={label === undefined ? undefined : "img"}
+      role={Label === undefined ? undefined : "img"}
       viewBox="0 0 36 36"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -174,7 +178,7 @@ export function BrandMark({ className, label }: BrandMarkProps): ReactNode {
   );
 }
 
-export const visuallyHiddenStyle: CSSProperties = {
+export const VisuallyHiddenStyle: CSSProperties = {
   border: 0,
   clip: "rect(0 0 0 0)",
   clipPath: "inset(50%)",

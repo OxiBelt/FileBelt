@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "FileBelt Phase 3 Kubernetes deployment",
+  "title": "FileBelt Phase 4 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "networkPolicy", "monitoring", "operation"],
+  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "networkPolicy", "monitoring", "operation"],
   "properties": {
     "global": {
       "type": "object",
@@ -27,13 +27,16 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web"],
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner"],
       "properties": {
         "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
         "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
         "filebelt-worker-maintenance": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-maintenance"}}}]},
         "filebelt-tools": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-tools"}}}]},
-        "filebelt-web": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-web"}}}]}
+        "filebelt-web": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-web"}}}]},
+        "filebelt-mcp-broker": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-mcp-broker"}}}]},
+        "filebelt-controller": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-controller"}}}]},
+        "filebelt-mcp-runner": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-mcp-runner"}}}]}
       }
     },
     "deployment": {
@@ -55,12 +58,14 @@
     },
     "workloads": {
       "type": "object", "additionalProperties": false,
-      "required": ["web", "api", "io", "maintenance", "operation"],
+      "required": ["web", "api", "io", "maintenance", "mcpBroker", "controller", "operation"],
       "properties": {
         "web": {"$ref": "#/definitions/servingWorkload"},
         "api": {"$ref": "#/definitions/servingWorkload"},
         "io": {"$ref": "#/definitions/servingWorkload"},
         "maintenance": {"$ref": "#/definitions/servingWorkload"},
+        "mcpBroker": {"$ref": "#/definitions/servingWorkload"},
+        "controller": {"$ref": "#/definitions/servingWorkload"},
         "operation": {
           "type": "object", "additionalProperties": false,
           "required": ["resources"],
@@ -87,7 +92,7 @@
     },
     "secrets": {
       "type": "object", "additionalProperties": false,
-      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "capabilityPrivateKey", "capabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls"],
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "capabilityPrivateKey", "capabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls"],
       "properties": {
         "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
@@ -104,12 +109,54 @@
         "apiServerTls": {"$ref": "#/definitions/tlsSecret"},
         "ioServerTls": {"$ref": "#/definitions/tlsSecret"},
         "apiClientTls": {"$ref": "#/definitions/tlsSecret"},
-        "ioClientTls": {"$ref": "#/definitions/tlsSecret"}
+        "ioClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "mcpDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "mcpVaultKeyring": {"$ref": "#/definitions/singleKeySecret"},
+        "mcpBrokerServerTls": {"$ref": "#/definitions/tlsSecret"},
+        "apiMcpClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "mcpGatewayClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "mcpBackendClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "controllerServerTls": {"$ref": "#/definitions/tlsSecret"},
+        "controllerClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "runnerBrokerClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "runnerGatewayClientTls": {"$ref": "#/definitions/tlsSecret"}
       }
+    },
+    "mcp": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "runners", "gateway"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "runners": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "namespace", "catalogConfigMap", "catalogKey", "trustedRootConfigMap", "trustedRootKey", "bundlesConfigMap"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "namespace": {"$ref": "#/definitions/dnsLabel"},
+            "catalogConfigMap": {"$ref": "#/definitions/dnsLabel"},
+            "catalogKey": {"$ref": "#/definitions/secretKey"},
+            "trustedRootConfigMap": {"$ref": "#/definitions/dnsLabel"},
+            "trustedRootKey": {"$ref": "#/definitions/secretKey"},
+            "bundlesConfigMap": {"$ref": "#/definitions/dnsLabel"}
+          }
+        },
+        "gateway": {
+          "type": "object", "additionalProperties": false,
+          "required": ["address", "serverName", "profile"],
+          "properties": {
+            "address": {"type": "string", "minLength": 3, "maxLength": 512, "pattern": "^[A-Za-z0-9.-]+:[1-9][0-9]{0,4}$"},
+            "serverName": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9.-]+$"},
+            "profile": {"$ref": "#/definitions/dnsLabel"}
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"enabled": {"const": true}}}}
+      ]
     },
     "networkPolicy": {
       "type": "object", "additionalProperties": false,
-      "required": ["publicIngress", "monitoring", "dns", "postgres", "oidcGateway", "iggy", "otlp"],
+      "required": ["publicIngress", "monitoring", "dns", "postgres", "oidcGateway", "mcpGateway", "kubernetesApi", "iggy", "otlp"],
       "properties": {
         "publicIngress": {"$ref": "#/definitions/fromList"},
         "monitoring": {"$ref": "#/definitions/fromList"},
@@ -119,6 +166,8 @@
         },
         "postgres": {"$ref": "#/definitions/destination"},
         "oidcGateway": {"$ref": "#/definitions/destination"},
+        "mcpGateway": {"$ref": "#/definitions/optionalDestination"},
+        "kubernetesApi": {"$ref": "#/definitions/optionalDestination"},
         "iggy": {"$ref": "#/definitions/optionalDestination"},
         "otlp": {"$ref": "#/definitions/optionalDestination"}
       }
@@ -175,6 +224,10 @@
       ]
     }
   },
+  "allOf": [
+    {"if": {"properties": {"mcp": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"mcpGateway": {"properties": {"enabled": {"const": true}}}}}}}},
+    {"if": {"properties": {"mcp": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"kubernetesApi": {"properties": {"enabled": {"const": true}}}}}}}}
+  ],
   "definitions": {
     "registry": {"type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"},
     "optionalRegistry": {"type": "string", "pattern": "^(?:|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)$"},

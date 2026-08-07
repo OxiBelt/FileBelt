@@ -152,6 +152,56 @@ projection no less often than every 60 seconds. Iggy may prompt an earlier
 check, but database uncertainty or missing notification delivery never permits
 access.
 
+## MCP principals, approvals, and data grants
+
+An MCP registration is owned by exactly one internal user or service principal
+within the tenant. A personal registration belongs only to its user. A managed
+registration is derived from one administrator-owned template assigned to an
+exact user, group, or service principal; assignment never gives a tenant
+administrator implicit access to that principal's private-drive content.
+Service identities bind one internal service principal to an exact SPIFFE URI
+within an operator-configured trust domain. Deleting or suspending the service
+revokes its grants, disables its registrations, and advances authoritative
+generations.
+
+Discovery creates an immutable capability snapshot. Approval decisions bind to
+the snapshot and each exact capability fingerprint; tool names, remote
+annotations, and descriptions are untrusted display data. A registration is
+usable only when validation, authentication, capability review, quarantine,
+enablement, and revocation state all allow it. Registration, template, service,
+capability, or global-block changes invalidate affected authority in
+PostgreSQL; Iggy is not involved in that decision. Every administrator block
+mutation advances a tenant block generation and cancels active MCP invocations
+in the same transaction. Every registration credential or configuration
+generation change also revokes registration-bound data grants and pending
+approvals, supersedes capability snapshots, revokes their reviews, deletes
+pending OAuth attempts, and requires fresh discovery/review before enablement.
+
+Interactive invocation uses a five-minute intent whose server-held digest binds
+the current principal and session, application ID, registration, primitive,
+capability fingerprint, canonical arguments, and attachments. The user then
+creates an approval from that intent. The browser never supplies a keyed digest
+or silently approves. A one-shot approval is consumed atomically; a saved
+session approval is allowed only within its exact binding and expires within
+one hour. Replaying an intent, changing its request, using another session, or
+encountering stale authority fails closed.
+
+MCP data access is separate from server authentication. An exact node data
+grant binds the destination registration, current principal, drive, node,
+immutable version, permitted `READ_METADATA` and/or `READ_CONTENT` disclosure,
+ACL and namespace generations, and an expiry of no more than 30 days. The
+broker re-evaluates current Virtual ACL and generations before transfer. A new
+file head is not implied by a grant to an older version, and MCP output cannot
+write payload storage directly. Attachments are explicit, non-recursive, and
+limited to four; filenames, media types, sizes, and bytes are disclosed only
+when separately selected.
+
+Service invocation grants additionally bind the service identity, registration,
+application ID, exact capability fingerprint, argument constraints, named MCP
+data-grant IDs, an hourly quota, and a maximum 30-day expiry. They do not confer
+drive ownership or bypass Virtual ACL. Revocation, suspension, expiry, quota
+uncertainty, or a missing referenced data grant denies the operation.
+
 ## Sharing, trash, audit, and availability
 
 Direct sharing resolves only an already-linked principal by its current

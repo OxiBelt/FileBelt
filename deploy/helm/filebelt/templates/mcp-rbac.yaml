@@ -1,0 +1,36 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.mcp.runners.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "filebelt.name" . }}-controller
+  namespace: {{ .Values.mcp.runners.namespace | quote }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "controller") | indent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "filebelt.name" . }}-controller
+  namespace: {{ .Values.mcp.runners.namespace | quote }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "controller") | indent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "filebelt.name" . }}-controller
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "filebelt.name" . }}-controller
+{{- end }}

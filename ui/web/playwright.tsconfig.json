@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noUncheckedIndexedAccess": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": ["node", "@playwright/test"]
+  },
+  "include": ["browser/**/*.ts"]
+}

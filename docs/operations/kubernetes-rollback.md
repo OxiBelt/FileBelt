@@ -12,6 +12,9 @@
   generations, and overlapping backend certificate trust.
 - Iggy contains no rollback authority. PostgreSQL and the payload checkpoint
   determine recovery state.
+- MCP policy/vault schemas are forward-only. Retain every KEK generation named
+  by `filebelt.recovery.checkpoint.v2`; disabling MCP never authorizes dropping
+  its tables or deleting encrypted rows.
 
 ## Failure before workload rollout
 
@@ -25,6 +28,9 @@ logs, chart revision, SQLx ledger, and exact administrator SQL checksum.
   explicit `grants.sql`; never substitute a broader grant or default privilege.
 - A storage-probe failure leaves workloads disabled until the operator fixes
   ownership/provider semantics or selects a known-good fresh claim.
+- An MCP grant/vault verification failure leaves broker and runners disabled.
+  Repair only with a new forward migration or the reviewed narrow grants; never
+  grant the API access to `filebelt_mcp_vault`.
 
 Existing compatible workloads may continue using the expanded schema. Remove
 only the opt-in Job in the next Helm revision after evidence is retained.
@@ -37,11 +43,34 @@ only the opt-in Job in the next Helm revision after evidence is retained.
 4. Run `helm rollback` to the recorded revision and wait for every Pod to use
    the previous image digest and immutable configuration.
 5. Confirm API and I/O mTLS, database readiness, payload probe, worker fencing,
-   outbox polling, and two-user authorization behavior.
+   outbox polling, and two-user authorization behavior. If MCP remains enabled,
+   also confirm broker/gateway mTLS, explicit approval, exact-version grant,
+   revocation, and cross-user denial.
 6. Record the failed digest/config and prevent it from being selected again.
 
 Do not roll back a Secret in place. Restore the previous versioned Secret name
 or contents, update the matching generation, and roll Pods deliberately.
+
+## MCP broker or runner rollback
+
+Disable runner admission first. Cancel active runner invocations and keep the
+current controller available until it removes invocation-labeled Pods and
+bootstrap Secrets. Then set `mcp.runners.enabled=false`; do not delete arbitrary
+Pods or Secrets by name prefix alone. Streamable HTTP mediation may remain
+enabled only if the broker, vault, gateway, database policy, and revocation path
+are independently healthy.
+
+To disable all MCP, revoke affected registrations/services, wait for active
+invocations to reach a terminal state, then set `mcp.enabled=false`. Restore the
+recorded previous API/web images and configuration together so the public
+contract and SPA do not diverge. A binary expecting configuration version 2
+must receive its recorded version-2 ConfigMap; current binaries require version
+3. The expanded PostgreSQL schema and vault ciphertext remain in place.
+
+Never roll a catalog entry back by moving a digest or weakening signature
+policy. Select a previously reviewed immutable catalog/root/bundle ConfigMap and
+digest-pinned image, or leave runners disabled. Preserve old certificate and
+KEK generations through the rollback verification window.
 
 ## Incompatible schema or inconsistent state
 

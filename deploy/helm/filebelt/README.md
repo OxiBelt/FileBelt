@@ -2,24 +2,34 @@
 
 # FileBelt Helm chart
 
-This chart deploys the supported Phase 3 FileBelt application boundary on
+This chart deploys the supported Phase 4 FileBelt application boundary on
 Kubernetes `1.34` through `1.36`. It deliberately does not install PostgreSQL,
 Iggy, an OIDC provider, an OIDC egress gateway, an ingress controller, storage,
-cert-manager, a monitoring stack, or a FileBelt controller. Install it in a
+cert-manager, an MCP egress gateway, or a monitoring stack. Install it in a
 dedicated namespace: its namespace-wide default-deny policy intentionally
-isolates every Pod in that namespace.
+isolates every core Pod in that namespace. Curated runners additionally use a
+separate, pre-created namespace reserved exclusively for one FileBelt release.
 
-The chart renders four Deployments:
+The default chart renders four Deployments:
 
 - web/OxiBelt, API, and I/O each default to two replicas;
 - maintenance defaults to one replica;
 - `deployment.quiesced=true` retains the workload definitions but sets every
   replica count to zero for an operator-controlled recovery window.
 
-It never renders a StatefulSet, HPA, Kubernetes RBAC permission, Secret, PVC,
-dependency fixture, media controller, or MCP broker. The API has no payload
-mount. Only I/O, maintenance, and explicitly selected storage/recovery Jobs
-mount the existing payload claim.
+`mcp.enabled=true` adds two broker replicas. The separate
+`mcp.runners.enabled=true` opt-in adds two Lease-elected controller replicas,
+cross-namespace Pod/Secret/Lease RBAC confined to `mcp.runners.namespace`, and
+the service account used by per-invocation runner Pods. Runner Pods are created
+dynamically rather than as a Deployment. They use a digest-pinned trusted relay
+sidecar, a verified catalog server image, no service-account token, no payload
+mount, and a runner-namespace default-deny policy.
+
+It never renders a StatefulSet, HPA, Secret, PVC, dependency fixture, media
+controller, cluster-scoped RBAC, ClusterRole, or ClusterRoleBinding. The API,
+broker, controller, and runners have no payload mount. Only I/O, maintenance,
+and explicitly selected storage/recovery Jobs mount the existing payload
+claim.
 
 Application resource names are fixed under the `filebelt-*` prefix. This is
 intentional: FileBelt supports one tenant/deployment in its dedicated namespace
@@ -39,10 +49,15 @@ and the generated edge configuration can use stable Service DNS names.
   activate the default backend mTLS configuration against an older image.
 - Existing Secrets containing the exact keys listed below. The chart projects
   only named keys with file mode `0440` and never reads or renders their data.
+- When curated runners are enabled, a pre-created
+  `mcp.runners.namespace` different from the release namespace, reserved for
+  this release and labeled for the restricted Pod Security Standard. Provision
+  the runner broker/gateway client TLS Secrets in that namespace; all other
+  chart inputs remain in the release namespace.
 
 Every production image is selected by a lower-case `sha256:` digest. The
 all-zero values are static-validation sentinels, not installable artifacts;
-replace all five before live installation.
+replace all eight before live installation.
 
 ## Configuration and credentials
 
@@ -56,12 +71,43 @@ all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
 
-The default `filebelt.toml` is version 2 in Kubernetes mode and configures the
+The default `filebelt.toml` is version 3 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
 logs, Prometheus, and the OIDC egress proxy. Replace the example origin,
 issuer, tenant, administrator, backend UUID, certificate identities, and edge
-host together. The API and I/O client URI SAN allowlists contain one identity
-by default and may contain a second only during certificate rotation.
+host together. The API client URI SAN allowlist contains the web identity. The
+I/O allowlist contains the web identity and the exact MCP broker attachment
+identity; it may contain one additional retiring identity only during
+certificate rotation.
+
+MCP remains disabled in both values and application configuration by default.
+Enabling it requires an HTTPS broker URL, projected API-to-broker mTLS files,
+database and vault Secrets, an exact egress-gateway peer, an HTTPS internal I/O
+URL, projected broker-to-I/O mTLS files, and matching backend TLS identities.
+The required `[mcp.attachments]` values use
+`https://filebelt-worker-io:8081/` and the three files projected below
+`/run/secrets/mcp-backend-tls`; chart validation rejects an enabled broker when
+that narrow path is absent. Enabling curated runners additionally requires an
+operator-owned catalog ConfigMap, a Sigstore trusted-root ConfigMap, bundle
+ConfigMap, exact Kubernetes API NetworkPolicy peers, runner TLS Secrets, and a
+runner image string matching the chart's digest. The controller performs
+offline certificate, transparency-log, issuer, identity, and artifact-digest
+verification before creating any Pod.
+The `[mcp.runners] namespace` must exactly match the chart
+`mcp.runners.namespace`; chart validation rejects the release namespace. The
+controller stays in the release namespace, while its Role, leadership Lease,
+runner ServiceAccount, Pods, and bootstrap Secrets exist only in the dedicated
+runner namespace.
+The projected trust root must contain exactly one bounded Fulcio CA, Rekor key,
+and CT key and no TSA authority. Each bundle must contain one Rekor v1 entry
+with an inclusion proof and promise; its authenticated integrated time must be
+inside all three explicit validity windows. Unbounded, overlapping, or
+partially rotated trust material is rejected, so replace the trusted-root and
+bundle projections together.
+The packaged
+[`examples/mcp-runner-catalog.schema.json`](examples/mcp-runner-catalog.schema.json)
+is the operator-facing catalog shape; catalog JSON, trusted root, and bundles
+remain operator-owned inputs and are never synthesized by the chart.
 
 Secret value objects have `name`, key fields, and a non-secret `generation`.
 The Secret must already exist. Increment only the affected generation when its
@@ -80,12 +126,19 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | `publicTls` | `tls.crt`, `tls.key` | Web |
 | API/I/O server TLS | `tls.crt`, `tls.key`, `client-ca.crt` | Corresponding backend |
 | API/I/O client TLS | `tls.crt`, `tls.key`, `server-ca.crt` | Web |
+| `mcpDatabase` and `mcpVaultKeyring` | `database-url` and `keyring.json` | MCP broker |
+| broker server and API MCP client TLS | certificate, key, and exact CA keys | Broker and API |
+| MCP gateway and backend client TLS | certificate, key, and `server-ca.crt` | Broker |
+| controller server/client TLS | certificate, key, and exact CA keys | Controller and broker |
+| runner broker/gateway TLS | `tls.crt`, `tls.key`, `ca.crt` | Trusted relay sidecar only; create in `mcp.runners.namespace` |
 
 Secret names are not rollouts by themselves. Generations make an in-place
 Secret rotation explicit and auditable. Rotate backend certificates by first
 adding the new exact client URI SAN to the server allowlist, rotating the web
 client Secret and generation, verifying convergence, and then removing the old
 identity in a second immutable configuration revision.
+When MCP is enabled, changing `secrets.apiMcpClientTls.generation` is included
+in the API Pod-template checksum and therefore rolls the API client identity.
 
 ## Networking and exposure
 
@@ -102,13 +155,21 @@ The chart permits only these application paths:
 - API to DNS, PostgreSQL, the OIDC gateway, and optional OTLP;
 - I/O to DNS, PostgreSQL, and optional OTLP;
 - maintenance to DNS, PostgreSQL, optional Iggy, and optional OTLP;
+- when enabled, API to broker; broker to PostgreSQL, API, I/O, the exact MCP
+  gateway, and controller; controller to the exact Kubernetes API peer; and
+  runner relay sidecars to broker and the exact MCP gateway, with no DNS
+  egress from runner Pods;
 - an administrative Job to DNS and PostgreSQL.
 
 `networkPolicy` peers accept Kubernetes namespace/Pod selectors or bounded
 `ipBlock` CIDRs. The chart rejects `0.0.0.0/0` and `::/0`. Set every external
 peer and port explicitly; enabling Iggy or OTLP requires at least one peer.
 DNS defaults assume CoreDNS with `k8s-app=kube-dns`; override this for
-NodeLocal DNS or another cluster design.
+NodeLocal DNS or another cluster design. The trusted controller resolves the
+configured broker and gateway names before Pod creation and passes only a
+bounded list of numeric socket addresses to the relay. The untrusted server
+therefore cannot use cluster DNS, while TLS continues to authenticate the
+separately configured server names.
 
 ## Installation and staged database changes
 
@@ -170,11 +231,15 @@ no online-backup, PITR, HA, RPO, or RTO claim.
 
 ## Availability, monitoring, and validation
 
-Web, API, and I/O use rolling updates with `maxUnavailable: 0`, `maxSurge: 1`,
+Web, API, I/O, broker, and controller use rolling updates with
+`maxUnavailable: 0`, `maxSurge: 1`,
 `minAvailable: 1` PDBs, and preferred hostname/zone spreading. Maintenance is
-single-replica and has no PDB or leader-election claim. Resource requests and
-limits in `values.yaml` are tested small-system baselines, not capacity
-guarantees.
+single-replica and has no PDB or leader-election claim. Controller readiness is
+held false until the runner-namespace Lease is owned; only the leader accepts
+runner create/delete requests, and create/cancel mutations are serialized so a
+late create cannot survive cancellation. Resource
+requests and limits in `values.yaml` are tested small-system baselines, not
+capacity guarantees.
 
 Each role has a private metrics Service. `ServiceMonitor` and `PrometheusRule`
 are disabled by default and fail closed if enabled without their CRDs. The
@@ -189,7 +254,8 @@ tests/scripts/check-helm-chart.sh
 ```
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
-negative schema/helper cases, proves workload and mount boundaries, validates
+negative schema/helper cases, proves core and MCP workload/RBAC/mount
+boundaries, validates
 quiescing and administrative Jobs, and rejects unexpected resource kinds. A
 connected test cluster must additionally run server-side dry-run under the
 restricted Pod Security Standard and the Kind/Minikube lifecycle, NetworkPolicy,

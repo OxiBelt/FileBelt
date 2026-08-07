@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 
-"""Render and validate the Phase 2 Docker trust and mount boundaries."""
+"""Render and validate the Phase 4 Docker trust and mount boundaries."""
 
 from __future__ import annotations
 
@@ -45,6 +45,11 @@ def secret_sources(service: dict[str, Any]) -> set[str]:
 
 
 def main() -> int:
+    subprocess.run(
+        ["node", "--test", str(ROOT / "tests/docker/mcp-egress/policy.test.mjs")],
+        cwd=ROOT,
+        check=True,
+    )
     with tempfile.TemporaryDirectory(prefix="filebelt-phase2-compose-") as directory:
         state = Path(directory) / "state"
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
@@ -61,6 +66,8 @@ def main() -> int:
                 "iggy",
                 "--profile",
                 "fault",
+                "--profile",
+                "mcp",
                 "config",
                 "--format",
                 "json",
@@ -76,6 +83,7 @@ def main() -> int:
     services = model["services"]
     assert model["networks"]["control"]["internal"] is True
     assert model["networks"]["edge"]["internal"] is True
+    assert model["networks"]["internet-egress"].get("internal", False) is False
     assert services["postgres"]["image"] == POSTGRES
     assert services["postgres-runtime-roles"]["image"] == POSTGRES
     assert services["postgres"]["user"] == "999:999"
@@ -91,6 +99,8 @@ def main() -> int:
         "filebelt-worker-io",
         "filebelt-worker-maintenance",
         "filebelt-io-database-unavailable",
+        "filebelt-mcp-broker",
+        "filebelt-mcp-egress",
     }
     for name in hardened:
         service = services[name]
@@ -103,6 +113,8 @@ def main() -> int:
     api = services["filebelt-api"]
     io = services["filebelt-worker-io"]
     maintenance = services["filebelt-worker-maintenance"]
+    broker = services["filebelt-mcp-broker"]
+    gateway = services["filebelt-mcp-egress"]
     web = services["filebelt-web"]
     assert not api.get("volumes"), "the API must not mount payload storage"
     assert targets(io.get("volumes"), "volume") == {"/var/lib/filebelt/payloads"}
@@ -111,6 +123,10 @@ def main() -> int:
     assert set(io["networks"]) == {"control", "edge"}
     assert set(maintenance["networks"]) == {"control"}
     assert set(web["networks"]) == {"edge"}
+    assert set(broker["networks"]) == {"control"}
+    assert set(gateway["networks"]) == {"control", "internet-egress"}
+    assert not broker.get("volumes"), "the MCP broker must not mount payload storage"
+    assert not gateway.get("volumes"), "the egress gateway must not mount payload storage"
     assert not web.get("volumes")
     assert secret_sources(web) == {
         "filebelt-tls-certificate",
@@ -129,6 +145,23 @@ def main() -> int:
     }
     assert secret_sources(io) == {"io-database-url", "capability-public-keyset"}
     assert secret_sources(maintenance) == {"maintenance-database-url"}
+    assert secret_sources(broker) == {
+        "mcp-database-url",
+        "mcp-vault-keyring",
+        "capability-public-keyset",
+        "mcp-egress-client-certificate",
+        "mcp-egress-client-private-key",
+        "mcp-egress-ca-certificate",
+    }
+    assert secret_sources(gateway) == {
+        "mcp-egress-server-certificate",
+        "mcp-egress-server-private-key",
+        "mcp-egress-ca-certificate",
+    }
+
+    for name, service in services.items():
+        if name != "filebelt-mcp-egress":
+            assert "internet-egress" not in service.get("networks", {}), name
 
     for name, service in services.items():
         if name != "filebelt-web":
@@ -152,7 +185,7 @@ def main() -> int:
             assert "seccomp:unconfined" not in service.get("security_opt", []), name
     assert services["filebelt-io-database-unavailable"]["network_mode"] == "none"
 
-    print("Phase 2 Compose contract is valid")
+    print("Phase 4 Compose contract is valid")
     return 0
 
 

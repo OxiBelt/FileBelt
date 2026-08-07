@@ -20,7 +20,40 @@ spec:
       protocol: TCP
 ---
 {{- end }}
-{{- range $component := list "web" "api" "io" "maintenance" }}
+{{- if .Values.mcp.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" . }}-mcp-broker
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "mcp-broker") | indent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: mcp-broker}
+  ports:
+    - {name: mcp, port: 8082, targetPort: mcp, protocol: TCP}
+    {{- if .Values.mcp.runners.enabled }}
+    - {name: runner-relay, port: 8084, targetPort: runner-relay, protocol: TCP}
+    {{- end }}
+---
+{{- end }}
+{{- if .Values.mcp.runners.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" . }}-controller
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "controller") | indent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: controller}
+  ports: [{name: controller, port: 8083, targetPort: controller, protocol: TCP}]
+---
+{{- end }}
+{{- $metricsComponents := list "web" "api" "io" "maintenance" -}}
+{{- if .Values.mcp.enabled }}{{- $metricsComponents = append $metricsComponents "mcp-broker" -}}{{- end }}
+{{- if .Values.mcp.runners.enabled }}{{- $metricsComponents = append $metricsComponents "controller" -}}{{- end }}
+{{- range $component := $metricsComponents }}
 apiVersion: v1
 kind: Service
 metadata:

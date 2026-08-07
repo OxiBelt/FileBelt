@@ -16,6 +16,9 @@ ACTIVE_ROLES = (
     "filebelt-api",
     "filebelt-worker-io",
     "filebelt-worker-maintenance",
+    "filebelt-mcp-broker",
+    "filebelt-controller",
+    "filebelt-mcp-runner",
     "filebelt-tools",
     "filebelt-web",
 )
@@ -53,7 +56,7 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                 "repository": f"ghcr.io/oxibelt/{role}",
                 "platforms": [f"linux/{architecture}" for architecture in ARCHITECTURES],
             }
-            for role in (*ACTIVE_ROLES, "filebelt-media-controller", "filebelt-mcp-broker")
+            for role in (*ACTIVE_ROLES, "filebelt-media-controller")
         ]
         self.plan.write_text(
             json.dumps(
@@ -256,7 +259,6 @@ exit 0
         self.assertTrue(all(subject["digest"] == DIGEST for subject in subjects["subjects"]))
         log = self.log.read_text(encoding="utf-8")
         self.assertNotIn("filebelt-media-controller", log)
-        self.assertNotIn("filebelt-mcp-broker", log)
         self.assertEqual(log.count("buildx imagetools create --tag"), len(ACTIVE_ROLES))
 
     def test_refuses_to_replace_an_existing_release_tag(self) -> None:

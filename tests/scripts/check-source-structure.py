@@ -29,6 +29,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/apps/filebelt-worker-maintenance",
     "source/apps/filebelt-media-controller",
     "source/apps/filebelt-mcp-broker",
+    "source/apps/filebelt-mcp-runner",
     "source/apps/filebelt-controller",
     "source/apps/filebeltctl",
     "source/crates/filebelt-build-identity",
@@ -41,6 +42,8 @@ EXPECTED_RUST_MEMBERS = {
     "source/crates/filebelt-vfs-protocol",
     "source/crates/filebelt-document-protocol",
     "source/crates/filebelt-mcp-policy",
+    "source/crates/filebelt-mcp-protocol",
+    "source/crates/filebelt-mcp-vault",
     "source/crates/filebelt-control-protocol",
     "source/crates/filebelt-runtime",
     "source/crates/filebelt-deployment-diagnostics",
@@ -295,7 +298,7 @@ def check(root: Path) -> list[str]:
                     failures.append("release workflow trigger differs from signed tags only")
                 if promote >= 0:
                     promotion = content[promote:]
-                    for inactive in ["filebelt-media-controller", "filebelt-mcp-broker"]:
+                    for inactive in ["filebelt-media-controller"]:
                         if inactive in promotion:
                             failures.append(
                                 f"inactive role is present in release promotion: {inactive}"

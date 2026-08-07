@@ -11,21 +11,24 @@ This repository implements the Apache core production boundary: a
 tenant-scoped PostgreSQL namespace and Virtual ACL, OIDC browser sessions,
 immutable file versions, UUID-addressed whole/chunk payload storage,
 capability-limited I/O workers, sharing and revocation, durable jobs/outbox,
-optional Apache Iggy notifications, and an accessible React web drive behind
-OxiBelt.
+optional Apache Iggy notifications, a per-principal MCP broker with explicit
+capability and data approval, and an accessible React web drive behind
+OxiBelt. Reviewed local MCP servers may run only through the separately
+opted-in Kubernetes controller and one-shot runner boundary.
 
 Docker remains the development/integration topology. Production uses the
 hardened Helm chart on Kubernetes 1.34-1.36 with external PostgreSQL, OIDC,
 optional Iggy, operator Secrets, an existing RWX POSIX claim, default-deny
-networking, and backend mTLS. FileBelt makes no HA, online-backup, PITR, numeric
-RPO, or numeric RTO claim.
+networking, and backend mTLS. MCP additionally requires an operator-managed
+egress gateway; the broker and runner controller are disabled by default.
+FileBelt makes no HA, online-backup, PITR, numeric RPO, or numeric RTO claim.
 
 The [living engineering specifications](docs/README.md),
 [supply-chain policy](docs/SupplyChain.md), and
 [runtime and deployment contract](docs/RuntimeAndDeployment.md) describe the
 current build, runtime, and release boundary. Pull-request validation remains
-read-only; authorized signed SemVer tags may promote the five active images and
-Helm chart with attestations.
+read-only; authorized signed SemVer tags may promote the eight active images
+and Helm chart with attestations.
 
 ## Repository regions
 
@@ -79,6 +82,14 @@ Additional supply-chain checks are described in
   payload storage.
 - Apache Iggy accelerates wake-ups and invalidation. The same operations remain
   correct through PostgreSQL polling when Iggy is absent or unavailable.
+- MCP server registrations, immutable capability reviews, exact approvals,
+  version-pinned data grants, service grants, revocation state, and redacted
+  activity are authoritative in PostgreSQL. Credentials use a separate
+  envelope-encrypted vault schema and never enter browser storage.
+- The MCP broker has no payload mount and reaches remote servers only through
+  an allowlisting mTLS egress gateway. Curated stdio servers run in one-shot,
+  digest-pinned Kubernetes Pods with no service-account token or direct
+  Internet path.
 - OxiBelt terminates public TLS and serves/proxies the SPA, REST API, uploads,
   and Range downloads. Kubernetes backends require native mTLS and
   NetworkPolicy isolation.
@@ -98,8 +109,8 @@ native platform matrix with:
 
 ```sh
 pnpm --filter @filebelt/devops build
-tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase3/image-plan.json
-tests/scripts/run-image-matrix.sh --plan artifacts/phase3/image-plan.json --platform linux/amd64 --output-dir artifacts/phase3/amd64
+tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase4/image-plan.json
+tests/scripts/run-image-matrix.sh --plan artifacts/phase4/image-plan.json --platform linux/amd64 --output-dir artifacts/phase4/amd64
 tests/scripts/check-helm-chart.sh
 ```
 

@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: FileBelt HTTP API
   version: 1.0.0
-  description: Phase 2 control-plane and capability-grant contract.
+  description: Durable FileBelt control-plane, storage-grant, and outbound MCP broker contract.
 servers:
   - url: /
 security:
@@ -551,6 +551,894 @@ paths:
                 $ref: "#/components/schemas/NodePage"
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations:
+    get:
+      operationId: listMcpRegistrations
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Personal and assigned managed registrations visible to the current principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistrationPage"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMcpRegistration"
+      responses:
+        "201":
+          description: Disabled personal registration.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistration"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/import:
+    post:
+      operationId: importMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpRegistrationExport"
+      responses:
+        "201":
+          description: Disabled registration imported without credentials, approvals, or grants.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistration"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}:
+    get:
+      operationId: getMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+      responses:
+        "200":
+          description: Redacted registration configuration and state.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistration"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMcpRegistration"
+      responses:
+        "200":
+          description: Updated registration. Authority-affecting changes leave it disabled.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistration"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "202":
+          description: Registration disabled immediately and queued for bounded credential revocation and erasure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDeletionStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/export:
+    get:
+      operationId: exportMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+      responses:
+        "200":
+          description: Portable registration configuration without credentials, grants, approvals, or activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistrationExport"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/test:
+    post:
+      operationId: testMcpRegistration
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "200":
+          description: Bounded transport and authentication test result with no upstream response body.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpTestResult"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/discover:
+    post:
+      operationId: discoverMcpCapabilities
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "200":
+          description: Newly discovered immutable capability snapshot awaiting review.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpCapabilitySnapshot"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/state:
+    post:
+      operationId: changeMcpRegistrationState
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeMcpRegistrationState"
+      responses:
+        "200":
+          description: Updated enablement or revocation state.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpRegistration"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/credentials:
+    put:
+      operationId: putMcpStaticCredential
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutMcpStaticCredential"
+      responses:
+        "204":
+          description: Credential replaced. Its value is never returned.
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMcpCredential
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Credential destroyed and the registration disabled.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/oauth/start:
+    post:
+      operationId: startMcpOauth
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartMcpOauth"
+      responses:
+        "200":
+          description: Browser authorization destination and server-held attempt expiry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpOauthStart"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/oauth/callback:
+    get:
+      operationId: completeMcpOauth
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: state
+          in: query
+          schema:
+            type: string
+            maxLength: 4096
+        - name: iss
+          in: query
+          schema:
+            type: string
+            format: uri
+            maxLength: 2048
+        - name: error
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+      responses:
+        "303":
+          description: Complete the server-held OAuth attempt and return to the local MCP settings route.
+          headers:
+            Location:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/registrations/{registration_id}/capability-review:
+    get:
+      operationId: getMcpCapabilityReview
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+      responses:
+        "200":
+          description: Current immutable snapshot and its review decisions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpCapabilityReview"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putMcpCapabilityReview
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutMcpCapabilityReview"
+      responses:
+        "200":
+          description: Review bound to the exact snapshot and capability fingerprints.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpCapabilityReview"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/approvals:
+    get:
+      operationId: listMcpApprovals
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Current principal's saved, redacted approvals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpApprovalPage"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/approvals/{approval_id}:
+    delete:
+      operationId: revokeMcpApproval
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Approval revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/activity:
+    get:
+      operationId: listMcpActivity
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Redacted MCP activity visible to the current principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpActivityPage"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/invocation-intents:
+    post:
+      operationId: createMcpInvocationIntent
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpInvocationRequest"
+      responses:
+        "201":
+          description: Five-minute intent storing only the keyed digest of the exact request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpInvocationIntent"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/invocation-intents/{intent_id}/approval:
+    post:
+      operationId: approveMcpInvocationIntent
+      description: Creates an approval from the server-held exact request digest; the browser never supplies or derives keyed digests.
+      parameters:
+        - $ref: "#/components/parameters/IntentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveMcpInvocationIntent"
+      responses:
+        "201":
+          description: Explicit approval bound to this exact intent, session, application, capability, arguments, and attachments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpApproval"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/invocation-intents/{intent_id}/stream:
+    post:
+      operationId: streamMcpInvocation
+      parameters:
+        - $ref: "#/components/parameters/IntentId"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpInvocationRequest"
+      responses:
+        "200":
+          description: Bounded line-delimited invocation events; disconnect cancels and results are never replayed.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: Each line is one McpInvocationEvent JSON value.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mcp/invocations/{invocation_id}:
+    delete:
+      operationId: cancelMcpInvocation
+      parameters:
+        - $ref: "#/components/parameters/InvocationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Cancellation recorded; execution and upstream transfer are terminated.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants:
+    get:
+      operationId: listMcpDataGrants
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: Active self-node MCP grants the current principal may inspect.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/McpDataGrant"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMcpDataGrant
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMcpDataGrant"
+      responses:
+        "201":
+          description: Strictly attenuated, self-node-only MCP data grant.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDataGrant"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants/{mcp_grant_id}:
+    delete:
+      operationId: revokeMcpDataGrant
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/McpGrantId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: MCP data grant revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/templates:
+    get:
+      operationId: listAdminMcpTemplates
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Managed MCP templates visible to a recently authenticated tenant administrator.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpTemplatePage"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAdminMcpTemplate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminMcpTemplate"
+      responses:
+        "201":
+          description: Disabled managed template.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpTemplate"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/templates/{template_id}:
+    get:
+      operationId: getAdminMcpTemplate
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+      responses:
+        "200":
+          description: Managed template and redacted assignment counts.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpTemplate"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateAdminMcpTemplate
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAdminMcpTemplate"
+      responses:
+        "200":
+          description: Updated template; authority-affecting changes disable its activations.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpTemplate"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteAdminMcpTemplate
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "202":
+          description: Template and activations disabled and queued for credential revocation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDeletionStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/templates/{template_id}/assignments/{principal_id}:
+    put:
+      operationId: putAdminMcpTemplateAssignment
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+        - $ref: "#/components/parameters/PrincipalId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutAdminMcpTemplateAssignment"
+      responses:
+        "200":
+          description: Exact user, group, or service assignment.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpTemplateAssignment"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteAdminMcpTemplateAssignment
+      parameters:
+        - $ref: "#/components/parameters/TemplateId"
+        - $ref: "#/components/parameters/PrincipalId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Assignment and its activation revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/service-identities:
+    get:
+      operationId: listAdminMcpServiceIdentities
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Service principals and exact SPIFFE URI bindings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpServiceIdentityPage"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAdminMcpServiceIdentity
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminMcpServiceIdentity"
+      responses:
+        "201":
+          description: Suspended service principal awaiting grants.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpServiceIdentity"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/service-identities/{service_id}:
+    patch:
+      operationId: updateAdminMcpServiceIdentity
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAdminMcpServiceIdentity"
+      responses:
+        "200":
+          description: Updated service state or identity binding.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpServiceIdentity"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteAdminMcpServiceIdentity
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "202":
+          description: Service disabled immediately and all invocation grants revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDeletionStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/service-identities/{service_id}/invocation-grants:
+    get:
+      operationId: listAdminMcpServiceInvocationGrants
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+      responses:
+        "200":
+          description: Redacted grants for one service identity.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminMcpServiceInvocationGrant"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAdminMcpServiceInvocationGrant
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminMcpServiceInvocationGrant"
+      responses:
+        "201":
+          description: Maximum-thirty-day exact service invocation grant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpServiceInvocationGrant"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/service-identities/{service_id}/invocation-grants/{service_grant_id}:
+    delete:
+      operationId: revokeAdminMcpServiceInvocationGrant
+      parameters:
+        - $ref: "#/components/parameters/ServiceId"
+        - $ref: "#/components/parameters/ServiceGrantId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Service invocation grant revoked.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/block-rules:
+    get:
+      operationId: listAdminMcpBlockRules
+      responses:
+        "200":
+          description: Global origin, profile, catalog, registration, and capability blocks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminMcpBlockRule"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createAdminMcpBlockRule
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminMcpBlockRule"
+      responses:
+        "201":
+          description: Global block applied to new and active invocations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMcpBlockRule"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mcp/block-rules/{block_rule_id}:
+    delete:
+      operationId: deleteAdminMcpBlockRule
+      parameters:
+        - $ref: "#/components/parameters/BlockRuleId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Global block removed; affected registrations remain disabled pending explicit review.
+        default:
+          $ref: "#/components/responses/Problem"
   /io/v1/uploads/{upload_id}/parts/{part}:
     put:
       operationId: putUploadPart
@@ -713,6 +1601,60 @@ components:
       description: Must equal the signed `grant_id` capability claim.
       schema:
         $ref: "#/components/schemas/UuidV4"
+    RegistrationId:
+      name: registration_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    ApprovalId:
+      name: approval_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    IntentId:
+      name: intent_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    InvocationId:
+      name: invocation_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    McpGrantId:
+      name: mcp_grant_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    TemplateId:
+      name: template_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    ServiceId:
+      name: service_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    ServiceGrantId:
+      name: service_grant_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
+    BlockRuleId:
+      name: block_rule_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
     Range:
       name: Range
       in: header
@@ -738,6 +1680,15 @@ components:
       name: Idempotency-Key
       in: header
       required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Exact opaque generation ETag from the most recent representation.
       schema:
         type: string
         minLength: 1
@@ -872,6 +1823,9 @@ components:
           maximum: 599
         code:
           type: string
+          maxLength: 128
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z0-9_-]+)+$"
+          description: Stable dotted FileBelt reason code. MCP failures use the `mcp.*` namespace.
     Session:
       type: object
       additionalProperties: false
@@ -1344,6 +2298,1109 @@ components:
           type: integer
           format: int64
           minimum: 0
+    McpRegistrationPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpRegistration"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    McpRegistration:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - ownership
+        - display_name
+        - transport
+        - endpoint_uri
+        - catalog_entry_id
+        - trust_profile
+        - protocol_version
+        - lifecycle_state
+        - validation_state
+        - authentication_state
+        - capability_state
+        - quarantine_state
+        - credential_kind
+        - credential_present
+        - managed_locked
+        - attachment_policy
+        - etag
+        - generation
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        ownership:
+          type: string
+          enum: [personal, managed_user, managed_group, managed_service]
+        managed_template_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        transport:
+          type: string
+          enum: [streamable_http, stdio_catalog]
+        endpoint_uri:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+        catalog_entry_id:
+          oneOf:
+            - type: string
+              pattern: "^[a-z0-9][a-z0-9._-]{0,127}$"
+            - type: "null"
+        trust_profile:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+        protocol_version:
+          type: string
+          enum: ["2026-07-28", "2025-11-25"]
+        lifecycle_state:
+          type: string
+          enum: [disabled, enabled, revoking, deleted]
+        validation_state:
+          type: string
+          enum: [untested, valid, invalid, stale]
+        authentication_state:
+          type: string
+          enum: [not_required, missing, pending, ready, expired, revoked]
+        capability_state:
+          type: string
+          enum: [undiscovered, review_required, reviewed, changed]
+        quarantine_state:
+          type: string
+          enum: [clear, quarantined, blocked]
+        credential_kind:
+          type: string
+          enum: [none, oauth, bearer, api_key]
+        credential_present:
+          type: boolean
+        managed_locked:
+          type: boolean
+        attachment_policy:
+          $ref: "#/components/schemas/McpAttachmentPolicy"
+        capability_snapshot_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        etag:
+          type: string
+          description: Opaque current-generation value to send as `If-Match`.
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateMcpRegistration:
+      type: object
+      additionalProperties: false
+      required: [display_name, transport, trust_profile, attachment_policy]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        transport:
+          type: string
+          enum: [streamable_http, stdio_catalog]
+        endpoint_uri:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+        catalog_entry_id:
+          oneOf:
+            - type: string
+              pattern: "^[a-z0-9][a-z0-9._-]{0,127}$"
+            - type: "null"
+        trust_profile:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+        attachment_policy:
+          $ref: "#/components/schemas/McpAttachmentPolicy"
+    UpdateMcpRegistration:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        endpoint_uri:
+          type: string
+          format: uri
+          maxLength: 2048
+        trust_profile:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+        attachment_policy:
+          $ref: "#/components/schemas/McpAttachmentPolicy"
+    McpAttachmentPolicy:
+      type: object
+      additionalProperties: false
+      required: [allowed_mime_patterns, allowed_encodings, max_attachments, max_item_bytes, max_total_bytes]
+      properties:
+        allowed_mime_patterns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            maxLength: 127
+        allowed_encodings:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [utf8, base64]
+        max_attachments:
+          type: integer
+          minimum: 0
+          maximum: 4
+        max_item_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 16777216
+        max_total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 16777216
+    McpRegistrationExport:
+      type: object
+      additionalProperties: false
+      required: [format, display_name, transport, trust_profile, attachment_policy]
+      properties:
+        format:
+          type: string
+          const: filebelt.mcp-registration.v1
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        transport:
+          type: string
+          enum: [streamable_http, stdio_catalog]
+        endpoint_uri:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+        catalog_entry_id:
+          oneOf:
+            - type: string
+              maxLength: 128
+            - type: "null"
+        trust_profile:
+          type: string
+          maxLength: 64
+        attachment_policy:
+          $ref: "#/components/schemas/McpAttachmentPolicy"
+    ChangeMcpRegistrationState:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [enable, disable, revoke]
+    PutMcpStaticCredential:
+      type: object
+      additionalProperties: false
+      required: [kind, secret]
+      properties:
+        kind:
+          type: string
+          enum: [bearer, api_key]
+        secret:
+          type: string
+          minLength: 1
+          maxLength: 8192
+          writeOnly: true
+          x-sensitive: true
+    StartMcpOauth:
+      type: object
+      additionalProperties: false
+      required: [return_path]
+      properties:
+        return_path:
+          type: string
+          pattern: "^/settings/mcp(?:/[0-9a-f-]+)?$"
+          maxLength: 256
+        issuer:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+    McpOauthStart:
+      type: object
+      additionalProperties: false
+      required: [authorization_url, expires_at]
+      properties:
+        authorization_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+    McpTestResult:
+      type: object
+      additionalProperties: false
+      required: [succeeded, protocol_version, authentication_state, duration_ms, checked_at]
+      properties:
+        succeeded:
+          type: boolean
+        protocol_version:
+          oneOf:
+            - type: string
+              enum: ["2026-07-28", "2025-11-25"]
+            - type: "null"
+        authentication_state:
+          type: string
+          enum: [not_required, missing, pending, ready, expired, revoked]
+        duration_ms:
+          type: integer
+          minimum: 0
+          maximum: 120000
+        checked_at:
+          type: string
+          format: date-time
+        problem_code:
+          oneOf:
+            - type: string
+              pattern: "^mcp\\.[a-z0-9_.-]+$"
+            - type: "null"
+    McpCapabilitySnapshot:
+      type: object
+      additionalProperties: false
+      required: [id, registration_id, protocol_version, fingerprint, capabilities, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        protocol_version:
+          type: string
+          enum: ["2026-07-28", "2025-11-25"]
+        fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        capabilities:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/McpCapability"
+        created_at:
+          type: string
+          format: date-time
+    McpCapability:
+      type: object
+      additionalProperties: false
+      required: [kind, name, title, description, fingerprint, read_only_hint, risk, state, input_schema]
+      properties:
+        kind:
+          type: string
+          enum: [resource, prompt, tool]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        title:
+          oneOf:
+            - type: string
+              maxLength: 256
+            - type: "null"
+        description:
+          oneOf:
+            - type: string
+              maxLength: 4096
+            - type: "null"
+        fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        read_only_hint:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        risk:
+          type: string
+          enum: [low, elevated, prohibited]
+        state:
+          type: string
+          enum: [new, unchanged, changed, removed]
+        input_schema:
+          description: Untrusted, bounded JSON Schema displayed as text/tree only.
+        output_schema:
+          description: Optional untrusted, bounded JSON Schema displayed as text/tree only.
+    McpCapabilityReview:
+      type: object
+      additionalProperties: false
+      required: [snapshot, decisions, reviewed_at]
+      properties:
+        snapshot:
+          $ref: "#/components/schemas/McpCapabilitySnapshot"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpCapabilityDecision"
+        reviewed_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+    PutMcpCapabilityReview:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, snapshot_fingerprint, decisions]
+      properties:
+        snapshot_id:
+          $ref: "#/components/schemas/UuidV4"
+        snapshot_fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        decisions:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/McpCapabilityDecision"
+    McpCapabilityDecision:
+      type: object
+      additionalProperties: false
+      required: [capability_fingerprint, decision]
+      properties:
+        capability_fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        decision:
+          type: string
+          enum: [approved, blocked]
+    ApproveMcpInvocationIntent:
+      type: object
+      additionalProperties: false
+      required: [scope, expires_at]
+      properties:
+        scope:
+          type: string
+          enum: [once, session]
+          description: "`once` expires with intent consumption; `session` is permitted only for reviewed low-risk non-tool operations and expires within one hour. Tool calls always require one-shot approval regardless of the server-provided read-only hint."
+        expires_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          description: "Must be null for `once` and present within one hour for `session`."
+    McpApproval:
+      type: object
+      additionalProperties: false
+      required: [id, intent_id, scope, registration_id, capability_fingerprint, application_id, argument_digest, attachment_digest, created_at, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        intent_id:
+          $ref: "#/components/schemas/UuidV4"
+        scope:
+          type: string
+          enum: [once, session]
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        capability_fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        application_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        argument_digest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        attachment_digest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    McpApprovalPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpApproval"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    McpInvocationRequest:
+      type: object
+      additionalProperties: false
+      required: [application_id, registration_id, capability, arguments, attachments]
+      properties:
+        application_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        capability:
+          $ref: "#/components/schemas/McpCapabilityReference"
+        arguments:
+          description: Exact bounded JSON arguments included in the intent digest and resubmitted to the stream.
+        attachments:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/McpAttachmentBinding"
+    McpCapabilityReference:
+      type: object
+      additionalProperties: false
+      required: [kind, name, fingerprint]
+      properties:
+        kind:
+          type: string
+          enum: [resource, prompt, tool]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+    McpAttachmentBinding:
+      type: object
+      additionalProperties: false
+      required: [drive_id, node_id, version_id, fields]
+      properties:
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+        version_id:
+          $ref: "#/components/schemas/UuidV4"
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/McpAttachmentFieldBinding"
+    McpAttachmentFieldBinding:
+      type: object
+      additionalProperties: false
+      required: [source, target_json_pointer, encoding]
+      properties:
+        source:
+          type: string
+          enum: [content, basename, mime_type, size_bytes]
+        target_json_pointer:
+          type: string
+          maxLength: 1024
+          pattern: "^(?:/(?:[^~/]|~[01])*)*$"
+        encoding:
+          type: string
+          enum: [native, utf8, base64]
+    McpInvocationIntent:
+      type: object
+      additionalProperties: false
+      required: [id, request_digest, expires_at, approval_required]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        request_digest:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        expires_at:
+          type: string
+          format: date-time
+        approval_required:
+          type: boolean
+    McpInvocationEvent:
+      type: object
+      additionalProperties: false
+      required: [event, invocation_id, sequence, created_at]
+      properties:
+        event:
+          type: string
+          enum: [started, progress, text, json, media, error, completed]
+        invocation_id:
+          $ref: "#/components/schemas/UuidV4"
+        sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        progress:
+          oneOf:
+            - type: number
+              minimum: 0
+              maximum: 1
+            - type: "null"
+        text:
+          oneOf:
+            - type: string
+              maxLength: 1048576
+            - type: "null"
+        json:
+          description: Bounded JSON rendered as a non-editable tree, never as HTML.
+        media:
+          oneOf:
+            - $ref: "#/components/schemas/McpSafeMedia"
+            - type: "null"
+        problem_code:
+          oneOf:
+            - type: string
+              pattern: "^mcp\\.[a-z0-9_.-]+$"
+            - type: "null"
+    McpSafeMedia:
+      type: object
+      additionalProperties: false
+      required: [mime_type, base64, size_bytes]
+      properties:
+        mime_type:
+          type: string
+          enum: [image/png, image/jpeg, image/webp, audio/mpeg, audio/ogg, audio/wav]
+        base64:
+          type: string
+          contentEncoding: base64
+          maxLength: 5592408
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 4194304
+    McpActivity:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - actor_kind
+        - application_id
+        - registration_id
+        - capability_fingerprint
+        - attachment_version_ids
+        - approval_id
+        - request_bytes
+        - response_bytes
+        - duration_ms
+        - outcome
+        - reason_code
+        - created_at
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        actor_kind:
+          type: string
+          enum: [user, service]
+        application_id:
+          type: string
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        capability_fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        attachment_version_ids:
+          type: array
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/UuidV4"
+        approval_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        request_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        response_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        outcome:
+          type: string
+          enum: [succeeded, denied, failed, cancelled, interrupted]
+        reason_code:
+          oneOf:
+            - type: string
+              pattern: "^mcp\\.[a-z0-9_.-]+$"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+    McpActivityPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpActivity"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    CreateMcpDataGrant:
+      type: object
+      additionalProperties: false
+      required: [principal_id, registration_id, version_id, actions, expected_acl_generation, expires_at]
+      properties:
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+          description: Exact destination registration; the grant is invalid for every other MCP server registration.
+        version_id:
+          $ref: "#/components/schemas/UuidV4"
+          description: Exact immutable node version authorized for transfer; the current or a future head is never implied.
+        actions:
+          type: array
+          minItems: 2
+          maxItems: 3
+          uniqueItems: true
+          contains:
+            const: use_mcp
+          items:
+            type: string
+            enum: [use_mcp, read_metadata, read_content]
+        expected_acl_generation:
+          type: integer
+          format: int64
+          minimum: 1
+        expires_at:
+          type: string
+          format: date-time
+    McpDataGrant:
+      type: object
+      additionalProperties: false
+      required: [id, principal_id, registration_id, drive_id, node_id, version_id, actions, acl_generation, created_at, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+        version_id:
+          $ref: "#/components/schemas/UuidV4"
+        actions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [use_mcp, read_metadata, read_content]
+        acl_generation:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    McpDeletionStatus:
+      type: object
+      additionalProperties: false
+      required: [id, state, destroy_after]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        state:
+          type: string
+          enum: [revoking, erased]
+        destroy_after:
+          type: string
+          format: date-time
+    AdminMcpTemplate:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - display_name
+        - transport
+        - endpoint_uri
+        - catalog_entry_id
+        - trust_profile
+        - enabled
+        - assignment_count
+        - etag
+        - generation
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        transport:
+          type: string
+          enum: [streamable_http, stdio_catalog]
+        endpoint_uri:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+        catalog_entry_id:
+          oneOf:
+            - type: string
+              maxLength: 128
+            - type: "null"
+        trust_profile:
+          type: string
+          maxLength: 64
+        enabled:
+          type: boolean
+        assignment_count:
+          type: integer
+          minimum: 0
+        etag:
+          type: string
+          description: Opaque current-generation value to send as `If-Match`.
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateAdminMcpTemplate:
+      type: object
+      additionalProperties: false
+      required: [display_name, transport, trust_profile]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        transport:
+          type: string
+          enum: [streamable_http, stdio_catalog]
+        endpoint_uri:
+          oneOf:
+            - type: string
+              format: uri
+              maxLength: 2048
+            - type: "null"
+        catalog_entry_id:
+          oneOf:
+            - type: string
+              maxLength: 128
+            - type: "null"
+        trust_profile:
+          type: string
+          maxLength: 64
+    UpdateAdminMcpTemplate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 1000
+        endpoint_uri:
+          type: string
+          format: uri
+          maxLength: 2048
+        catalog_entry_id:
+          type: string
+          maxLength: 128
+        trust_profile:
+          type: string
+          maxLength: 64
+        enabled:
+          type: boolean
+    AdminMcpTemplatePage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMcpTemplate"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    PutAdminMcpTemplateAssignment:
+      type: object
+      additionalProperties: false
+      required: [principal_kind]
+      properties:
+        principal_kind:
+          type: string
+          enum: [user, group, service]
+    AdminMcpTemplateAssignment:
+      type: object
+      additionalProperties: false
+      required: [template_id, principal_id, principal_kind, created_at]
+      properties:
+        template_id:
+          $ref: "#/components/schemas/UuidV4"
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        principal_kind:
+          type: string
+          enum: [user, group, service]
+        created_at:
+          type: string
+          format: date-time
+    AdminMcpServiceIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, spiffe_uri, state, etag, generation, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        spiffe_uri:
+          type: string
+          format: uri
+          pattern: "^spiffe://"
+          maxLength: 2048
+        state:
+          type: string
+          enum: [active, suspended, deleting]
+        etag:
+          type: string
+          description: Opaque current-generation value to send as `If-Match`.
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateAdminMcpServiceIdentity:
+      type: object
+      additionalProperties: false
+      required: [display_name, spiffe_uri]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        spiffe_uri:
+          type: string
+          format: uri
+          pattern: "^spiffe://"
+          maxLength: 2048
+    UpdateAdminMcpServiceIdentity:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        spiffe_uri:
+          type: string
+          format: uri
+          pattern: "^spiffe://"
+          maxLength: 2048
+        state:
+          type: string
+          enum: [active, suspended]
+    AdminMcpServiceIdentityPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMcpServiceIdentity"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    CreateAdminMcpServiceInvocationGrant:
+      type: object
+      additionalProperties: false
+      required:
+        - registration_id
+        - capability
+        - application_id
+        - argument_constraints
+        - mcp_data_grant_ids
+        - max_invocations_per_hour
+        - expires_at
+      properties:
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        capability:
+          $ref: "#/components/schemas/McpCapabilityReference"
+        application_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        argument_constraints:
+          description: Bounded JSON Schema intersected with the reviewed capability input schema.
+        mcp_data_grant_ids:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/UuidV4"
+        max_invocations_per_hour:
+          type: integer
+          minimum: 1
+          maximum: 600
+        expires_at:
+          type: string
+          format: date-time
+    AdminMcpServiceInvocationGrant:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - service_id
+        - registration_id
+        - capability
+        - application_id
+        - argument_constraints
+        - mcp_data_grant_ids
+        - max_invocations_per_hour
+        - created_at
+        - expires_at
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        service_id:
+          $ref: "#/components/schemas/UuidV4"
+        registration_id:
+          $ref: "#/components/schemas/UuidV4"
+        capability:
+          $ref: "#/components/schemas/McpCapabilityReference"
+        application_id:
+          type: string
+        argument_constraints:
+          description: Redacted bounded constraint document.
+        mcp_data_grant_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/UuidV4"
+        max_invocations_per_hour:
+          type: integer
+          minimum: 1
+          maximum: 600
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    CreateAdminMcpBlockRule:
+      type: object
+      additionalProperties: false
+      required: [kind, value, reason]
+      properties:
+        kind:
+          type: string
+          enum: [origin, trust_profile, catalog_entry, registration, capability]
+        value:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    AdminMcpBlockRule:
+      type: object
+      additionalProperties: false
+      required: [id, kind, value, reason, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        kind:
+          type: string
+          enum: [origin, trust_profile, catalog_entry, registration, capability]
+        value:
+          type: string
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     UploadPartReceipt:
       type: object
       additionalProperties: false

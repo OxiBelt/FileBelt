@@ -2,7 +2,7 @@
 
 # FileBelt observability assets
 
-These portable Phase 3 examples do not install a monitoring stack. Import
+These portable Phase 4 examples do not install a monitoring stack. Import
 `grafana-dashboard.json`, load `prometheus-rules.yaml` into the operator's
 Prometheus, and adapt `otel-collector.yaml` to a trusted trace backend. The
 Helm chart can render equivalent `ServiceMonitor` and `PrometheusRule` objects

@@ -17,6 +17,8 @@ ROLES = (
     "filebelt-worker-maintenance",
     "filebelt-media-controller",
     "filebelt-mcp-broker",
+    "filebelt-controller",
+    "filebelt-mcp-runner",
     "filebelt-tools",
     "filebelt-web",
 )

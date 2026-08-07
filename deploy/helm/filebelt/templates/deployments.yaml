@@ -140,6 +140,9 @@ spec:
       annotations:
         checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.apiDatabase.generation .Values.secrets.oidcClient.generation .Values.secrets.oidcCa.generation .Values.secrets.capabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.digestKey.generation .Values.secrets.apiServerTls.generation | sha256sum | quote }}
+        {{- if .Values.mcp.enabled }}
+        checksum/mcp-client-tls: {{ .Values.secrets.apiMcpClientTls.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-api
       automountServiceAccountToken: false
@@ -184,6 +187,9 @@ spec:
             - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
             - {name: digest-key, mountPath: /run/secrets/digest-key, subPath: digest-key, readOnly: true}
             - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
+            {{- if .Values.mcp.enabled }}
+            - {name: mcp-client-tls, mountPath: /run/secrets/mcp-broker-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
@@ -207,6 +213,16 @@ spec:
               - {key: {{ .Values.secrets.apiServerTls.certificateKey }}, path: tls.crt}
               - {key: {{ .Values.secrets.apiServerTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.apiServerTls.caKey }}, path: client-ca.crt}
+        {{- if .Values.mcp.enabled }}
+        - name: mcp-client-tls
+          secret:
+            secretName: {{ .Values.secrets.apiMcpClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.apiMcpClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.apiMcpClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.apiMcpClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---
 {{- $quiescedReplicas = ternary 0 .Values.workloads.io.replicas .Values.deployment.quiesced }}

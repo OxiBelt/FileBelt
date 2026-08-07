@@ -1,4 +1,244 @@
 
 # cargo-vet audits file
 
-[audits]
+[criteria.filebelt-constrained-deployment]
+description = """
+The crate is acceptable in FileBelt's deployed dependency graph only under the
+documented call-path, feature, and input constraints in its audit note. This
+criterion does not certify generic safe-to-deploy use.
+"""
+implies = "safe-to-run"
+
+[[audits.cmpv2]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+notes = "Reviewed complete checksum-matched source. The safe DER message types preserve reader length and tag checks, contain no build script or ambient I/O, and the CRMF dependency is separately constrained because FileBelt never reaches its encoding API."
+
+[[audits.cms]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.2.3"
+notes = "Reviewed complete checksum-matched source. It is safe DER/CMS structure parsing with bounded-reader enforcement, no build script, no unsafe code, and no ambient I/O; cryptographic verification remains the caller's responsibility."
+
+[[audits.crmf]]
+who = "OpenAI Codex"
+criteria = "filebelt-constrained-deployment"
+version = "0.2.0"
+notes = "Reviewed complete checksum-matched source. EncKeyWithIdChoice::tag recursively calls itself for GeneralName and can stack overflow if that public variant is encoded. FileBelt reaches CRMF only through dormant Sigstore TSA type dependencies, disallows TSA bundles, and never calls CRMF decoding or encoding."
+
+[[audits.defmt]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.1.1"
+notes = "Reviewed complete checksum-matched source. It is lock-only for FileBelt targets; the build script copies a packaged linker script only to OUT_DIR, and runtime unsafe code implements the documented embedded logger ABI with input-bounded encoding."
+
+[[audits.defmt-macros]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.1.1"
+notes = "Reviewed complete checksum-matched proc-macro source. It is lock-only, reads compiler tokens and Cargo logging variables only, performs no filesystem, network, or process access, and generated unsafe calls preserve defmt's logger contract."
+
+[[audits.defmt-parser]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.0.0"
+notes = "Reviewed complete checksum-matched source. It is lock-only pure safe compile-time parsing with work proportional to trusted format strings; malformed huge indices can affect compilation but no runtime input reaches it."
+
+[[audits.der_derive]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.7.3"
+notes = "Reviewed complete checksum-matched proc-macro source. It forbids unsafe code, has no ambient I/O, and generated decoders preserve DER reader nesting, length checks, and unknown-choice rejection."
+
+[[audits.dtoa]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.0.11"
+notes = "Reviewed complete checksum-matched source. Formatting uses a fixed 25-byte buffer with bounds derived from IEEE-754 inputs, has no build script or ambient I/O, and FileBelt reaches it only through metrics formatting."
+
+[[audits.flagset]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.4.7"
+notes = "Reviewed complete checksum-matched no_std source. It has no build script or ambient I/O; unsafe construction documents the valid-bit precondition, while macro-generated and DER-decoded uses satisfy it through static declarations and checked construction."
+
+[[audits.jiff-tzdb]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.1.8"
+notes = "Reviewed complete checksum-matched no_std source and embedded TZDB 2026c. All 598 case-insensitively sorted names and byte ranges were validated against the exact 202414-byte blob; the crate has no build script, unsafe code, or ambient I/O."
+
+[[audits.jiff-tzdb-platform]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.1.3"
+notes = "Reviewed complete checksum-matched source. It is a minimal no_std platform re-export with no build script, unsafe code, or ambient I/O and is absent from FileBelt's Linux deployment targets."
+
+[[audits.opentelemetry]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched source and selected features. It provides API, context, trace, and metric data structures with caller-proportional allocations and no build script or ambient I/O; the TypeId hasher invariant follows std TypeId hashing."
+
+[[audits.opentelemetry-http]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched source for the selected blocking reqwest path. Hyper-only unsafe code is unselected; network access uses the supplied client. Collector response bodies are buffered, while FileBelt bounds requests to three seconds and an operator-controlled endpoint."
+
+[[audits.opentelemetry-otlp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched source and selected HTTP protobuf, blocking reqwest, and trace features. It has no unsafe code or build script; FileBelt supplies a no-proxy, no-redirect, three-second client and bounded batching, while standard OTEL environment headers and compression remain operator inputs."
+
+[[audits.opentelemetry-proto]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched generated prost messages and deterministic trace and metric transforms. It has no build script, unsafe code, or ambient I/O; allocations scale with supplied telemetry."
+
+[[audits.opentelemetry_sdk]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched source. It uses OS-random identifiers and a dedicated bounded batch thread without unsafe code or a build script; FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
+
+[[audits.portable-atomic-util]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.2.7"
+notes = "Reviewed complete checksum-matched source, build script, and std-derived Arc, Weak, and RawWaker unsafe contracts. It is target-only for platforms without pointer atomics and is absent from FileBelt's Linux amd64, arm64, and riscv64 builds."
+
+[[audits.prometheus-client]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.24.0"
+notes = "Reviewed complete checksum-matched source and selected empty default features. It forbids unsafe code and has no runtime I/O; the protobuf build path is unselected, FileBelt labels are bounded and static, and FileBelt does not use exemplars."
+
+[[audits.prometheus-client-derive-encode]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.5.0"
+notes = "Reviewed complete checksum-matched compiler-only proc-macro source. It has no unsafe code, build script, or ambient I/O and generated runtime code directly delegates field and variant encoders."
+
+[[audits.reqwest]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.13.4"
+notes = "Reviewed complete checksum-matched source with only form and json selected in the Sigstore graph. TLS, decompression, streaming, and system-proxy features are absent; native connector ReadBuf unsafe preserves initialization invariants, and FileBelt does not instantiate Sigstore's online clients."
+
+[[audits.rmcp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "3.1.1"
+notes = "Reviewed complete checksum-matched source with default features disabled. FileBelt uses bounded model response types only and the crate has no runtime unsafe code. Its build script can set core.hooksPath only in a special vendored repository layout, which is absent from the registry layout and FileBelt builds."
+
+[[audits.ryu-js]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.0.3"
+notes = "Reviewed complete checksum-matched formatting source. It uses fixed-size buffers and sealed IEEE-754 traits with no build script, allocation, or ambient I/O; FileBelt does not directly call its documented unsafe raw-buffer APIs."
+
+[[audits.serde_json_canonicalizer]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.3.2"
+notes = "Reviewed complete checksum-matched source. It recursively buffers and sorts input and casts integers through binary64, so FileBelt's sole wrapper recursively rejects integers outside the I-JSON safe range before every security-sensitive canonicalization; direct arbitrary-Value use is prohibited."
+
+[[audits.sigstore-bundle]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source. It is safe structural bundle parsing with no build script or ambient I/O; FileBelt applies a four-MiB outer bound, rejects TSA material, and validates the exact Rekor entry and identity before use."
+
+[[audits.sigstore-crypto]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source and cryptographic dispatch. Algorithm and key parsing are explicit, verification errors fail closed, unsafe code is absent, and the crate has no build script or ambient I/O."
+
+[[audits.sigstore-merkle]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source. Inclusion verification uses checked tree arithmetic and fixed cryptographic hashes over caller-provided bounded data, with no unsafe code, build script, or ambient I/O."
+
+[[audits.sigstore-rekor]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source. Offline Rekor body, promise, and proof verification binds log ID, body, index, and integrated time and fails closed; online client paths are not instantiated by FileBelt."
+
+[[audits.sigstore-trust-root]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source as a trust-root parser and selector. It has no unsafe code or build script; FileBelt does not rely on its pooled validity selection and instead requires one explicitly bounded authority per purpose and checks the authenticated time itself."
+
+[[audits.sigstore-tsa]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source. Timestamp parsing and signature verification fail closed when supplied correctly associated roots; FileBelt rejects all TSA material before calling the verifier, and online timestamp clients are not instantiated."
+
+[[audits.sigstore-types]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched generated and handwritten types. They contain no unsafe code, build script, or ambient I/O; FileBelt bounds documents before decoding and validates cardinality, identity, digest, and time semantics separately."
+
+[[audits.sigstore-verify]]
+who = "OpenAI Codex"
+criteria = "filebelt-constrained-deployment"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched defaults-off source. Generic authority pools do not associate every validFor window with the selected Fulcio, CT, or TSA material. FileBelt's only caller requires one bounded Fulcio, Rekor, and CT authority, no TSA, one authenticated Rekor v1 event with the exact log ID, and the selected integrated time inside all three windows."
+
+[[audits.tls_codec]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.4.2"
+notes = "Reviewed complete checksum-matched source. It has no unsafe code, build script, or ambient I/O. Generic Read byte-vector decoders can allocate a declared u32 length, while FileBelt's Sigstore SCT path uses slice decoding only after the four-MiB bundle bound."
+
+[[audits.tls_codec_derive]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.4.2"
+notes = "Reviewed complete checksum-matched proc-macro source. It has no unsafe code or ambient I/O, generates sequential field decoding with discriminant rejection, and the conditional_deserialization feature is unselected."
+
+[[audits.tonic]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.14.6"
+notes = "Reviewed complete checksum-matched source with codegen only. Transport, server, TLS, and compression are unselected; metadata casts, base64 construction, raw metadata contracts, and codec buffer invariants were reviewed, and FileBelt does not use tonic transport."
+
+[[audits.tonic-prost]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.14.6"
+notes = "Reviewed complete checksum-matched thin prost codec. It contains no build script, unsafe code, or ambient I/O; encoder and decoder buffer invariants follow tonic's reserved growable buffer contract, and FileBelt uses HTTP OTLP rather than gRPC transport."
+
+[[audits.tracing-opentelemetry]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+notes = "Reviewed complete checksum-matched source with metrics and tracing-log defaults disabled. The TypeId-checked downcast_raw pointer preserves the subscriber lifetime, and the crate has no build script or ambient I/O."
+
+[[audits.tracing-serde]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+notes = "Reviewed complete checksum-matched source. It performs pure caller-driven tracing metadata and field serialization with no unsafe code, build script, or ambient I/O."
+
+[[audits.x509-cert]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.2.5"
+notes = "Reviewed complete checksum-matched DER certificate and extension types. Safe decoders retain length and tag checks, the crate has no build script or ambient I/O, and signature and trust decisions remain explicit caller operations."
+
+[[audits.x509-tsp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+notes = "Reviewed complete checksum-matched safe DER timestamp-protocol structures. It has no build script, unsafe code, or ambient I/O; FileBelt rejects TSA material, so its CMP/CRMF dependency path is compiled but never reached."

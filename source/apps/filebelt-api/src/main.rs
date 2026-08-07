@@ -14,6 +14,7 @@ use filebelt_runtime::{init_telemetry, install_crypto_provider};
 mod app;
 mod auth;
 mod error;
+mod mcp;
 mod policy;
 mod resources;
 

@@ -88,4 +88,29 @@ spec:
           annotations:
             summary: A FileBelt TLS certificate expires within 14 days
             runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        {{- if .Values.mcp.enabled }}
+        - alert: FileBeltMcpRevocationLag
+          expr: filebelt_mcp_revocation_lag_seconds > 5
+          for: 30s
+          labels: {severity: critical}
+          annotations:
+            summary: MCP authority revocation exceeded the five-second contract
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+        {{- end }}
+        {{- if .Values.mcp.runners.enabled }}
+        - alert: FileBeltMcpControllerLeadershipInvalid
+          expr: sum(filebelt_controller_leader) != 1
+          for: 30s
+          labels: {severity: critical}
+          annotations:
+            summary: MCP runner controller leadership is invalid
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+        - alert: FileBeltMcpRunnerReconciliationFailing
+          expr: increase(filebelt_controller_reconciliation_failures_total[10m]) > 0
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: MCP runner reconciliation is failing
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+        {{- end }}
 {{- end }}

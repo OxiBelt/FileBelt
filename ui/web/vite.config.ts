@@ -28,16 +28,18 @@ export default defineConfig({
     alias: {
       "@filebelt/admin": fileURLToPath(new URL("../admin/source/index.tsx", import.meta.url)),
       "@filebelt/design-system": fileURLToPath(new URL("../design-system/source/index.tsx", import.meta.url)),
+      "@filebelt/mcp-settings": fileURLToPath(new URL("../mcp-settings/source/index.tsx", import.meta.url)),
     },
   },
   server: {
     headers: {
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
     },
   },
   test: {
     environment: "node",
+    exclude: ["browser/**", "dist/**", "node_modules/**"],
   },
 });

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 2
+version = 3
 public_origin = "https://filebelt.localhost:8443/"
 
 [deployment]
@@ -37,6 +37,9 @@ current_generation = 1
 [listeners]
 api = "0.0.0.0:8080"
 io = "0.0.0.0:8081"
+mcp_broker = "0.0.0.0:8082"
+controller = "0.0.0.0:8083"
+mcp_runner_relay = "0.0.0.0:8084"
 operations = "0.0.0.0:9090"
 allow_container_wildcard = true
 

@@ -31,6 +31,18 @@ images:
     repository: oxibelt/filebelt-web
     registryMirror: ""
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-mcp-broker:
+    repository: oxibelt/filebelt-mcp-broker
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-controller:
+    repository: oxibelt/filebelt-controller
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-mcp-runner:
+    repository: oxibelt/filebelt-mcp-runner
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 deployment:
   quiesced: false
@@ -41,7 +53,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 2
+    version = 3
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -79,6 +91,9 @@ configuration:
     [listeners]
     api = "0.0.0.0:8080"
     io = "0.0.0.0:8081"
+    mcp_broker = "0.0.0.0:8082"
+    controller = "0.0.0.0:8083"
+    mcp_runner_relay = "0.0.0.0:8084"
     operations = "0.0.0.0:9090"
     allow_container_wildcard = true
 
@@ -92,7 +107,7 @@ configuration:
     certificate_chain_file = "/run/secrets/backend-tls/tls.crt"
     private_key_file = "/run/secrets/backend-tls/tls.key"
     client_ca_file = "/run/secrets/backend-tls/client-ca.crt"
-    allowed_client_uri_sans = ["spiffe://filebelt/web/io"]
+    allowed_client_uri_sans = ["spiffe://filebelt/web/io", "spiffe://filebelt/mcp-broker/io"]
 
     [telemetry]
     log_format = "json"
@@ -325,6 +340,18 @@ workloads:
     resources:
       requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 256Mi}
       limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 2Gi}
+  mcpBroker:
+    replicas: 2
+    terminationGracePeriodSeconds: 45
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+  controller:
+    replicas: 2
+    terminationGracePeriodSeconds: 45
+    resources:
+      requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+      limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 256Mi}
   operation:
     resources:
       database:
@@ -355,6 +382,31 @@ secrets:
   ioServerTls: {name: filebelt-io-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   apiClientTls: {name: filebelt-api-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   ioClientTls: {name: filebelt-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  mcpDatabase: {name: filebelt-mcp-database, key: database-url, generation: "1"}
+  mcpVaultKeyring: {name: filebelt-mcp-vault-keyring, key: keyring.json, generation: "1"}
+  mcpBrokerServerTls: {name: filebelt-mcp-broker-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  apiMcpClientTls: {name: filebelt-api-mcp-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  mcpGatewayClientTls: {name: filebelt-mcp-gateway-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  mcpBackendClientTls: {name: filebelt-mcp-backend-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  controllerServerTls: {name: filebelt-controller-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  controllerClientTls: {name: filebelt-controller-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  runnerBrokerClientTls: {name: filebelt-runner-broker-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: ca.crt, generation: "1"}
+  runnerGatewayClientTls: {name: filebelt-runner-gateway-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: ca.crt, generation: "1"}
+
+mcp:
+  enabled: false
+  runners:
+    enabled: false
+    namespace: filebelt-mcp-runners
+    catalogConfigMap: filebelt-mcp-runner-catalog
+    catalogKey: catalog.json
+    trustedRootConfigMap: filebelt-mcp-sigstore-trusted-root
+    trustedRootKey: trusted-root.json
+    bundlesConfigMap: filebelt-mcp-sigstore-bundles
+  gateway:
+    address: filebelt-mcp-egress.filebelt-egress.svc:8443
+    serverName: filebelt-mcp-egress.filebelt-egress.svc
+    profile: public-web
 
 networkPolicy:
   publicIngress:
@@ -389,6 +441,18 @@ networkPolicy:
           matchLabels: {kubernetes.io/metadata.name: filebelt-egress}
         podSelector:
           matchLabels: {app.kubernetes.io/name: filebelt-oidc-egress}
+  mcpGateway:
+    enabled: false
+    port: 8443
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-egress}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-mcp-egress}
+  kubernetesApi:
+    enabled: false
+    port: 443
+    to: []
   iggy:
     enabled: false
     port: 8090

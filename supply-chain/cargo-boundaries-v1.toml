@@ -110,7 +110,12 @@ forbidden_packages = []
 forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
 filebelt-controller = []
+filebelt-deployment-diagnostics = []
+filebelt-mcp-protocol = []
+filebelt-runtime = []
 
 [[graph_profiles]]
 label = "database repository"
@@ -124,6 +129,7 @@ forbidden_package_prefixes = []
 filebelt-database = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
 
 [[graph_profiles]]
 label = "deployment diagnostics"
@@ -200,8 +206,16 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
 filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
 filebelt-mcp-broker = []
+filebelt-mcp-policy = []
+filebelt-mcp-protocol = []
+filebelt-mcp-vault = []
+filebelt-runtime = []
 
 [[graph_profiles]]
 label = "MCP policy"
@@ -213,6 +227,78 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-mcp-policy = []
+
+[[graph_profiles]]
+label = "MCP protocol"
+package = "filebelt-mcp-protocol"
+manifest = "source/crates/filebelt-mcp-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-mcp-protocol = []
+
+[[graph_profiles]]
+label = "MCP vault"
+package = "filebelt-mcp-vault"
+manifest = "source/crates/filebelt-mcp-vault/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-mcp-vault = []
+
+[[graph_profiles]]
+label = "MCP runner"
+package = "filebelt-mcp-runner"
+manifest = "source/apps/filebelt-mcp-runner/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-deployment-diagnostics = []
+filebelt-mcp-protocol = []
+filebelt-mcp-runner = []
 
 [[graph_profiles]]
 label = "media controller"
@@ -239,6 +325,7 @@ forbidden_package_prefixes = []
 filebelt-database = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
 filebelt-storage = []
 
 [[graph_profiles]]
@@ -280,6 +367,8 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
+filebelt-mcp-protocol = []
 filebelt-runtime = []
 filebelt-storage-protocol = []
 
@@ -298,6 +387,7 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
 filebelt-runtime = []
 filebelt-storage = []
 filebelt-storage-protocol = []
@@ -318,6 +408,7 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
 filebelt-runtime = []
 filebelt-storage = []
 filebelt-worker-maintenance = ["default", "service-runtime"]
@@ -337,6 +428,7 @@ filebelt-database = []
 filebelt-deployment-diagnostics = []
 filebelt-domain = []
 filebelt-events-protocol = []
+filebelt-mcp-policy = []
 filebelt-storage = []
 filebelt-worker-maintenance = []
 filebeltctl = []
@@ -495,9 +587,15 @@ public_modules = []
 wildcard_reexports = []
 
 [[public_surfaces]]
+package = "filebelt-controller"
+crate_root = "source/apps/filebelt-controller/src/lib.rs"
+public_modules = ["catalog", "kubernetes", "pod"]
+wildcard_reexports = []
+
+[[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = []
+public_modules = ["mcp"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -533,6 +631,24 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-mcp-policy"
 crate_root = "source/crates/filebelt-mcp-policy/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-mcp-protocol"
+crate_root = "source/crates/filebelt-mcp-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-mcp-runner"
+crate_root = "source/apps/filebelt-mcp-runner/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-mcp-vault"
+crate_root = "source/crates/filebelt-mcp-vault/src/lib.rs"
 public_modules = []
 wildcard_reexports = []
 

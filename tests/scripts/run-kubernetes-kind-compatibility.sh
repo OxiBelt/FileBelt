@@ -10,6 +10,7 @@ readonly KIND_135_IMAGE="kindest/node:v1.35.5@sha256:ce977ae6d65918d0b58a5f8b5e9
 readonly KIND_136_IMAGE="kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"
 readonly RELEASE_NAME="phase3"
 readonly NAMESPACE="filebelt-kind"
+readonly RUNNER_NAMESPACE="filebelt-kind-mcp-runners"
 readonly OPERATION_ID="123e4567-e89b-42d3-a456-426614174000"
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -45,6 +46,8 @@ diagnose() {
   kubectl_cmd get nodes -o wide >&2
   kubectl_cmd get all,configmap,networkpolicy,poddisruptionbudget \
     --namespace "${NAMESPACE}" -o wide >&2
+  kubectl_cmd get serviceaccount,role,rolebinding,networkpolicy \
+    --namespace "${RUNNER_NAMESPACE}" -o wide >&2
   kubectl_cmd get events --all-namespaces --sort-by=.lastTimestamp >&2
   helm --kubeconfig "${KUBECONFIG}" history "${RELEASE_NAME}" \
     --namespace "${NAMESPACE}" >&2
@@ -88,7 +91,7 @@ server_validate() {
     kubectl_cmd apply --server-side --dry-run=server --field-manager=filebelt-acceptance \
       --filename - >"${output}"
 
-  if [[ "${operation}" != "base" ]]; then
+  if [[ "${operation}" != "base" && "${operation}" != "mcp" ]]; then
     grep -E '^job\.batch/filebelt-' "${output}" >/dev/null \
       || die "${operation} did not produce an API-valid operation Job"
   fi
@@ -168,15 +171,96 @@ actual_version="$(kubectl_cmd get --raw /version \
   || die "API server version ${actual_version:-unknown} does not match ${expected_version}"
 
 kubectl_cmd create namespace "${NAMESPACE}"
-kubectl_cmd label --overwrite namespace "${NAMESPACE}" \
-  pod-security.kubernetes.io/enforce=restricted \
-  pod-security.kubernetes.io/enforce-version=latest \
-  pod-security.kubernetes.io/audit=restricted \
-  pod-security.kubernetes.io/warn=restricted >/dev/null
+kubectl_cmd create namespace "${RUNNER_NAMESPACE}"
+for namespace in "${NAMESPACE}" "${RUNNER_NAMESPACE}"; do
+  kubectl_cmd label --overwrite namespace "${namespace}" \
+    pod-security.kubernetes.io/enforce=restricted \
+    pod-security.kubernetes.io/enforce-version=latest \
+    pod-security.kubernetes.io/audit=restricted \
+    pod-security.kubernetes.io/warn=restricted >/dev/null
+done
 
 # The restricted namespace admission path and the live API server jointly
 # validate every base object before Helm records a revision.
 server_validate base
+
+# Submit the opt-in broker, controller, namespace RBAC, and NetworkPolicy
+# topology to the live API server as well. Quiescing keeps this a pure schema
+# and restricted-admission check without requiring release images or Secrets.
+mcp_config="${work_dir}/filebelt-mcp.toml"
+awk '
+  /^  filebelt: \|$/ { in_filebelt=1; next }
+  /^  oxibelt: \|$/ { in_filebelt=0 }
+  in_filebelt { sub(/^    /, ""); print }
+' "${chart_dir}/values.yaml" >"${mcp_config}"
+cat >>"${mcp_config}" <<EOF
+
+[backend_tls.mcp_broker]
+certificate_chain_file = "/run/secrets/mcp-broker-server-tls/tls.crt"
+private_key_file = "/run/secrets/mcp-broker-server-tls/tls.key"
+client_ca_file = "/run/secrets/mcp-broker-server-tls/client-ca.crt"
+allowed_client_uri_sans = ["spiffe://filebelt/api/mcp", "spiffe://filebelt/runner/mcp"]
+
+[backend_tls.controller]
+certificate_chain_file = "/run/secrets/controller-server-tls/tls.crt"
+private_key_file = "/run/secrets/controller-server-tls/tls.key"
+client_ca_file = "/run/secrets/controller-server-tls/client-ca.crt"
+allowed_client_uri_sans = ["spiffe://filebelt/mcp-broker/controller"]
+
+[mcp]
+enabled = true
+database_url_file = "/run/secrets/mcp-database-url"
+
+[mcp.broker]
+url = "https://filebelt-mcp-broker.${NAMESPACE}.svc:8082/"
+client_certificate_chain_file = "/run/secrets/mcp-broker-client-tls/tls.crt"
+client_private_key_file = "/run/secrets/mcp-broker-client-tls/tls.key"
+server_ca_file = "/run/secrets/mcp-broker-client-tls/server-ca.crt"
+
+[mcp.vault]
+keyring_file = "/run/secrets/mcp-vault-keyring.json"
+current_generation = 1
+
+[mcp.egress]
+gateway_url = "https://filebelt-mcp-egress.filebelt-egress.svc:8443/"
+client_certificate_chain_file = "/run/secrets/mcp-gateway-tls/tls.crt"
+client_private_key_file = "/run/secrets/mcp-gateway-tls/tls.key"
+server_ca_file = "/run/secrets/mcp-gateway-tls/server-ca.crt"
+
+[mcp.attachments]
+io_url = "https://filebelt-worker-io:8081/"
+client_certificate_chain_file = "/run/secrets/mcp-backend-tls/tls.crt"
+client_private_key_file = "/run/secrets/mcp-backend-tls/tls.key"
+server_ca_file = "/run/secrets/mcp-backend-tls/server-ca.crt"
+
+[mcp.trust_profiles.public]
+public_webpki = true
+ports = [443]
+
+[mcp.runners]
+enabled = true
+namespace = "${RUNNER_NAMESPACE}"
+catalog_file = "/etc/filebelt/mcp/catalog/catalog.json"
+trusted_root_file = "/etc/filebelt/mcp/trust/trusted-root.json"
+bundle_directory = "/etc/filebelt/mcp/bundles"
+runner_image = "ghcr.io/oxibelt/filebelt-mcp-runner@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+controller_url = "https://filebelt-controller.${NAMESPACE}.svc:8083/"
+controller_client_certificate_chain_file = "/run/secrets/controller-client-tls/tls.crt"
+controller_client_private_key_file = "/run/secrets/controller-client-tls/tls.key"
+controller_server_ca_file = "/run/secrets/controller-client-tls/server-ca.crt"
+max_per_principal = 1
+max_per_tenant = 8
+EOF
+api_address="$(kubectl_cmd get service kubernetes --namespace default -o jsonpath='{.spec.clusterIP}')"
+if [[ "${api_address}" == *:* ]]; then api_cidr="${api_address}/128"; else api_cidr="${api_address}/32"; fi
+server_validate mcp \
+  --set mcp.enabled=true \
+  --set mcp.runners.enabled=true \
+  --set-string mcp.runners.namespace="${RUNNER_NAMESPACE}" \
+  --set networkPolicy.mcpGateway.enabled=true \
+  --set networkPolicy.kubernetesApi.enabled=true \
+  --set-json "networkPolicy.kubernetesApi.to=[{\"ipBlock\":{\"cidr\":\"${api_cidr}\"}}]" \
+  --set-file configuration.filebelt="${mcp_config}"
 helm --kubeconfig "${KUBECONFIG}" upgrade --install "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --values "${ci_values}" \
@@ -200,7 +284,7 @@ old_checksum="$(kubectl_cmd get deployment filebelt-api --namespace "${NAMESPACE
 [[ "$(kubectl_cmd get configmap "${old_config_name}" --namespace "${NAMESPACE}" -o jsonpath='{.immutable}')" == "true" ]] \
   || die "the initial content-addressed ConfigMap is not immutable"
 
-changed_config=$'version = 2\n\n[deployment]\nmode = "kubernetes"\n\n[acceptance]\nrevision = "second"'
+changed_config=$'version = 3\n\n[deployment]\nmode = "kubernetes"\n\n[acceptance]\nrevision = "second"'
 helm --kubeconfig "${KUBECONFIG}" upgrade "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --reuse-values \

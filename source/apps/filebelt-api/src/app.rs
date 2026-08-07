@@ -36,6 +36,7 @@ pub(crate) struct AppState {
     pub(crate) oidc_http: reqwest::Client,
     pub(crate) capability_signer: Arc<Ed25519KeyPair>,
     pub(crate) public_origin: String,
+    pub(crate) mcp: Option<Arc<crate::mcp::McpApiState>>,
     digest_key: [u8; 32],
 }
 
@@ -94,6 +95,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         .try_into()
         .map_err(|_| anyhow!("digest key must contain exactly 32 bytes"))?;
     let public_origin = config.public_origin.origin().ascii_serialization();
+    let mcp = crate::mcp::initialize(&config)?;
     let listener = config.listeners.api;
     let state = AppState {
         config: config.clone(),
@@ -104,6 +106,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         oidc_http,
         capability_signer,
         public_origin,
+        mcp,
         digest_key,
     };
     tokio::spawn(refresh_oidc(state.clone()));
@@ -232,6 +235,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
             "/api/v1",
             Router::new()
                 .merge(crate::auth::router())
+                .merge(crate::mcp::router())
                 .merge(crate::resources::router()),
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))
@@ -429,7 +433,7 @@ mod tests {
         )
         .unwrap();
         let config = Config {
-            version: 2,
+            version: filebelt_control_protocol::CONFIG_VERSION,
             deployment: DeploymentConfig {
                 mode: DeploymentMode::Development,
             },
@@ -470,6 +474,7 @@ mod tests {
             listeners: ListenerConfig::default(),
             limits: LimitConfig::default(),
             iggy: None,
+            mcp: filebelt_control_protocol::McpConfig::default(),
         };
         validate_public_key(&config, &signer).unwrap();
     }

@@ -25,6 +25,50 @@ url = "https://raw.githubusercontent.com/OxiBelt/OxiBelt/main/supply-chain/audit
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
+[policy."cmpv2:0.2.0"]
+dependency-criteria = { crmf = "filebelt-constrained-deployment" }
+notes = "The CRMF encoding surface with the known GeneralName recursion is unreachable from FileBelt's no-TSA controller path."
+
+[policy."crmf:0.2.0"]
+notes = "The constrained criterion applies only to dormant CRMF code; its direct dependencies retain the standard deployment requirement."
+
+[policy."crmf:0.2.0".dependency-criteria]
+cms = "safe-to-deploy"
+der = "safe-to-deploy"
+spki = "safe-to-deploy"
+x509-cert = "safe-to-deploy"
+
+[policy.filebelt-controller]
+dependency-criteria = { sigstore-verify = "filebelt-constrained-deployment" }
+notes = "The controller is the sole sigstore-verify caller and enforces FileBelt's bounded offline trust profile before accepting a runner catalog entry."
+
+[policy."sigstore-verify:0.11.0"]
+notes = "The constrained verifier criterion applies only to sigstore-verify itself; its direct dependencies retain the standard deployment requirement."
+
+[policy."sigstore-verify:0.11.0".dependency-criteria]
+base64 = "safe-to-deploy"
+cms = "safe-to-deploy"
+const-oid = "safe-to-deploy"
+hex = "safe-to-deploy"
+jiff = "safe-to-deploy"
+pem = "safe-to-deploy"
+rustls-pki-types = "safe-to-deploy"
+rustls-webpki = "safe-to-deploy"
+serde = "safe-to-deploy"
+serde_json = "safe-to-deploy"
+serde_json_canonicalizer = "safe-to-deploy"
+sigstore-bundle = "safe-to-deploy"
+sigstore-crypto = "safe-to-deploy"
+sigstore-merkle = "safe-to-deploy"
+sigstore-rekor = "safe-to-deploy"
+sigstore-trust-root = "safe-to-deploy"
+sigstore-tsa = "safe-to-deploy"
+sigstore-types = "safe-to-deploy"
+thiserror = "safe-to-deploy"
+tls_codec = "safe-to-deploy"
+tracing = "safe-to-deploy"
+x509-cert = "safe-to-deploy"
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
@@ -167,10 +211,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.blake3]]
 version = "1.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.block-buffer]]
-version = "0.10.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.block-buffer]]
@@ -337,10 +377,6 @@ criteria = "safe-to-deploy"
 version = "0.2.17"
 criteria = "safe-to-deploy"
 
-[[exemptions.cpufeatures]]
-version = "0.3.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.crc]]
 version = "3.4.0"
 criteria = "safe-to-deploy"
@@ -383,10 +419,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crypto-bigint]]
 version = "0.5.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.crypto-common]]
-version = "0.1.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.crypto-common]]
@@ -582,19 +614,7 @@ version = "0.4.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashbrown]]
-version = "0.12.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
 version = "0.14.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
-version = "0.16.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
-version = "0.17.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hashlink]]
@@ -611,10 +631,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hkdf]]
 version = "0.13.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.hmac]]
-version = "0.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hmac]]
@@ -709,10 +725,6 @@ criteria = "safe-to-deploy"
 version = "1.9.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.indexmap]]
-version = "2.14.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.inlinable_string]]
 version = "0.1.15"
 criteria = "safe-to-deploy"
@@ -739,10 +751,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
 version = "0.13.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.itertools]]
-version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.itoa]]
@@ -1054,14 +1062,6 @@ version = "0.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_core]]
-version = "0.6.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.9.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
 version = "0.10.1"
 criteria = "safe-to-deploy"
 
@@ -1186,10 +1186,6 @@ version = "0.1.29"
 criteria = "safe-to-deploy"
 
 [[exemptions.schemars]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.schemars]]
 version = "1.2.2"
 criteria = "safe-to-deploy"
 
@@ -1225,10 +1221,6 @@ criteria = "safe-to-deploy"
 version = "0.6.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_spanned]]
-version = "1.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_urlencoded]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
@@ -1250,15 +1242,7 @@ version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]
-version = "0.10.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.sha2]]
 version = "0.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.shlex]]
-version = "1.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.shlex]]
@@ -1341,10 +1325,6 @@ criteria = "safe-to-deploy"
 version = "2.0.119"
 criteria = "safe-to-deploy"
 
-[[exemptions.syn]]
-version = "3.0.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.sync_wrapper]]
 version = "1.0.2"
 criteria = "safe-to-deploy"
@@ -1354,15 +1334,7 @@ version = "0.4.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror]]
-version = "1.0.69"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror]]
 version = "2.0.18"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "1.0.69"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror-impl]]
@@ -1411,10 +1383,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.toml_datetime]]
 version = "0.6.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.toml_datetime]]
-version = "0.7.5+spec-1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_datetime]]
@@ -1563,10 +1531,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.webpki-roots]]
 version = "0.26.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.webpki-roots]]
-version = "1.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.whoami]]

@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use crate::grants::{encode_hex, migration_manifest_in};
 
-const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v1";
-const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v1";
+const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v2";
+const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v2";
 const MAX_CHECKPOINT_BYTES: u64 = 1_048_576;
 const PAYLOAD_BATCH_SIZE: i64 = 1_000;
 const CHECKPOINT_FIELDS: &[&str] = &[
@@ -101,6 +101,12 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
         tenant_id,
     )
     .await?;
+    let mcp_vault_generations = distinct_generations(
+        &mut transaction,
+        "SELECT DISTINCT kek_generation AS token_key_generation FROM (SELECT tenant_id,kek_generation FROM filebelt_mcp_vault.secret_envelopes UNION ALL SELECT tenant_id,kek_generation FROM filebelt_mcp_vault.oauth_attempt_secrets) vault_keys WHERE tenant_id=$1 ORDER BY token_key_generation",
+        tenant_id,
+    )
+    .await?;
     let audit_watermark = sqlx::query("SELECT occurred_at::text AS occurred_at,id FROM audit_events WHERE tenant_id=$1 ORDER BY occurred_at DESC,id DESC LIMIT 1")
         .bind(tenant_id)
         .fetch_optional(&mut *transaction)
@@ -112,7 +118,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
                 "id": row.get::<Uuid, _>("id"),
             })
         });
-    let counts = sqlx::query("SELECT (SELECT count(id) FROM principals WHERE tenant_id=$1) AS principals,(SELECT count(id) FROM users WHERE tenant_id=$1) AS users,(SELECT count(id) FROM groups WHERE tenant_id=$1) AS groups,(SELECT count(id) FROM drives WHERE tenant_id=$1) AS drives,(SELECT count(id) FROM nodes WHERE tenant_id=$1) AS nodes,(SELECT count(id) FROM file_versions WHERE tenant_id=$1) AS file_versions,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1) AS payload_objects,(SELECT count(id) FROM jobs WHERE tenant_id=$1) AS jobs,(SELECT count(id) FROM audit_events WHERE tenant_id=$1) AS audit_events,(SELECT count(id) FROM outbox_events WHERE tenant_id=$1 AND published_at IS NULL) AS pending_outbox,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS expected_payloads,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('quarantining','quarantined')) AS quarantined_payloads,(SELECT COALESCE(sum(size_bytes),0)::bigint FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS total_payload_bytes")
+    let counts = sqlx::query("SELECT (SELECT count(id) FROM principals WHERE tenant_id=$1) AS principals,(SELECT count(id) FROM users WHERE tenant_id=$1) AS users,(SELECT count(id) FROM groups WHERE tenant_id=$1) AS groups,(SELECT count(id) FROM drives WHERE tenant_id=$1) AS drives,(SELECT count(id) FROM nodes WHERE tenant_id=$1) AS nodes,(SELECT count(id) FROM file_versions WHERE tenant_id=$1) AS file_versions,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1) AS payload_objects,(SELECT count(id) FROM jobs WHERE tenant_id=$1) AS jobs,(SELECT count(id) FROM audit_events WHERE tenant_id=$1) AS audit_events,(SELECT count(id) FROM outbox_events WHERE tenant_id=$1 AND published_at IS NULL) AS pending_outbox,(SELECT count(id) FROM filebelt_mcp.registrations WHERE tenant_id=$1 AND deleted_at IS NULL) AS mcp_registrations,(SELECT count(id) FROM filebelt_mcp.deletion_tombstones WHERE tenant_id=$1) AS mcp_deletion_tombstones,(SELECT count(invocation_id) FROM filebelt_mcp.runner_slot_reservations WHERE tenant_id=$1 AND released_at IS NULL) AS mcp_runner_slot_reservations,(SELECT count(registration_id) FROM filebelt_mcp_vault.secret_envelopes WHERE tenant_id=$1 AND deleted_at IS NULL) AS mcp_secret_envelopes,(SELECT count(attempt_id) FROM filebelt_mcp_vault.oauth_attempt_secrets WHERE tenant_id=$1) AS mcp_oauth_attempt_secrets,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS expected_payloads,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('quarantining','quarantined')) AS quarantined_payloads,(SELECT COALESCE(sum(size_bytes),0)::bigint FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS total_payload_bytes")
         .bind(tenant_id)
         .bind(configuration.storage.backend_id)
         .fetch_one(&mut *transaction)
@@ -139,6 +145,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
         "database_key_generations": {
             "sessions": session_generations,
             "share_links": share_generations,
+            "mcp_vault": mcp_vault_generations,
         },
         "migrations": migrations,
         "audit_watermark": audit_watermark,
@@ -153,6 +160,11 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "jobs": counts.get::<i64, _>("jobs"),
             "audit_events": counts.get::<i64, _>("audit_events"),
             "pending_outbox": counts.get::<i64, _>("pending_outbox"),
+            "mcp_registrations": counts.get::<i64, _>("mcp_registrations"),
+            "mcp_deletion_tombstones": counts.get::<i64, _>("mcp_deletion_tombstones"),
+            "mcp_runner_slot_reservations": counts.get::<i64, _>("mcp_runner_slot_reservations"),
+            "mcp_secret_envelopes": counts.get::<i64, _>("mcp_secret_envelopes"),
+            "mcp_oauth_attempt_secrets": counts.get::<i64, _>("mcp_oauth_attempt_secrets"),
             "expected_payloads": counts.get::<i64, _>("expected_payloads"),
             "quarantined_payloads": counts.get::<i64, _>("quarantined_payloads"),
             "total_payload_bytes": counts.get::<i64, _>("total_payload_bytes"),

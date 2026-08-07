@@ -21,6 +21,8 @@ export const ImageRoles = [
   "filebelt-worker-maintenance",
   "filebelt-media-controller",
   "filebelt-mcp-broker",
+  "filebelt-controller",
+  "filebelt-mcp-runner",
   "filebelt-tools",
   "filebelt-web",
 ] as const;
@@ -269,7 +271,19 @@ const RoleDefinitions: readonly RoleDefinition[] = [
     IggyRuntimeComponents,
   ),
   RustRole("filebelt-media-controller", "filebelt-media-controller"),
-  RustRole("filebelt-mcp-broker", "filebelt-mcp-broker"),
+  RustRole(
+    "filebelt-mcp-broker",
+    "filebelt-mcp-broker",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
+  RustRole(
+    "filebelt-controller",
+    "filebelt-controller",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
+  RustRole("filebelt-mcp-runner", "filebelt-mcp-runner"),
   RustRole("filebelt-tools", "filebeltctl", RustIggyImageLicense, IggyRuntimeComponents),
   {
     Role: "filebelt-web",
@@ -298,6 +312,8 @@ const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-worker-maintenance": "FileBelt maintenance worker",
   "filebelt-media-controller": "FileBelt media controller",
   "filebelt-mcp-broker": "FileBelt MCP broker",
+  "filebelt-controller": "FileBelt MCP runner controller",
+  "filebelt-mcp-runner": "FileBelt trusted MCP stdio runner relay",
   "filebelt-tools": "FileBelt command-line tools",
   "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };

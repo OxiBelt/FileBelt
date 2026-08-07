@@ -42,6 +42,12 @@ stream, not a logging mode.
 - Is Iggy publication behind while PostgreSQL polling remains healthy?
 - Did a scrub quarantine data or detect a BLAKE3 mismatch?
 - Are backend/public certificates approaching expiry?
+- Are MCP invocations bounded, policy denials expected, and registrations free
+  of new quarantine transitions?
+- Is MCP revocation visible within five seconds, and is exactly one runner
+  controller the reconciliation leader when runners are enabled?
+- Are one-shot runner creation and cleanup progressing without reconciliation
+  failures or orphan resources?
 
 The shipped dashboard answers these questions without a user-content or
 tenant selector.
@@ -59,8 +65,13 @@ tenant selector.
 - Quarantine or digest mismatch: critical.
 - Certificate lifetime below fourteen days: warning; below three days:
   critical.
+- MCP revocation lag above five seconds for 30 seconds: critical.
+- Runner controller leader gauge summed across replicas differs from one for 30
+  seconds: critical when runners are enabled.
+- Runner reconciliation failure in ten minutes sustained for five minutes, or
+  a registration entering quarantine in 15 minutes: warning.
 
-There is no backup-freshness alert because Phase 3 has no persisted backup
+There is no backup-freshness alert because FileBelt has no persisted backup
 schedule or numeric recovery objective. External backup automation must alert
 on its own schedule; FileBelt alerts only on a failed recovery verification
 when such a run is executed.
@@ -73,3 +84,11 @@ final cursor only after the `filebelt.audit.export.v1` checkpoint record is
 received. External tooling owns encryption, transport, retention, replay, and
 deduplication by audit event ID. Never configure an always-running FileBelt
 Internet exporter.
+
+MCP audit/activity records include stable registration, capability, principal,
+application, outcome, byte-count, and reason-code fields only. They exclude
+arguments, attachment content or paths, remote result bodies, OAuth values,
+credentials, approval digests, bootstrap tokens, SPIFFE certificate material,
+and vault metadata that could aid decryption. Dashboard labels remain bounded;
+registration, invocation, Pod, and principal UUIDs belong only in protected
+redacted diagnostics where explicitly allowed.

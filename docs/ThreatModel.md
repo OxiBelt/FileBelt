@@ -1,16 +1,17 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 3 Kubernetes Threat Model
+# Phase 4 Kubernetes and MCP Threat Model
 
 - Date: 2026-08-07
 - Owner: `@PiQuark6046`
 - Scope: repository and image supply chain, OIDC and browser sessions, tenant
   administration, namespace and Virtual ACL, REST and authenticated sharing,
   OxiBelt, capability-limited storage workers, PostgreSQL, UUID payload
-  storage, durable jobs, optional Iggy, audit, Kubernetes 1.34-1.36,
+  storage, durable jobs, optional Iggy, audit, MCP registrations and vault,
+  remote MCP mediation, one-shot curated runners, Kubernetes 1.34-1.36,
   NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
 - Excluded: managed-cluster/provider internals, online backup, HA/PITR and
-  numeric production RPO/RTO, adapters, MCP, media, Markdown editing,
+  numeric production RPO/RTO, adapters, media, Markdown editing,
   ONLYOFFICE, WebTransport, and application encryption
 
 ## Assets and security objectives
@@ -31,6 +32,18 @@
   unauthorized publication, silent loss, or premature deletion.
 - Iggy loss, delay, duplication, or compromise cannot alter committed state or
   make revocation depend solely on event delivery.
+- MCP server authentication never becomes FileBelt data authority. Every
+  capability, approval, data disclosure, service grant, and revocation remains
+  exact, tenant/principal-bound, generation-qualified, and PostgreSQL-backed.
+- MCP credentials, OAuth verifier/state, bootstrap tokens, and vault keys do
+  not cross into browser storage, untrusted server containers, telemetry,
+  build evidence, or broader database roles. Exact approved arguments and
+  selected attachment disclosures cross only to the chosen server; arguments,
+  attachments, and results remain ephemeral and never enter browser
+  persistence, telemetry, or build evidence.
+- Remote and stdio MCP servers cannot select arbitrary egress, images,
+  commands, resources, Kubernetes authority, payload mounts, or FileBelt
+  credentials.
 - Pull-request inputs cannot cross license regions, publish artifacts, or
   broaden a FileBelt Pod's privileges. Tag-only promotion publishes only
   previously validated immutable subjects.
@@ -47,6 +60,12 @@ OIDC issuer <──TLS CONNECT── egress gateway <── NetworkPolicy ──
 
 PostgreSQL outbox ──> publisher ──optional──> Iggy ──wake/invalidate──> workers
 PostgreSQL jobs  <──────────────────── five-second polling fallback ────────┘
+
+browser ──session+CSRF──> API ──signed fbmcp1/mTLS──> MCP broker
+                              │                         ├──mTLS/target profile──> MCP egress gateway ──> remote server
+                              │                         └──mTLS──> controller ──namespaced API──> one-shot runner Pod
+                              └──exact version/data grant──> I/O worker             ├──trusted relay──> broker/gateway
+                                                                                     └──stdio──> untrusted catalog server
 ```
 
 OxiBelt terminates public TLS. Kubernetes API and I/O backends require TLS 1.3
@@ -56,19 +75,49 @@ payload mount, verification keys, and narrow database access but cannot mutate
 namespace or ACL state. Maintenance uses a distinct database role and the same
 RWX root. Iggy is an untrusted, at-least-once notification path.
 
+The API owns browser intent and approval admission but has no MCP-vault access.
+The broker owns narrow MCP policy/vault access, receives signed delegations,
+has no payload mount, and can reach remote servers only through the MCP egress
+gateway. The controller is the only FileBelt workload with a ServiceAccount
+token; it runs in the core namespace, but its cross-namespace Role is limited
+to runner Pods, bootstrap Secrets, and its leadership Lease in a separate,
+exclusive runner namespace. The runner relay is trusted FileBelt code, while the
+catalog server sharing its Pod is hostile. That server receives no token,
+Secret, database, payload, or Kubernetes API authority and reaches the network
+only through the loopback relay proxy and default-deny NetworkPolicy. Runner
+Pods have no DNS egress: the trusted controller resolves the broker and gateway
+to bounded numeric address lists, and the relay rejects hostnames while keeping
+TLS server-name authentication separate.
+
 The production namespace is one trusted FileBelt deployment and tenant.
 Adjacent Pods and compromised public clients are hostile. The Kubernetes
 control plane, cluster and node administrators, CNI, CSI/storage provider,
 database operator, certificate issuer, OIDC issuer, and egress-gateway operator
 remain powerful trusted parties. Namespace isolation does not protect against
 a compromised node or cluster administrator. ServiceAccount tokens are absent
-because no FileBelt workload needs the Kubernetes API.
+from every workload except the runner controller's narrowly authorized Pod.
 
 ## Threats and controls
 
 | Threat | Control | Required evidence |
 | --- | --- | --- |
 | OIDC login injection, replay, or callback confusion | Exact issuer and callback allowlists; code+PKCE, state, nonce, signature, audience, and time validation | OIDC negative and replay tests |
+| MCP OAuth callback is mixed up, replayed, or used for another server | Ten-minute one-shot server-held attempt bound to user, session, registration, credential generation, issuer, exact callback and local return path; every credential/config change erases pending attempts; PKCE/state and resource/audience binding; no token passthrough | MCP OAuth fixture, generation change, mix-up, expiry, replay, and audience tests |
+| MCP credential is exposed to the API, browser, logs, or another registration | Separate vault schema and broker role; AES-256-GCM envelope with context-bound AAD and KEK generation; write-only UI; configuration PATCH is broker-mediated cryptographic erasure through one narrow definer function | Database privilege, direct-config denial, vault context-swap, browser-storage, redaction, and deletion tests |
+| Remote endpoint performs SSRF, DNS rebinding, or trust-profile escape | Broker has no direct Internet path; mTLS gateway receives exact target origin/profile and enforces host, CIDR, port, CA, redirect, and resolved-address policy on every connection | Gateway redirect/rebinding/private-address and NetworkPolicy denial tests |
+| Remote capability drifts after approval | Immutable snapshot and descriptor fingerprint; enablement requires exact review; rediscovery/drift disables authority until review | Capability drift, fingerprint, and enablement-state tests |
+| Browser silently approves or replays changed arguments | Five-minute intent with server-derived keyed argument/attachment digests; explicit confirmation; one-shot atomic approval; exact request resubmission | Browser no-preapproval, changed-request, second-use, and cross-session tests |
+| Data grant follows a moving file head or reaches another server | Grant binds destination registration, drive/node and immutable version, disclosures, expiry, and ACL/namespace generations; revalidate before transfer | Version-head race, registration-swap, revoke, and ACL-generation tests |
+| Service identity or saved grant becomes broad ambient authority | Exact SPIFFE binding, application/capability/arguments/data-grant set, hourly quota and <=30-day expiry; suspend/delete revokes dependent state | SPIFFE mismatch, attenuation, quota, expiry, and service-revocation tests |
+| Malicious result executes script or exhausts the browser | Render text literally, JSON as a bounded non-editable tree, and only allowlisted magic-checked media through Blob URLs; no HTML injection or autoplay | Chromium/Firefox script-result, media-bound, CSP, and accessibility tests |
+| Compromised broker reads arbitrary payload or browser identity | No payload mount, no browser session/OIDC/ACL/user/payload-locator database privileges, signed narrow delegation, and I/O mediation for approved versions | Mount, database-grant, delegation, and direct-storage denial tests |
+| Curated server steals bootstrap, broker, gateway, or Kubernetes credentials | Secrets mount only in the trusted relay; the server receives only its reviewed command, runner shim, memory socket, bounded temporary storage, loopback proxy settings, no ServiceAccount token, and a scrubbed environment | Rendered-Pod secret/mount/env and in-Pod abuse tests |
+| Runner catalog substitutes an image, command, signature, or resource limit | Schema-v1 bounded catalog, digest-only image, offline Sigstore trusted root/bundle with exact issuer/identity, allowlisted registry/architecture/egress profile, fixed command and resources | Catalog traversal, signature, digest, command, architecture, and quantity tests |
+| Compromised controller gains core or cluster-wide authority | Pre-created exclusive runner namespace, core controller ServiceAccount bound only to a Role in that runner namespace, no core Role and no ClusterRole | Static RBAC, `kubectl auth can-i`, cross-namespace, and leader tests |
+| Orphan runner survives cancellation or controller failover | Invocation lifecycle owns create, create/cancel share a mutation lock, cancellation-before-ack performs idempotent cleanup, resources are invocation-named, and Pods have a 130-second deadline | Cancellation/create race, controller failover, stale Secret, and cleanup tests |
+| MCP flood exhausts broker, controller, or remote server | Bounded request/result/attachment sizes and deadlines, principal/registration/replica semaphores, bounded queue, persisted rate buckets, and PostgreSQL-authoritative runner slots reserved before create and held until confirmed delete | Oversize, timeout, queue-full, rate-limit, cross-replica concurrent-runner, expired-slot, and delete-failure tests |
+| Revocation depends on event delivery or leaves a recoverable token | PostgreSQL registration/block generations cancel invocations and revoke dependent approvals, immutable-version data grants, snapshots, and reviews; Iggy is unused for authority; broker erases vault/OAuth envelopes and records only a tombstone | Iggy-down revocation, admin-block in-flight cancel, generation-bound grant, cryptographic erasure, and tombstone tests |
+| Restore omits a vault generation or MCP policy inventory | Recovery checkpoint v2 records MCP counts/tombstones and referenced KEK generations without ciphertext; verification must match before traffic | Quiesced v2 checkpoint, missing-KEK, mismatched-inventory, and fresh-target restore tests |
 | Public login requests exhaust PostgreSQL | Expired or consumed attempts are reclaimed under a tenant lock and active attempts have a fixed admission bound | Retention and admission-limit tests |
 | Stale or malicious JWKS authorizes a new identity | Bounded 24-hour freshness plus 24-hour known-key outage window; unknown `kid` and new discovery fail closed | Rotation/outage/unknown-key tests |
 | Mutable email takes over an account or share | Identity is exact issuer/subject; only verified email resolves an already-linked principal; grant stores principal ID | Identity collision and share-resolution tests |
@@ -87,9 +136,9 @@ because no FileBelt workload needs the Kubernetes API.
 | Compromised web client identity reaches the other backend | Separate client certificates and exact URI SAN allowlists for API and I/O; one retiring identity allowed only during rotation | Cross-upstream certificate and rotation tests |
 | Kubelet cannot authenticate to an mTLS application listener | Separate low-information operations listener; never expose it publicly; metrics ingress restricted to configured monitoring peers | Probe and NetworkPolicy tests |
 | Mutable Secret changes without a controlled restart | Existing key-filtered Secret projections plus an explicit generation in the Pod template; configuration and trust load only at startup | Secret/certificate rollout tests |
-| ServiceAccount token or RBAC expands a compromised Pod | Per-role token automount disabled on ServiceAccount and Pod; no Role/Binding is rendered | Static manifests and `kubectl auth can-i` tests |
+| Unexpected ServiceAccount token or RBAC expands a compromised Pod | Token automount disabled for every role except the controller; its exact runner-namespace Role is the only Role/Binding rendered and grants no core-namespace authority | Static manifests and `kubectl auth can-i` tests |
 | API bypasses the OIDC egress allowlist | Dedicated OIDC HTTP client uses an explicit in-cluster CONNECT gateway; NetworkPolicy permits only its namespace/pod/port; gateway allowlists the issuer | Direct-Internet denial and gateway destination tests |
-| DNS or external dependency addressing creates catch-all egress | Explicit DNS peer and dependency namespace/pod/IPBlock values; chart rejects IPv4/IPv6 default routes | Schema/helper and live policy tests |
+| DNS or external dependency addressing creates catch-all egress | Core roles use explicit DNS peers; runner Pods have no DNS path and receive only controller-resolved numeric broker/gateway addresses; chart rejects IPv4/IPv6 default routes | Schema/helper and live policy tests |
 | Proxy retries a non-idempotent write | OxiBelt write retries disabled; allocation/commit require scoped idempotency records | Lost-response and duplicate-write tests |
 | Edge cache serves another user's content | Authenticated content and reserved public routes are never cached; only non-JavaScript hashed static assets are immutable | Cache-control and cross-user tests |
 | Stolen capability is replayed or used for another object | `fbcap1` audience/operation/ID/bounds/generation/fence/nonce/expiry signature; upload nonce replay record | Capability mutation and replay tests |
@@ -133,24 +182,31 @@ default durable retention is 365 days and the user-visible privacy subset is
 ## Residual risk
 
 The single maintainer, cluster/operator plane, storage/database providers,
-certificate issuer, egress gateway, and configured OIDC issuer remain
-concentrations of trust. A compromised API signing key can issue byte capabilities until the key
-generation is retired, although the claims and worker generation checks limit
-scope and time. A storage or database administrator can deny service and may
-observe unencrypted-at-application-layer data; encryption at rest is delegated
-to the volume/provider.
+certificate issuer, OIDC and MCP egress gateways, configured OIDC issuer, MCP
+vault KEK custodian, and runner-catalog signing authorities remain
+concentrations of trust. A compromised API signing key can issue byte or MCP
+delegations until the key generation is retired, although claims and worker or
+broker generation checks limit scope and time. A storage or database
+administrator can deny service and may observe unencrypted-at-application-layer
+data; encryption at rest is delegated to the volume/provider.
 
 Open byte streams can retain access for up to the configured 60-second check
 interval. The Kubernetes recovery procedure proves a coordinated quiesced
 restore into fresh targets, but it does not claim production availability,
 online backup, PITR, HA, or an RPO/RTO. Standard NetworkPolicy cannot identify
-an Internet FQDN, so OIDC depends on the correctness of the operator gateway.
+an Internet FQDN, so OIDC and remote MCP depend on their operator gateways.
+A compromised controller can replace eligible Pods and Secrets only in the
+exclusive runner namespace; exact RBAC, offline catalog verification, short Pod lifetime,
+and separate broker/gateway authentication limit but do not eliminate that
+risk. A malicious admitted server can consume its assigned CPU, memory, and
+ephemeral storage and return adversarial data until its deadline; it cannot be
+made trustworthy by sandboxing.
 Dependency scans, attestations, and signed source mappings reduce known
 supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so
 their review debt remains until equivalent audit evidence replaces them.
 
 The threat model must be extended before enabling a second issuer, another
-tenant per deployment, a service mesh, a controller, an adapter, WebTransport,
-MCP, media, application encryption/deduplication, multi-root/RWO storage, or
-online backup.
+tenant per deployment, a service mesh, an adapter, WebTransport, media, MCP
+sampling/elicitation or payload-write mediation, application
+encryption/deduplication, multi-root/RWO storage, or online backup.

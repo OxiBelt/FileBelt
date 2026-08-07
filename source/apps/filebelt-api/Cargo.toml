@@ -21,14 +21,18 @@ filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-domain.workspace = true
+filebelt-mcp-policy.workspace = true
+filebelt-mcp-protocol.workspace = true
 filebelt-runtime.workspace = true
 filebelt-storage-protocol.workspace = true
 getrandom.workspace = true
 openidconnect.workspace = true
+prost.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 subtle.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -122,10 +122,58 @@ The pinned Iggy helper alone receives its documented `SYS_NICE`, unlimited
 memlock, and seccomp exception. Image and Compose contract tests fail if that
 exception reaches a FileBelt container or another profile service.
 
+## Phase 4 MCP dependency admission
+
+Phase 4 admits `rmcp@3.1.1` with default features disabled for bounded MCP
+model decoding and `sigstore-verify@0.11.0` with default features disabled for
+offline runner-catalog verification. They are lockfile exact. The broker still
+owns HTTP transport, size/deadline enforcement, egress-gateway routing,
+authorization, and result validation; the MCP library does not receive a
+browser session, payload path, vault keyring, or unrestricted connector. The
+controller verifier reads only an operator-projected trusted root, catalog, and
+bundle directory. It permits no online trust-root or transparency-log lookup
+at admission time.
+
+The catalog format is schema version 1, at most 1 MiB and 128 entries. Its
+trusted-root document is at most 2 MiB and each Sigstore bundle at most 4 MiB.
+Every entry binds a lowercase allowlisted registry repository, SHA-256 image
+digest, HTTPS source, declared license, absolute command and bounded arguments,
+supported architecture set, egress profile, resource quantities, and exact
+signature identity/issuer. Bundle paths are canonicalized below the configured
+directory. Catalog, root, bundle, image, or policy changes are supply-chain and
+deployment-authority changes, not runtime user configuration.
+
+FileBelt deliberately accepts a narrower trust-root profile than the generic
+Sigstore verifier. The projection must contain exactly one bounded Fulcio CA,
+one bounded Rekor key, and one bounded CT key, with explicit start and end
+times, and no TSA authority. A bundle must contain exactly one Rekor v1 entry
+with both an inclusion proof and promise, a positive integrated time, and the
+exact projected Rekor log ID. That authenticated integrated time must fall
+inside all three authority windows and must be the verifier-selected time with
+no warnings. Rotations atomically replace the root and catalog bundles; they do
+not introduce overlapping authority sets. This wrapper is required because the
+admitted verifier version does not itself associate every pooled authority
+window with the material it selected.
+
+The browser workspace pins `@playwright/test@1.62.0` for Chromium and Firefox
+security-flow coverage. It remains development-only and installs browsers only
+in the test environment. `openapi-typescript@7.13.0` remains the sole
+deterministic public-client generator; Phase 4 regeneration covers all MCP
+personal, administrative, intent/approval, OAuth, and data-grant schemas.
+Generated output is committed and drift checked.
+
+The nine-role image plan adds `filebelt-controller` and
+`filebelt-mcp-runner` and activates `filebelt-mcp-broker`. Broker and controller
+use `Apache-2.0 AND MIT AND CDLA-Permissive-2.0`; runner uses
+`Apache-2.0 AND MIT`. SBOM, notices, Cargo Vet, Cargo Deny, advisory, native
+linkage, and three-platform evidence apply independently to each role. A
+third-party catalog server is never promoted as a FileBelt image and must carry
+its own license, notices, source, signature, digest, and vulnerability review.
+
 ## OCI evidence
 
 Phase 1 image builds use digest-pinned Dockerfile frontends and bases and create
-local Docker image archives only. Each of the seven roles is checked against an
+local Docker image archives only. Each of the nine roles is checked against an
 immutable plan containing its repository, version, source revision and ref,
 build kind, license, and platform. The archive must contain the corresponding
 static Rust probe or web assets, the expected license evidence, numeric
@@ -196,12 +244,15 @@ their probe contracts with role-specific runtime contracts. Evidence adds:
   shutdown; and
 - the exact OxiBelt base/source/route relationship for `filebelt-web`.
 
-The media-controller and MCP-broker images remain probe-only and their evidence
-must continue to say so. Rust and OxiBelt-derived images use the role-specific
-aggregate expressions in the license map: WebPKI consumers include CDLA,
-Iggy-client roles also include MPL-2.0, and the web role includes ISC and 0BSD.
-Every upstream copyright and notice discovered from the final image and
-dependency graph is shipped and mapped to the SBOM.
+The media-controller image remains probe-only and its evidence must continue to
+say so. Broker, controller, and runner evidence instead proves their active
+runtime modes, listeners, database/mount/Secret boundaries, mTLS identities,
+gateway-only egress, and restricted one-shot Pod contract. Rust and
+OxiBelt-derived images use the role-specific aggregate expressions in the
+license map: WebPKI consumers include CDLA, Iggy-client roles also include
+MPL-2.0, and the web role includes ISC and 0BSD. Every upstream copyright and
+notice discovered from the final image and dependency graph is shipped and
+mapped to the SBOM.
 
 AMD64 and ARM64 run native runtime and Docker behavior tests. RISC-V
 cross-compiles and runs bounded rootless-QEMU smoke tests, including native
@@ -213,7 +264,7 @@ The read-only pull-request matrix validates all roles on native AMD64 and
 ARM64. Default-branch, scheduled, and manual checks also validate RISC-V by
 cross-compiling the static probes and running the extracted binaries in a
 rootless, digest-pinned QEMU helper container. The release dry run covers all
-21 role/platform combinations and an AMD64 normalized rebuild.
+27 role/platform combinations and an AMD64 normalized rebuild.
 
 No Phase 1 or Phase 2 workflow has package, release, or attestation write
 permission.
@@ -236,15 +287,16 @@ contexts or retained evidence. Docker and browser logs redact these values.
 Fault and restore artifacts are sensitive local test output and use
 deterministic cleanup.
 
-## Phase 3 Kubernetes and publication evidence
+## Phase 4 Kubernetes and publication evidence
 
-Phase 3 retains the seven-role build and evidence matrix but admits only five
-deployable/publishable roles: API, I/O, maintenance, tools, and web. The media
-controller and MCP broker remain probe-only, have no Helm workload, and are not
-promoted to GHCR. The Helm chart creates no PostgreSQL, Iggy, OIDC, certificate
-issuer, monitoring stack, Secret, or PVC; cluster-test fixtures retain their
-upstream names, licenses, and immutable digests and are not FileBelt release
-artifacts.
+Phase 4 uses a nine-role build and evidence matrix and admits eight
+deployable/publishable roles: API, I/O, maintenance, MCP broker, controller,
+runner, tools, and web. The media controller remains probe-only, has no Helm
+workload, and is not promoted to GHCR. MCP broker and controller workloads and
+one-shot runner Pods are separately disabled by default. The Helm chart creates
+no PostgreSQL, Iggy, OIDC, egress gateway, certificate issuer, monitoring stack,
+Secret, or PVC; cluster-test fixtures retain their upstream names, licenses,
+and immutable digests and are not FileBelt release artifacts.
 
 The exact OxiBelt prerelease admitted above remains the current immutable input,
 and its separate outbound client-certificate behavior for each upstream is

@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.mcp.v1;
+
+// A FileBelt authority delegation is signed over the exact deterministic
+// encoding of these claims. Arbitrary MCP arguments and result bodies are
+// deliberately excluded from the signed envelope and durable audit state.
+message DelegationClaims {
+  string capability_id = 1;
+  string audience = 2;
+  McpOperation operation = 3;
+  string tenant_id = 4;
+  string principal_id = 5;
+  string session_id = 6;
+  string application_id = 7;
+  string registration_id = 8;
+  bytes capability_fingerprint = 9;
+  bytes arguments_digest = 10;
+  repeated AttachmentClaim attachments = 11;
+  uint64 policy_generation = 12;
+  uint64 membership_generation = 13;
+  bytes nonce = 14;
+  int64 issued_at_unix_seconds = 15;
+  int64 expires_at_unix_seconds = 16;
+  string service_grant_id = 17;
+}
+
+message AttachmentClaim {
+  string drive_id = 1;
+  string node_id = 2;
+  string version_id = 3;
+  string data_grant_id = 4;
+  repeated AttachmentFieldClaim fields = 5;
+  uint64 maximum_raw_bytes = 6;
+  uint64 drive_acl_generation = 7;
+  uint64 resource_acl_generation = 8;
+  uint64 membership_generation = 9;
+  uint64 namespace_generation = 10;
+  string download_path = 11;
+  string authorization = 12;
+  string basename = 13;
+  string media_type = 14;
+  uint64 size_bytes = 15;
+}
+
+message AttachmentFieldClaim {
+  AttachmentDisclosure disclosure = 1;
+  string target_json_pointer = 2;
+  AttachmentEncoding encoding = 3;
+}
+
+message SignedDelegation {
+  uint32 key_generation = 1;
+  bytes claims = 2;
+  bytes signature = 3;
+}
+
+message InvocationRequest {
+  string request_id = 1;
+  string delegation = 2;
+  string protocol_version = 3;
+  McpPrimitive primitive = 4;
+  string capability_name = 5;
+  bytes arguments_json = 6;
+  int64 deadline_unix_milliseconds = 7;
+}
+
+message InvocationFrame {
+  string request_id = 1;
+  uint64 sequence = 2;
+  InvocationFrameKind kind = 3;
+  bytes payload = 4;
+  string code = 5;
+  bool terminal = 6;
+}
+
+message RunnerLeaseClaims {
+  string lease_id = 1;
+  string tenant_id = 2;
+  string principal_id = 3;
+  string registration_id = 4;
+  string invocation_id = 5;
+  string catalog_entry = 6;
+  string image_digest = 7;
+  bytes catalog_fingerprint = 8;
+  uint64 cpu_millis = 9;
+  uint64 memory_bytes = 10;
+  int64 issued_at_unix_seconds = 11;
+  int64 expires_at_unix_seconds = 12;
+  bytes nonce = 13;
+}
+
+// Requested by the trusted broker over the controller's namespace-local mTLS
+// listener. The bootstrap token is single-use and is only mounted into the
+// trusted relay sidecar; the curated server container never receives it.
+message CreateRunnerLeaseRequest {
+  string invocation_id = 1;
+  string tenant_id = 2;
+  string principal_id = 3;
+  string catalog_entry = 4;
+  bytes bootstrap_token = 5;
+}
+
+message CreateRunnerLeaseResponse {
+  string invocation_id = 1;
+  string resource_name = 2;
+}
+
+message DeleteRunnerLeaseRequest {
+  string invocation_id = 1;
+}
+
+message DeleteRunnerLeaseResponse {
+  string invocation_id = 1;
+}
+
+// The first frame on an authenticated broker connection. The broker consumes
+// the token exactly once and binds the socket to invocation_id before accepting
+// any relay data.
+message RunnerRelayHello {
+  string protocol_version = 1;
+  string invocation_id = 2;
+  bytes bootstrap_token = 3;
+}
+
+// Bounded bidirectional framing between the trusted relay sidecar and broker.
+// Sequence numbers are independently monotonic in each direction.
+message RunnerRelayFrame {
+  string invocation_id = 1;
+  uint64 sequence = 2;
+  RunnerRelayFrameKind kind = 3;
+  bytes payload = 4;
+  string code = 5;
+  bool terminal = 6;
+}
+
+enum McpOperation {
+  MCP_OPERATION_UNSPECIFIED = 0;
+  MCP_OPERATION_INVOKE = 1;
+  MCP_OPERATION_DISCOVER = 2;
+  MCP_OPERATION_TEST = 3;
+  MCP_OPERATION_RUNNER_BOOTSTRAP = 4;
+  MCP_OPERATION_OAUTH_DISCOVER = 5;
+  MCP_OPERATION_OAUTH_BEGIN = 6;
+  MCP_OPERATION_OAUTH_COMPLETE = 7;
+  MCP_OPERATION_CREDENTIAL_REPLACE = 8;
+  MCP_OPERATION_CREDENTIAL_ERASE = 9;
+  MCP_OPERATION_REGISTRATION_CONFIGURE = 10;
+}
+
+enum McpPrimitive {
+  MCP_PRIMITIVE_UNSPECIFIED = 0;
+  MCP_PRIMITIVE_TOOL = 1;
+  MCP_PRIMITIVE_RESOURCE = 2;
+  MCP_PRIMITIVE_PROMPT = 3;
+}
+
+enum AttachmentDisclosure {
+  ATTACHMENT_DISCLOSURE_UNSPECIFIED = 0;
+  ATTACHMENT_DISCLOSURE_CONTENT = 1;
+  ATTACHMENT_DISCLOSURE_BASENAME = 2;
+  ATTACHMENT_DISCLOSURE_MEDIA_TYPE = 3;
+  ATTACHMENT_DISCLOSURE_SIZE = 4;
+}
+
+enum AttachmentEncoding {
+  ATTACHMENT_ENCODING_UNSPECIFIED = 0;
+  ATTACHMENT_ENCODING_UTF8 = 1;
+  ATTACHMENT_ENCODING_BASE64 = 2;
+  ATTACHMENT_ENCODING_DECIMAL = 3;
+}
+
+enum InvocationFrameKind {
+  INVOCATION_FRAME_KIND_UNSPECIFIED = 0;
+  INVOCATION_FRAME_KIND_ACCEPTED = 1;
+  INVOCATION_FRAME_KIND_PROGRESS = 2;
+  INVOCATION_FRAME_KIND_TEXT = 3;
+  INVOCATION_FRAME_KIND_JSON = 4;
+  INVOCATION_FRAME_KIND_MEDIA = 5;
+  INVOCATION_FRAME_KIND_ERROR = 6;
+  INVOCATION_FRAME_KIND_COMPLETE = 7;
+}
+
+enum RunnerRelayFrameKind {
+  RUNNER_RELAY_FRAME_KIND_UNSPECIFIED = 0;
+  RUNNER_RELAY_FRAME_KIND_DATA = 1;
+  RUNNER_RELAY_FRAME_KIND_CLOSE = 2;
+  RUNNER_RELAY_FRAME_KIND_ERROR = 3;
+}

@@ -35,6 +35,7 @@ export const En = {
   loading: "Loading your files",
   mainNavigation: "FileBelt navigation",
   manager: "Manager",
+  mcp: "MCP servers",
   markRead: "Mark all read",
   modified: "Modified",
   moreActions: "More actions",

@@ -32,7 +32,7 @@ def fixture(name: str) -> str:
 class CargoBoundaryTests(unittest.TestCase):
     def test_policy_registers_every_current_production_manifest(self) -> None:
         self.assertEqual(POLICY.schema_version, 1)
-        self.assertEqual(len(POLICY.profiles), 21)
+        self.assertEqual(len(POLICY.profiles), 24)
         CHECKER.validate_repository_layout(REPO_ROOT, POLICY)
 
     def test_accepts_exact_authorization_graph(self) -> None:

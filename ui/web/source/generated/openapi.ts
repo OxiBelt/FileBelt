@@ -10,6 +10,150 @@
  */
 
 export interface paths {
+    readonly "/api/v1/admin/mcp/block-rules": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listAdminMcpBlockRules"];
+        readonly put?: never;
+        readonly post: operations["createAdminMcpBlockRule"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/block-rules/{block_rule_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["deleteAdminMcpBlockRule"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/service-identities": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listAdminMcpServiceIdentities"];
+        readonly put?: never;
+        readonly post: operations["createAdminMcpServiceIdentity"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/service-identities/{service_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["deleteAdminMcpServiceIdentity"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["updateAdminMcpServiceIdentity"];
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/service-identities/{service_id}/invocation-grants": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listAdminMcpServiceInvocationGrants"];
+        readonly put?: never;
+        readonly post: operations["createAdminMcpServiceInvocationGrant"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/service-identities/{service_id}/invocation-grants/{service_grant_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["revokeAdminMcpServiceInvocationGrant"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/templates": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listAdminMcpTemplates"];
+        readonly put?: never;
+        readonly post: operations["createAdminMcpTemplate"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/templates/{template_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getAdminMcpTemplate"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["deleteAdminMcpTemplate"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["updateAdminMcpTemplate"];
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mcp/templates/{template_id}/assignments/{principal_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put: operations["putAdminMcpTemplateAssignment"];
+        readonly post?: never;
+        readonly delete: operations["deleteAdminMcpTemplateAssignment"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/auth/callback": {
         readonly parameters: {
             readonly query?: never;
@@ -117,6 +261,38 @@ export interface paths {
         readonly put?: never;
         readonly post: operations["createDownloadGrant"];
         readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listMcpDataGrants"];
+        readonly put?: never;
+        readonly post: operations["createMcpDataGrant"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants/{mcp_grant_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["revokeMcpDataGrant"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -262,6 +438,295 @@ export interface paths {
         readonly get?: never;
         readonly put?: never;
         readonly post: operations["beginUpload"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/activity": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listMcpActivity"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/approvals": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listMcpApprovals"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/approvals/{approval_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["revokeMcpApproval"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/invocation-intents": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["createMcpInvocationIntent"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/invocation-intents/{intent_id}/approval": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Creates an approval from the server-held exact request digest; the browser never supplies or derives keyed digests. */
+        readonly post: operations["approveMcpInvocationIntent"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/invocation-intents/{intent_id}/stream": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["streamMcpInvocation"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/invocations/{invocation_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["cancelMcpInvocation"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/oauth/callback": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["completeMcpOauth"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listMcpRegistrations"];
+        readonly put?: never;
+        readonly post: operations["createMcpRegistration"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getMcpRegistration"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["deleteMcpRegistration"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["updateMcpRegistration"];
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/capability-review": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getMcpCapabilityReview"];
+        readonly put: operations["putMcpCapabilityReview"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/credentials": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put: operations["putMcpStaticCredential"];
+        readonly post?: never;
+        readonly delete: operations["deleteMcpCredential"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/discover": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["discoverMcpCapabilities"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/export": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["exportMcpRegistration"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/oauth/start": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["startMcpOauth"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/state": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["changeMcpRegistrationState"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/{registration_id}/test": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["testMcpRegistration"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mcp/registrations/import": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["importMcpRegistration"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -465,6 +930,91 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        readonly AdminMcpBlockRule: {
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly kind: "origin" | "trust_profile" | "catalog_entry" | "registration" | "capability";
+            readonly reason: string;
+            readonly value: string;
+        };
+        readonly AdminMcpServiceIdentity: {
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly display_name: string;
+            /** @description Opaque current-generation value to send as `If-Match`. */
+            readonly etag: string;
+            /** Format: int64 */
+            readonly generation: number;
+            readonly id: components["schemas"]["UuidV4"];
+            /** Format: uri */
+            readonly spiffe_uri: string;
+            /** @enum {string} */
+            readonly state: "active" | "suspended" | "deleting";
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        readonly AdminMcpServiceIdentityPage: {
+            readonly items: readonly components["schemas"]["AdminMcpServiceIdentity"][];
+            readonly next_cursor: string | null;
+        };
+        readonly AdminMcpServiceInvocationGrant: {
+            readonly application_id: string;
+            /** @description Redacted bounded constraint document. */
+            readonly argument_constraints: unknown;
+            readonly capability: components["schemas"]["McpCapabilityReference"];
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly max_invocations_per_hour: number;
+            readonly mcp_data_grant_ids: readonly components["schemas"]["UuidV4"][];
+            readonly registration_id: components["schemas"]["UuidV4"];
+            readonly service_id: components["schemas"]["UuidV4"];
+        };
+        readonly AdminMcpTemplate: {
+            readonly assignment_count: number;
+            readonly catalog_entry_id: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly description?: string;
+            readonly display_name: string;
+            readonly enabled: boolean;
+            readonly endpoint_uri: string | null;
+            /** @description Opaque current-generation value to send as `If-Match`. */
+            readonly etag: string;
+            /** Format: int64 */
+            readonly generation: number;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly transport: "streamable_http" | "stdio_catalog";
+            readonly trust_profile: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        readonly AdminMcpTemplateAssignment: {
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly principal_kind: "user" | "group" | "service";
+            readonly template_id: components["schemas"]["UuidV4"];
+        };
+        readonly AdminMcpTemplatePage: {
+            readonly items: readonly components["schemas"]["AdminMcpTemplate"][];
+            readonly next_cursor: string | null;
+        };
+        readonly ApproveMcpInvocationIntent: {
+            /** @description Must be null for `once` and present within one hour for `session`. */
+            readonly expires_at: string | null;
+            /**
+             * @description `once` expires with intent consumption; `session` is permitted only for reviewed low-risk non-tool operations and expires within one hour. Tool calls always require one-shot approval regardless of the server-provided read-only hint.
+             * @enum {string}
+             */
+            readonly scope: "once" | "session";
+        };
         readonly BeginUpload: {
             /** Format: int64 */
             readonly declared_size_bytes: number;
@@ -484,10 +1034,67 @@ export interface components {
             readonly method: "PUT" | "POST";
             readonly path: string;
         };
+        readonly ChangeMcpRegistrationState: {
+            /** @enum {string} */
+            readonly action: "enable" | "disable" | "revoke";
+        };
+        readonly CreateAdminMcpBlockRule: {
+            /** @enum {string} */
+            readonly kind: "origin" | "trust_profile" | "catalog_entry" | "registration" | "capability";
+            readonly reason: string;
+            readonly value: string;
+        };
+        readonly CreateAdminMcpServiceIdentity: {
+            readonly display_name: string;
+            /** Format: uri */
+            readonly spiffe_uri: string;
+        };
+        readonly CreateAdminMcpServiceInvocationGrant: {
+            readonly application_id: string;
+            /** @description Bounded JSON Schema intersected with the reviewed capability input schema. */
+            readonly argument_constraints: unknown;
+            readonly capability: components["schemas"]["McpCapabilityReference"];
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly max_invocations_per_hour: number;
+            readonly mcp_data_grant_ids: readonly components["schemas"]["UuidV4"][];
+            readonly registration_id: components["schemas"]["UuidV4"];
+        };
+        readonly CreateAdminMcpTemplate: {
+            readonly catalog_entry_id?: string | null;
+            readonly description?: string;
+            readonly display_name: string;
+            readonly endpoint_uri?: string | null;
+            /** @enum {string} */
+            readonly transport: "streamable_http" | "stdio_catalog";
+            readonly trust_profile: string;
+        };
         readonly CreateDirectory: {
             /** Format: int64 */
             readonly expected_parent_generation: number;
             readonly name: string;
+        };
+        readonly CreateMcpDataGrant: {
+            readonly actions: readonly ("use_mcp" | "read_metadata" | "read_content")[];
+            /** Format: int64 */
+            readonly expected_acl_generation: number;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** @description Exact destination registration; the grant is invalid for every other MCP server registration. */
+            readonly registration_id: components["schemas"]["UuidV4"];
+            /** @description Exact immutable node version authorized for transfer; the current or a future head is never implied. */
+            readonly version_id: components["schemas"]["UuidV4"];
+        };
+        readonly CreateMcpRegistration: {
+            readonly attachment_policy: components["schemas"]["McpAttachmentPolicy"];
+            readonly catalog_entry_id?: string | null;
+            readonly description?: string;
+            readonly display_name: string;
+            readonly endpoint_uri?: string | null;
+            /** @enum {string} */
+            readonly transport: "streamable_http" | "stdio_catalog";
+            readonly trust_profile: string;
         };
         readonly CreateShare: {
             /** @enum {string} */
@@ -572,6 +1179,245 @@ export interface components {
             readonly state: "finalized";
             readonly upload_id: components["schemas"]["UuidV4"];
         };
+        readonly McpActivity: {
+            /** @enum {string} */
+            readonly actor_kind: "user" | "service";
+            readonly application_id: string;
+            readonly approval_id: components["schemas"]["UuidV4"] | null;
+            readonly attachment_version_ids: readonly components["schemas"]["UuidV4"][];
+            readonly capability_fingerprint: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: int64 */
+            readonly duration_ms: number;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly outcome: "succeeded" | "denied" | "failed" | "cancelled" | "interrupted";
+            readonly reason_code: string | null;
+            readonly registration_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly request_bytes: number;
+            /** Format: int64 */
+            readonly response_bytes: number;
+        };
+        readonly McpActivityPage: {
+            readonly items: readonly components["schemas"]["McpActivity"][];
+            readonly next_cursor: string | null;
+        };
+        readonly McpApproval: {
+            readonly application_id: string;
+            readonly argument_digest: string;
+            readonly attachment_digest: string;
+            readonly capability_fingerprint: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly intent_id: components["schemas"]["UuidV4"];
+            readonly registration_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly scope: "once" | "session";
+        };
+        readonly McpApprovalPage: {
+            readonly items: readonly components["schemas"]["McpApproval"][];
+            readonly next_cursor: string | null;
+        };
+        readonly McpAttachmentBinding: {
+            readonly drive_id: components["schemas"]["UuidV4"];
+            readonly fields: readonly components["schemas"]["McpAttachmentFieldBinding"][];
+            readonly node_id: components["schemas"]["UuidV4"];
+            readonly version_id: components["schemas"]["UuidV4"];
+        };
+        readonly McpAttachmentFieldBinding: {
+            /** @enum {string} */
+            readonly encoding: "native" | "utf8" | "base64";
+            /** @enum {string} */
+            readonly source: "content" | "basename" | "mime_type" | "size_bytes";
+            readonly target_json_pointer: string;
+        };
+        readonly McpAttachmentPolicy: {
+            readonly allowed_encodings: readonly ("utf8" | "base64")[];
+            readonly allowed_mime_patterns: readonly string[];
+            readonly max_attachments: number;
+            /** Format: int64 */
+            readonly max_item_bytes: number;
+            /** Format: int64 */
+            readonly max_total_bytes: number;
+        };
+        readonly McpCapability: {
+            readonly description: string | null;
+            readonly fingerprint: string;
+            /** @description Untrusted, bounded JSON Schema displayed as text/tree only. */
+            readonly input_schema: unknown;
+            /** @enum {string} */
+            readonly kind: "resource" | "prompt" | "tool";
+            readonly name: string;
+            /** @description Optional untrusted, bounded JSON Schema displayed as text/tree only. */
+            readonly output_schema?: unknown;
+            readonly read_only_hint: boolean | null;
+            /** @enum {string} */
+            readonly risk: "low" | "elevated" | "prohibited";
+            /** @enum {string} */
+            readonly state: "new" | "unchanged" | "changed" | "removed";
+            readonly title: string | null;
+        };
+        readonly McpCapabilityDecision: {
+            readonly capability_fingerprint: string;
+            /** @enum {string} */
+            readonly decision: "approved" | "blocked";
+        };
+        readonly McpCapabilityReference: {
+            readonly fingerprint: string;
+            /** @enum {string} */
+            readonly kind: "resource" | "prompt" | "tool";
+            readonly name: string;
+        };
+        readonly McpCapabilityReview: {
+            readonly decisions: readonly components["schemas"]["McpCapabilityDecision"][];
+            readonly reviewed_at: string | null;
+            readonly snapshot: components["schemas"]["McpCapabilitySnapshot"];
+        };
+        readonly McpCapabilitySnapshot: {
+            readonly capabilities: readonly components["schemas"]["McpCapability"][];
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly fingerprint: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly protocol_version: "2026-07-28" | "2025-11-25";
+            readonly registration_id: components["schemas"]["UuidV4"];
+        };
+        readonly McpDataGrant: {
+            /** Format: int64 */
+            readonly acl_generation: number;
+            readonly actions: readonly ("use_mcp" | "read_metadata" | "read_content")[];
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly node_id: components["schemas"]["UuidV4"];
+            readonly principal_id: components["schemas"]["UuidV4"];
+            readonly registration_id: components["schemas"]["UuidV4"];
+            readonly version_id: components["schemas"]["UuidV4"];
+        };
+        readonly McpDeletionStatus: {
+            /** Format: date-time */
+            readonly destroy_after: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly state: "revoking" | "erased";
+        };
+        readonly McpInvocationEvent: {
+            /** Format: date-time */
+            readonly created_at: string;
+            /** @enum {string} */
+            readonly event: "started" | "progress" | "text" | "json" | "media" | "error" | "completed";
+            readonly invocation_id: components["schemas"]["UuidV4"];
+            /** @description Bounded JSON rendered as a non-editable tree, never as HTML. */
+            readonly json?: unknown;
+            readonly media?: components["schemas"]["McpSafeMedia"] | null;
+            readonly problem_code?: string | null;
+            readonly progress?: number | null;
+            /** Format: int64 */
+            readonly sequence: number;
+            readonly text?: string | null;
+        };
+        readonly McpInvocationIntent: {
+            readonly approval_required: boolean;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly request_digest: string;
+        };
+        readonly McpInvocationRequest: {
+            readonly application_id: string;
+            /** @description Exact bounded JSON arguments included in the intent digest and resubmitted to the stream. */
+            readonly arguments: unknown;
+            readonly attachments: readonly components["schemas"]["McpAttachmentBinding"][];
+            readonly capability: components["schemas"]["McpCapabilityReference"];
+            readonly registration_id: components["schemas"]["UuidV4"];
+        };
+        readonly McpOauthStart: {
+            /** Format: uri */
+            readonly authorization_url: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+        };
+        readonly McpRegistration: {
+            readonly attachment_policy: components["schemas"]["McpAttachmentPolicy"];
+            /** @enum {string} */
+            readonly authentication_state: "not_required" | "missing" | "pending" | "ready" | "expired" | "revoked";
+            readonly capability_snapshot_id?: components["schemas"]["UuidV4"] | null;
+            /** @enum {string} */
+            readonly capability_state: "undiscovered" | "review_required" | "reviewed" | "changed";
+            readonly catalog_entry_id: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** @enum {string} */
+            readonly credential_kind: "none" | "oauth" | "bearer" | "api_key";
+            readonly credential_present: boolean;
+            readonly description?: string;
+            readonly display_name: string;
+            readonly endpoint_uri: string | null;
+            /** @description Opaque current-generation value to send as `If-Match`. */
+            readonly etag: string;
+            /** Format: int64 */
+            readonly generation: number;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly lifecycle_state: "disabled" | "enabled" | "revoking" | "deleted";
+            readonly managed_locked: boolean;
+            readonly managed_template_id?: components["schemas"]["UuidV4"] | null;
+            /** @enum {string} */
+            readonly ownership: "personal" | "managed_user" | "managed_group" | "managed_service";
+            /** @enum {string} */
+            readonly protocol_version: "2026-07-28" | "2025-11-25";
+            /** @enum {string} */
+            readonly quarantine_state: "clear" | "quarantined" | "blocked";
+            /** @enum {string} */
+            readonly transport: "streamable_http" | "stdio_catalog";
+            readonly trust_profile: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            /** @enum {string} */
+            readonly validation_state: "untested" | "valid" | "invalid" | "stale";
+        };
+        readonly McpRegistrationExport: {
+            readonly attachment_policy: components["schemas"]["McpAttachmentPolicy"];
+            readonly catalog_entry_id?: string | null;
+            readonly description?: string;
+            readonly display_name: string;
+            readonly endpoint_uri?: string | null;
+            /** @constant */
+            readonly format: "filebelt.mcp-registration.v1";
+            /** @enum {string} */
+            readonly transport: "streamable_http" | "stdio_catalog";
+            readonly trust_profile: string;
+        };
+        readonly McpRegistrationPage: {
+            readonly items: readonly components["schemas"]["McpRegistration"][];
+            readonly next_cursor: string | null;
+        };
+        readonly McpSafeMedia: {
+            readonly base64: string;
+            /** @enum {string} */
+            readonly mime_type: "image/png" | "image/jpeg" | "image/webp" | "audio/mpeg" | "audio/ogg" | "audio/wav";
+            /** Format: int64 */
+            readonly size_bytes: number;
+        };
+        readonly McpTestResult: {
+            /** @enum {string} */
+            readonly authentication_state: "not_required" | "missing" | "pending" | "ready" | "expired" | "revoked";
+            /** Format: date-time */
+            readonly checked_at: string;
+            readonly duration_ms: number;
+            readonly problem_code?: string | null;
+            readonly protocol_version: ("2026-07-28" | "2025-11-25") | null;
+            readonly succeeded: boolean;
+        };
         readonly NamespaceMutation: {
             /** Format: int64 */
             readonly expected_namespace_generation: number;
@@ -599,11 +1445,26 @@ export interface components {
             readonly next_cursor: string | null;
         };
         readonly Problem: {
+            /** @description Stable dotted FileBelt reason code. MCP failures use the `mcp.*` namespace. */
             readonly code: string;
             readonly status: number;
             readonly title: string;
             /** Format: uri */
             readonly type: string;
+        };
+        readonly PutAdminMcpTemplateAssignment: {
+            /** @enum {string} */
+            readonly principal_kind: "user" | "group" | "service";
+        };
+        readonly PutMcpCapabilityReview: {
+            readonly decisions: readonly components["schemas"]["McpCapabilityDecision"][];
+            readonly snapshot_fingerprint: string;
+            readonly snapshot_id: components["schemas"]["UuidV4"];
+        };
+        readonly PutMcpStaticCredential: {
+            /** @enum {string} */
+            readonly kind: "bearer" | "api_key";
+            readonly secret: string;
         };
         readonly RestoreVersion: {
             readonly expected_head_version_id: components["schemas"]["UuidV4"];
@@ -631,6 +1492,34 @@ export interface components {
             readonly last_seen_at: string;
             readonly revoked: boolean;
             readonly user_agent?: string | null;
+        };
+        readonly StartMcpOauth: {
+            readonly issuer?: string | null;
+            readonly return_path: string;
+        };
+        readonly UpdateAdminMcpServiceIdentity: {
+            readonly display_name?: string;
+            /** Format: uri */
+            readonly spiffe_uri?: string;
+            /** @enum {string} */
+            readonly state?: "active" | "suspended";
+        };
+        readonly UpdateAdminMcpTemplate: {
+            readonly catalog_entry_id?: string;
+            readonly description?: string;
+            readonly display_name?: string;
+            readonly enabled?: boolean;
+            /** Format: uri */
+            readonly endpoint_uri?: string;
+            readonly trust_profile?: string;
+        };
+        readonly UpdateMcpRegistration: {
+            readonly attachment_policy?: components["schemas"]["McpAttachmentPolicy"];
+            readonly description?: string;
+            readonly display_name?: string;
+            /** Format: uri */
+            readonly endpoint_uri?: string;
+            readonly trust_profile?: string;
         };
         readonly UploadAllocation: {
             readonly chunk_size_bytes: number;
@@ -732,6 +1621,8 @@ export interface components {
         };
     };
     parameters: {
+        readonly ApprovalId: components["schemas"]["UuidV4"];
+        readonly BlockRuleId: components["schemas"]["UuidV4"];
         readonly Csrf: string;
         readonly Cursor: string;
         readonly DriveId: components["schemas"]["UuidV4"];
@@ -739,14 +1630,23 @@ export interface components {
         /** @description Must equal the signed `grant_id` capability claim. */
         readonly GrantId: components["schemas"]["UuidV4"];
         readonly IdempotencyKey: string;
+        /** @description Exact opaque generation ETag from the most recent representation. */
+        readonly IfMatch: string;
+        readonly IntentId: components["schemas"]["UuidV4"];
+        readonly InvocationId: components["schemas"]["UuidV4"];
         readonly Limit: number;
+        readonly McpGrantId: components["schemas"]["UuidV4"];
         readonly NodeId: components["schemas"]["UuidV4"];
         readonly Origin: string;
         readonly ParentId: components["schemas"]["UuidV4"];
         readonly PrincipalId: components["schemas"]["UuidV4"];
         /** @description One bytes range only; it must be contained by the signed inclusive range. */
         readonly Range: string;
+        readonly RegistrationId: components["schemas"]["UuidV4"];
+        readonly ServiceGrantId: components["schemas"]["UuidV4"];
+        readonly ServiceId: components["schemas"]["UuidV4"];
         readonly SessionId: components["schemas"]["UuidV4"];
+        readonly TemplateId: components["schemas"]["UuidV4"];
         readonly UploadId: components["schemas"]["UuidV4"];
         readonly VersionId: components["schemas"]["UuidV4"];
     };
@@ -759,6 +1659,498 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    readonly listAdminMcpBlockRules: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Global origin, profile, catalog, registration, and capability blocks. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["AdminMcpBlockRule"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createAdminMcpBlockRule: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateAdminMcpBlockRule"];
+            };
+        };
+        readonly responses: {
+            /** @description Global block applied to new and active invocations. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpBlockRule"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteAdminMcpBlockRule: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly block_rule_id: components["parameters"]["BlockRuleId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Global block removed; affected registrations remain disabled pending explicit review. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listAdminMcpServiceIdentities: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Service principals and exact SPIFFE URI bindings. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpServiceIdentityPage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createAdminMcpServiceIdentity: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateAdminMcpServiceIdentity"];
+            };
+        };
+        readonly responses: {
+            /** @description Suspended service principal awaiting grants. */
+            readonly 201: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpServiceIdentity"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteAdminMcpServiceIdentity: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly service_id: components["parameters"]["ServiceId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Service disabled immediately and all invocation grants revoked. */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpDeletionStatus"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly updateAdminMcpServiceIdentity: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly service_id: components["parameters"]["ServiceId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpdateAdminMcpServiceIdentity"];
+            };
+        };
+        readonly responses: {
+            /** @description Updated service state or identity binding. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpServiceIdentity"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listAdminMcpServiceInvocationGrants: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly service_id: components["parameters"]["ServiceId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Redacted grants for one service identity. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["AdminMcpServiceInvocationGrant"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createAdminMcpServiceInvocationGrant: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly service_id: components["parameters"]["ServiceId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateAdminMcpServiceInvocationGrant"];
+            };
+        };
+        readonly responses: {
+            /** @description Maximum-thirty-day exact service invocation grant. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpServiceInvocationGrant"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeAdminMcpServiceInvocationGrant: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly service_grant_id: components["parameters"]["ServiceGrantId"];
+                readonly service_id: components["parameters"]["ServiceId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Service invocation grant revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listAdminMcpTemplates: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Managed MCP templates visible to a recently authenticated tenant administrator. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpTemplatePage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createAdminMcpTemplate: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateAdminMcpTemplate"];
+            };
+        };
+        readonly responses: {
+            /** @description Disabled managed template. */
+            readonly 201: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpTemplate"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getAdminMcpTemplate: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly template_id: components["parameters"]["TemplateId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Managed template and redacted assignment counts. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpTemplate"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteAdminMcpTemplate: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly template_id: components["parameters"]["TemplateId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Template and activations disabled and queued for credential revocation. */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpDeletionStatus"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly updateAdminMcpTemplate: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly template_id: components["parameters"]["TemplateId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpdateAdminMcpTemplate"];
+            };
+        };
+        readonly responses: {
+            /** @description Updated template; authority-affecting changes disable its activations. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpTemplate"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly putAdminMcpTemplateAssignment: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly principal_id: components["parameters"]["PrincipalId"];
+                readonly template_id: components["parameters"]["TemplateId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PutAdminMcpTemplateAssignment"];
+            };
+        };
+        readonly responses: {
+            /** @description Exact user, group, or service assignment. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AdminMcpTemplateAssignment"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteAdminMcpTemplateAssignment: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly principal_id: components["parameters"]["PrincipalId"];
+                readonly template_id: components["parameters"]["TemplateId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Assignment and its activation revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly completeOidcLogin: {
         readonly parameters: {
             readonly query?: {
@@ -940,6 +2332,97 @@ export interface operations {
                 content: {
                     readonly "application/json": components["schemas"]["DownloadGrant"];
                 };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listMcpDataGrants: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Active self-node MCP grants the current principal may inspect. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["McpDataGrant"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMcpDataGrant: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateMcpDataGrant"];
+            };
+        };
+        readonly responses: {
+            /** @description Strictly attenuated, self-node-only MCP data grant. */
+            readonly 201: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpDataGrant"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeMcpDataGrant: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly mcp_grant_id: components["parameters"]["McpGrantId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description MCP data grant revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
             };
             readonly default: components["responses"]["Problem"];
         };
@@ -1241,6 +2724,672 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["UploadAllocation"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listMcpActivity: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Redacted MCP activity visible to the current principal. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpActivityPage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listMcpApprovals: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current principal's saved, redacted approvals. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpApprovalPage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeMcpApproval: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly approval_id: components["parameters"]["ApprovalId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Approval revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMcpInvocationIntent: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["McpInvocationRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Five-minute intent storing only the keyed digest of the exact request. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpInvocationIntent"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly approveMcpInvocationIntent: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly intent_id: components["parameters"]["IntentId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ApproveMcpInvocationIntent"];
+            };
+        };
+        readonly responses: {
+            /** @description Explicit approval bound to this exact intent, session, application, capability, arguments, and attachments. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpApproval"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly streamMcpInvocation: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly intent_id: components["parameters"]["IntentId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["McpInvocationRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Bounded line-delimited invocation events; disconnect cancels and results are never replayed. */
+            readonly 200: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/x-ndjson": string;
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly cancelMcpInvocation: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly invocation_id: components["parameters"]["InvocationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Cancellation recorded; execution and upstream transfer are terminated. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly completeMcpOauth: {
+        readonly parameters: {
+            readonly query?: {
+                readonly code?: string;
+                readonly error?: string;
+                readonly iss?: string;
+                readonly state?: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Complete the server-held OAuth attempt and return to the local MCP settings route. */
+            readonly 303: {
+                headers: {
+                    readonly Location?: string;
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listMcpRegistrations: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Personal and assigned managed registrations visible to the current principal. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistrationPage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateMcpRegistration"];
+            };
+        };
+        readonly responses: {
+            /** @description Disabled personal registration. */
+            readonly 201: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistration"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Redacted registration configuration and state. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistration"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Registration disabled immediately and queued for bounded credential revocation and erasure. */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpDeletionStatus"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly updateMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpdateMcpRegistration"];
+            };
+        };
+        readonly responses: {
+            /** @description Updated registration. Authority-affecting changes leave it disabled. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistration"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getMcpCapabilityReview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current immutable snapshot and its review decisions. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpCapabilityReview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly putMcpCapabilityReview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PutMcpCapabilityReview"];
+            };
+        };
+        readonly responses: {
+            /** @description Review bound to the exact snapshot and capability fingerprints. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpCapabilityReview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly putMcpStaticCredential: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PutMcpStaticCredential"];
+            };
+        };
+        readonly responses: {
+            /** @description Credential replaced. Its value is never returned. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly deleteMcpCredential: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Credential destroyed and the registration disabled. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly discoverMcpCapabilities: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Newly discovered immutable capability snapshot awaiting review. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpCapabilitySnapshot"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly exportMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Portable registration configuration without credentials, grants, approvals, or activity. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistrationExport"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly startMcpOauth: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StartMcpOauth"];
+            };
+        };
+        readonly responses: {
+            /** @description Browser authorization destination and server-held attempt expiry. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpOauthStart"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly changeMcpRegistrationState: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ChangeMcpRegistrationState"];
+            };
+        };
+        readonly responses: {
+            /** @description Updated enablement or revocation state. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistration"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly testMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly registration_id: components["parameters"]["RegistrationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Bounded transport and authentication test result with no upstream response body. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpTestResult"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly importMcpRegistration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["McpRegistrationExport"];
+            };
+        };
+        readonly responses: {
+            /** @description Disabled registration imported without credentials, approvals, or grants. */
+            readonly 201: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["McpRegistration"];
                 };
             };
             readonly default: components["responses"]["Problem"];

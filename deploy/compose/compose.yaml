@@ -135,6 +135,7 @@ services:
       - api-database-password
       - io-database-password
       - maintenance-database-password
+      - mcp-database-password
     configs:
       - source: postgres-database-role-script
         target: /opt/filebelt/bootstrap-database-roles.sh
@@ -280,6 +281,70 @@ services:
     expose: ["9090"]
     restart: unless-stopped
 
+  filebelt-mcp-egress:
+    build:
+      context: ../../tests/docker/mcp-egress
+      dockerfile: Dockerfile
+    image: filebelt-mcp-egress-fixture:phase4
+    profiles: [mcp]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    init: true
+    pids_limit: 256
+    stop_grace_period: 35s
+    secrets:
+      - source: mcp-egress-server-certificate
+        target: /run/secrets/tls.crt
+        mode: 0444
+      - source: mcp-egress-server-private-key
+        target: /run/secrets/tls.key
+        mode: 0400
+      - source: mcp-egress-ca-certificate
+        target: /run/secrets/client-ca.crt
+        mode: 0444
+    networks: [control, internet-egress]
+    expose: ["8443"]
+    restart: unless-stopped
+
+  filebelt-mcp-broker:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-mcp-broker
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-mcp-broker
+    image: filebelt-mcp-broker:phase4
+    profiles: [mcp]
+    command: [serve, --config, /etc/filebelt/filebelt.toml]
+    secrets:
+      - mcp-database-url
+      - mcp-vault-keyring
+      - capability-public-keyset
+      - source: mcp-egress-client-certificate
+        target: /run/secrets/mcp-egress-client.crt
+        mode: 0444
+      - source: mcp-egress-client-private-key
+        target: /run/secrets/mcp-egress-client.key
+        mode: 0400
+      - source: mcp-egress-ca-certificate
+        target: /run/secrets/mcp-egress-ca.crt
+        mode: 0444
+    configs:
+      - source: filebelt-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    networks: [control]
+    depends_on:
+      postgres-runtime-roles: {condition: service_completed_successfully}
+      filebelt-mcp-egress: {condition: service_started}
+    expose: ["8082", "8084", "9090"]
+    restart: unless-stopped
+
   filebelt-web:
     <<: *filebelt-service
     build:
@@ -362,6 +427,7 @@ services:
 networks:
   control: {internal: true}
   edge: {internal: true}
+  internet-egress: {}
 
 volumes:
   postgres-data: {}
@@ -393,12 +459,18 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/io-database-password
   maintenance-database-password:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-password
+  mcp-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-password
   api-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-database-url
   io-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/io-database-url
   maintenance-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-url
+  mcp-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-url
+  mcp-vault-keyring:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-vault-keyring.json
   oidc-client-secret:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret
   capability-private-key:
@@ -411,3 +483,13 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/tls/filebelt.crt
   filebelt-tls-private-key:
     file: ${FILEBELT_STATE_DIR:-./.state}/tls/filebelt.key
+  mcp-egress-ca-certificate:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/mcp-egress-ca.crt
+  mcp-egress-server-certificate:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/mcp-egress-server.crt
+  mcp-egress-server-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/mcp-egress-server.key
+  mcp-egress-client-certificate:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/mcp-egress-client.crt
+  mcp-egress-client-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/tls/mcp-egress-client.key

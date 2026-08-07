@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App.js";
 import { HttpFileBeltClient } from "./http-client.js";
+import { HttpMcpSettingsClient } from "./mcp-http-client.js";
 import { PublicShareApp, TakePublicShareFragment } from "./PublicShareApp.js";
 import "./styles.css";
 
@@ -15,11 +16,12 @@ if (Root === null) {
 }
 
 const Client = new HttpFileBeltClient();
+const McpClient = new HttpMcpSettingsClient();
 const IsPublicShare = window.location.pathname.startsWith("/public/share");
 const FragmentToken = IsPublicShare ? TakePublicShareFragment() : "";
 
 createRoot(Root).render(
   <StrictMode>
-    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} />}
+    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} McpClient={McpClient} />}
   </StrictMode>,
 );

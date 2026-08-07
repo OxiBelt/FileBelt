@@ -30,13 +30,27 @@ licenses and notices of its linked runtime and copied upstream contents.
 | --- | --- | --- |
 | `filebelt-api` and `filebelt-worker-io` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; ship exact upstream notices and inspect native linkage |
 | `filebelt-worker-maintenance` and `filebelt-tools` | `Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0` | Adds the exact Iggy client and its unmodified MPL helper; ship its license and corresponding-source pointer with SBOM evidence |
-| `filebelt-media-controller` and `filebelt-mcp-broker` | `Apache-2.0 AND MIT` | Apache FileBelt source plus the Rust/musl runtime; ship exact notices and inspect native linkage |
+| `filebelt-media-controller` and `filebelt-mcp-runner` | `Apache-2.0 AND MIT` | Apache FileBelt source plus the Rust/musl runtime; ship exact notices and inspect native linkage |
+| `filebelt-mcp-broker` and `filebelt-controller` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; the controller also contains the reviewed Sigstore verifier graph |
 | `filebelt-web` | `Apache-2.0 AND MIT AND ISC AND 0BSD` | FileBelt Apache SPA/config, ISC Lucide assets, and 0BSD `tslib` copied onto the digest-pinned Apache-2.0 OxiBelt runtime; no source linkage or copied reference code |
 | `tslib@2.8.1` | `0BSD` | Lockfile-pinned Fluent UI runtime helper admitted by the Node license policy; distributed only as part of the browser bundle |
 | PostgreSQL 18.4 helper | Upstream PostgreSQL License | External Docker integration process; retain upstream label/notices; never republish as a FileBelt image |
 | Apache Iggy 0.8.0 helper and client | Upstream Apache-2.0 evidence | Optional external event process and reviewed generic client; never authoritative and never republished as a FileBelt image |
 | OIDC test provider | Exact upstream composition recorded by the Docker plan | External integration fixture only; not a FileBelt release image |
 | Rustls/OTLP/Prometheus runtime support | Apache-2.0 and compatible MIT/ISC dependencies recorded in `Cargo.lock` | Shared only through the Apache-2.0 `filebelt-runtime` crate; exact graph, notice, SBOM, vulnerability, and Cargo Vet admission are required before promotion |
+
+`filebelt-mcp-broker` uses the exact reviewed MCP model/runtime graph and
+`filebelt-controller` uses the exact offline Sigstore verification graph. Those
+dependencies remain linked only into Apache-region processes; they do not move
+third-party MCP server source into FileBelt. `filebelt-mcp-runner` is a generic
+relay/shim and neither links to nor copies a catalog server implementation.
+
+Operator-supplied MCP egress gateways and catalog server images are external
+processes, not FileBelt release artifacts. Every admitted catalog entry records
+its own source and license and uses a digest-pinned image plus verified Sigstore
+bundle. The operator remains responsible for that image's distribution terms,
+notices, and corresponding source. Catalog verification and a Pod boundary are
+security/process evidence; they are not a substitute for license review.
 
 The OxiBelt prerelease and digest, PostgreSQL digest, Iggy digest/client, native
 AWS-LC composition, Cargo features, Node packages, and generated-client
@@ -53,11 +67,12 @@ the sole license analysis.
 Helm templates, Kubernetes and NetworkPolicy manifests, operational scripts,
 Prometheus rules, Grafana dashboards, and OpenTelemetry examples are original
 Apache-2.0 repository content. They introduce no source link from Apache core
-to an adapter. PostgreSQL, Iggy, OIDC, the egress gateway, CSI provider,
-certificate issuer, and monitoring services remain external processes and are
-not redistributed by the FileBelt chart. New Rust TLS, metrics, and telemetry
-crates must appear in the exact Cargo graph, image SBOM, notices, Cargo Vet,
-Cargo Deny, and vulnerability evidence before their images can be promoted.
+to an adapter. PostgreSQL, Iggy, OIDC, the OIDC/MCP egress gateways, CSI
+provider, certificate issuer, and monitoring services remain external
+processes and are not redistributed by the FileBelt chart. New Rust TLS,
+metrics, and telemetry crates must appear in the exact Cargo graph, image SBOM,
+notices, Cargo Vet, Cargo Deny, and vulnerability evidence before their images
+can be promoted.
 
 Changing a license region, moving code between regions, admitting a copyleft or
 native dependency, or changing an image's composition requires an explicit

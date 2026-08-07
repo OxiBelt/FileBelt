@@ -16,13 +16,16 @@ sensitive operational evidence.
 
 ## Create a coordinated backup
 
-1. Record the chart revision, five image digests, ConfigMap identities, Secret
-   generations, key generations, and certificate overlap.
-2. Upgrade to `deployment.quiesced=true` with no administrative Job enabled.
-   Wait for web/API/I/O/maintenance Pods to terminate and for active streams
-   and leases to drain or fence.
+1. Record the chart revision, selected workload image digests, ConfigMap
+   identities, Secret generations, capability and MCP KEK generations, runner
+   catalog/root/bundle identities, and certificate overlap.
+2. Stop new MCP admission and cancel active invocations while the controller is
+   still running. Wait for runner Pods and bootstrap Secrets to reconcile, then
+   upgrade to `deployment.quiesced=true` with no administrative Job enabled.
+   Wait for web/API/I/O/maintenance/broker/controller Pods and all remaining
+   streams and leases to drain or fence.
 3. In a second revision, still quiesced, run the recovery checkpoint Job. Save
-   its single `filebelt.recovery.checkpoint.v1` JSON document outside the
+   its single `filebelt.recovery.checkpoint.v2` JSON document outside the
    cluster.
 4. While still quiesced, take the external PostgreSQL backup and RWX volume
    snapshot/copy. Record their immutable provider identifiers alongside the
@@ -43,16 +46,22 @@ unredacted logs in ordinary CI artifacts.
    reviewed grants, and grant/schema verification.
 4. Run configuration validation and the storage semantics probe.
 5. Run `filebeltctl recovery verify` against the saved checkpoint. Migrations,
-   tenant/backend identity, audit watermark, payload counts/bytes, and the
-   deterministic expected-payload inventory hash must agree.
+   tenant/backend identity, audit watermark, payload counts/bytes, MCP
+   registration/tombstone/vault inventories, every referenced MCP KEK
+   generation, and the deterministic expected-payload inventory hash must
+   agree. The emitted schema is `filebelt.recovery.verification.v2`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
-   deletion intent, quarantine, job attempts, outbox, and audit continuity.
+   deletion intent, quarantine, MCP invocation/runner leases and revocation
+   tombstones, job attempts, outbox, and audit continuity.
 7. Start a full scrub with a new run UUID and the exact tenant-slug
    confirmation. Wait for every scrub job and require zero failed,
    operator-blocked, or quarantined payloads.
-8. Enable maintenance, I/O, API, and web in that order. Repeat two-user login,
+8. Enable maintenance, I/O, API, and web in that order. Enable the broker and
+   controller later and separately. Repeat two-user login,
    list, upload, download/range, version restore, direct share, revoke, and
-   cross-user denial checks.
+   cross-user denial checks, followed by MCP registration, explicit approval,
+   exact-version data disclosure, broker-mediated authenticated test, and
+   revocation checks.
 9. Capture only redacted verification metadata. Delete the recovery namespace,
    database, and PVC only after validating their exact deterministic names and
    confirming they are rehearsal-owned.
@@ -68,5 +77,11 @@ unredacted logs in ordinary CI artifacts.
   never restore policy state from Iggy.
 - Lost signing/digest keys: keep traffic stopped and follow the key-compromise
   procedure. A backup without required key generations may be unusable.
+- Lost MCP KEK: keep MCP admission and broker traffic stopped. A matching
+  PostgreSQL snapshot without every checkpoint-v2 MCP vault generation cannot
+  recover the affected credentials; restore a complete coordinated set or
+  revoke and cryptographically erase the registrations under an explicit
+  incident plan. Core file operations may resume only after proving they remain
+  isolated from the disabled MCP path.
 - Partial scrub: rerun the same run UUID to resume idempotently. Do not treat a
   partial run as verification.

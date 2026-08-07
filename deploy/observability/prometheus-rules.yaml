@@ -117,3 +117,36 @@ groups:
         annotations:
           summary: FileBelt cannot publish optional Iggy notifications
           runbook_url: docs/operations/kubernetes.md#outages-and-diagnosis
+  - name: filebelt-mcp
+    rules:
+      - alert: FileBeltMcpRevocationLag
+        expr: filebelt_mcp_revocation_lag_seconds > 5
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: MCP authority revocation exceeded the five-second contract
+          runbook_url: docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+      - alert: FileBeltMcpControllerLeadershipInvalid
+        expr: sum(filebelt_controller_leader) != 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: The MCP runner controller has zero or multiple reconciliation leaders
+          runbook_url: docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+      - alert: FileBeltMcpRunnerReconciliationFailing
+        expr: increase(filebelt_controller_reconciliation_failures_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: MCP runner Lease or cleanup reconciliation is failing
+          runbook_url: docs/operations/kubernetes.md#mcp-broker-and-runner-incidents
+      - alert: FileBeltMcpQuarantineIncreasing
+        expr: increase(filebelt_mcp_quarantined_registrations_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: MCP registrations are entering protocol quarantine
+          runbook_url: docs/operations/kubernetes.md#mcp-broker-and-runner-incidents

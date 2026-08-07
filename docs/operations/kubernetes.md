@@ -7,9 +7,10 @@
 FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.3. Kubernetes is
 the production topology; Compose remains development and integration only.
 The chart deploys web, API, I/O, and maintenance Deployments and explicit
-administrative Jobs. It does not deploy PostgreSQL, OIDC, Iggy, an egress
-gateway, certificate issuer, monitoring stack, controller, StatefulSet, or
-persistent volume.
+administrative Jobs. MCP broker and runner-controller Deployments are separate
+opt-ins and disabled by default; the controller creates bounded one-shot runner
+Pods. The chart does not deploy PostgreSQL, OIDC, Iggy, either egress gateway,
+certificate issuer, monitoring stack, StatefulSet, or persistent volume.
 
 Operators provide:
 
@@ -21,6 +22,13 @@ Operators provide:
 - a pre-existing RWX POSIX claim owned for UID/GID 10001;
 - public, backend-server, and distinct API/I/O backend-client certificates in
   existing Secrets;
+- when MCP is enabled, a dedicated broker database login, MCP vault keyring,
+  broker/API/gateway mTLS identities, and an HTTPS egress gateway that enforces
+  the configured target trust profile;
+- when runners are enabled, controller and runner mTLS identities, a
+  digest-pinned runner image, a schema-v1 runner catalog, offline Sigstore
+  trusted root/bundles, an exact Kubernetes API NetworkPolicy peer, and a
+  pre-created exclusive runner namespace separate from the release namespace;
 - a public L4/TCP path to the web ClusterIP Service; and
 - optional Prometheus and OTLP endpoints.
 
@@ -31,7 +39,10 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 ## Preflight
 
 1. Confirm the Kubernetes and Helm versions and enforce the restricted Pod
-   Security Standard on the target namespace.
+   Security Standard on the target namespace. When runners are enabled, create
+   `mcp.runners.namespace` separately, enforce the same standard there, reserve
+   it for this FileBelt release, and create the runner broker/gateway TLS
+   Secrets in that namespace.
 2. Confirm every application image is a lowercase `sha256:` digest and the
    OxiBelt digest is the version accepted by FileBelt's supply-chain policy.
 3. Confirm the external PVC advertises RWX and is not owned by this Helm
@@ -43,7 +54,14 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 6. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Render with strict lint and server-side dry-run before changing the release.
+7. Confirm `filebelt.toml` uses format 3. If MCP is enabled, validate the
+   broker/vault/gateway/trust-profile fields; if runners are enabled, also
+   validate controller mTLS, catalog/root/bundles, runner digest, namespace,
+   and quotas. The `[mcp.runners] namespace` must equal the Helm
+   `mcp.runners.namespace` and must not equal the release namespace.
+8. Render with strict lint and server-side dry-run before changing the release.
+   For runners, inspect the namespaced Role and prove it cannot read or mutate
+   resources outside the runner namespace.
 
 Keep rendered output and Helm values protected. Secret bytes must not appear in
 values, ConfigMaps, command lines, logs, or retained CI artifacts.
@@ -72,14 +90,23 @@ per Helm revision and capture its status/log before disabling it.
    readiness, endpoints, PDB, and two replicas of web/API/I/O.
 8. Exercise login, upload, download, version, direct share, and revoke with two
    users before admitting ordinary traffic.
+9. In a later revision, optionally enable the MCP broker without runners.
+   Exercise personal registration, transport test, discovery, exact capability
+   review, intent-bound approval, version-pinned attachment, activity, revoke,
+   OAuth expiry/replay, and cross-user denial.
+10. Enable runners only after the broker path is healthy. Verify offline
+    catalog admission, controller leadership, one-shot creation/cancellation,
+    bootstrap Secret cleanup, cross-namespace RBAC denial in the core
+    namespace, no runner DNS egress, per-principal/tenant quotas, and absence
+    of secrets in the untrusted server container.
 
 ## Staged upgrade
 
 Never combine a new workload image/config rollout with the migration revision.
 
-1. Back up and record the current chart, five image digests, immutable ConfigMap
-   names, Secret generations, database migration ledger, and certificate trust
-   overlap.
+1. Back up and record the current chart, selected workload image digests,
+   immutable ConfigMap names, Secret and MCP KEK generations, database migration
+   ledger, runner catalog/root/bundle identities, and certificate trust overlap.
 2. Using current workload values, add only the new release's migration Job.
    Existing Deployment pod templates must remain byte-for-byte unchanged.
 3. Wait for migration success. A timeout, checksum error, or lock conflict
@@ -92,7 +119,9 @@ Never combine a new workload image/config rollout with the migration revision.
    and explicit Secret generations. Wait for every old ReplicaSet Pod to leave
    endpoints and every replacement to become ready.
 8. Repeat the two-user acceptance path and inspect database, outbox, job,
-   storage, OIDC, TLS, and error metrics.
+   storage, OIDC, TLS, and error metrics. When enabled, repeat the MCP
+   approval/data-grant/revocation path before enabling runners in a separate
+   revision.
 
 The migration ledger is forward-only. Expand-compatible schema changes precede
 rollout; contract migrations occur only after the documented compatibility
@@ -110,6 +139,13 @@ window.
 4. Remove old identities and roots, bump generations, roll again, and confirm
    TLS-expiry and handshake metrics.
 
+Rotate broker, controller, runner, and MCP-gateway certificates by the same
+overlap-first procedure, but one connection edge at a time. Rotate the MCP
+vault KEK independently: add the new generation, make it current, rewrap or
+replace credentials under controlled operation, verify the recovery-v2 key
+inventory, and remove an old generation only after no envelope or checkpoint
+requires it.
+
 An in-place Secret update without a generation rollout is not a supported
 rotation procedure.
 
@@ -126,17 +162,52 @@ rotation procedure.
   no mount. Preserve and quarantine evidence rather than deleting it.
 - Worker crash: wait for lease expiry/takeover and verify that stale fencing
   tokens cannot complete work.
+- MCP gateway outage: remote and runner-server network operations fail closed;
+  core file operations remain available and the broker must not connect
+  directly to the target.
+- MCP broker outage: MCP readiness and invocations fail, while registrations and
+  policy remain in PostgreSQL. Do not bypass the broker or expose its listener.
+- Controller outage: existing one-shot Pods remain deadline-bounded; no new
+  runner is admitted without exactly one leader. Restore leadership and verify
+  orphan Pod/Secret reconciliation before resuming runner traffic.
 
 Use the private metrics and structured logs described in
 [observability.md](observability.md). Do not expose operations ports through the
 public L4 path.
 
+## MCP broker and runner incidents
+
+On `FileBeltMcpRevocationLag`, stop MCP admission and confirm the authoritative
+registration, principal, approval, grant, and invocation generations in
+PostgreSQL. Cancel active invocations and disable the affected registration or
+service. Do not wait for Iggy and do not extend an approval to compensate for
+lag.
+
+On invalid controller leadership or runner reconciliation failure, set
+`mcp.runners.enabled=false` in a controlled chart revision, preserve controller
+logs and catalog identities, and enumerate only runner-labeled Pods and Secrets
+in the configured namespace. Delete a resource only after its invocation ID and
+FileBelt labels match authoritative state. Keep the broker enabled only for
+Streamable HTTP if that path remains independently healthy.
+
+On quarantine growth, leave registrations disabled, preserve redacted
+protocol/error reason codes, and compare the exact capability snapshot,
+protocol version, endpoint trust profile, and gateway decision. Never show or
+export credential plaintext or the remote response body as incident evidence.
+
+For gateway or catalog compromise, disable runners before the broker, revoke
+the affected registration/service/certificate identities, rotate bootstrap and
+gateway credentials, and replace the catalog/root/bundle or gateway policy in a
+new immutable configuration revision. A corrected image uses a new digest;
+never move a catalog digest or release tag.
+
 ## Uninstall
 
 Capture required audit/recovery evidence, disable traffic, drain workloads, and
-uninstall only the Helm release's namespaced objects. The existing PVC,
-external database, external Iggy, OIDC gateway, certificate Secrets, and
-published registry artifacts are never cleanup targets.
+uninstall only the Helm release's namespaced objects. Confirm the controller has
+reconciled one-shot runner Pods and bootstrap Secrets first. The existing PVC,
+external database, external Iggy, OIDC/MCP gateways, operator Secrets, runner
+catalog inputs, and published registry artifacts are never cleanup targets.
 
 For failures during an upgrade, follow
 [the Kubernetes rollback runbook](kubernetes-rollback.md). For backups and

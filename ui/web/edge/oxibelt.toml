@@ -311,7 +311,7 @@ html = "no-store"
 
 [[routes.actions.response_headers.set]]
 name = "Content-Security-Policy"
-value = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+value = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
 
 [[routes.actions.response_headers.set]]
 name = "Cross-Origin-Opener-Policy"

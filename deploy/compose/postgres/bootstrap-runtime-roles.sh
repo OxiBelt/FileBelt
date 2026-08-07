@@ -48,10 +48,12 @@ SQL
     api_password=$(read_hex_secret /run/secrets/api-database-password)
     io_password=$(read_hex_secret /run/secrets/io-database-password)
     maintenance_password=$(read_hex_secret /run/secrets/maintenance-database-password)
+    mcp_password=$(read_hex_secret /run/secrets/mcp-database-password)
     {
       printf "\\set api_password '%s'\n" "${api_password}"
       printf "\\set io_password '%s'\n" "${io_password}"
       printf "\\set maintenance_password '%s'\n" "${maintenance_password}"
+      printf "\\set mcp_password '%s'\n" "${mcp_password}"
       cat <<'SQL'
 \set ON_ERROR_STOP on
 BEGIN;
@@ -61,12 +63,16 @@ SELECT format('CREATE ROLE filebelt_io_login LOGIN INHERIT PASSWORD %L', :'io_pa
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_io_login') \gexec
 SELECT format('CREATE ROLE filebelt_maintenance_login LOGIN INHERIT PASSWORD %L', :'maintenance_password')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_maintenance_login') \gexec
+SELECT format('CREATE ROLE filebelt_mcp_broker_login LOGIN INHERIT PASSWORD %L', :'mcp_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_mcp_broker_login') \gexec
 ALTER ROLE filebelt_api_login PASSWORD :'api_password';
 ALTER ROLE filebelt_io_login PASSWORD :'io_password';
 ALTER ROLE filebelt_maintenance_login PASSWORD :'maintenance_password';
+ALTER ROLE filebelt_mcp_broker_login PASSWORD :'mcp_password';
 GRANT filebelt_api TO filebelt_api_login;
 GRANT filebelt_io TO filebelt_io_login;
 GRANT filebelt_maintenance TO filebelt_maintenance_login;
+GRANT filebelt_mcp_broker TO filebelt_mcp_broker_login;
 COMMIT;
 SQL
     } | psql --host postgres --username filebelt_owner --dbname filebelt --no-psqlrc

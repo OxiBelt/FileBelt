@@ -42,6 +42,18 @@ for node_image in \
   assert_contains "${workflow}" "${node_image}"
 done
 
+for mcp_boundary in \
+  "server_validate mcp" \
+  "RUNNER_NAMESPACE=\"filebelt-kind-mcp-runners\"" \
+  "create namespace \"\${RUNNER_NAMESPACE}\"" \
+  "mcp.runners.namespace=\"\${RUNNER_NAMESPACE}\"" \
+  "namespace = \"\${RUNNER_NAMESPACE}\"" \
+  "mcp.runners.enabled=true" \
+  "networkPolicy.kubernetesApi.to" \
+  "controller_url = \"https://filebelt-controller."; do
+  assert_contains "${kind_script}" "${mcp_boundary}"
+done
+
 assert_contains "${network_script}" \
   "registry.k8s.io/e2e-test-images/agnhost:2.61@sha256:101f3357d1ad890c3090e78ea6c6a47dc5137cbe19836796e13d5dcb2b84d2e6"
 assert_contains "${network_script}" \

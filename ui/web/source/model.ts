@@ -10,7 +10,8 @@ export type RouteId =
   | "versions"
   | "shares"
   | "sessions"
-  | "privacy";
+  | "privacy"
+  | "mcp";
 
 export type EntryKind = "file" | "folder";
 export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";

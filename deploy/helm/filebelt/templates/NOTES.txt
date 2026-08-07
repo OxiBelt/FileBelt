@@ -1,18 +1,22 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
-FileBelt Phase 3 rendered a Kubernetes {{ .Capabilities.KubeVersion.Version }} release.
+FileBelt Phase 4 rendered a Kubernetes {{ .Capabilities.KubeVersion.Version }} release.
 
 Mode: {{ if .Values.deployment.quiesced }}QUIESCED (all application replicas are zero){{ else }}serving{{ end }}
 Administrative operation: {{ .Values.operation.type }}
 
 Before enabling traffic, verify that:
-  * all five image digests are release digests, not the all-zero sentinel;
+  * all eight image digests are release digests, not the all-zero sentinel;
   * external PostgreSQL, OIDC egress, DNS, ingress, monitoring, and optional
     Iggy/OTLP NetworkPolicy peers match this namespace;
   * every referenced Secret and the existing RWX PVC are operator-managed;
   * migration, owner-applied grants, grant verification, bootstrap, and storage
     probe evidence has been retained; and
   * OxiBelt includes the reviewed outbound client-certificate capability.
+{{ if .Values.mcp.runners.enabled }}
+  * {{ .Values.mcp.runners.namespace }} is pre-created, exclusive to this
+    release, restricted by Pod Security, and contains the runner TLS Secrets.
+{{ end }}
 
-The chart creates no database, credential, PVC, ingress, controller, or RBAC
-permission. Read deploy/helm/filebelt/README.md before changing quiesced mode or
-running an explicit Job.
+The chart creates no database, credential, PVC, ingress, external dependency,
+or cluster-scoped RBAC permission. Read deploy/helm/filebelt/README.md before
+changing quiesced mode, enabling MCP runners, or running an explicit Job.

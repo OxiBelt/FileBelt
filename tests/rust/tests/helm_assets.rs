@@ -6,7 +6,7 @@ use std::fs;
 use filebelt_repository_tests::repository_root;
 
 #[test]
-fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
+fn phase4_chart_has_the_production_assets_and_exact_role_contract() {
     let root = repository_root();
     let chart = root.join("deploy/helm/filebelt");
     let metadata = fs::read_to_string(chart.join("Chart.yaml")).expect("chart metadata");
@@ -14,6 +14,11 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
         fs::read_to_string(chart.join("values.schema.json")).expect("values schema");
     let schema: serde_json::Value =
         serde_json::from_str(&schema_source).expect("valid schema JSON");
+    let catalog_schema_source =
+        fs::read_to_string(chart.join("examples/mcp-runner-catalog.schema.json"))
+            .expect("MCP runner catalog schema");
+    let catalog_schema: serde_json::Value =
+        serde_json::from_str(&catalog_schema_source).expect("valid catalog schema JSON");
     let values = fs::read_to_string(chart.join("values.yaml")).expect("values");
     let templates = fs::read_dir(chart.join("templates"))
         .expect("templates")
@@ -33,6 +38,8 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
             "configmaps.yaml",
             "deployments.yaml",
             "monitoring.yaml",
+            "mcp-deployments.yaml",
+            "mcp-rbac.yaml",
             "networkpolicies.yaml",
             "operation-job.yaml",
             "pdbs.yaml",
@@ -43,7 +50,7 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
         .map(str::to_owned)
         .collect()
     );
-    assert!(metadata.contains("filebelt.dev/phase: \"3\""));
+    assert!(metadata.contains("filebelt.dev/phase: \"4\""));
     assert!(metadata.contains("kubeVersion: \">=1.34.0-0 <1.37.0-0\""));
     for role in [
         "filebelt-api",
@@ -51,6 +58,9 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
         "filebelt-worker-maintenance",
         "filebelt-tools",
         "filebelt-web",
+        "filebelt-mcp-broker",
+        "filebelt-controller",
+        "filebelt-mcp-runner",
     ] {
         assert!(
             schema["properties"]["images"]["properties"]
@@ -59,14 +69,13 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
         );
         assert!(values.contains(&format!("  {role}:")));
     }
-    for inactive_role in ["filebelt-media-controller", "filebelt-mcp-broker"] {
-        assert!(
-            schema["properties"]["images"]["properties"]
-                .get(inactive_role)
-                .is_none()
-        );
-        assert!(!values.contains(&format!("  {inactive_role}:")));
-    }
+    let inactive_role = "filebelt-media-controller";
+    assert!(
+        schema["properties"]["images"]["properties"]
+            .get(inactive_role)
+            .is_none()
+    );
+    assert!(!values.contains(&format!("  {inactive_role}:")));
     assert_eq!(
         schema["properties"]["global"]["properties"]["runAsUser"]["const"],
         10001
@@ -77,4 +86,15 @@ fn phase3_chart_has_the_production_assets_and_exact_role_contract() {
             .is_some_and(|operations| operations.len() == 11)
     );
     assert!(values.contains("linux/riscv64"));
+    assert_eq!(catalog_schema["properties"]["schemaVersion"]["const"], 1);
+    assert_eq!(catalog_schema["properties"]["entries"]["maxItems"], 128);
+    assert_eq!(
+        catalog_schema["$defs"]["entry"]["properties"]["image"]["pattern"],
+        "^sha256:[0-9a-f]{64}$"
+    );
+    assert_eq!(
+        schema["properties"]["mcp"]["properties"]["runners"]["properties"]["namespace"]["$ref"],
+        "#/definitions/dnsLabel"
+    );
+    assert!(values.contains("    namespace: filebelt-mcp-runners"));
 }

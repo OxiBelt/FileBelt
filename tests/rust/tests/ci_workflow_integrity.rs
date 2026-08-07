@@ -163,13 +163,15 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-api",
         "filebelt-worker-io",
         "filebelt-worker-maintenance",
+        "filebelt-mcp-broker",
+        "filebelt-controller",
+        "filebelt-mcp-runner",
         "filebelt-tools",
         "filebelt-web",
     ] {
         assert!(active_roles.contains(active));
     }
     assert!(!active_roles.contains("filebelt-media-controller"));
-    assert!(!active_roles.contains("filebelt-mcp-broker"));
 }
 
 #[test]

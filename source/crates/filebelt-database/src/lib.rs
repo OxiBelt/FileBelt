@@ -4,6 +4,8 @@
 
 #![deny(unsafe_code)]
 
+pub mod mcp;
+
 use filebelt_events_protocol::EventEnvelope;
 use prost::Message;
 use serde::{Deserialize, Serialize};

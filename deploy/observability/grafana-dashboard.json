@@ -61,11 +61,39 @@
       ],
       "title": "Maintenance activity",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "sum(filebelt_mcp_active_invocations)", "refId": "A"},
+        {"expr": "sum(rate(filebelt_mcp_policy_denials_total[5m]))", "refId": "B"},
+        {"expr": "sum(filebelt_mcp_quarantined_registrations)", "refId": "C"}
+      ],
+      "title": "MCP broker activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "filebelt_controller_leader", "refId": "A"},
+        {"expr": "increase(filebelt_controller_runner_created_total[1h])", "refId": "B"},
+        {"expr": "increase(filebelt_controller_reconciliation_failures_total[1h])", "refId": "C"}
+      ],
+      "title": "MCP runner controller",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 41,
-  "tags": ["filebelt", "phase3"],
+  "tags": ["filebelt", "phase4", "mcp"],
   "templating": {
     "list": [
       {

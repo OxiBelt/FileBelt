@@ -394,9 +394,14 @@ fn server_config(settings: &BackendServerTlsConfig) -> Result<rustls::ServerConf
     let inner = WebPkiClientVerifier::builder_with_provider(Arc::new(roots), Arc::clone(&provider))
         .build()
         .map_err(|error| format!("cannot build backend client verifier: {error}"))?;
-    let verifier = ExactUriClientVerifier {
+    let verifier = PolicyUriClientVerifier {
         inner,
         allowed: settings.allowed_client_uri_sans.iter().cloned().collect(),
+        trust_domains: settings
+            .allowed_client_trust_domains
+            .iter()
+            .cloned()
+            .collect(),
     };
     rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -421,12 +426,13 @@ pub fn certificate_not_after_unix_seconds(
 }
 
 #[derive(Debug)]
-struct ExactUriClientVerifier {
+struct PolicyUriClientVerifier {
     inner: Arc<dyn ClientCertVerifier>,
     allowed: BTreeSet<String>,
+    trust_domains: BTreeSet<String>,
 }
 
-impl ClientCertVerifier for ExactUriClientVerifier {
+impl ClientCertVerifier for PolicyUriClientVerifier {
     fn offer_client_auth(&self) -> bool {
         self.inner.offer_client_auth()
     }
@@ -448,8 +454,9 @@ impl ClientCertVerifier for ExactUriClientVerifier {
         let verified = self
             .inner
             .verify_client_cert(end_entity, intermediates, now)?;
-        let allowed = certificate_has_allowed_uri(end_entity.as_ref(), &self.allowed)
-            .map_err(|_| Error::InvalidCertificate(CertificateError::BadEncoding))?;
+        let allowed =
+            certificate_has_allowed_uri(end_entity.as_ref(), &self.allowed, &self.trust_domains)
+                .map_err(|_| Error::InvalidCertificate(CertificateError::BadEncoding))?;
         if !allowed {
             return Err(Error::InvalidCertificate(
                 CertificateError::ApplicationVerificationFailure,
@@ -481,7 +488,11 @@ impl ClientCertVerifier for ExactUriClientVerifier {
     }
 }
 
-fn certificate_has_allowed_uri(certificate: &[u8], allowed: &BTreeSet<String>) -> Result<bool, ()> {
+fn certificate_has_allowed_uri(
+    certificate: &[u8],
+    allowed: &BTreeSet<String>,
+    trust_domains: &BTreeSet<String>,
+) -> Result<bool, ()> {
     let (_, certificate) = parse_x509_certificate(certificate).map_err(|_| ())?;
     let san = certificate.subject_alternative_name().map_err(|_| ())?;
     Ok(san.is_some_and(|extension| {
@@ -494,8 +505,17 @@ fn certificate_has_allowed_uri(certificate: &[u8], allowed: &BTreeSet<String>) -
                 _ => None,
             })
             .collect::<Vec<_>>();
-        uri_names.len() == 1 && allowed.contains(uri_names[0])
+        uri_names.len() == 1
+            && (allowed.contains(uri_names[0])
+                || spiffe_trust_domain(uri_names[0])
+                    .is_some_and(|domain| trust_domains.contains(domain)))
     }))
+}
+
+fn spiffe_trust_domain(uri: &str) -> Option<&str> {
+    let remainder = uri.strip_prefix("spiffe://")?;
+    let (domain, path) = remainder.split_once('/')?;
+    (!domain.is_empty() && !path.is_empty()).then_some(domain)
 }
 
 pub struct TelemetryGuard {
@@ -555,7 +575,7 @@ fn build_tracer_provider(
     let Some(endpoint) = &settings.otlp_http_endpoint else {
         return Ok(None);
     };
-    let mut http = reqwest::ClientBuilder::new()
+    let mut http = reqwest::blocking::ClientBuilder::new()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(3));
@@ -657,7 +677,7 @@ impl fmt::Debug for OperationsState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExactUriClientVerifier, MtlsListener, OperationsState, certificate_has_allowed_uri,
+        MtlsListener, OperationsState, PolicyUriClientVerifier, certificate_has_allowed_uri,
     };
     use axum::serve::Listener as _;
     use filebelt_control_protocol::BackendServerTlsConfig;
@@ -724,16 +744,17 @@ mod tests {
         (client.der().clone(), roots)
     }
 
-    fn verifier(roots: RootCertStore, allowed: &str) -> ExactUriClientVerifier {
+    fn verifier(roots: RootCertStore, allowed: &str) -> PolicyUriClientVerifier {
         let inner = WebPkiClientVerifier::builder_with_provider(
             Arc::new(roots),
             Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
         )
         .build()
         .unwrap();
-        ExactUriClientVerifier {
+        PolicyUriClientVerifier {
             inner,
             allowed: BTreeSet::from([allowed.to_owned()]),
+            trust_domains: BTreeSet::new(),
         }
     }
 
@@ -745,9 +766,17 @@ mod tests {
     fn exact_uri_san_is_required() {
         let certificate = client_certificate("spiffe://filebelt.test/web-api");
         let allowed = BTreeSet::from(["spiffe://filebelt.test/web-api".to_owned()]);
-        assert!(certificate_has_allowed_uri(&certificate, &allowed).unwrap());
+        assert!(certificate_has_allowed_uri(&certificate, &allowed, &BTreeSet::new()).unwrap());
         let wrong = BTreeSet::from(["spiffe://filebelt.test/web-io".to_owned()]);
-        assert!(!certificate_has_allowed_uri(&certificate, &wrong).unwrap());
+        assert!(!certificate_has_allowed_uri(&certificate, &wrong, &BTreeSet::new()).unwrap());
+        assert!(
+            certificate_has_allowed_uri(
+                &certificate,
+                &BTreeSet::new(),
+                &BTreeSet::from(["filebelt.test".to_owned()]),
+            )
+            .unwrap()
+        );
     }
 
     #[test]
@@ -762,7 +791,9 @@ mod tests {
             .self_signed(&KeyPair::generate().unwrap())
             .unwrap();
         let allowed = BTreeSet::from(["spiffe://filebelt.test/web-api".to_owned()]);
-        assert!(!certificate_has_allowed_uri(certificate.der(), &allowed).unwrap());
+        assert!(
+            !certificate_has_allowed_uri(certificate.der(), &allowed, &BTreeSet::new()).unwrap()
+        );
     }
 
     #[test]
@@ -882,6 +913,7 @@ mod tests {
             private_key_file: private_key_path,
             client_ca_file: client_ca_path,
             allowed_client_uri_sans: vec![identity.into()],
+            allowed_client_trust_domains: Vec::new(),
         };
         let mut listener = MtlsListener::bind(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),

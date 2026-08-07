@@ -16,3 +16,28 @@ spec:
       app.kubernetes.io/component: {{ $component }}
 ---
 {{- end }}
+{{- if .Values.mcp.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt.name" . }}-mcp-broker
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "mcp-broker") | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: mcp-broker}
+---
+{{- end }}
+{{- if .Values.mcp.runners.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt.name" . }}-controller
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "controller") | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: controller}
+{{- end }}

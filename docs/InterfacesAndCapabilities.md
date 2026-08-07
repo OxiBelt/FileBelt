@@ -14,10 +14,12 @@ The public control-plane contract is the OpenAPI 3.1 JSON REST API under
 `/api/v1`. The committed source is
 [`protocol/http/v1/openapi.yaml`](../protocol/http/v1/openapi.yaml). It covers
 OIDC and local sessions, drives and nodes, trash, immutable versions, upload and
-download grants, direct shares, and ACL-governed shared views. Tenant
-administration, preferences, and audit/privacy mutation endpoints are not in the
-current public contract. Group and anonymous-link share values are reserved but
-unavailable.
+download grants, direct shares, ACL-governed shared views, per-principal MCP
+registrations, capability review, approvals, invocation, version-pinned data
+grants, and tenant-administrator MCP templates, service identities, service
+grants, and global blocks. General tenant administration, preferences, and
+audit/privacy mutation endpoints are not in the current public contract. Group
+and anonymous-link share values are reserved but unavailable.
 
 Payload bytes travel over ordinary HTTP streaming under `/io/v1`:
 
@@ -43,6 +45,9 @@ request returns the stored result; reusing a key for a different request returns
 The generated TypeScript contract under `ui/web/source/generated/` is derived
 from OpenAPI and consumed by the browser client. UI route guards, hidden
 controls, and disabled actions remain usability behavior, never authorization.
+The MCP settings UI keeps CSRF material only in memory and stores no credential,
+OAuth state, approval digest, invocation result, or registration secret in Web
+Storage or IndexedDB.
 
 ## Edge trust boundary
 
@@ -93,6 +98,82 @@ clients use `Authorization: fbcap1 <base64url-envelope>`. An admitted long
 stream rechecks the authoritative generation projection within 60 seconds and
 stops on mismatch or database uncertainty.
 
+## MCP mediation contracts
+
+The public MCP workflow is intent-first. `POST /api/v1/mcp/invocation-intents`
+accepts one exact `McpInvocationRequest` and returns a five-minute
+`McpInvocationIntent`. When approval is required, the browser confirms the
+displayed registration, capability, application, arguments, attachment
+versions, and expiry, then posts only the approval scope and expiry to the
+intent-bound approval route. The server derives all keyed argument and
+attachment digests from its stored intent. `POST .../{intent_id}/stream` must
+receive the same request semantics and returns bounded
+`application/x-ndjson`; a mismatch, consumed intent, missing approval, or
+disconnect fails closed and cancels execution.
+
+Browser result rendering is data-only. Text is placed in a `<pre>` element;
+JSON is a non-editable tree capped at depth 16, 200 entries per object or
+array, and 2,000 rendered values across the complete result. Media is decoded
+into a revocable Blob URL only after exact size and magic checks and is limited
+to 4 MiB and PNG, JPEG, WebP, MP3, Ogg, or WAV.
+Images are rejected above 4,096 pixels on either axis or 16 million pixels;
+audio is metadata-only until user action, never autoplays, and is rejected
+above five minutes. HTML, script, SVG, remote media URLs, and unrecognized
+content never enter an executable DOM sink.
+
+MCP mutation routes require the normal CSRF, exact Origin, Fetch Metadata,
+idempotency, and generation ETag controls shown in OpenAPI. Problems use stable
+`mcp.*` codes. Registration export contains configuration only, never a
+credential, OAuth token, capability decision, approval, grant, or activity.
+Session-scope approval is unavailable for `tool_call` even when the hostile MCP
+descriptor claims `readOnlyHint=true`; tool calls always consume a one-shot
+approval. Reusable approval remains limited to reviewed low-risk non-tool
+operations and one hour.
+OAuth start stores PKCE verifier, state, issuer, registration, principal,
+session, and return path on the server for at most ten minutes. The callback is
+the single allowlisted `/api/v1/mcp/oauth/callback`; it consumes the attempt,
+binds tokens to the exact resource/audience, and redirects only to the stored
+local settings path. Authorization-code and refresh exchanges send the exact
+registration endpoint as the OAuth resource indicator; access state stores the
+same resource, and an expired access token can be replaced only by a bounded,
+rotated refresh token. Specifically,
+`POST /api/v1/mcp/registrations/{registration_id}/oauth/start` accepts
+`StartMcpOauth` with a local `/settings/mcp` return path and optional configured
+issuer, then returns `McpOauthStart` with the authorization URL and expiry. The
+unauthenticated issuer redirect reaches the callback with bounded `code`,
+`state`, optional `iss`, or `error` query values and receives only a `303` back
+to that stored local path; OAuth tokens never appear in the public response.
+
+The API delegates broker work with an Ed25519-signed `fbmcp1` envelope over
+deterministic Protobuf. Claims bind audience and operation, tenant, principal,
+session or exact service grant, application, registration, capability and
+argument digests, attachment versions/disclosures/generations, policy and
+membership generations, nonce, and a maximum 120-second lifetime. The broker
+accepts no browser cookie or unsigned authority. Internal invocation frames are
+limited to 4 MiB and carry a request ID, ordered sequence, bounded payload, and
+terminal state.
+
+Remote Streamable HTTP sessions are opened by the broker through the
+operator-managed mTLS egress gateway using an exact target origin and trust
+profile. The gateway, not a caller-controlled proxy setting, enforces host,
+CIDR, port, public-WebPKI/custom-CA, and dynamic-registration policy. The
+supported MCP protocol values are current `2026-07-28` and fallback
+`2025-11-25`; negotiation to any other value fails closed. Local
+stdio servers are selected only from the offline-Sigstore-verified catalog.
+The broker requests a runner through the controller's mTLS, bounded Protobuf
+interface; the one-shot runner presents a 32--4096-byte bootstrap token over
+the `filebelt.mcp.runner.v1` relay and uses ordered payload frames no larger than
+65,536 bytes. These internal routes are not public APIs.
+
+The admitted upstream method set is deliberately small: initialization,
+`tools/list`, `resources/list`, `prompts/list`, `tools/call`, `resources/read`,
+and `prompts/get`. Each discovery class is capped at 1,000 descriptors, names
+are capped at 256 bytes, and every tool must declare `readOnlyHint=true`.
+Tool results are capped at 128 content blocks. Sampling, elicitation, roots,
+subscriptions, arbitrary notifications, and payload writes are not mediated;
+adding one of them requires a new protocol, authorization, threat-model, and
+deployment review.
+
 ## Key rotation and configuration
 
 `filebeltctl` creates capability signing material and keyed-digest material as
@@ -107,6 +188,10 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
+The current format is version 3; older versions are rejected. `mcp.enabled`
+defaults to false, and `mcp.runners.enabled` is a separate Kubernetes-only
+opt-in that requires broker/controller mTLS, a digest-pinned runner image, and
+the verified catalog inputs.
 
 ## Protobuf and generated contracts
 

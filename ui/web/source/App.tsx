@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search as SearchIcon,
+  ServerCog,
   Settings2,
   ShieldCheck,
   Sun,
@@ -46,6 +47,7 @@ import {
   VisuallyHiddenStyle,
 } from "@filebelt/design-system";
 import type { Density, ThemeChoice } from "@filebelt/design-system";
+import type { McpSettingsClient } from "@filebelt/mcp-settings";
 
 import { PrivacyView, SessionsView, SharesView, UploadsView, VersionsView } from "./ActivityViews.js";
 import { AuthenticationRequiredError } from "./client.js";
@@ -56,6 +58,7 @@ import { EmptySelection, SelectionReducer } from "./selection.js";
 import { En } from "./strings.js";
 
 const AdminPanel = lazy(() => import("@filebelt/admin"));
+const McpSettings = lazy(() => import("@filebelt/mcp-settings"));
 const PreferencesKey = "filebelt.appearance.v1";
 
 interface Preferences {
@@ -92,10 +95,12 @@ const RoutePaths: Record<RouteId, string> = {
   shares: "/shares",
   sessions: "/sessions",
   privacy: "/privacy",
+  mcp: "/settings/mcp",
 };
 
 function RouteFromPath(Pathname: string): RouteId | "admin" {
   if (Pathname === "/admin" || Pathname.startsWith("/admin/")) return "admin";
+  if (Pathname === "/settings/mcp" || Pathname.startsWith("/settings/mcp/")) return "mcp";
   return (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as RouteId | undefined) ?? "drive";
 }
 
@@ -126,6 +131,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
   const Titles: Record<RouteId | "admin", string> = {
     admin: En.admin,
     drive: En.myDrive,
+    mcp: En.mcp,
     privacy: En.privacy,
     recent: En.recent,
     sessions: En.sessions,
@@ -141,6 +147,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
 
 interface AppProps {
   Client: FileBeltClient;
+  McpClient?: McpSettingsClient;
 }
 
 export function OidcLoginHref(): string {
@@ -157,7 +164,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
-export function App({ Client }: AppProps): ReactNode {
+export function App({ Client, McpClient }: AppProps): ReactNode {
   const [Route, Navigate] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
@@ -268,6 +275,7 @@ export function App({ Client }: AppProps): ReactNode {
     { Icon: Link2, Id: "shares", Label: En.shares },
     { Icon: ShieldCheck, Id: "sessions", Label: En.sessions },
     { Icon: Bell, Id: "privacy", Label: En.privacy },
+    { Icon: ServerCog, Id: "mcp", Label: En.mcp },
     ...(Snapshot?.CurrentUser.IsTenantAdmin === true ? [{ Icon: Settings2, Id: "admin" as const, Label: En.admin }] : []),
   ];
 
@@ -323,6 +331,8 @@ export function App({ Client }: AppProps): ReactNode {
               {Route === "shares" ? <SharesView File={PrimarySelection} onCreate={(Input) => Mutate(() => Client.createShare(Input), En.shareCreated)} onRevoke={(Id) => Mutate(() => Client.revokeShare(Id), En.shareRevoked)} Shares={Snapshot.Shares} Strings={En} /> : null}
               {Route === "sessions" ? <SessionsView onRevoke={(Id) => Mutate(() => Client.revokeSession(Id), En.sessionRevoked)} Sessions={Snapshot.Sessions} Strings={En} /> : null}
               {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
+              {Route === "mcp" && McpClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><McpSettings Client={McpClient} IsTenantAdmin={Snapshot.CurrentUser.IsTenantAdmin} /></Suspense> : null}
+              {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
               {["drive", "shared-drives", "shared", "recent", "trash"].includes(Route) ? (
                 <section aria-labelledby="files-heading" className="fb-files-view">
                   <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.files}</p><h1 id="files-heading">{RouteTitle(Route)}</h1></div><div className="fb-heading-actions"><Tooltip content={En.refresh} relationship="label"><Button appearance="subtle" icon={<RefreshCw />} onClick={() => void Refresh()} /></Tooltip><Button appearance="primary" icon={<Upload />} onClick={() => FileInput.current?.click()}>{En.upload}</Button><input accept="*/*" aria-label={En.uploadHint} hidden multiple onChange={OnFiles} ref={FileInput} type="file" /></div></header>

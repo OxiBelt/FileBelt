@@ -17,7 +17,7 @@ is forbidden.
   may depend inward on those contracts, never the reverse.
 - UI packages consume documented APIs and do not implement authorization.
 
-## Phase 2 package direction
+## Package direction
 
 ```text
 role binaries / browser SPA
@@ -84,7 +84,7 @@ an event payload cannot overwrite committed truth. Payload bytes are
 authoritative only in conjunction with their committed PostgreSQL version and
 manifest state.
 
-## Phase 3 deployment direction
+## Deployment direction
 
 Kubernetes and Helm types remain in deployment templates, tests, and operator
 documentation. They do not enter domain, authorization, database, storage, or
@@ -101,11 +101,14 @@ and OTLP are output protocols and cannot become policy or durability inputs.
 
 ## Change review
 
-Adding a dependency edge across one of these layers requires an accepted ADR
-when it changes public contracts, policy, persistence, runtime trust, native
-linkage, or a license boundary. Review the resolved Cargo/pnpm graph rather
-than only direct manifest text. Generated code follows the destination
-package's license and records its schema and generator provenance.
+Adding a dependency edge across one of these layers requires an explicit
+architecture and policy review in the same pull request when it changes public
+contracts, policy, persistence, runtime trust, native linkage, or a license
+boundary. Record rationale, alternatives, compatibility, security and license
+effects, rollout, and rollback, and update the applicable living specification.
+Review the resolved Cargo/pnpm graph rather than only direct manifest text.
+Generated code follows the destination package's license and records its schema
+and generator provenance.
 
 Repository contract tests validate workspace membership, resolved path
 dependencies, package license metadata, generated-code provenance, database
@@ -136,6 +139,9 @@ focused cleanup once the affected responsibilities and compatibility tests are
 under review.
 
 Changing a reviewed graph or public-surface entry requires an explicit policy
-diff and the normal ADR review whenever it also changes a public contract,
-runtime trust, persistence, native linkage, or license boundary. The checker
-does not provide an automatic baseline-update mode.
+diff. When the change also affects a public contract, runtime trust,
+persistence, native linkage, or license boundary, the same pull request updates
+the applicable [runtime](RuntimeAndDeployment.md),
+[storage](StorageAndDurability.md), interface, authorization, license, and
+supply-chain specifications. The checker does not provide an automatic
+baseline-update mode.

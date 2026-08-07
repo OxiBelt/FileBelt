@@ -7,11 +7,12 @@ TypeScript. The project is Kubernetes-first, uses PostgreSQL as authoritative
 metadata state, and applies one application-level Virtual ACL model across web
 and protocol access paths.
 
-This repository implements the Phase 3 Apache core production boundary: a tenant-scoped
-PostgreSQL namespace and Virtual ACL, OIDC browser sessions, immutable file
-versions, UUID-addressed whole/chunk payload storage, capability-limited I/O
-workers, sharing and revocation, durable jobs/outbox, optional Apache Iggy
-notifications, and an accessible React web drive behind OxiBelt.
+This repository implements the Apache core production boundary: a
+tenant-scoped PostgreSQL namespace and Virtual ACL, OIDC browser sessions,
+immutable file versions, UUID-addressed whole/chunk payload storage,
+capability-limited I/O workers, sharing and revocation, durable jobs/outbox,
+optional Apache Iggy notifications, and an accessible React web drive behind
+OxiBelt.
 
 Docker remains the development/integration topology. Production uses the
 hardened Helm chart on Kubernetes 1.34-1.36 with external PostgreSQL, OIDC,
@@ -19,13 +20,12 @@ optional Iggy, operator Secrets, an existing RWX POSIX claim, default-deny
 networking, and backend mTLS. FileBelt makes no HA, online-backup, PITR, numeric
 RPO, or numeric RTO claim.
 
-The Phase 1 image evidence contract remains in
-[ADR-0007](docs/adr/0007-oci-build-and-release-evidence.md), its Phase 2
-runtime extension is [ADR-0011](docs/adr/0011-phase-two-runtime-images-and-evidence.md),
-and the production/release boundary is
-[ADR-0012](docs/adr/0012-kubernetes-and-operational-maturity.md).
-Pull-request validation remains read-only; authorized signed SemVer tags may
-promote the five active images and Helm chart with attestations.
+The [living engineering specifications](docs/README.md),
+[supply-chain policy](docs/SupplyChain.md), and
+[runtime and deployment contract](docs/RuntimeAndDeployment.md) describe the
+current build, runtime, and release boundary. Pull-request validation remains
+read-only; authorized signed SemVer tags may promote the five active images and
+Helm chart with attestations.
 
 ## Repository regions
 
@@ -35,10 +35,11 @@ promote the five active images and Helm chart with attestations.
 - `adapters/onlyoffice/` is an AGPL-3.0-only region.
 - `adapters/nfs/` is reserved as an LGPL-3.0-or-later region.
 - `adapters/transcode/` contains only Apache-2.0 governance material until an
-  accepted ADR establishes the exact FFmpeg composition.
+  explicit review updates the license and runtime contracts with the exact
+  FFmpeg composition.
 
 See [the license map](docs/LicenseMap.md), [contribution guide](CONTRIBUTING.md),
-and [accepted ADRs](docs/adr/README.md) before making changes.
+and [engineering documentation index](docs/README.md) before making changes.
 
 ## Bootstrap checks
 
@@ -82,10 +83,13 @@ Additional supply-chain checks are described in
   and Range downloads. Kubernetes backends require native mTLS and
   NetworkPolicy isolation.
 
-Read [the ADR index](docs/adr/README.md),
-[threat model](docs/ThreatModel.md), and
-[Kubernetes operator guide](docs/operations/kubernetes.md) before changing these
-boundaries.
+Read the [namespace and authorization](docs/NamespaceAndAuthorization.md),
+[interfaces and capabilities](docs/InterfacesAndCapabilities.md),
+[storage and durability](docs/StorageAndDurability.md), and
+[runtime and deployment](docs/RuntimeAndDeployment.md) contracts, together with
+the [threat model](docs/ThreatModel.md) and
+[Kubernetes operator guide](docs/operations/kubernetes.md), before changing
+these boundaries.
 
 ## Image checks
 

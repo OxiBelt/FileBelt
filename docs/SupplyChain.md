@@ -6,7 +6,8 @@ Rust and Node lockfiles are committed. Dependencies use reviewed registries and
 exact versions; unpinned Git sources and unexpected lifecycle scripts are
 blocked. Apache runtime graphs allow reviewed permissive licenses. MPL, CDDL,
 LGPL, GPL, AGPL, native linkage, bundled source, and `*-sys` dependencies need
-an accepted review before admission.
+an explicit dependency, license, and architecture review recorded in the
+admitting pull request.
 
 Rust changes run `cargo audit`, `cargo deny`, and `cargo vet`. Node changes use
 frozen pnpm installation with scripts disabled, license admission, audit,
@@ -128,7 +129,8 @@ local Docker image archives only. Each of the seven roles is checked against an
 immutable plan containing its repository, version, source revision and ref,
 build kind, license, and platform. The archive must contain the corresponding
 static Rust probe or web assets, the expected license evidence, numeric
-user/group `10001:10001`, and the complete OCI label contract from ADR-0007.
+user/group `10001:10001`, and the complete OCI label contract from the
+[runtime and deployment specification](RuntimeAndDeployment.md).
 
 Native Rust builds install exact binutils, GCC, musl, musl development, and
 musl-tools package versions from immutable Debian snapshot
@@ -161,8 +163,9 @@ Ninja records are build-only evidence and are never copied into the final
 scratch image, so they do not change its license expression or notices. Rust
 images use the aggregate license expression `Apache-2.0 AND MIT` and ship
 upstream Rust and musl copyright manifests. The Phase 1 static web artifact
-remains `Apache-2.0` and excludes those Rust-only notices; ADR-0011 defines the
-later OxiBelt-derived composition.
+remained `Apache-2.0` and excluded those Rust-only notices; the current
+OxiBelt-derived composition is defined in the
+[license map](LicenseMap.md#runtime-composition).
 
 Unexcepted `HIGH` or `CRITICAL` vulnerabilities fail the gate. Exceptions in
 `supply-chain/image-vulnerability-exceptions.json` must match the role,
@@ -218,13 +221,14 @@ Archives and reports are downloadable CI evidence, not published releases.
 Signed release tags are verified in a temporary keyring containing only the
 [tracked authorized signers](../supply-chain/release-tag-signers/README.md),
 and the tag must peel to the checked-out source revision.
-When publication is introduced, a separate least-privilege job must consume the
-already validated artifacts, attach GitHub artifact attestations, verify the
-pushed digest, and avoid rebuilding. Until that later decision is accepted,
-rollback consists of disabling the image workflow calls and discarding local or
-CI `artifacts/` output. Native smoke tests remove the archive tag they load, and
+At the Phase 1 and Phase 2 boundary, publication remained deferred to a
+separate least-privilege job that would consume already validated artifacts,
+attach GitHub artifact attestations, verify the pushed digest, and avoid
+rebuilding. The current tag-only promotion contract is described below. Native
+smoke tests remove the archive tag they load, and
 RISC-V smoke tests remove their temporary helper image, so the matrix leaves no
-role or helper tag in the local daemon. There is no registry artifact to revoke.
+role or helper tag in the local daemon. At that boundary there was no registry
+artifact to revoke.
 
 Database volumes, payloads, backups, test user data, TLS keys, OIDC credentials,
 cookies, CSRF tokens, capabilities, and signing/hash keysets never enter build
@@ -242,12 +246,13 @@ issuer, monitoring stack, Secret, or PVC; cluster-test fixtures retain their
 upstream names, licenses, and immutable digests and are not FileBelt release
 artifacts.
 
-The OxiBelt input must advance to an immutable release that supports a separate
-outbound client certificate per upstream. Before the FileBelt pin changes, its
-source revision, route/cache/retry behavior, server-name validation,
-client-key handling, architecture set, license/notices, SBOM, and vulnerability
-evidence are reviewed again. FileBelt still does not copy from or build the
-local reference checkout.
+The exact OxiBelt prerelease admitted above remains the current immutable input,
+and its separate outbound client-certificate behavior for each upstream is
+covered by edge and Kubernetes acceptance. Before the FileBelt pin changes,
+its source revision, prerelease rationale, route/cache/retry behavior,
+server-name validation, client-key handling, architecture set,
+license/notices, SBOM, and vulnerability evidence are reviewed again. FileBelt
+does not copy from or build the local reference checkout.
 
 Kubernetes acceptance uses digest-pinned Kind node images for the supported
 1.34, 1.35, and 1.36 lines; pinned Minikube, kubectl, Helm, CNI, fixture, and
@@ -276,3 +281,14 @@ Artifact rollback selects a previous verified digest. The project does not
 move version tags or automatically delete packages/attestations; a compromised
 artifact is withdrawn only through a separately reviewed administrator
 incident procedure and replaced by a new SemVer release.
+
+## Changing the policy
+
+A dependency, toolchain, base image, feature, native linkage, license,
+vulnerability exception, evidence format, or publication-authority change
+requires an explicit supply-chain and architecture review in the same pull
+request. Record rationale, alternatives, exact graph or artifact effects,
+security and license impact, expiry where applicable, rollout, and rollback.
+Update this policy, the [license map](LicenseMap.md),
+[runtime specification](RuntimeAndDeployment.md), machine-readable admission
+files, notices, and regression evidence with the change.

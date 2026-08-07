@@ -127,7 +127,8 @@ changes, download starts, conflicts, corruption, and
 denials. Do not emit routine list results or chunk progress. Records contain
 stable IDs and reason codes, not raw credentials or payload content. The
 default durable retention is 365 days and the user-visible privacy subset is
-90 days; operator configuration remains within ADR-0008 bounds.
+90 days; operator configuration remains within the bounds in
+[Namespace and Authorization](NamespaceAndAuthorization.md).
 
 ## Residual risk
 

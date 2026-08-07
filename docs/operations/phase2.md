@@ -11,12 +11,12 @@ production deployment and has no HA, PITR, RPO, or RTO commitment. Kubernetes
 workloads, NetworkPolicies, migration Jobs, disruption behavior, and minikube
 lifecycle are Phase 3 work.
 
-Read these decisions before operating the stack:
+Read the current specifications before operating the stack:
 
-- [identity, sessions, and Virtual ACL](../adr/0008-identity-sessions-and-virtual-acl.md);
-- [HTTP edge and worker capabilities](../adr/0009-http-edge-and-worker-capabilities.md);
-- [PostgreSQL, storage, and job durability](../adr/0010-postgresql-storage-and-job-durability.md); and
-- [Phase 2 runtime images and evidence](../adr/0011-phase-two-runtime-images-and-evidence.md).
+- [Namespace and Authorization](../NamespaceAndAuthorization.md);
+- [Interfaces and Capabilities](../InterfacesAndCapabilities.md);
+- [Storage and Durability](../StorageAndDurability.md); and
+- [Runtime and Deployment](../RuntimeAndDeployment.md).
 
 ## Required inputs
 
@@ -72,7 +72,9 @@ non-secret deployment wiring only.
 
 ## Configuration invariants
 
-The defaults and absolute bounds are authoritative in ADR-0010. Validation
+The defaults and accepted envelopes are authoritative in
+[Storage and Durability](../StorageAndDurability.md#configuration-safety-envelope).
+Validation
 also enforces these relationships:
 
 - maximum file size is representable by the chosen chunk size and part count;
@@ -85,8 +87,9 @@ also enforces these relationships:
   envelope permits.
 
 Changing configuration requires a graceful restart. Do not edit persisted
-rows to bypass the validation envelope. A value outside an absolute envelope
-requires a new ADR and migration/compatibility analysis.
+rows to bypass the validation envelope. A value outside an accepted envelope
+requires a reviewed update to the storage specification plus migration and
+compatibility analysis in the same pull request.
 
 ## Normal operation
 

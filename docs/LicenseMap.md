@@ -13,13 +13,13 @@ is `supply-chain/license-regions.toml`.
 | `adapters/ftp-ftps/` | GPL-3.0-or-later | `@PiQuark6046` | Separate workspace/process/image |
 | `adapters/onlyoffice/` | AGPL-3.0-only | `@PiQuark6046` | Separate workspace/process/image; network source access required |
 | `adapters/nfs/` | LGPL-3.0-or-later | `@PiQuark6046` | Reserved separate workspace/process/image |
-| `adapters/transcode/` governance files | Apache-2.0 | `@PiQuark6046` | No implementation until a composition ADR |
+| `adapters/transcode/` governance files | Apache-2.0 | `@PiQuark6046` | No implementation until the exact FFmpeg composition and license boundary are reviewed and documented |
 
 Apache packages may expose protocol-neutral schemas used by adapters. They may
 not import, link, or path-depend on adapter implementation code. Every image
 must carry a license expression matching its actual contents.
 
-## Phase 3 runtime composition
+## Runtime composition
 
 The source-region expression and final-image expression answer different
 questions. Original code under `source/`, `protocol/`, `ui/`, and `devops/`
@@ -58,3 +58,11 @@ certificate issuer, and monitoring services remain external processes and are
 not redistributed by the FileBelt chart. New Rust TLS, metrics, and telemetry
 crates must appear in the exact Cargo graph, image SBOM, notices, Cargo Vet,
 Cargo Deny, and vulnerability evidence before their images can be promoted.
+
+Changing a license region, moving code between regions, admitting a copyleft or
+native dependency, or changing an image's composition requires an explicit
+license and architecture review in the same pull request. Record contributor
+relicensing authority where applicable and update this map, the machine-readable
+region policy, [dependency boundaries](DependencyBoundaries.md),
+[supply-chain policy](SupplyChain.md), and
+[runtime specification](RuntimeAndDeployment.md) together.

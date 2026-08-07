@@ -7,8 +7,8 @@ lint:
   use:
     - STANDARD
   except:
-    # ADR-0004 fixes the public tree at protocol/<domain>/v1 while package
-    # names retain the repository-wide filebelt prefix.
+    # The public source tree is protocol/<domain>/v1 while package names retain
+    # the repository-wide filebelt prefix; see InterfacesAndCapabilities.md.
     - PACKAGE_DIRECTORY_MATCH
 breaking:
   use:

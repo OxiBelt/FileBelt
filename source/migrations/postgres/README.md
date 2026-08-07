@@ -3,7 +3,9 @@
 # PostgreSQL migrations
 
 SQLx migrations are immutable forward-only `NNNNNN_description.sql` files as
-defined by ADR-0005. Apply `roles.sql` as a role administrator, provision
+defined by the
+[storage and durability specification](../../../docs/StorageAndDurability.md).
+Apply `roles.sql` as a role administrator, provision
 deployment-specific login roles as members of exactly one group role, and run
 `filebeltctl database migrate` with the migrator credential. Apply
 `grants.sql` as the database owner after every migration; it deliberately uses

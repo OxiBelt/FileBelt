@@ -60,7 +60,14 @@ repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 version=$(jq -er '.version' "${plan}")
 revision=$(jq -er '.source.revision' "${plan}")
 source_ref=$(jq -er '.source.ref' "${plan}")
-dirty=$(jq -er '.source.dirty' "${plan}")
+dirty=$(
+  jq -er '
+    .source.dirty
+    | if type == "boolean" then tostring
+      else error("image plan source.dirty must be a boolean")
+      end
+  ' "${plan}"
+)
 kind=$(jq -er '.source.kind' "${plan}")
 
 python3 "${repo_root}/tests/scripts/validate-image.py" \

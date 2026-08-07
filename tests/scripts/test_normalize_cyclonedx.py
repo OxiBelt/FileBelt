@@ -17,10 +17,19 @@ from typing import Any
 PLATFORM = "linux/amd64"
 
 
-def component(name: str, relationship: str) -> dict[str, str]:
-    purl_type = "cargo" if name == "filebelt-api" else "generic"
+def component(
+    name: str,
+    relationship: str,
+    *,
+    component_type: str | None = None,
+    purl_type: str | None = None,
+) -> dict[str, str]:
+    if component_type is None:
+        component_type = "application" if name in {"filebelt-api", "rustc"} else "library"
+    if purl_type is None:
+        purl_type = "cargo" if name in {"filebelt-api", "webpki-roots"} else "generic"
     return {
-        "type": "library" if relationship == "runtime" else "application",
+        "type": component_type,
         "name": name,
         "version": "1.0.0",
         "purl": f"pkg:{purl_type}/{name}@1.0.0?target=amd64",
@@ -40,7 +49,12 @@ class CycloneDxNormalizationTests(unittest.TestCase):
         self.output = self.directory / "normalized.json"
         self.runtime_output = self.directory / "runtime.json"
         inventory = {
-            platform: [component("filebelt-api", "runtime"), component("rustc", "build-tool")]
+            platform: [
+                component("filebelt-api", "runtime"),
+                component("webpki-roots", "runtime"),
+                component("rust-std", "runtime"),
+                component("rustc", "build-tool"),
+            ]
             for platform in ("linux/amd64", "linux/arm64", "linux/riscv64")
         }
         self.plan_value: dict[str, Any] = {
@@ -113,10 +127,17 @@ class CycloneDxNormalizationTests(unittest.TestCase):
         result = self.run_normalizer()
         self.assertEqual(result.returncode, 0, result.stderr)
         normalized = json.loads(self.output.read_text(encoding="utf-8"))
-        self.assertEqual(len(normalized["components"]), 2)
+        self.assertEqual(len(normalized["components"]), 4)
         subject_dependency = normalized["dependencies"][-1]
         self.assertEqual(
-            subject_dependency["dependsOn"], [component("filebelt-api", "runtime")["purl"]]
+            subject_dependency["dependsOn"],
+            sorted(
+                [
+                    component("filebelt-api", "runtime")["purl"],
+                    component("webpki-roots", "runtime")["purl"],
+                    component("rust-std", "runtime")["purl"],
+                ]
+            ),
         )
         runtime = json.loads(self.runtime_output.read_text(encoding="utf-8"))
         scanner = next(
@@ -129,7 +150,27 @@ class CycloneDxNormalizationTests(unittest.TestCase):
             item for item in runtime["dependencies"] if item["ref"] == scanner["bom-ref"]
         )
         self.assertEqual(
-            scanner_dependency["dependsOn"], [component("filebelt-api", "runtime")["purl"]]
+            scanner_dependency["dependsOn"],
+            sorted(
+                [
+                    component("filebelt-api", "runtime")["purl"],
+                    component("webpki-roots", "runtime")["purl"],
+                ]
+            ),
+        )
+        runtime_subject = next(
+            item
+            for item in runtime["dependencies"]
+            if item["ref"].startswith("urn:filebelt:")
+            and not item["ref"].endswith(":trivy-cargo")
+        )
+        self.assertEqual(
+            runtime_subject["dependsOn"],
+            sorted([component("rust-std", "runtime")["purl"], scanner["bom-ref"]]),
+        )
+        self.assertNotIn(
+            component("rustc", "build-tool")["purl"],
+            {item["bom-ref"] for item in runtime["components"]},
         )
 
     def test_missing_rust_inventory_fails_closed(self) -> None:
@@ -145,6 +186,28 @@ class CycloneDxNormalizationTests(unittest.TestCase):
         result = self.run_normalizer()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("runtime and build-tool", result.stderr)
+
+    def test_missing_cargo_application_fails_closed(self) -> None:
+        self.plan_value["images"][0]["artifact"]["components"][PLATFORM] = [
+            component("filebelt-api", "runtime", component_type="library"),
+            component("rustc", "build-tool"),
+        ]
+        result = self.run_normalizer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one Cargo application", result.stderr)
+
+    def test_duplicate_cargo_application_fails_closed(self) -> None:
+        self.plan_value["images"][0]["artifact"]["components"][PLATFORM].append(
+            component(
+                "filebelt-helper",
+                "runtime",
+                component_type="application",
+                purl_type="cargo",
+            )
+        )
+        result = self.run_normalizer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one Cargo application", result.stderr)
 
 
 if __name__ == "__main__":

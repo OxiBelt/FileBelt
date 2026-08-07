@@ -238,7 +238,17 @@ def main() -> int:
         cargo_refs = sorted(
             reference for reference in runtime_refs if reference.startswith("pkg:cargo/")
         )
-        if image.get("artifact", {}).get("kind") == "rust-binary" and len(cargo_refs) != 1:
+        cargo_application_refs = sorted(
+            component["bom-ref"]
+            for component in runtime_components
+            if component.get("type") == "application"
+            and isinstance(component.get("bom-ref"), str)
+            and component["bom-ref"].startswith("pkg:cargo/")
+        )
+        if (
+            image.get("artifact", {}).get("kind") == "rust-binary"
+            and len(cargo_application_refs) != 1
+        ):
             raise ValueError("Rust runtime inventory must contain exactly one Cargo application")
         runtime_dependencies = []
         for dependency in normalized_dependencies:
@@ -264,7 +274,7 @@ def main() -> int:
                     dependency["dependsOn"] = sorted(
                         reference
                         for reference in dependency["dependsOn"]
-                        if reference != cargo_refs[0]
+                        if reference not in cargo_refs
                     )
                     dependency["dependsOn"].append(application_ref)
                     dependency["dependsOn"].sort()

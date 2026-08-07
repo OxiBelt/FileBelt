@@ -64,3 +64,34 @@ fn phase1_workflows_are_read_only_and_cover_the_image_matrix() {
     assert!(dry_run.contains("normalized-rebuild:"));
     assert!(dry_run.contains("retention-days: 30"));
 }
+
+#[test]
+fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("bootstrap workflow");
+    let protocol_start = workflow.find("\n  protocol:\n").expect("protocol job");
+    let protocol_end = workflow[protocol_start..]
+        .find("\n  dco:\n")
+        .map(|offset| protocol_start + offset)
+        .expect("job after protocol");
+    let protocol = &workflow[protocol_start..protocol_end];
+
+    let setup = protocol
+        .find("actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020")
+        .expect("pinned Node setup");
+    let activation = protocol
+        .find("corepack prepare pnpm@11.20.0 --activate")
+        .expect("pinned pnpm activation");
+    let install = protocol
+        .find("pnpm install --frozen-lockfile --ignore-scripts")
+        .expect("frozen dependency install");
+    let generation = protocol
+        .find("python3 tests/scripts/check-generated.py --repo-root .")
+        .expect("generated-client check");
+
+    assert!(protocol.contains("node-version: \"24.19.0\""));
+    assert!(setup < activation);
+    assert!(activation < install);
+    assert!(install < generation);
+}

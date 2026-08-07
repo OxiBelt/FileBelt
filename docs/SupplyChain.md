@@ -99,8 +99,13 @@ user/group `10001:10001`, and the complete OCI label contract from ADR-0007.
 Native Rust builds install exact binutils, GCC, musl, musl development, and
 musl-tools package versions from immutable Debian snapshot
 `20260713T000000Z`. RISC-V uses the digest-pinned cross-toolchain recorded in
-`supply-chain/tooling.toml`. A live package mirror or an unversioned toolchain
-package is not an admitted build input.
+`supply-chain/tooling.toml`. Its AMD64-hosted builder also installs the exact
+CMake, Clang/libclang, and Ninja versions recorded there from the same
+snapshot. A tracked Apache-2.0 CMake toolchain file binds AWS-LC compilation
+and bindgen to the copied RISC-V musl compiler and sysroot. The build fails
+before Cargo unless the compiler version, target triple, linker version, and
+compiler digest match the admitted cross-toolchain identity. A live package
+mirror or an unversioned toolchain package is not an admitted build input.
 
 Each role/platform archive produces:
 
@@ -117,10 +122,13 @@ CycloneDX scope, and immutable evidence source. A Rust SBOM must contain both
 runtime and build-tool records; an empty or partial inventory fails even when
 Trivy reports no package records for the `scratch` filesystem. Runtime records
 use `required` scope, while build tools use `excluded` scope and are omitted
-from the image subject's dependency edge. Rust images use the aggregate license
-expression `Apache-2.0 AND MIT` and ship upstream Rust and musl copyright
-manifests. The Phase 1 static web artifact remains `Apache-2.0` and excludes
-those Rust-only notices; ADR-0011 defines the later OxiBelt-derived composition.
+from the image subject's dependency edge. RISC-V CMake, Clang/libclang, and
+Ninja records are build-only evidence and are never copied into the final
+scratch image, so they do not change its license expression or notices. Rust
+images use the aggregate license expression `Apache-2.0 AND MIT` and ship
+upstream Rust and musl copyright manifests. The Phase 1 static web artifact
+remains `Apache-2.0` and excludes those Rust-only notices; ADR-0011 defines the
+later OxiBelt-derived composition.
 
 Unexcepted `HIGH` or `CRITICAL` vulnerabilities fail the gate. Exceptions in
 `supply-chain/image-vulnerability-exceptions.json` must match the role,

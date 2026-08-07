@@ -123,6 +123,8 @@ const RUST_BUILDER_EVIDENCE =
   "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488";
 const NATIVE_SNAPSHOT_EVIDENCE =
   "https://snapshot.debian.org/archive/debian/20260713T000000Z";
+const RISCV64_BUILDER_SNAPSHOT_EVIDENCE =
+  "https://snapshot.debian.org/archive/debian/20260713T000000Z";
 const RISCV64_TOOLCHAIN_EVIDENCE =
   "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl@sha256:60372bf6ad955bc04ac9b0689476b05955b4e90fc2030d311be687025672cc6d";
 
@@ -192,6 +194,42 @@ const RUST_PLATFORM_COMPONENTS: PlatformComponentInventory = {
       "Apache-2.0 OR MIT",
       "build-tool",
       RUST_BUILDER_EVIDENCE,
+    ),
+    component(
+      "application",
+      "cmake",
+      "3.31.6-2",
+      "pkg:deb/debian/cmake@3.31.6-2?arch=amd64",
+      "BSD-3-Clause",
+      "build-tool",
+      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#cmake=3.31.6-2`,
+    ),
+    component(
+      "application",
+      "clang",
+      "1:19.0-63",
+      "pkg:deb/debian/clang@1%3A19.0-63?arch=amd64",
+      "Apache-2.0 WITH LLVM-exception",
+      "build-tool",
+      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#clang=1:19.0-63`,
+    ),
+    component(
+      "library",
+      "libclang-dev",
+      "1:19.0-63",
+      "pkg:deb/debian/libclang-dev@1%3A19.0-63?arch=amd64",
+      "Apache-2.0 WITH LLVM-exception",
+      "build-tool",
+      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#libclang-dev=1:19.0-63`,
+    ),
+    component(
+      "application",
+      "ninja-build",
+      "1.12.1-1",
+      "pkg:deb/debian/ninja-build@1.12.1-1?arch=amd64",
+      "Apache-2.0",
+      "build-tool",
+      `${RISCV64_BUILDER_SNAPSHOT_EVIDENCE}#ninja-build=1.12.1-1`,
     ),
     component(
       "application",

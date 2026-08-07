@@ -104,6 +104,62 @@ test("build plan contains the seven fixed roles and immutable runtime contract",
       }
     }
   }
+  const expectedRiscvBuildTools = [
+    {
+      type: "application",
+      name: "cmake",
+      version: "3.31.6-2",
+      purl: "pkg:deb/debian/cmake@3.31.6-2?arch=amd64",
+      license: "BSD-3-Clause",
+      relationship: "build-tool",
+      evidence: "https://snapshot.debian.org/archive/debian/20260713T000000Z#cmake=3.31.6-2",
+    },
+    {
+      type: "application",
+      name: "clang",
+      version: "1:19.0-63",
+      purl: "pkg:deb/debian/clang@1%3A19.0-63?arch=amd64",
+      license: "Apache-2.0 WITH LLVM-exception",
+      relationship: "build-tool",
+      evidence: "https://snapshot.debian.org/archive/debian/20260713T000000Z#clang=1:19.0-63",
+    },
+    {
+      type: "library",
+      name: "libclang-dev",
+      version: "1:19.0-63",
+      purl: "pkg:deb/debian/libclang-dev@1%3A19.0-63?arch=amd64",
+      license: "Apache-2.0 WITH LLVM-exception",
+      relationship: "build-tool",
+      evidence:
+        "https://snapshot.debian.org/archive/debian/20260713T000000Z#libclang-dev=1:19.0-63",
+    },
+    {
+      type: "application",
+      name: "ninja-build",
+      version: "1.12.1-1",
+      purl: "pkg:deb/debian/ninja-build@1.12.1-1?arch=amd64",
+      license: "Apache-2.0",
+      relationship: "build-tool",
+      evidence:
+        "https://snapshot.debian.org/archive/debian/20260713T000000Z#ninja-build=1.12.1-1",
+    },
+  ];
+  for (const image of plan.images.filter(({ artifact }) => artifact.kind === "rust-binary")) {
+    const riscvComponents = image.artifact.components["linux/riscv64"];
+    for (const expected of expectedRiscvBuildTools) {
+      assert.deepEqual(
+        riscvComponents.find(({ name }) => name === expected.name),
+        expected,
+      );
+    }
+    for (const platform of ["linux/amd64", "linux/arm64"]) {
+      assert.ok(
+        image.artifact.components[platform].every(
+          ({ name }) => !expectedRiscvBuildTools.some(({ name: expected }) => name === expected),
+        ),
+      );
+    }
+  }
   assert.deepEqual(plan.images.at(-1).artifact, {
     kind: "oxibelt-edge",
     packages: ["ui/web", "ui/markdown"],

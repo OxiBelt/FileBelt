@@ -41,7 +41,17 @@ fn image_plan_contract_fixes_roles_platforms_and_registry() {
     ));
     assert!(plan.contains("kind: \"oxibelt-edge\""));
     assert!(plan.contains("PlatformComponentInventory"));
-    for component in ["rust-std", "musl", "rustc", "gcc", "binutils"] {
+    for component in [
+        "rust-std",
+        "musl",
+        "rustc",
+        "gcc",
+        "binutils",
+        "cmake",
+        "clang",
+        "libclang-dev",
+        "ninja-build",
+    ] {
         assert!(plan.contains(&format!("\"{component}\"")));
     }
     assert!(plan.contains("`pkg:cargo/${packageName}@${FILEBELT_PACKAGE_VERSION}`"));
@@ -53,6 +63,9 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
     let root = repository_root();
     let rust =
         fs::read_to_string(root.join("source/ops/Dockerfile.roles")).expect("Rust role Dockerfile");
+    let riscv64_toolchain =
+        fs::read_to_string(root.join("source/ops/riscv64-musl-toolchain.cmake"))
+            .expect("RISC-V CMake toolchain");
     let web = fs::read_to_string(root.join("ui/web/Dockerfile")).expect("web Dockerfile");
     for dockerfile in [&rust, &web] {
         assert!(dockerfile.contains("USER 10001:10001"));
@@ -91,6 +104,53 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
     assert!(rust.contains("snapshot.debian.org/archive/debian/20260713T000000Z"));
     assert!(rust.contains("binutils=2.44-3"));
     assert!(rust.contains("musl-tools=1.2.5-3.1~deb13u1"));
+    for tool in [
+        "clang=1:19.0-63",
+        "cmake=3.31.6-2",
+        "libclang-dev=1:19.0-63",
+        "ninja-build=1.12.1-1",
+    ] {
+        assert!(
+            rust.contains(tool),
+            "missing pinned RISC-V build tool {tool}"
+        );
+    }
+    for target_variable in [
+        "AWS_LC_SYS_USE_SYSTEM_riscv64gc_unknown_linux_musl=\"0\"",
+        "BINDGEN_EXTRA_CLANG_ARGS_riscv64gc_unknown_linux_musl",
+        "CMAKE_GENERATOR_riscv64gc_unknown_linux_musl=\"Ninja\"",
+        "CMAKE_TOOLCHAIN_FILE_riscv64gc_unknown_linux_musl",
+    ] {
+        assert!(
+            rust.contains(target_variable),
+            "missing RISC-V target input {target_variable}"
+        );
+    }
+    for identity in [
+        "14.3.0",
+        "riscv64-unknown-linux-musl",
+        "GNU ld (crosstool-NG UNKNOWN) 2.45",
+        "3fe20d705129f8ba4ae6be393fd4c484479f688f576af78c0ff2bb10e59d5f86",
+    ] {
+        assert!(
+            rust.contains(identity),
+            "missing RISC-V identity {identity}"
+        );
+    }
+    assert!(rust.contains("COPY --from=riscv64-toolchain /x-tools /x-tools"));
+    assert!(!rust.contains("CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUNNER"));
+    for setting in [
+        "set(CMAKE_SYSTEM_NAME Linux)",
+        "set(CMAKE_SYSTEM_PROCESSOR riscv64)",
+        "set(CMAKE_SYSROOT",
+        "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)",
+        "-march=rv64gc -mabi=lp64d -mcmodel=medany",
+    ] {
+        assert!(
+            riscv64_toolchain.contains(setting),
+            "missing RISC-V CMake setting {setting}"
+        );
+    }
     assert!(rust.contains("Rust-COPYRIGHT-library.html"));
     assert!(rust.contains("musl-COPYRIGHT"));
     assert!(!rust.contains("apt-get install -y --no-install-recommends binutils musl-tools"));

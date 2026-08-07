@@ -56,7 +56,7 @@ EXPECTED_NODE_PACKAGES = {
     "ui/web": "@filebelt/web",
 }
 REQUIRED_ADRS = range(1, 8)
-SPDX_EXTENSIONS = {".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
+SPDX_EXTENSIONS = {".cmake", ".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
 TOOL_OWNED_SPDX_FILES = {
     "supply-chain/audits.toml",
     "supply-chain/config.toml",
@@ -105,6 +105,7 @@ def check(root: Path) -> list[str]:
         ".github/workflows/check-filebelt.yml",
         ".github/workflows/release-dry-run.yml",
         "source/ops/Dockerfile.roles",
+        "source/ops/riscv64-musl-toolchain.cmake",
         "ui/web/Dockerfile",
         "deploy/helm/filebelt/Chart.yaml",
         "deploy/helm/filebelt/values.schema.json",

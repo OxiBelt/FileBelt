@@ -22,17 +22,46 @@ RUN sed -i \
 
 FROM builder-base AS builder-native
 
+# cross-rs source revision: 55f847251389c5406df85579191c0eac412fab3a
+# Copy only the compiler and sysroot; do not inherit emulator helpers or Cargo runners.
 FROM --platform=linux/amd64 ${RISCV64_TOOLCHAIN_IMAGE} AS riscv64-toolchain
 
 FROM builder-base AS builder-riscv64
 
+ARG BUILDARCH
+
+RUN apt-get -o Acquire::Check-Valid-Until=false update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      clang=1:19.0-63 \
+      cmake=3.31.6-2 \
+      libclang-dev=1:19.0-63 \
+      ninja-build=1.12.1-1 && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=riscv64-toolchain /x-tools /x-tools
+COPY source/ops/riscv64-musl-toolchain.cmake /opt/filebelt/riscv64-musl-toolchain.cmake
 ENV PATH="/x-tools/riscv64-unknown-linux-musl/bin:${PATH}" \
     AR_riscv64gc_unknown_linux_musl="riscv64-unknown-linux-musl-ar" \
+    AWS_LC_SYS_USE_SYSTEM_riscv64gc_unknown_linux_musl="0" \
+    BINDGEN_EXTRA_CLANG_ARGS_riscv64gc_unknown_linux_musl="--sysroot=/x-tools/riscv64-unknown-linux-musl/riscv64-unknown-linux-musl/sysroot/" \
     CC_riscv64gc_unknown_linux_musl="riscv64-unknown-linux-musl-gcc" \
     CXX_riscv64gc_unknown_linux_musl="riscv64-unknown-linux-musl-g++" \
     CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER="riscv64-unknown-linux-musl-gcc" \
-    CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Ctarget-feature=+crt-static"
+    CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Ctarget-feature=+crt-static" \
+    CMAKE_GENERATOR_riscv64gc_unknown_linux_musl="Ninja" \
+    CMAKE_TOOLCHAIN_FILE_riscv64gc_unknown_linux_musl="/opt/filebelt/riscv64-musl-toolchain.cmake"
+
+RUN if [ "${BUILDARCH}" != amd64 ]; then \
+      echo "the pinned RISC-V cross compiler requires BUILDARCH=amd64" >&2; \
+      exit 1; \
+    fi && \
+    compiler=/x-tools/riscv64-unknown-linux-musl/bin/riscv64-unknown-linux-musl-gcc && \
+    linker=/x-tools/riscv64-unknown-linux-musl/bin/riscv64-unknown-linux-musl-ld && \
+    test "$("${compiler}" -dumpfullversion)" = "14.3.0" && \
+    test "$("${compiler}" -dumpmachine)" = "riscv64-unknown-linux-musl" && \
+    test "$("${linker}" --version | sed -n '1p')" = "GNU ld (crosstool-NG UNKNOWN) 2.45" && \
+    test "$(sha256sum "${compiler}" | awk '{print $1}')" = \
+      "3fe20d705129f8ba4ae6be393fd4c484479f688f576af78c0ff2bb10e59d5f86"
 
 FROM ${FILEBELT_BUILDER_STAGE} AS role-builder
 

@@ -48,6 +48,6 @@ fn transcode_region_contains_only_governance_material() {
     assert_eq!(
         names,
         expected.map(std::ffi::OsString::from),
-        "transcode implementation requires an accepted composition ADR"
+        "transcode implementation requires reviewed composition and license contracts"
     );
 }

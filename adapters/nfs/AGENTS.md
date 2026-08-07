@@ -1,8 +1,14 @@
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
-# Future NFS adapter guidance
+# NFS automated-agent overlay
 
-This reserved LGPL-3.0-or-later region may eventually contain an NFS-Ganesha
-FSAL shim. No implementation is authorized in Phase 0. Plan Mode and exact
-upstream ABI, linkage, replacement/relink, protocol, image, and source review
-are mandatory before adding code.
+This file applies only to automated agents. Follow the
+[root agent guidance](../../AGENTS.md), [contributor workflow](../../CONTRIBUTING.md),
+[shared adapter policy](../README.md), and
+[living specifications](../../docs/README.md).
+
+Enter Plan Mode before changing this reserved region. Stop and ask the
+maintainer if the exact NFS-Ganesha version and ABI, linkage, LGPL replacement
+and relinking path, generic protocol boundary, image composition, source
+obligations, or integration tests are unresolved. Do not add implementation
+until the shared adapter review is complete in the same change.

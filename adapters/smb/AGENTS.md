@@ -1,9 +1,14 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# SMB adapter guidance
+# SMB automated-agent overlay
 
-This directory is a GPL-3.0-or-later region for a future Samba VFS adapter and
-bridge. It must remain outside root workspaces and use only a generic FileBelt
-VFS protocol across the process boundary. Do not add Samba-derived code,
-dependencies, Dockerfiles, or generated artifacts without Plan Mode, exact
-upstream review, notices, source instructions, and protocol integration tests.
+This file applies only to automated agents. Follow the
+[root agent guidance](../../AGENTS.md), [contributor workflow](../../CONTRIBUTING.md),
+[shared adapter policy](../README.md), and
+[living specifications](../../docs/README.md).
+
+Enter Plan Mode before changing this reserved region. Stop and ask the
+maintainer if the exact Samba version, VFS ABI, linkage, GPL source obligations,
+generic process protocol, identity and ACL mapping, image composition, notices,
+or integration tests are unresolved. Do not add implementation until the
+shared adapter review is complete in the same change.

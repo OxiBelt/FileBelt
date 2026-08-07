@@ -1,6 +1,18 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# FileBelt agent guidance
+# FileBelt automated-agent guidance
+
+## Audience and precedence
+
+This file is an overlay for automated coding agents. People and automated
+agents share the contributor workflow in [`CONTRIBUTING.md`](CONTRIBUTING.md)
+and the current engineering contracts indexed in
+[`docs/README.md`](docs/README.md). If this file conflicts with either source,
+stop and ask the maintainer which rule should prevail.
+
+Files below `.agents/temp/` are ignored, local planning material. They are not
+repository policy, must not override tracked guidance, and must not be cited in
+commits or pull requests.
 
 ## Project boundaries
 
@@ -10,13 +22,27 @@ Apache Iggy is notification only. Host filesystem ownership never represents a
 FileBelt user. Every access path must resolve an internal principal and enforce
 the common Virtual ACL model.
 
-## Mandatory planning
+## Mandatory planning and escalation
 
 Enter Plan Mode before creating a service or image, changing persisted data,
 authorization or namespace semantics, adding a protocol or external
 integration, changing a public contract, or moving code across a license
-boundary. Read applicable ADRs and component guidance first. Do not silently
-choose security, durability, compatibility, or licensing semantics.
+boundary. Read the applicable component overlay and living specifications
+first:
+
+- [`NamespaceAndAuthorization.md`](docs/NamespaceAndAuthorization.md) for
+  identity, names, principals, sharing, and Virtual ACL;
+- [`InterfacesAndCapabilities.md`](docs/InterfacesAndCapabilities.md) for
+  public APIs, protocol schemas, edge behavior, and worker capabilities;
+- [`StorageAndDurability.md`](docs/StorageAndDurability.md) for migrations,
+  payload state, jobs, recovery, and compatibility; and
+- [`RuntimeAndDeployment.md`](docs/RuntimeAndDeployment.md) for images,
+  external inputs, Kubernetes, release evidence, and rollback.
+
+Stop and ask the maintainer whenever repository evidence and the requested
+change leave a material security, durability, compatibility, public-contract,
+or licensing choice unresolved. Do not silently select those semantics, and do
+not implement past an unresolved decision.
 
 ## Dependency and license direction
 
@@ -27,22 +53,18 @@ choose security, durability, compatibility, or licensing semantics.
   replaceable process boundary.
 - Domain and authorization packages remain independent of SQL, HTTP,
   Kubernetes, UI, Iggy, and adapter implementation types.
-- Rust packages inherit `unsafe_code = "deny"`; exceptions require an accepted
-  ADR and an entry in the unsafe-exception registry.
+- Rust packages inherit `unsafe_code = "deny"`; exceptions require explicit
+  maintainer approval, a rationale in the same pull request, and an entry in
+  `supply-chain/unsafe-exceptions.toml`.
 
 ## Change discipline
 
-Use Conventional Commits and add regression coverage at the lowest useful
-layer. Update ADRs, threat models, operator documentation, license evidence,
+Follow `CONTRIBUTING.md`, including its same-pull-request design review,
+validation, DCO, and Conventional Commit requirements. Update the applicable
+living specifications, threat model, operator documentation, license evidence,
 and rollback notes whenever their boundary changes. Preserve deterministic
 resource naming and cleanup in tests. Never make an event stream the sole
 record of committed state.
-
-`CONTRIBUTING.md` is the source of truth for contributor workflow and
-commit-message format. Follow its
-[commit-message requirements](CONTRIBUTING.md#commit-messages) before making or
-reviewing changes. If this file and `CONTRIBUTING.md` diverge on Conventional
-Commits requirements, follow `CONTRIBUTING.md`.
 
 ## Agent commit message guidance
 
@@ -60,30 +82,7 @@ context inline without citing inaccessible local material. Sanitize the
 description and do not expose secrets, personal data, or undisclosed
 vulnerability details.
 
-## Required bootstrap checks
-
-```sh
-python3 tests/scripts/check-source-structure.py --repo-root .
-python3 tests/scripts/check-markdown-links.py --repo-root .
-python3 tests/scripts/check-generated.py --repo-root .
-tests/scripts/check-rust-module-size.sh --warn
-tests/scripts/check-cargo-boundaries.sh
-reuse lint
-cargo fmt --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-features --locked
-cargo audit
-cargo deny check
-cargo vet --locked
-corepack pnpm install --frozen-lockfile --ignore-scripts
-pnpm licenses list --json | python3 tests/scripts/check-node-licenses.py --policy supply-chain/node-policy.toml
-pnpm audit --audit-level high
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-```
-
-Phase-specific Docker, browser, Kubernetes, release, and integration commands
-become mandatory only when those artifacts exist; never replace them with a
+Run the shared checks documented in `CONTRIBUTING.md` and `README.md`, plus the
+targeted Docker, browser, Kubernetes, release, and integration checks required
+by the affected living specification. Never replace a required check with a
 false-positive placeholder.

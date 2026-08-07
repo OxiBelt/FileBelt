@@ -56,7 +56,13 @@ EXPECTED_NODE_PACKAGES = {
     "ui/mcp-settings": "@filebelt/mcp-settings",
     "ui/web": "@filebelt/web",
 }
-REQUIRED_ADRS = range(1, 13)
+REQUIRED_LIVING_SPECS = (
+    "docs/README.md",
+    "docs/NamespaceAndAuthorization.md",
+    "docs/InterfacesAndCapabilities.md",
+    "docs/StorageAndDurability.md",
+    "docs/RuntimeAndDeployment.md",
+)
 SPDX_EXTENSIONS = {".cmake", ".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
 TOOL_OWNED_SPDX_FILES = {
     "supply-chain/audits.toml",
@@ -96,6 +102,7 @@ def check(root: Path) -> list[str]:
         "AGENTS.md",
         "CONTRIBUTING.md",
         "SECURITY.md",
+        *REQUIRED_LIVING_SPECS,
         "docs/LicenseMap.md",
         "docs/ThreatModel.md",
         "supply-chain/license-regions.toml",
@@ -137,6 +144,9 @@ def check(root: Path) -> list[str]:
         if not (root / relative).is_file():
             failures.append(f"missing required file: {relative}")
 
+    if (root / "docs/adr").exists():
+        failures.append("legacy docs/adr directory must not exist")
+
     region_data = load_toml(root / "supply-chain/license-regions.toml")
     regions = {
         item["path"]: item["license"]
@@ -172,7 +182,8 @@ def check(root: Path) -> list[str]:
     unexpected_transcode = transcode_files - transcode_allowed
     if unexpected_transcode:
         failures.append(
-            f"transcode implementation requires an ADR: {sorted(unexpected_transcode)}"
+            "transcode implementation requires reviewed composition and license "
+            f"contracts: {sorted(unexpected_transcode)}"
         )
 
     cargo = load_toml(root / "Cargo.toml")
@@ -239,18 +250,6 @@ def check(root: Path) -> list[str]:
         set(allowed_node_licenses)
     ):
         failures.append("Node license allowlist must be non-empty and contain no duplicates")
-
-    adr_dir = root / "docs/adr"
-    for number in REQUIRED_ADRS:
-        matches = list(adr_dir.glob(f"{number:04d}-*.md"))
-        if len(matches) != 1:
-            failures.append(f"expected exactly one ADR-{number:04d}")
-            continue
-        content = matches[0].read_text(encoding="utf-8")
-        if "- Status: Accepted" not in content:
-            failures.append(f"ADR-{number:04d} is not accepted")
-        if "## Open questions\n\nNone." not in content:
-            failures.append(f"ADR-{number:04d} has unresolved open questions")
 
     for path in iter_files(root):
         if path.suffix not in SPDX_EXTENSIONS:

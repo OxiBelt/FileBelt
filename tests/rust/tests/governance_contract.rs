@@ -5,21 +5,42 @@ use std::fs;
 use filebelt_repository_tests::repository_root;
 
 #[test]
-fn required_adrs_are_accepted_and_closed() {
+fn living_specifications_replace_decision_records() {
     let root = repository_root();
-    let directory = root.join("docs/adr");
-    for number in 1..=7 {
-        let prefix = format!("{number:04}-");
-        let matches = fs::read_dir(&directory)
-            .expect("ADR directory")
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
-            .collect::<Vec<_>>();
-        assert_eq!(matches.len(), 1, "expected one ADR-{number:04}");
-        let content = fs::read_to_string(matches[0].path()).expect("ADR content");
-        assert!(content.contains("- Status: Accepted"));
-        assert!(content.contains("## Open questions\n\nNone."));
+    for relative in [
+        "docs/README.md",
+        "docs/NamespaceAndAuthorization.md",
+        "docs/InterfacesAndCapabilities.md",
+        "docs/StorageAndDurability.md",
+        "docs/RuntimeAndDeployment.md",
+    ] {
+        assert!(
+            root.join(relative).is_file(),
+            "missing living specification {relative}"
+        );
     }
+    assert!(
+        !root.join("docs/adr").exists(),
+        "legacy decision-record directory exists"
+    );
+}
+
+#[test]
+fn contributor_and_agent_guidance_have_explicit_audiences() {
+    let root = repository_root();
+    let contributing =
+        fs::read_to_string(root.join("CONTRIBUTING.md")).expect("contributor guidance");
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("agent guidance");
+
+    assert!(contributing.contains("human-facing source of truth"));
+    assert!(contributing.contains("people do not need to read them"));
+    assert!(contributing.contains("## Design and boundary review"));
+    assert!(!contributing.contains("Enter Plan Mode"));
+
+    assert!(agents.contains("automated-agent guidance"));
+    assert!(agents.contains("CONTRIBUTING.md"));
+    assert!(agents.contains("docs/README.md"));
+    assert!(agents.contains("Enter Plan Mode"));
 }
 
 #[test]

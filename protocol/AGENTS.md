@@ -1,11 +1,22 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Protocol guidance
+# Protocol automated-agent overlay
 
-This tree is Apache-2.0 and is a public, replaceable process boundary.
+This file applies only to automated agents. Follow the
+[root agent guidance](../AGENTS.md), [contributor workflow](../CONTRIBUTING.md),
+[protocol documentation](README.md), and
+[interfaces and capabilities contract](../docs/InterfacesAndCapabilities.md).
 
-- Follow ADR-0004 and ADR-0009. Version Protobuf schemas below
-  `protocol/<domain>/v1/` with `filebelt.<domain>.v1` packages.
+Enter Plan Mode before adding or changing a schema, transport, authentication
+method, service, error, compatibility promise, generator, or adapter-facing
+boundary. Stop and ask the maintainer when wire semantics, versioning,
+authorization, replay behavior, compatibility, generation provenance, or
+license effects are unresolved.
+
+This tree is Apache-2.0 and defines public, replaceable process boundaries.
+
+- Version Protobuf schemas below `protocol/<domain>/v1/` with
+  `filebelt.<domain>.v1` packages.
 - Use FileBelt tenant/principal/resource/operation identifiers and stable wire
   enums. Never serialize database rows, physical paths, OxiBelt/Iggy internals,
   or Samba, FTP, ONLYOFFICE, NFS-Ganesha, Kubernetes, or browser-library types.

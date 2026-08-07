@@ -2,6 +2,12 @@
 
 # Contributing to FileBelt
 
+This is the human-facing source of truth for FileBelt contribution workflow and
+the shared contract for every contributor. Files named `AGENTS.md` add
+instructions for automated coding agents; people do not need to read them.
+Current engineering contracts are indexed in
+[`docs/README.md`](docs/README.md).
+
 ## Contribution certification
 
 FileBelt uses Developer Certificate of Origin 1.1 certification and does not
@@ -16,15 +22,36 @@ Developer Certificate of Origin 1.1 published at <https://developercertificate.o
 
 ## Workflow
 
-1. Read root and component `AGENTS.md` files and accepted ADRs.
-2. Enter Plan Mode for changes to persisted state, public protocols, security,
-   authorization, images, deployments, or license boundaries.
-3. Keep changes small and add the lowest-layer regression test.
-4. Run the checks documented in `README.md` and report the exact commands.
+1. Read the applicable living specifications and component documentation.
+2. Keep changes small and add the lowest-layer regression test.
+3. Update affected specifications, threat models, operator guidance, license
+   evidence, compatibility notes, and rollback instructions in the same pull
+   request as the behavior change.
+4. Run the required checks and report the exact commands and results.
 5. Follow the [commit-message requirements](#commit-messages).
 
 Pull requests must disclose affected license regions, migrations, images,
 public contracts, threat-model changes, and any skipped check with its reason.
+
+## Design and boundary review
+
+A change to persisted state, namespace or authorization semantics, a public
+interface, an external integration or dependency, unsafe-code policy, image or
+deployment behavior, recovery, or a license boundary must carry its design
+review in the same pull request. State the repository evidence, selected
+behavior, credible alternatives, security and license effects, compatibility or
+migration path, verification, rollout, and rollback. Update the applicable
+living specifications:
+
+- [`NamespaceAndAuthorization.md`](docs/NamespaceAndAuthorization.md);
+- [`InterfacesAndCapabilities.md`](docs/InterfacesAndCapabilities.md);
+- [`StorageAndDurability.md`](docs/StorageAndDurability.md); and
+- [`RuntimeAndDeployment.md`](docs/RuntimeAndDeployment.md).
+
+Do not leave a material security, durability, compatibility, public-contract,
+or licensing choice implicit. Ask the maintainer to resolve it before the pull
+request is ready to merge. Review history remains in Git and the pull request;
+the living documents describe the current contract.
 
 ## Code style and repository boundaries
 
@@ -63,6 +90,38 @@ keep the external name. Run `pnpm lint`; warnings fail the check. Files
 registered as generated outputs retain semantic lint, typecheck, build, and
 generation-drift coverage but are exempt from hand-authored naming and layout
 rules. Never edit generated output directly.
+
+## Required checks
+
+Run the applicable repository checks from the root. The complete bootstrap
+suite is:
+
+```sh
+python3 tests/scripts/check-source-structure.py --repo-root .
+python3 tests/scripts/check-markdown-links.py --repo-root .
+python3 tests/scripts/check-generated.py --repo-root .
+tests/scripts/check-rust-module-size.sh --warn
+tests/scripts/check-cargo-boundaries.sh
+reuse lint
+cargo fmt --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+cargo audit
+cargo deny check
+cargo vet --locked
+corepack pnpm install --frozen-lockfile --ignore-scripts
+pnpm licenses list --json | python3 tests/scripts/check-node-licenses.py --policy supply-chain/node-policy.toml
+pnpm audit --audit-level high
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Run targeted Docker, browser, Kubernetes, release, and integration commands
+when the affected artifact exists. Do not substitute a placeholder check. A
+pull request may omit an inapplicable or unavailable check only when it records
+the reason.
 
 ## Commit messages
 

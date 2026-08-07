@@ -1,9 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# ONLYOFFICE adapter guidance
+# ONLYOFFICE automated-agent overlay
 
-This directory is an AGPL-3.0-only region for a future connector, callback
-service, and provider-specific UI. It stays outside root workspaces and receives
-no payload mount or general database credentials. Plan Mode must approve the
-exact upstream edition, source-access path, JWT/callback security, notices,
-branding, image composition, and network-user source link before implementation.
+This file applies only to automated agents. Follow the
+[root agent guidance](../../AGENTS.md), [contributor workflow](../../CONTRIBUTING.md),
+[shared adapter policy](../README.md), and
+[living specifications](../../docs/README.md).
+
+Enter Plan Mode before changing this reserved region. Stop and ask the
+maintainer if the exact upstream edition, AGPL network-source path, JWT and
+callback security, branding, browser-code boundary, image composition, notices,
+database or payload isolation, or integration tests are unresolved. Do not add
+implementation until the shared adapter review is complete in the same change.

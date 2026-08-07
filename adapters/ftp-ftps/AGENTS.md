@@ -1,9 +1,14 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# FTP/FTPS adapter guidance
+# FTP/FTPS automated-agent overlay
 
-This directory is a GPL-3.0-or-later region for a future FTP/FTPS gateway. It
-must remain outside root workspaces and call only generic FileBelt contracts.
-Plan Mode must approve the server/framework, linked libraries, TLS modes,
-network exposure, image composition, notices, and corresponding source before
-implementation.
+This file applies only to automated agents. Follow the
+[root agent guidance](../../AGENTS.md), [contributor workflow](../../CONTRIBUTING.md),
+[shared adapter policy](../README.md), and
+[living specifications](../../docs/README.md).
+
+Enter Plan Mode before changing this reserved region. Stop and ask the
+maintainer if the exact server or framework, upstream version, linkage, license,
+credential mapping, TLS and data-channel exposure, image composition, notices,
+corresponding source, or protocol tests are unresolved. Do not add
+implementation until the shared adapter review is complete in the same change.

@@ -1,8 +1,18 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Apache core source guidance
+# Apache core automated-agent overlay
 
-This tree is Apache-2.0 and inherits the root `AGENTS.md` and accepted ADRs.
+This file applies only to automated agents. Follow the
+[root agent guidance](../AGENTS.md), [contributor workflow](../CONTRIBUTING.md),
+and [living specifications](../docs/README.md).
+
+Enter Plan Mode before changing persisted state, namespace or authorization
+semantics, public interfaces, payload acknowledgement or deletion, worker
+authority, migrations, runtime roles, or unsafe-code policy. Stop and ask the
+maintainer whenever the applicable living specification does not resolve a
+security, durability, compatibility, recovery, or license decision.
+
+This tree is Apache-2.0.
 
 - Keep domain and authorization crates free of SQLx, HTTP, OIDC, storage-path,
   Kubernetes, UI, Iggy, and adapter implementation types.
@@ -20,5 +30,5 @@ This tree is Apache-2.0 and inherits the root `AGENTS.md` and accepted ADRs.
 - SQL migrations are forward-only and immutable after release. Use the
   dedicated migrator command and expand/migrate/contract compatibility.
 - Add the lowest-layer regression test and preserve `unsafe_code = "deny"`.
-  Native or `unsafe` exceptions require accepted governance and supply-chain
-  evidence.
+  Native or `unsafe` exceptions require explicit maintainer approval and
+  supply-chain evidence in the same change.

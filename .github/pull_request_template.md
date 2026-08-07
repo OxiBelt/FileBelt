@@ -11,7 +11,8 @@
 - Migrations or persisted state:
 - Images or deployment roles:
 - Threat-model changes:
-- ADRs added or updated:
+- Living specifications or operator documentation updated:
+- Material decisions, alternatives, and compatibility notes:
 
 ## Verification
 

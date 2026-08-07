@@ -9,7 +9,7 @@ All notable changes to FileBelt are documented here. The project uses
 
 ### Added
 
-- Repository governance, workspace, license, ADR, and CI bootstrap.
+- Repository governance, workspace, license, architecture, and CI bootstrap.
 - Read-only Docker image archives with OCI labels for seven Apache image roles
   on AMD64, ARM64, and RISC-V, with deterministic build identity and scratch
   final images.

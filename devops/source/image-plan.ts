@@ -68,19 +68,19 @@ export interface ImagePlanSource {
 
 export type ImageArtifact =
   | {
-      readonly kind: "rust-binary";
-      readonly binary: string;
-      readonly components: PlatformComponentInventory;
-    }
+    readonly kind: "rust-binary";
+    readonly binary: string;
+    readonly components: PlatformComponentInventory;
+  }
   | {
-      readonly kind: "oxibelt-edge";
-      readonly packages: readonly ["ui/web", "ui/markdown"];
-      readonly base: {
-        readonly image: typeof OXIBELT_IMAGE;
-        readonly version: typeof OXIBELT_VERSION;
-        readonly revision: typeof OXIBELT_REVISION;
-      };
+    readonly kind: "oxibelt-edge";
+    readonly packages: readonly ["ui/web", "ui/markdown"];
+    readonly base: {
+      readonly image: typeof OXIBELT_IMAGE;
+      readonly version: typeof OXIBELT_VERSION;
+      readonly revision: typeof OXIBELT_REVISION;
     };
+  };
 
 export interface ImageRow {
   readonly role: ImageRole;
@@ -495,15 +495,15 @@ function createImageRow(definition: RoleDefinition): ImageRow {
     artifact:
       definition.artifact.kind === "rust-binary"
         ? {
-            kind: "rust-binary",
-            binary: definition.artifact.binary,
-            components: cloneComponentInventory(definition.artifact.components),
-          }
+          kind: "rust-binary",
+          binary: definition.artifact.binary,
+          components: cloneComponentInventory(definition.artifact.components),
+        }
         : {
-            kind: "oxibelt-edge",
-            packages: [...definition.artifact.packages],
-            base: { ...definition.artifact.base },
-          },
+          kind: "oxibelt-edge",
+          packages: [...definition.artifact.packages],
+          base: { ...definition.artifact.base },
+        },
   };
 }
 

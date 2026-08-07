@@ -6,6 +6,10 @@ packages:
 
 autoInstallPeers: false
 
+peerDependencyRules:
+  allowedVersions:
+    "openapi-typescript@7.13.0>typescript": "6.0.3"
+
 onlyBuiltDependencies: []
 
 overrides:

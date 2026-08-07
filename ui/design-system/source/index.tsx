@@ -98,12 +98,13 @@ export interface FileBeltIconProps extends Omit<LucideProps, "ref"> {
 }
 
 export function FileBeltIcon({
-  icon: Icon,
+  icon,
   label,
   size = 20,
   strokeWidth = 1.75,
   ...props
 }: FileBeltIconProps): ReactNode {
+  const Icon = icon;
   return (
     <Icon
       {...props}

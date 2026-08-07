@@ -260,7 +260,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       }));
 
       let cursor: string | null = null;
-      let finalize: ByteGrant | null = null;
+      let finalize: ByteGrant | null;
       do {
         const grants: UploadGrants = requireData<UploadGrants>(await this.#api.GET("/api/v1/uploads/{upload_id}", {
           params: {

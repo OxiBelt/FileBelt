@@ -21,6 +21,22 @@ repository; locally asserted audits remain reviewable in
 a dependency-policy review, not an implicit network trust decision at build
 time.
 
+Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.0,
+`@eslint/js` 10.0.1, `typescript-eslint` 8.66.0, TypeScript 6.0.3, and
+`@stylistic/eslint-plugin` 5.10.0. The Stylistic package supplies maintained
+layout rules without lifecycle scripts; its resolved license must remain
+admitted by `supply-chain/node-policy.toml`. Rust production-package closures
+and first-party features are independently reviewed in
+`supply-chain/cargo-boundaries-v1.toml`; this complements rather than replaces
+the exact lockfile, Cargo Vet, Cargo Deny, and advisory checks.
+
+Peer checks remain strict except for one exact compatibility admission:
+`openapi-typescript@7.13.0` declares TypeScript `^5.x`, while FileBelt pins
+TypeScript 6.0.3. `pnpm-workspace.yaml` therefore permits only that package and
+peer-version pair after deterministic OpenAPI regeneration was verified with
+TypeScript 6.0.3. Changing either exact version requires revalidating and
+updating or removing the exception.
+
 ### Cargo Vet acceptance baseline
 
 `supply-chain/config.toml` contains a generated, minimal baseline for the exact

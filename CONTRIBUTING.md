@@ -26,6 +26,35 @@ Developer Certificate of Origin 1.1 published at <https://developercertificate.o
 Pull requests must disclose affected license regions, migrations, images,
 public contracts, threat-model changes, and any skipped check with its reason.
 
+## Code style and repository boundaries
+
+Rust uses the root `rustfmt.toml` policy and workspace lint configuration. Run
+`cargo fmt --check` and the locked workspace Clippy command before committing.
+The module-size checker reports production Rust files above 750 physical lines:
+
+```sh
+tests/scripts/check-rust-module-size.sh --warn
+```
+
+The CI check is advisory because dependency direction and module responsibility
+are authoritative. Use `--enforce` only for focused decomposition work, and set
+`FILEBELT_RUST_SOURCE_LINE_LIMIT` only when testing the checker itself.
+
+Run `tests/scripts/check-cargo-boundaries.sh` after changing a Cargo manifest,
+feature, import boundary, crate-root public module, or wildcard re-export. The
+versioned policy in `supply-chain/cargo-boundaries-v1.toml` is reviewed by hand;
+the checker deliberately has no command that automatically accepts a new
+baseline. A new adapter manifest must first receive its component-specific
+license, graph, formatting, lint, and test policy and must remain outside the
+root workspace.
+
+Hand-authored JavaScript and TypeScript use two-space indentation, double
+quotes, semicolons, camelCase values, UPPER_CASE constants, and PascalCase
+types and React components. Run `pnpm lint`; warnings fail the check. Files
+registered as generated outputs retain semantic lint, typecheck, build, and
+generation-drift coverage but are exempt from hand-authored naming and layout
+rules. Never edit generated output directly.
+
 ## Commit messages
 
 Use Conventional Commits for commit messages:

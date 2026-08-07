@@ -37,8 +37,8 @@ try {
   runtimeProcess.exitCode = 1;
 }
 
-function run(arguments_: readonly string[]): void {
-  const [command, ...commandArguments] = arguments_;
+function run(inputArguments: readonly string[]): void {
+  const [command, ...commandArguments] = inputArguments;
   if (command === "image-plan") {
     createImagePlanFile(commandArguments);
     return;
@@ -56,8 +56,8 @@ function run(arguments_: readonly string[]): void {
   );
 }
 
-function createImagePlanFile(arguments_: readonly string[]): void {
-  const options = parseOptions(arguments_, [
+function createImagePlanFile(inputArguments: readonly string[]): void {
+  const options = parseOptions(inputArguments, [
     "channel",
     "version",
     "revision",
@@ -92,14 +92,14 @@ function createImagePlanFile(arguments_: readonly string[]): void {
   fileSystem.writeFileSync(output, serializeImagePlan(plan), { encoding: "utf8", flag: "w" });
 }
 
-function validateImagePlanFile(arguments_: readonly string[]): void {
-  const options = parseOptions(arguments_, ["input"]);
+function validateImagePlanFile(inputArguments: readonly string[]): void {
+  const options = parseOptions(inputArguments, ["input"]);
   const input = readOption(options, "input");
   validateImagePlan(readJson(input));
 }
 
-function evaluateVulnerabilities(arguments_: readonly string[]): void {
-  const options = parseOptions(arguments_, [
+function evaluateVulnerabilities(inputArguments: readonly string[]): void {
+  const options = parseOptions(inputArguments, [
     "trivy",
     "policy",
     "role",
@@ -128,13 +128,13 @@ function evaluateVulnerabilities(arguments_: readonly string[]): void {
 }
 
 function parseOptions(
-  arguments_: readonly string[],
+  inputArguments: readonly string[],
   allowedNames: readonly string[],
 ): ReadonlyMap<string, string> {
   const options = new Map<string, string>();
-  for (let index = 0; index < arguments_.length; index += 2) {
-    const option = arguments_[index];
-    const value = arguments_[index + 1];
+  for (let index = 0; index < inputArguments.length; index += 2) {
+    const option = inputArguments[index];
+    const value = inputArguments[index + 1];
     if (option === undefined || !option.startsWith("--") || option.length === 2) {
       throw new Error("image-plan options must use --name value pairs");
     }
@@ -162,12 +162,16 @@ function readJson(path: string): unknown {
   try {
     contents = fileSystem.readFileSync(path, { encoding: "utf8" });
   } catch (error: unknown) {
-    throw new Error(`cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
   try {
     return JSON.parse(contents) as unknown;
   } catch (error: unknown) {
-    throw new Error(`${path} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${path} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    });
   }
 }
 

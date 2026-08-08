@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 3
+version = 4
 public_origin = "https://filebelt.localhost:8443/"
 
 [deployment]
@@ -40,12 +40,22 @@ io = "0.0.0.0:8081"
 mcp_broker = "0.0.0.0:8082"
 controller = "0.0.0.0:8083"
 mcp_runner_relay = "0.0.0.0:8084"
+collaboration_ws = "0.0.0.0:8085"
+collaboration_webtransport = "0.0.0.0:8086"
 operations = "0.0.0.0:9090"
 allow_container_wildcard = true
 
 [telemetry]
 log_format = "text"
 prometheus_enabled = true
+
+[collaboration]
+enabled = true
+database_url_file = "/run/secrets/collaboration-database-url"
+capability_private_key_file = "/run/secrets/collaboration-capability-private-key"
+capability_key_generation = 2
+io_url = "http://filebelt-worker-io:8081/"
+webtransport_enabled = false
 
 [limits]
 whole_threshold_bytes = 33554432

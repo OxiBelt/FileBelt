@@ -14,6 +14,7 @@ const PrincipalId = "00000000-0000-4000-8000-000000000005";
 const UploadId = "00000000-0000-4000-8000-000000000006";
 const PayloadId = "00000000-0000-4000-8000-000000000007";
 const GrantId = "00000000-0000-4000-8000-000000000008";
+const ImportIntentId = "00000000-0000-4000-8000-000000000014";
 
 const Session = {
   csrf_token: "csrf-value-not-browser-storage",
@@ -55,6 +56,7 @@ function Node(Id: string, Name: string): components["schemas"]["Node"] {
     acl_generation: 1,
     display_name: Name,
     drive_id: DriveId,
+    head_media_type: "text/markdown",
     head_version_id: "00000000-0000-4000-8000-000000000012",
     id: Id,
     kind: "file",
@@ -126,6 +128,9 @@ class ContractServer {
     if (Path === `/api/v1/drives/${DriveId}/uploads` && HttpRequest.method === "POST") {
       return Json(UploadAllocation(), 201);
     }
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents` && HttpRequest.method === "POST") {
+      return Json({ expires_at: "2026-08-06T12:15:00Z", id: ImportIntentId, source_drive_id: DriveId, source_node_id: FirstNodeId, source_version_id: Node(FirstNodeId, "Source.docx").head_version_id as string, target_media_type: "text/markdown", target_name: "Source.md", target_parent_id: RootId }, 201);
+    }
     if (Path === `/api/v1/uploads/${UploadId}` && HttpRequest.method === "GET") {
       return Json({
         finalize: ByteGrant("POST", `/io/v1/uploads/${UploadId}/finalize`, "finalize-secret"),
@@ -170,6 +175,13 @@ describe("HttpFileBeltClient", () => {
     await Client.getWorkspace();
     await Client.upload([{ Data: new Blob(["data"]), Name: "upload.txt", Size: 4 }]);
     expect(await (await Client.download(FirstNodeId)).text()).toBe("data");
+    expect(await (await Client.readMarkdown(FirstNodeId, "00000000-0000-4000-8000-000000000012")).text()).toBe("data");
+    await Client.saveMarkdown({
+      Contents: new Blob(["# replacement"], { type: "text/markdown" }),
+      EntryId: FirstNodeId,
+      ExpectedHeadVersionId: "00000000-0000-4000-8000-000000000012",
+      Name: "File one.txt",
+    });
 
     const Allocation = FindRequest(Server.Requests, "POST", `/api/v1/drives/${DriveId}/uploads`);
     expect(await Allocation.clone().json()).toMatchObject({
@@ -179,6 +191,13 @@ describe("HttpFileBeltClient", () => {
     });
     expect(Allocation.headers.get("x-filebelt-csrf")).toBe(Session.csrf_token);
     expect(Allocation.headers.get("idempotency-key")).not.toBeNull();
+    const MarkdownAllocation = Server.Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    expect(MarkdownAllocation).toBeDefined();
+    if (MarkdownAllocation !== undefined) expect(await MarkdownAllocation.clone().json()).toMatchObject({
+      declared_media_type: "text/markdown",
+      expected_head_version_id: "00000000-0000-4000-8000-000000000012",
+      node_id: FirstNodeId,
+    });
 
     const Part = FindRequest(Server.Requests, "PUT", `/io/v1/uploads/${UploadId}/parts/0`);
     expect(Part.credentials).toBe("omit");
@@ -227,6 +246,22 @@ describe("HttpFileBeltClient", () => {
     const Client = new HttpFileBeltClient(FetchImplementation, "https://filebelt.localhost");
 
     await expect(Client.getWorkspace()).rejects.toBeInstanceOf(AuthenticationRequiredError);
+  });
+
+  it("binds an Office conversion to an exact source version and one new sibling upload", async () => {
+    const Source = Node(FirstNodeId, "Source.docx");
+    const Server = new ContractServer([Source]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+    if (Source.head_version_id === null) return;
+
+    await Client.importMarkdown({ Contents: new Blob(["# hi"], { type: "text/markdown" }), EntryId: FirstNodeId, SourceVersionId: Source.head_version_id, TargetName: "Source.md" });
+
+    const Intent = FindRequest(Server.Requests, "POST", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents`);
+    expect(await Intent.clone().json()).toEqual({ source_version_id: Source.head_version_id, target_name: "Source.md" });
+    const Allocation = Server.Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    expect(Allocation).toBeDefined();
+    if (Allocation !== undefined) expect(await Allocation.clone().json()).toMatchObject({ declared_media_type: "text/markdown", expected_parent_generation: 19, import_intent_id: ImportIntentId, name: "Source.md", parent_id: RootId });
   });
 });
 

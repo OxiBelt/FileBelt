@@ -4,7 +4,8 @@
 
 Protocol-neutral Protobuf `proto3` schemas live under
 `protocol/<domain>/v1/` and use `filebelt.<domain>.v1` packages. The current
-schemas define storage capabilities and notification envelopes. The public HTTP
+schemas define storage capabilities, notification envelopes, and collaboration
+frames. The public HTTP
 contract lives at `protocol/http/v1/openapi.yaml`. See
 [Interfaces and Capabilities](../docs/InterfacesAndCapabilities.md) for the
 transport, trust, compatibility, and key-rotation contract.

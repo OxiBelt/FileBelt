@@ -65,6 +65,11 @@ message InvocationRequest {
   string capability_name = 5;
   bytes arguments_json = 6;
   int64 deadline_unix_milliseconds = 7;
+  // Canonical JSON for filebelt.markdown.semantic.v1 input. It carries an
+  // exact node/base-version context and normalized source; the broker binds it
+  // into the delegation digest and forwards it only as MCP request metadata.
+  // It is never interpreted as executable content or stored as durable source.
+  bytes semantic_input_json = 8;
 }
 
 message InvocationFrame {
@@ -181,6 +186,9 @@ enum InvocationFrameKind {
   INVOCATION_FRAME_KIND_MEDIA = 5;
   INVOCATION_FRAME_KIND_ERROR = 6;
   INVOCATION_FRAME_KIND_COMPLETE = 7;
+  // A bounded filebelt.markdown.semantic.v1 proposal returned by the MCP
+  // server. Consumers must apply it through the ordinary editor operation.
+  INVOCATION_FRAME_KIND_SEMANTIC = 8;
 }
 
 enum RunnerRelayFrameKind {

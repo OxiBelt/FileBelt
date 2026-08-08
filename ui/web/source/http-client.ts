@@ -3,14 +3,18 @@
 import createClient from "openapi-fetch";
 import type { Client } from "openapi-fetch";
 
-import { AuthenticationRequiredError } from "./client.js";
+import { AuthenticationRequiredError, VersionConflictError } from "./client.js";
 import type {
   CreateShareInput,
   FileBeltClient,
   PublicShareClient,
   PublicShareGrant,
+  MarkdownSaveInput,
+  MarkdownImportInput,
+  MarkdownCollaborationGrant,
+  MarkdownHead,
 } from "./client.js";
-import type { components, paths } from "./generated/openapi.js";
+import type { components, operations, paths } from "./generated/openapi.js";
 import type {
   FileEntry,
   SessionRecord,
@@ -30,9 +34,12 @@ type UploadAllocation = components["schemas"]["UploadAllocation"];
 type ByteGrant = components["schemas"]["ByteGrant"];
 type UploadGrants = components["schemas"]["UploadGrants"];
 type DownloadGrant = components["schemas"]["DownloadGrant"];
+type CollaborationGrant = components["schemas"]["CollaborationGrant"];
+type MarkdownImportIntent = components["schemas"]["MarkdownImportIntent"];
 type DrivePage = components["schemas"]["DrivePage"];
 type NodePage = components["schemas"]["NodePage"];
 type VersionPage = components["schemas"]["VersionPage"];
+type UploadCommit = operations["commitUpload"]["responses"][201]["content"]["application/json"];
 
 interface NodeLocation {
   DriveId: string;
@@ -339,6 +346,102 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Response.blob();
   }
 
+  async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
+    const Location = this.#location(EntryId);
+    await this.#ensureSession();
+    const Grant = RequireData<DownloadGrant>(await this.#Api.POST(
+      "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants",
+      { body: { version_id: VersionId }, params: { header: this.#mutationHeaders(), path: { drive_id: Location.DriveId, node_id: EntryId } } },
+    ));
+    return (await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin")).blob();
+  }
+
+  async importMarkdown(Input: MarkdownImportInput): Promise<string> {
+    const Location = this.#location(Input.EntryId);
+    await this.#ensureSession();
+    const Intent = RequireData<MarkdownImportIntent>(await this.#Api.POST(
+      "/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
+      {
+        body: { source_version_id: Input.SourceVersionId, target_name: Input.TargetName },
+        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId, node_id: Input.EntryId } },
+      },
+    ));
+    const Parent = await this.#getNode(Location.DriveId, Intent.target_parent_id);
+    if (Parent.kind !== "directory") throw new Error("The Office source parent is unavailable.");
+    const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+      body: { declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, import_intent_id: Intent.id, name: Intent.target_name, parent_id: Intent.target_parent_id },
+      params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
+    }));
+    return this.#putUploadContents(Allocation, Input.Contents);
+  }
+
+  async beginMarkdownCollaboration(EntryId: string, ClientId: string): Promise<MarkdownCollaborationGrant | null> {
+    const Location = this.#location(EntryId);
+    await this.#ensureSession();
+    let Grant: CollaborationGrant;
+    try {
+      Grant = RequireData<CollaborationGrant>(await this.#Api.POST(
+        "/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
+        {
+          body: { client_id: ClientId, presence_mode: "display_name", transport: "websocket" },
+          params: {
+            header: this.#idempotentMutationHeaders(),
+            path: { drive_id: Location.DriveId, node_id: EntryId },
+          },
+        },
+      ));
+    } catch (Cause) {
+      if (Cause instanceof ApiRequestError && Cause.Status === 404) return null;
+      throw Cause;
+    }
+    const Endpoint = Grant.endpoints.find(({ transport: Transport }) => Transport === "websocket");
+    if (Endpoint === undefined || Grant.room.room_id === null) throw new Error("The collaboration endpoint is unavailable.");
+    return {
+      Authorization: Grant.authorization,
+      ClientId,
+      EndpointUrl: Endpoint.url,
+      PresenceLabel: Grant.presence_label,
+      RoomId: Grant.room.room_id,
+    };
+  }
+
+  async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
+    const Location = this.#location(EntryId);
+    await this.#ensureSession();
+    const Node = await this.#getNode(Location.DriveId, EntryId);
+    if (Node.head_version_id === null) throw new Error("The Markdown file has no current version.");
+    return { Contents: await this.readMarkdown(EntryId, Node.head_version_id), VersionId: Node.head_version_id };
+  }
+
+  async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
+    const Location = this.#location(Input.EntryId);
+    if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
+    await this.#ensureSession();
+    try {
+      const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+        body: { ...(Input.CheckpointId === undefined ? {} : { collaboration_checkpoint_id: Input.CheckpointId }), declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_head_version_id: Input.ExpectedHeadVersionId, name: Input.Name, node_id: Input.EntryId, parent_id: Location.ParentId },
+        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
+      }));
+      return await this.#putUploadContents(Allocation, Input.Contents);
+    } catch (Cause) {
+      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new VersionConflictError();
+      throw Cause;
+    }
+  }
+
+  async saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string> {
+    const Location = this.#location(Input.EntryId);
+    if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
+    await this.#ensureSession();
+    const Parent = await this.#getNode(Location.DriveId, Location.ParentId);
+    if (Parent.kind !== "directory") throw new Error("The Markdown file parent is unavailable.");
+    const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+      body: { declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, name: Input.Name, parent_id: Location.ParentId },
+      params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
+    }));
+    return this.#putUploadContents(Allocation, Input.Contents);
+  }
+
   async trashEntries(EntryIds: readonly string[]): Promise<void> {
     await this.#ensureSession();
     for (const EntryId of EntryIds) {
@@ -468,6 +571,33 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Location;
   }
 
+  async #putUploadContents(Allocation: UploadAllocation, Contents: Blob): Promise<string> {
+    let Cursor: string | null = null;
+    let Finalize: ByteGrant | null;
+    do {
+      const Grants: UploadGrants = RequireData<UploadGrants>(await this.#Api.GET("/api/v1/uploads/{upload_id}", {
+        params: { path: { upload_id: Allocation.upload_id }, query: PageQuery(Cursor) },
+      }));
+      for (let Index = 0; Index < Grants.parts.length; Index += 1) {
+        const Grant = Grants.parts[Index];
+        if (Grant === undefined) continue;
+        const PartNumber = UploadPartNumber(Grant.path) ?? Index;
+        const Start = PartNumber * Allocation.chunk_size_bytes;
+        const End = Math.min(Start + Allocation.chunk_size_bytes, Contents.size);
+        await this.#ioRequest(Grant.path, { body: Contents.slice(Start, End), headers: { Authorization: `fbcap1 ${Grant.authorization}` }, method: "PUT" }, "omit");
+      }
+      Finalize = Grants.finalize;
+      Cursor = Grants.next_cursor;
+    } while (Cursor !== null);
+    if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
+    await this.#ioRequest(Finalize.path, { headers: { Authorization: `fbcap1 ${Finalize.authorization}` }, method: "POST" }, "omit");
+    const Committed = RequireData<UploadCommit>(await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
+      body: { expected_fencing_token: Allocation.fencing_token },
+      params: { header: this.#idempotentMutationHeaders(), path: { upload_id: Allocation.upload_id } },
+    }));
+    return Committed.version_id;
+  }
+
   async #collectPages<T>(LoadPage: (Cursor: string | null) => Promise<Page<T>>): Promise<T[]> {
     const Items: T[] = [];
     let Cursor: string | null = null;
@@ -578,8 +708,11 @@ function DefaultBaseUrl(): string {
 function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntry {
   return {
     Id: Node.id,
+    HeadVersionId: Node.head_version_id,
     Kind: Node.kind === "directory" ? "folder" : "file",
     ModifiedAt: Node.updated_at,
+    MarkdownEligibility: MarkdownEligibility(Node.display_name, Node.head_media_type, Node.size_bytes),
+    MediaType: Node.head_media_type,
     Name: Node.display_name,
     Owner,
     Shared,
@@ -588,6 +721,12 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
     Trashed: Node.trashed,
     Version: Node.version_ordinal ?? 0,
   };
+}
+
+function MarkdownEligibility(Name: string, MediaType: string | null, Size: number | null): FileEntry["MarkdownEligibility"] {
+  const IsMarkdown = MediaType === "text/markdown" || /\.(md|markdown|mdown|mkdn)$/i.test(Name);
+  if (!IsMarkdown || Size === null || Size > 8 * 1024 * 1024) return "ineligible";
+  return Size <= 2 * 1024 * 1024 ? "editable" : "viewable";
 }
 
 function PageQuery(Cursor: string | null): PageQueryShape {

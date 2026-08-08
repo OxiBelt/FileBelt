@@ -22,7 +22,7 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "mcp-broker") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s" .Values.secrets.mcpDatabase.generation .Values.secrets.mcpVaultKeyring.generation .Values.secrets.mcpBrokerServerTls.generation .Values.secrets.mcpGatewayClientTls.generation .Values.secrets.mcpBackendClientTls.generation .Values.secrets.controllerClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-mcp-broker
@@ -119,7 +119,7 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "controller") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secrets: {{ .Values.secrets.controllerServerTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-controller

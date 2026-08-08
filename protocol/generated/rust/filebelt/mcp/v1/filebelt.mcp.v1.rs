@@ -113,6 +113,12 @@ pub struct InvocationRequest {
     pub arguments_json: ::prost::alloc::vec::Vec<u8>,
     #[prost(int64, tag="7")]
     pub deadline_unix_milliseconds: i64,
+    /// Canonical JSON for filebelt.markdown.semantic.v1 input. It carries an
+    /// exact node/base-version context and normalized source; the broker binds it
+    /// into the delegation digest and forwards it only as MCP request metadata.
+    /// It is never interpreted as executable content or stored as durable source.
+    #[prost(bytes="vec", tag="8")]
+    pub semantic_input_json: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InvocationFrame {
@@ -383,6 +389,9 @@ pub enum InvocationFrameKind {
     Media = 5,
     Error = 6,
     Complete = 7,
+    /// A bounded filebelt.markdown.semantic.v1 proposal returned by the MCP
+    /// server. Consumers must apply it through the ordinary editor operation.
+    Semantic = 8,
 }
 impl InvocationFrameKind {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -399,6 +408,7 @@ impl InvocationFrameKind {
             Self::Media => "INVOCATION_FRAME_KIND_MEDIA",
             Self::Error => "INVOCATION_FRAME_KIND_ERROR",
             Self::Complete => "INVOCATION_FRAME_KIND_COMPLETE",
+            Self::Semantic => "INVOCATION_FRAME_KIND_SEMANTIC",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -412,6 +422,7 @@ impl InvocationFrameKind {
             "INVOCATION_FRAME_KIND_MEDIA" => Some(Self::Media),
             "INVOCATION_FRAME_KIND_ERROR" => Some(Self::Error),
             "INVOCATION_FRAME_KIND_COMPLETE" => Some(Self::Complete),
+            "INVOCATION_FRAME_KIND_SEMANTIC" => Some(Self::Semantic),
             _ => None,
         }
     }

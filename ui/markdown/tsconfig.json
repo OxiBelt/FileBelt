@@ -1,10 +1,12 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
     "composite": true,
     "outDir": "dist",
     "rootDir": "source",
     "tsBuildInfoFile": "dist/markdown.tsbuildinfo"
   },
-  "include": ["source/**/*.ts"]
+  "include": ["source/**/*.ts", "source/**/*.tsx"]
 }

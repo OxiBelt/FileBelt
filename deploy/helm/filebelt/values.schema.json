@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "FileBelt Phase 4 Kubernetes deployment",
+  "title": "FileBelt Phase 5 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "networkPolicy", "monitoring", "operation"],
+  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "networkPolicy", "monitoring", "operation"],
   "properties": {
     "global": {
       "type": "object",
@@ -27,13 +27,14 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner"],
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner"],
       "properties": {
         "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
         "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
         "filebelt-worker-maintenance": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-maintenance"}}}]},
         "filebelt-tools": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-tools"}}}]},
         "filebelt-web": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-web"}}}]},
+        "filebelt-collaboration": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-collaboration"}}}]},
         "filebelt-mcp-broker": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-mcp-broker"}}}]},
         "filebelt-controller": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-controller"}}}]},
         "filebelt-mcp-runner": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-mcp-runner"}}}]}
@@ -58,12 +59,13 @@
     },
     "workloads": {
       "type": "object", "additionalProperties": false,
-      "required": ["web", "api", "io", "maintenance", "mcpBroker", "controller", "operation"],
+      "required": ["web", "api", "io", "maintenance", "collaboration", "mcpBroker", "controller", "operation"],
       "properties": {
         "web": {"$ref": "#/definitions/servingWorkload"},
         "api": {"$ref": "#/definitions/servingWorkload"},
         "io": {"$ref": "#/definitions/servingWorkload"},
         "maintenance": {"$ref": "#/definitions/servingWorkload"},
+        "collaboration": {"$ref": "#/definitions/servingWorkload"},
         "mcpBroker": {"$ref": "#/definitions/servingWorkload"},
         "controller": {"$ref": "#/definitions/servingWorkload"},
         "operation": {
@@ -92,7 +94,7 @@
     },
     "secrets": {
       "type": "object", "additionalProperties": false,
-      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "capabilityPrivateKey", "capabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls"],
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "capabilityPrivateKey", "capabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationCapabilityPrivateKey", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls"],
       "properties": {
         "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
@@ -110,6 +112,11 @@
         "ioServerTls": {"$ref": "#/definitions/tlsSecret"},
         "apiClientTls": {"$ref": "#/definitions/tlsSecret"},
         "ioClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "collaborationDatabase": {"$ref": "#/definitions/singleKeySecret"},
+        "collaborationCapabilityPrivateKey": {"$ref": "#/definitions/singleKeySecret"},
+        "collaborationServerTls": {"$ref": "#/definitions/tlsSecret"},
+        "collaborationIoClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "collaborationEdgeClientTls": {"$ref": "#/definitions/tlsSecret"},
         "mcpDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "mcpVaultKeyring": {"$ref": "#/definitions/singleKeySecret"},
         "mcpBrokerServerTls": {"$ref": "#/definitions/tlsSecret"},
@@ -153,6 +160,13 @@
       "allOf": [
         {"if": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"enabled": {"const": true}}}}
       ]
+    },
+    "collaboration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
     },
     "networkPolicy": {
       "type": "object", "additionalProperties": false,

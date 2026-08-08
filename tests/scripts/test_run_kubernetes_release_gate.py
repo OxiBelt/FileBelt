@@ -15,6 +15,7 @@ ROLES = (
     "filebelt-api",
     "filebelt-worker-io",
     "filebelt-worker-maintenance",
+    "filebelt-collaboration",
     "filebelt-media-controller",
     "filebelt-mcp-broker",
     "filebelt-controller",

@@ -32,6 +32,8 @@ pub enum StorageError {
     UnsafeObject,
     #[error("stored bytes do not match their durable metadata")]
     CorruptObject,
+    #[error("stored bytes do not satisfy the declared content profile")]
+    InvalidContent,
     #[error("storage operation is inconsistent with persisted state")]
     StateConflict,
     #[error("blocking storage task failed")]
@@ -241,6 +243,9 @@ impl StorageLayout {
         {
             return Err(StorageError::CorruptObject);
         }
+        if upload.declared_media_type.as_deref() == Some("text/markdown") {
+            validate_markdown_payload(&final_path, payload, parts)?;
+        }
         Ok(FinalizedObject {
             digest: *hasher.finalize().as_bytes(),
             size,
@@ -297,6 +302,99 @@ impl StorageLayout {
             return Err(StorageError::CorruptObject);
         }
         Ok(result)
+    }
+
+    /// Publish one already-fsynced staging part as a whole payload object.
+    /// This is used for collaboration update groups and snapshots, whose
+    /// authoritative manifest is separate from the upload-session tables.
+    pub fn finalize_whole_object(
+        &self,
+        payload: &PayloadRecord,
+        expected_size: u64,
+        expected_digest: &[u8; 32],
+    ) -> Result<FinalizedObject, StorageError> {
+        if payload.layout != "whole" {
+            return Err(StorageError::StateConflict);
+        }
+        let source = self.staging_part_path(payload.locator)?;
+        verify_file(&source, expected_size, expected_digest)?;
+        let destination = self.payload_path(payload)?;
+        match fs::hard_link(&source, &destination) {
+            Ok(()) => sync_directory(parent(&destination)?)?,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                verify_file(&destination, expected_size, expected_digest)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        verify_file(&destination, expected_size, expected_digest)?;
+        Ok(FinalizedObject {
+            digest: *expected_digest,
+            size: expected_size,
+        })
+    }
+
+    pub fn verify_staging_object(
+        &self,
+        locator: Uuid,
+        expected_size: u64,
+    ) -> Result<FinalizedObject, StorageError> {
+        let path = self.staging_part_path(locator)?;
+        verify_regular_file(&path)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut size = 0_u64;
+        hash_file(&path, &mut hasher, &mut size)?;
+        if size != expected_size {
+            return Err(StorageError::CorruptObject);
+        }
+        Ok(FinalizedObject {
+            digest: *hasher.finalize().as_bytes(),
+            size,
+        })
+    }
+
+    pub fn verified_whole_object_segment(
+        &self,
+        payload: &PayloadRecord,
+        start: u64,
+        end_inclusive: u64,
+    ) -> Result<Vec<DownloadSegment>, StorageError> {
+        if payload.layout != "whole" {
+            return Err(StorageError::StateConflict);
+        }
+        let size = u64::try_from(payload.size_bytes).map_err(|_| StorageError::StateConflict)?;
+        let digest: [u8; 32] = payload
+            .blake3
+            .as_deref()
+            .ok_or(StorageError::StateConflict)?
+            .try_into()
+            .map_err(|_| StorageError::StateConflict)?;
+        let path = self.payload_path(payload)?;
+        verify_file(&path, size, &digest)?;
+        if size == 0 {
+            return Ok(Vec::new());
+        }
+        if start > end_inclusive || end_inclusive >= size {
+            return Err(StorageError::StateConflict);
+        }
+        Ok(vec![DownloadSegment {
+            path,
+            offset: start,
+            length: end_inclusive - start + 1,
+        }])
+    }
+
+    pub fn remove_staging_locator(&self, locator: Uuid) -> Result<(), StorageError> {
+        let path = self.staging_part_path(locator)?;
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                verify_regular_file(&path)?;
+                fs::remove_file(&path)?;
+                sync_directory(parent(&path)?)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(())
     }
 
     pub fn remove_staging_parts(&self, parts: &[UploadPartRecord]) -> Result<(), StorageError> {
@@ -509,6 +607,37 @@ impl StorageLayout {
         verify_same_owner(&second, &first)?;
         Ok(second)
     }
+}
+
+fn validate_markdown_payload(
+    final_path: &Path,
+    payload: &PayloadRecord,
+    parts: &[UploadPartRecord],
+) -> Result<(), StorageError> {
+    let capacity = usize::try_from(payload.size_bytes).map_err(|_| StorageError::InvalidContent)?;
+    if capacity > 2_097_152 {
+        return Err(StorageError::InvalidContent);
+    }
+    let mut bytes = Vec::with_capacity(capacity);
+    match payload.layout.as_str() {
+        "whole" => {
+            File::open(final_path)?.read_to_end(&mut bytes)?;
+        }
+        "chunked" => {
+            for part in parts {
+                File::open(final_path.join(part_file_name(part.part_number)))?
+                    .read_to_end(&mut bytes)?;
+            }
+        }
+        _ => return Err(StorageError::StateConflict),
+    };
+    let content = bytes
+        .strip_prefix(&[0xef, 0xbb, 0xbf])
+        .unwrap_or(bytes.as_slice());
+    if content.contains(&0) || std::str::from_utf8(content).is_err() {
+        return Err(StorageError::InvalidContent);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -791,6 +920,9 @@ mod tests {
             part_count: parts,
             fencing_token: 1,
             state: "open".into(),
+            declared_media_type: None,
+            collaboration_checkpoint_id: None,
+            import_intent_id: None,
         }
     }
 

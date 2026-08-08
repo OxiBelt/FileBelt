@@ -63,6 +63,11 @@ fail_on_untrusted_forwarded_headers = true
 enabled = true
 max_http_version = "h2"
 
+[proxy.upgrades]
+websocket = true
+generic_http_upgrade = false
+connect_tunneling = false
+
 [proxy.retry]
 enabled = false
 tries = 1
@@ -155,6 +160,25 @@ idle_timeout_ms = 75000
 pool_max_idle_per_host = 64
 preserve_host = false
 websocket = false
+webrtc = false
+webtransport = false
+
+[upstreams.tls.ech]
+mode = "disabled"
+
+[[upstreams]]
+name = "filebelt-collaboration"
+origin = "http://filebelt-collaboration:8085"
+max_http_version = "h1"
+connect_timeout_ms = 3000
+request_timeout_ms = 30000
+first_byte_timeout_ms = 30000
+read_timeout_ms = 75000
+send_timeout_ms = 75000
+idle_timeout_ms = 75000
+pool_max_idle_per_host = 64
+preserve_host = false
+websocket = true
 webrtc = false
 webtransport = false
 
@@ -282,6 +306,93 @@ name = "Pragma"
 value = "no-cache"
 
 [[routes]]
+name = "filebelt-collaboration-ws-v1"
+hosts = ["filebelt.localhost"]
+path_prefix = "/collaboration/v1/ws"
+upstream = "filebelt-collaboration"
+compression = "off"
+security_headers = "default"
+generic_http_upgrade = false
+connect_tunneling = false
+grpc_web = false
+
+[routes.match]
+methods = ["GET"]
+protocols = ["websocket"]
+
+[[routes.match.headers]]
+name = "origin"
+exact = "https://filebelt.localhost:8443"
+
+[routes.retry]
+enabled = false
+
+[routes.limits]
+max_request_body_bytes = 4096
+
+[routes.timeouts]
+websocket_idle_timeout_ms = 60000
+
+[routes.actions.request_headers]
+remove = [
+  "authorization",
+  "cookie",
+  "x-user",
+  "x-group",
+  "x-groups",
+  "x-principal",
+  "x-tenant",
+  "x-filebelt-principal",
+  "x-filebelt-tenant",
+  "x-auth-request-user",
+  "x-auth-request-groups",
+  "x-remote-user",
+  "x-remote-groups",
+]
+
+[[routes.actions.response_headers.set]]
+name = "Cache-Control"
+value = "no-store"
+
+[[routes.actions.response_headers.set]]
+name = "Pragma"
+value = "no-cache"
+
+[[routes]]
+name = "filebelt-markdown-preview"
+hosts = ["filebelt.localhost"]
+path_prefix = "/markdown-preview/"
+static_root = "/srv/filebelt/markdown-preview"
+compression = "default"
+security_headers = "default"
+generic_http_upgrade = false
+connect_tunneling = false
+grpc_web = false
+
+[routes.static_files]
+directory_index = ["index.html"]
+try_files = ["{path}"]
+precompressed = ["br", "zstd", "gzip"]
+cache_control = "no-store"
+
+[routes.static_files.cache_control_by_extension]
+css = "public, max-age=31536000, immutable"
+js = "no-store"
+html = "no-store"
+
+[[routes.actions.response_headers.set]]
+name = "Content-Security-Policy"
+value = "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'self'; form-action 'none'; frame-src 'none'; frame-ancestors 'self'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types filebelt-markdown-generated"
+
+[[routes.actions.response_headers.set]]
+name = "Cross-Origin-Resource-Policy"
+value = "cross-origin"
+
+[[routes.actions.response_headers.set]]
+name = "Access-Control-Allow-Origin"
+value = "*"
+
+[[routes]]
 name = "filebelt-spa"
 hosts = ["filebelt.localhost"]
 path_prefix = "/"
@@ -311,7 +422,7 @@ html = "no-store"
 
 [[routes.actions.response_headers.set]]
 name = "Content-Security-Policy"
-value = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+value = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'"
 
 [[routes.actions.response_headers.set]]
 name = "Cross-Origin-Opener-Policy"

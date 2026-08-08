@@ -83,6 +83,7 @@ function InvocationResult({ Event }: { Event: McpInvocationEventView }): ReactNo
   if (Event.Kind === "text") return <SafeTextResult Value={Event.Value} />;
   if (Event.Kind === "json") return <SafeJsonResult Value={Event.Value} />;
   if (Event.Kind === "media") return <SafeMediaResult Value={Event.Value} />;
+  if (Event.Kind === "semanticMarkdown") return <pre className="fb-mcp-text"><bdi>{Event.Value.Markdown}</bdi></pre>;
   if (Event.Kind === "error") return <p className="fb-error" role="alert"><Bidi Value={Event.ProblemCode} /></p>;
   if (Event.Kind === "progress") return <progress aria-label={McpEn.invocationProgress} max={1} value={Event.Progress ?? 0} />;
   return <p className="fb-muted">{Event.Kind}</p>;

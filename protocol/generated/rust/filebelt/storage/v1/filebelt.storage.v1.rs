@@ -70,6 +70,9 @@ pub enum CapabilityOperation {
     Download = 3,
     DeletePayload = 4,
     ScrubPayload = 5,
+    WriteCollaborationObject = 6,
+    FinalizeCollaborationObject = 7,
+    ReadCollaborationObject = 8,
 }
 impl CapabilityOperation {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -84,6 +87,9 @@ impl CapabilityOperation {
             Self::Download => "CAPABILITY_OPERATION_DOWNLOAD",
             Self::DeletePayload => "CAPABILITY_OPERATION_DELETE_PAYLOAD",
             Self::ScrubPayload => "CAPABILITY_OPERATION_SCRUB_PAYLOAD",
+            Self::WriteCollaborationObject => "CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT",
+            Self::FinalizeCollaborationObject => "CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT",
+            Self::ReadCollaborationObject => "CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -95,6 +101,9 @@ impl CapabilityOperation {
             "CAPABILITY_OPERATION_DOWNLOAD" => Some(Self::Download),
             "CAPABILITY_OPERATION_DELETE_PAYLOAD" => Some(Self::DeletePayload),
             "CAPABILITY_OPERATION_SCRUB_PAYLOAD" => Some(Self::ScrubPayload),
+            "CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT" => Some(Self::WriteCollaborationObject),
+            "CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT" => Some(Self::FinalizeCollaborationObject),
+            "CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT" => Some(Self::ReadCollaborationObject),
             _ => None,
         }
     }

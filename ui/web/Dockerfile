@@ -22,14 +22,15 @@ COPY ui/admin ui/admin
 COPY ui/design-assets ui/design-assets
 COPY ui/design-system ui/design-system
 COPY ui/markdown ui/markdown
+COPY ui/mcp-settings ui/mcp-settings
 COPY ui/web ui/web
 RUN --network=none pnpm --filter @filebelt/design-system build && \
     pnpm --filter @filebelt/admin build && \
     pnpm --filter @filebelt/markdown build && \
     pnpm --filter @filebelt/web build && \
-    mkdir -p /out/web /out/markdown /out/notices && \
+    mkdir -p /out/web /out/markdown-preview /out/notices && \
     cp -R ui/web/dist/. /out/web/ && \
-    cp -R ui/markdown/dist/. /out/markdown/ && \
+    cp -R ui/markdown/dist/preview/. /out/markdown-preview/ && \
     pnpm licenses list --prod --json --filter @filebelt/web... > /out/notices/web-production-licenses.json && \
     cp ui/design-system/node_modules/lucide-react/LICENSE /out/notices/lucide-ISC.txt && \
     tslib_license=$(find node_modules/.pnpm -path '*/tslib@*/node_modules/tslib/LICENSE.txt') && \
@@ -55,7 +56,7 @@ COPY --chmod=0644 ui/web/OXIBELT_NOTICE.md /usr/share/licenses/FileBelt/notices/
 COPY --from=builder --chmod=0644 /out/notices /usr/share/licenses/FileBelt/notices/web
 COPY --chmod=0644 ui/web/edge/oxibelt.toml /etc/oxibelt/config/oxibelt.toml
 COPY --from=builder /out/web /srv/filebelt/web
-COPY --from=builder /out/markdown /srv/filebelt/markdown
+COPY --from=builder /out/markdown-preview /srv/filebelt/markdown-preview
 
 LABEL org.opencontainers.image.title="filebelt-web" \
       org.opencontainers.image.description="FileBelt OxiBelt TLS edge and web application" \

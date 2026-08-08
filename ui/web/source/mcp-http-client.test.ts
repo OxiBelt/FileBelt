@@ -8,6 +8,8 @@ import { HttpMcpSettingsClient } from "./mcp-http-client.js";
 const RegistrationId = "00000000-0000-4000-8000-000000000041";
 const SnapshotId = "00000000-0000-4000-8000-000000000042";
 const InvocationId = "00000000-0000-4000-8000-000000000043";
+const NodeId = "00000000-0000-4000-8000-000000000048";
+const BaseVersionId = "00000000-0000-4000-8000-000000000049";
 
 const Session = {
   csrf_token: "csrf-memory-only",
@@ -107,6 +109,7 @@ describe("HttpMcpSettingsClient", () => {
       Arguments: { query: "quarterly plan" },
       Capability: { Fingerprint: "b".repeat(64), Kind: "tool", Name: "search" },
       RegistrationId,
+      SemanticInput: { BaseVersionId, Markdown: "# Current source", NodeId },
     });
     expect(Server.Requests.some(({ url: Url }) => Url.endsWith("/stream"))).toBe(false);
     await Client.approveAndInvoke(Prepared, (Event) => Events.push(Event.Kind));
@@ -116,6 +119,7 @@ describe("HttpMcpSettingsClient", () => {
     expect(Requests.map(({ method: Method }) => Method)).toEqual(["POST", "POST", "POST"]);
     expect(await Requests[0]?.clone().text()).toBe(await Requests[2]?.clone().text());
     expect(await Requests[1]?.clone().json()).toEqual({ expires_at: null, scope: "once" });
+    expect(await Requests[0]?.clone().json()).toMatchObject({ semantic_input: { base_version_id: BaseVersionId, format: "filebelt.markdown.semantic.v1", markdown: "# Current source", node_id: NodeId } });
     expect(Requests[2]?.headers.get("Cache-Control")).toBeNull();
     expect(Requests[2]?.headers.get("X-FileBelt-Csrf")).toBe("csrf-memory-only");
   });

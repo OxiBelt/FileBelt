@@ -14,6 +14,7 @@
   "dependencies": {
     "@filebelt/admin": "workspace:*",
     "@filebelt/design-system": "workspace:*",
+    "@filebelt/markdown": "workspace:*",
     "@filebelt/mcp-settings": "workspace:*",
     "@fluentui/react-components": "9.74.5",
     "lucide-react": "1.28.0",

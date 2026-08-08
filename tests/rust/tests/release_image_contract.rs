@@ -4,11 +4,12 @@ use std::fs;
 
 use filebelt_repository_tests::repository_root;
 
-const ROLES: [&str; 9] = [
+const ROLES: [&str; 10] = [
     "filebelt-api",
     "filebelt-worker-io",
     "filebelt-worker-maintenance",
     "filebelt-media-controller",
+    "filebelt-collaboration",
     "filebelt-mcp-broker",
     "filebelt-controller",
     "filebelt-mcp-runner",
@@ -69,6 +70,12 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
         fs::read_to_string(root.join("source/ops/riscv64-musl-toolchain.cmake"))
             .expect("RISC-V CMake toolchain");
     let web = fs::read_to_string(root.join("ui/web/Dockerfile")).expect("web Dockerfile");
+    for workspace in ["admin", "design-system", "markdown", "mcp-settings", "web"] {
+        assert!(
+            web.contains(&format!("COPY ui/{workspace} ui/{workspace}")),
+            "web image must copy the {workspace} workspace before building"
+        );
+    }
     for dockerfile in [&rust, &web] {
         assert!(dockerfile.contains("USER 10001:10001"));
         assert!(dockerfile.contains("LICENSES/Apache-2.0.txt"));
@@ -181,6 +188,10 @@ fn oxibelt_edge_profile_keeps_routes_and_browser_security_explicit() {
         fs::read_to_string(root.join("ui/web/edge/oxibelt.toml")).expect("OxiBelt edge profile");
     let acceptance = fs::read_to_string(root.join("ui/web/edge/oxibelt.acceptance.toml"))
         .expect("OxiBelt acceptance edge profile");
+    let chart = fs::read_to_string(root.join("deploy/helm/filebelt/values.yaml"))
+        .expect("Helm chart values");
+    let vite = fs::read_to_string(root.join("ui/web/vite.config.ts"))
+        .expect("Vite browser security headers");
     for route in ["/api/v1", "/io/v1", "/public/v1"] {
         assert!(edge.contains(&format!("path_prefix = \"{route}\"")));
     }
@@ -195,12 +206,49 @@ fn oxibelt_edge_profile_keeps_routes_and_browser_security_explicit() {
     assert!(edge.contains("spa_fallback = \"/index.html\""));
     assert!(edge.contains("script-src 'self'"));
     assert!(edge.contains("frame-ancestors 'none'"));
+    assert!(edge.contains("require-trusted-types-for 'script'"));
+    assert!(edge.contains("trusted-types 'none'"));
+    assert!(edge.contains("name = \"filebelt-markdown-preview\""));
+    assert!(edge.contains("path_prefix = \"/markdown-preview/\""));
+    assert!(edge.contains("static_root = \"/srv/filebelt/markdown-preview\""));
+    assert!(edge.contains("trusted-types filebelt-markdown-generated"));
+    assert!(edge.contains("name = \"Access-Control-Allow-Origin\""));
+    assert!(edge.contains("style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"));
+    assert!(
+        edge.find("name = \"filebelt-markdown-preview\"") < edge.find("name = \"filebelt-spa\""),
+        "the opaque preview route must precede the SPA catch-all"
+    );
+    assert!(edge.contains("path_prefix = \"/collaboration/v1/ws\""));
+    assert!(edge.contains("protocols = [\"websocket\"]"));
+    assert!(!edge.contains("/collaboration/v1/wt"));
+    assert!(edge.contains("name = \"origin\""));
+    assert!(edge.contains("exact = \"https://filebelt.localhost:8443\""));
+    assert!(edge.contains("\"authorization\""));
+    assert!(edge.contains("\"cookie\""));
     assert!(edge.contains("html = \"no-store\""));
     assert!(edge.contains("js = \"no-store\""));
     assert!(!edge.contains("filebelt-development-oidc"));
     assert!(!edge.contains("/_filebelt-test-oidc/authorize"));
     assert!(acceptance.contains("filebelt-development-oidc"));
     assert!(acceptance.contains("/_filebelt-test-oidc/authorize"));
+    assert!(acceptance.contains("trusted-types filebelt-markdown-generated"));
+    assert!(acceptance.contains("name = \"Access-Control-Allow-Origin\""));
+    assert!(acceptance.contains("style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"));
+    assert!(acceptance.contains("path_prefix = \"/collaboration/v1/ws\""));
+    assert!(!acceptance.contains("/collaboration/v1/wt"));
+    assert!(chart.contains("trusted-types filebelt-markdown-generated"));
+    assert!(chart.contains("name = \"Access-Control-Allow-Origin\""));
+    assert!(chart.contains("style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"));
+    assert!(!chart.contains("/collaboration/v1/wt"));
+    assert!(vite.contains("MarkdownPreviewContentSecurityPolicy"));
+    assert!(vite.contains("trusted-types filebelt-markdown-generated"));
+    assert!(vite.contains("Access-Control-Allow-Origin"));
+    assert!(vite.contains("style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"));
+    assert!(
+        acceptance.find("name = \"filebelt-markdown-preview\"")
+            < acceptance.find("name = \"filebelt-spa\""),
+        "the acceptance preview route must precede the SPA catch-all"
+    );
 }
 
 #[test]

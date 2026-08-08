@@ -3,19 +3,26 @@
 -- default privileges: newly added objects remain inaccessible until this
 -- reviewed allowlist and the verifier are updated.
 
-REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault FROM PUBLIC;
-REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault
+REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
-       filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker;
-REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault
+       filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
+       filebelt_collaboration;
+REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
-       filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker;
+       filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
+       filebelt_collaboration;
 
 GRANT USAGE ON SCHEMA public
   TO filebelt_api, filebelt_io, filebelt_maintenance,
-     filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker;
-GRANT USAGE ON SCHEMA filebelt_mcp TO filebelt_api, filebelt_recovery, filebelt_mcp_broker;
+     filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
+     filebelt_collaboration;
+GRANT USAGE ON SCHEMA filebelt_mcp
+  TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
+GRANT USAGE ON SCHEMA filebelt_collaboration
+  TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
+     filebelt_collaboration;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or
@@ -43,7 +50,8 @@ GRANT SELECT ON authorization_generations TO filebelt_io;
 GRANT SELECT, INSERT, UPDATE, DELETE ON jobs, job_attempts, outbox_events,
   consumer_deduplication, payload_objects, upload_sessions, upload_parts,
   quota_reservations, capability_nonces TO filebelt_maintenance;
-GRANT SELECT (tenant_id, id, reserved_bytes), UPDATE (reserved_bytes)
+GRANT SELECT (tenant_id, id, reserved_bytes, used_physical_bytes),
+  UPDATE (reserved_bytes, used_physical_bytes)
   ON drives TO filebelt_maintenance;
 
 GRANT SELECT (id, slug) ON tenants TO filebelt_audit_exporter;
@@ -94,7 +102,7 @@ GRANT SELECT ON filebelt_mcp.capability_snapshots, filebelt_mcp.capabilities,
 GRANT INSERT ON filebelt_mcp.deletion_tombstones TO filebelt_api;
 GRANT INSERT ON filebelt_mcp.invocations TO filebelt_api;
 GRANT UPDATE (superseded_at) ON filebelt_mcp.capability_snapshots TO filebelt_api;
-GRANT UPDATE (state, response_bytes, reason_code, finished_at)
+GRANT UPDATE (state, response_bytes, reason_code, semantic_output_digest, finished_at)
   ON filebelt_mcp.invocations TO filebelt_api;
 
 -- The broker can revalidate principal generations but cannot read sessions,
@@ -138,6 +146,68 @@ GRANT UPDATE (revoked_at) ON filebelt_mcp.capability_reviews TO filebelt_mcp_bro
 GRANT UPDATE (superseded_at) ON filebelt_mcp.capability_snapshots TO filebelt_mcp_broker;
 GRANT UPDATE (consumed_at) ON filebelt_mcp.oauth_attempts TO filebelt_mcp_broker;
 GRANT UPDATE (consumed_at) ON filebelt_mcp.invocation_intents TO filebelt_mcp_broker;
+
+-- Collaboration control and data roles are deliberately disjoint. The API
+-- authorizes rooms and commits versions; the collaboration role sequences
+-- durable CRDT manifests but cannot mutate nodes or file_versions.
+GRANT SELECT, INSERT, UPDATE ON
+  filebelt_collaboration.rooms, filebelt_collaboration.epochs,
+  filebelt_collaboration.join_grants, filebelt_collaboration.checkpoints,
+  filebelt_collaboration.import_intents
+  TO filebelt_api;
+GRANT SELECT ON filebelt_collaboration.update_groups,
+  filebelt_collaboration.snapshots, filebelt_collaboration.objects
+  TO filebelt_api;
+
+GRANT SELECT (id, slug) ON tenants TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals
+  TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,kind,storage_ready,capacity_total_bytes,capacity_free_bytes,capacity_checked_at)
+  ON storage_backends TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,user_id,principal_id,idle_expires_at,absolute_expires_at,revoked_at)
+  ON api_sessions TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,status) ON users TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,drive_id,head_version_id,acl_generation,namespace_generation,trash_root_id)
+  ON nodes TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,node_id,size_bytes,blake3,media_type)
+  ON file_versions TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,acl_generation,namespace_generation,reserved_bytes,used_physical_bytes,quota_bytes),
+  UPDATE (reserved_bytes,used_physical_bytes) ON drives TO filebelt_collaboration;
+GRANT SELECT ON authorization_generations TO filebelt_collaboration;
+GRANT SELECT (tenant_id,id,principal_id,application_id,state,semantic_node_id,
+  semantic_base_version_id,semantic_input_digest,semantic_output_digest)
+  ON filebelt_mcp.invocations TO filebelt_collaboration;
+GRANT SELECT, INSERT, UPDATE ON filebelt_collaboration.payload_objects
+  TO filebelt_collaboration;
+GRANT SELECT, UPDATE ON filebelt_collaboration.payload_objects
+  TO filebelt_io, filebelt_maintenance;
+GRANT SELECT, INSERT, UPDATE ON
+  filebelt_collaboration.rooms, filebelt_collaboration.epochs,
+  filebelt_collaboration.objects, filebelt_collaboration.object_reservations,
+  filebelt_collaboration.update_groups, filebelt_collaboration.update_chunks,
+  filebelt_collaboration.snapshots, filebelt_collaboration.join_grants,
+  filebelt_collaboration.checkpoints, filebelt_collaboration.leases,
+  filebelt_collaboration.participants
+  TO filebelt_collaboration;
+
+GRANT SELECT, UPDATE ON payload_objects TO filebelt_io;
+GRANT SELECT, UPDATE ON filebelt_collaboration.objects,
+  filebelt_collaboration.object_reservations TO filebelt_io;
+GRANT SELECT ON filebelt_collaboration.epochs TO filebelt_io;
+
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_collaboration.epochs,
+  filebelt_collaboration.objects, filebelt_collaboration.object_reservations,
+  filebelt_collaboration.update_groups, filebelt_collaboration.update_chunks,
+  filebelt_collaboration.snapshots, filebelt_collaboration.join_grants,
+  filebelt_collaboration.checkpoints, filebelt_collaboration.import_intents,
+  filebelt_collaboration.leases, filebelt_collaboration.participants
+  TO filebelt_maintenance;
+
+GRANT SELECT ON filebelt_collaboration.rooms, filebelt_collaboration.epochs,
+  filebelt_collaboration.objects, filebelt_collaboration.update_groups,
+  filebelt_collaboration.snapshots, filebelt_collaboration.checkpoints
+  TO filebelt_recovery;
 GRANT UPDATE (state, response_bytes, reason_code, finished_at)
   ON filebelt_mcp.invocations TO filebelt_mcp_broker;
 GRANT UPDATE (used, limit_value, expires_at)

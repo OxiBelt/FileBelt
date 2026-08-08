@@ -250,6 +250,41 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns active Markdown collaboration state only to a principal currently authorized with READ_CONTENT and WRITE_CONTENT; collaboration has no spectator mode. */
+        readonly get: operations["getCollaborationSummary"];
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Discards the caller-authorized dirty collaboration state. It requires DELETE and WRITE_CONTENT and never changes an immutable file version. */
+        readonly delete: operations["discardCollaboration"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Issues one opaque, one-use, first-Protobuf-frame grant valid for at most 60 seconds. Neither the grant nor a session credential appears in an endpoint URL. */
+        readonly post: operations["createCollaborationGrant"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants": {
         readonly parameters: {
             readonly query?: never;
@@ -260,6 +295,23 @@ export interface paths {
         readonly get?: never;
         readonly put?: never;
         readonly post: operations["createDownloadGrant"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Records the exact authorized source version and one new sibling target for a Markdown import. The returned intent can bind one later BeginUpload request only. */
+        readonly post: operations["createMarkdownImportIntent"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1016,10 +1068,16 @@ export interface components {
             readonly scope: "once" | "session";
         };
         readonly BeginUpload: {
+            /** @description Durable collaboration checkpoint to consume for this immutable version. It is bound to this node and expected head. */
+            readonly collaboration_checkpoint_id?: components["schemas"]["UuidV4"] | null;
+            /** @description Caller declaration only. The committed media type is trusted only after server validation of finalized bytes. */
+            readonly declared_media_type?: components["schemas"]["MediaType"] | null;
             /** Format: int64 */
             readonly declared_size_bytes: number;
             readonly expected_head_version_id?: components["schemas"]["UuidV4"] | null;
             readonly expected_parent_generation?: number | null;
+            /** @description Exact one-use Markdown import intent. It cannot be combined with a collaboration checkpoint. */
+            readonly import_intent_id?: components["schemas"]["UuidV4"] | null;
             readonly name: string;
             readonly node_id?: components["schemas"]["UuidV4"] | null;
             readonly parent_id: components["schemas"]["UuidV4"];
@@ -1037,6 +1095,41 @@ export interface components {
         readonly ChangeMcpRegistrationState: {
             /** @enum {string} */
             readonly action: "enable" | "disable" | "revoke";
+        };
+        readonly CollaborationEndpoint: {
+            /** @enum {string} */
+            readonly transport: "websocket";
+            /**
+             * Format: uri
+             * @description Endpoint only; it contains neither authorization material nor session credentials.
+             */
+            readonly url: string;
+        };
+        readonly CollaborationGrant: {
+            /** @description Opaque one-use value sent only in the first CollaborationFrame Authenticate message. */
+            readonly authorization: string;
+            /** @constant */
+            readonly codec: "yjs-v1";
+            readonly endpoints: readonly components["schemas"]["CollaborationEndpoint"][];
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly grant_id: components["schemas"]["UuidV4"];
+            /** @description Server-derived privacy-safe label bound into the one-use grant. */
+            readonly presence_label: string;
+            readonly protocol_version: number;
+            readonly room: components["schemas"]["CollaborationSummary"];
+        };
+        readonly CollaborationSummary: {
+            readonly active: boolean;
+            readonly base_version_id: components["schemas"]["UuidV4"] | null;
+            readonly codec: "yjs-v1" | null;
+            readonly current_head_version_id: components["schemas"]["UuidV4"] | null;
+            readonly dirty_expires_at: string | null;
+            readonly durable_sequence: number | null;
+            readonly frozen: boolean;
+            readonly room_epoch: number | null;
+            readonly room_id: components["schemas"]["UuidV4"] | null;
+            readonly warning_at: string | null;
         };
         readonly CreateAdminMcpBlockRule: {
             /** @enum {string} */
@@ -1069,10 +1162,30 @@ export interface components {
             readonly transport: "streamable_http" | "stdio_catalog";
             readonly trust_profile: string;
         };
+        readonly CreateCollaborationGrant: {
+            readonly client_id: components["schemas"]["UuidV4"];
+            /**
+             * @description Pseudonyms are generated by FileBelt; display names come from the authenticated profile. Clients cannot supply collaborator labels.
+             * @enum {string}
+             */
+            readonly presence_mode: "pseudonym" | "display_name";
+            /**
+             * @description Phase 5 uses WebSocket. WebTransport remains reserved until its runtime and deployment boundary receive a separate review.
+             * @enum {string}
+             */
+            readonly transport: "websocket";
+        };
         readonly CreateDirectory: {
             /** Format: int64 */
             readonly expected_parent_generation: number;
             readonly name: string;
+        };
+        readonly CreateMarkdownImportIntent: {
+            readonly source_version_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly target_media_type?: "text/markdown";
+            /** @description Display name for a new file sibling of the source node. Existing nodes are never import targets. */
+            readonly target_name: string;
         };
         readonly CreateMcpDataGrant: {
             readonly actions: readonly ("use_mcp" | "read_metadata" | "read_content")[];
@@ -1163,9 +1276,11 @@ export interface components {
             readonly created_by: components["schemas"]["UuidV4"];
             readonly current: boolean;
             readonly id: components["schemas"]["UuidV4"];
+            readonly media_type: components["schemas"]["MediaType"];
             readonly node_id: components["schemas"]["UuidV4"];
             /** Format: int64 */
             readonly ordinal: number;
+            readonly provenance: components["schemas"]["VersionProvenance"];
             readonly restored_from_version_id: components["schemas"]["UuidV4"] | null;
             /** Format: int64 */
             readonly size_bytes: number;
@@ -1178,6 +1293,18 @@ export interface components {
             /** @constant */
             readonly state: "finalized";
             readonly upload_id: components["schemas"]["UuidV4"];
+        };
+        readonly MarkdownImportIntent: {
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly source_drive_id: components["schemas"]["UuidV4"];
+            readonly source_node_id: components["schemas"]["UuidV4"];
+            readonly source_version_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly target_media_type: "text/markdown";
+            readonly target_name: string;
+            readonly target_parent_id: components["schemas"]["UuidV4"];
         };
         readonly McpActivity: {
             /** @enum {string} */
@@ -1314,13 +1441,15 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
             /** @enum {string} */
-            readonly event: "started" | "progress" | "text" | "json" | "media" | "error" | "completed";
+            readonly event: "started" | "progress" | "text" | "json" | "semantic" | "media" | "error" | "completed";
             readonly invocation_id: components["schemas"]["UuidV4"];
             /** @description Bounded JSON rendered as a non-editable tree, never as HTML. */
             readonly json?: unknown;
             readonly media?: components["schemas"]["McpSafeMedia"] | null;
             readonly problem_code?: string | null;
             readonly progress?: number | null;
+            /** @description Route-specific semantic Markdown output with a UTF-8 byte cap of 2 MiB. It is rendered as data, not HTML. */
+            readonly semantic_output?: components["schemas"]["McpSemanticOutput"] | null;
             /** Format: int64 */
             readonly sequence: number;
             readonly text?: string | null;
@@ -1339,6 +1468,8 @@ export interface components {
             readonly attachments: readonly components["schemas"]["McpAttachmentBinding"][];
             readonly capability: components["schemas"]["McpCapabilityReference"];
             readonly registration_id: components["schemas"]["UuidV4"];
+            /** @description Route-specific normalized Markdown input with an exact node and immutable base-version context. Its UTF-8 byte length is capped at 2 MiB and is included in the exact intent digest. */
+            readonly semantic_input?: components["schemas"]["McpSemanticInput"] | null;
         };
         readonly McpOauthStart: {
             /** Format: uri */
@@ -1408,6 +1539,22 @@ export interface components {
             /** Format: int64 */
             readonly size_bytes: number;
         };
+        readonly McpSemanticInput: {
+            /** @description Exact immutable base version for the proposed transformation. */
+            readonly base_version_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly format: "filebelt.markdown.semantic.v1";
+            /** @description Valid UTF-8 Markdown normalized to LF without NUL; the route also enforces a 2 MiB UTF-8 byte limit. */
+            readonly markdown: string;
+            /** @description Exact Markdown file node whose normalized source is proposed for transformation. */
+            readonly node_id: components["schemas"]["UuidV4"];
+        };
+        readonly McpSemanticOutput: {
+            /** @constant */
+            readonly format: "filebelt.markdown.semantic.v1";
+            /** @description Valid UTF-8 Markdown normalized to LF without NUL; the route also enforces a 2 MiB UTF-8 byte limit. */
+            readonly markdown: string;
+        };
         readonly McpTestResult: {
             /** @enum {string} */
             readonly authentication_state: "not_required" | "missing" | "pending" | "ready" | "expired" | "revoked";
@@ -1418,6 +1565,8 @@ export interface components {
             readonly protocol_version: ("2026-07-28" | "2025-11-25") | null;
             readonly succeeded: boolean;
         };
+        /** @description A normalized media type. Values exposed on Node or FileVersion are trusted server-derived metadata; request values are declarations only. */
+        readonly MediaType: string;
         readonly NamespaceMutation: {
             /** Format: int64 */
             readonly expected_namespace_generation: number;
@@ -1427,6 +1576,7 @@ export interface components {
             readonly acl_generation: number;
             readonly display_name: string;
             readonly drive_id: components["schemas"]["UuidV4"];
+            readonly head_media_type: components["schemas"]["MediaType"] | null;
             readonly head_version_id: components["schemas"]["UuidV4"] | null;
             readonly id: components["schemas"]["UuidV4"];
             /** @enum {string} */
@@ -1555,6 +1705,13 @@ export interface components {
         readonly VersionPage: {
             readonly items: readonly components["schemas"]["FileVersion"][];
             readonly next_cursor: string | null;
+        };
+        readonly VersionProvenance: {
+            readonly creator_display_name: string;
+            readonly mcp_assisted: boolean;
+            /** @enum {string} */
+            readonly origin: "upload" | "markdown_save" | "collaboration_checkpoint" | "import" | "restore";
+            readonly source_version_id: components["schemas"]["UuidV4"] | null;
         };
     };
     responses: {
@@ -2301,6 +2458,91 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly getCollaborationSummary: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current durable room summary. A missing active room is represented by `active: false`. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CollaborationSummary"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly discardCollaboration: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Dirty room state is fenced and scheduled for discard. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createCollaborationGrant: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateCollaborationGrant"];
+            };
+        };
+        readonly responses: {
+            /** @description A no-store authorization grant and transport endpoints for one editing participant. */
+            readonly 201: {
+                headers: {
+                    readonly "Cache-Control"?: "no-store";
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CollaborationGrant"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly createDownloadGrant: {
         readonly parameters: {
             readonly query?: never;
@@ -2331,6 +2573,39 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["DownloadGrant"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMarkdownImportIntent: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateMarkdownImportIntent"];
+            };
+        };
+        readonly responses: {
+            /** @description Exact, short-lived import intent. Authorization is revalidated when it is consumed. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MarkdownImportIntent"];
                 };
             };
             readonly default: components["responses"]["Problem"];

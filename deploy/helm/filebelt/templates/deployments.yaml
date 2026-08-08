@@ -25,8 +25,11 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "web") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.oxibelt | sha256sum | quote }}
+        checksum/config: {{ tpl .Values.configuration.oxibelt . | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.publicTls.generation .Values.secrets.apiClientTls.generation .Values.secrets.ioClientTls.generation | sha256sum | quote }}
+        {{- if .Values.collaboration.enabled }}
+        checksum/collaboration-edge-client-tls: {{ .Values.secrets.collaborationEdgeClientTls.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-web
       automountServiceAccountToken: false
@@ -84,6 +87,9 @@ spec:
             - {name: public-tls, mountPath: /run/secrets/public-tls, readOnly: true}
             - {name: api-client-tls, mountPath: /run/secrets/api-client-tls, readOnly: true}
             - {name: io-client-tls, mountPath: /run/secrets/io-client-tls, readOnly: true}
+            {{- if .Values.collaboration.enabled }}
+            - {name: collaboration-edge-client-tls, mountPath: /run/secrets/collaboration-edge-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: oxibelt-config
@@ -114,6 +120,16 @@ spec:
               - {key: {{ .Values.secrets.ioClientTls.certificateKey }}, path: tls.crt}
               - {key: {{ .Values.secrets.ioClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.ioClientTls.caKey }}, path: server-ca.crt}
+        {{- if .Values.collaboration.enabled }}
+        - name: collaboration-edge-client-tls
+          secret:
+            secretName: {{ .Values.secrets.collaborationEdgeClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.collaborationEdgeClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.collaborationEdgeClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.collaborationEdgeClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---
 {{- $quiescedReplicas = ternary 0 .Values.workloads.api.replicas .Values.deployment.quiesced }}
@@ -138,7 +154,7 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "api") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.apiDatabase.generation .Values.secrets.oidcClient.generation .Values.secrets.oidcCa.generation .Values.secrets.capabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.digestKey.generation .Values.secrets.apiServerTls.generation | sha256sum | quote }}
         {{- if .Values.mcp.enabled }}
         checksum/mcp-client-tls: {{ .Values.secrets.apiMcpClientTls.generation | sha256sum | quote }}
@@ -245,7 +261,7 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "io") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.ioDatabase.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.ioServerTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-io
@@ -326,7 +342,7 @@ spec:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "maintenance") | indent 8 }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secrets: {{ .Values.secrets.maintenanceDatabase.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-maintenance

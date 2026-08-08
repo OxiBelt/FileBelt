@@ -14,7 +14,9 @@ The public control-plane contract is the OpenAPI 3.1 JSON REST API under
 `/api/v1`. The committed source is
 [`protocol/http/v1/openapi.yaml`](../protocol/http/v1/openapi.yaml). It covers
 OIDC and local sessions, drives and nodes, trash, immutable versions, upload and
-download grants, direct shares, ACL-governed shared views, per-principal MCP
+download grants, direct shares, ACL-governed shared views, Markdown
+collaboration summaries and first-frame grants, exact Markdown import intents,
+per-principal MCP
 registrations, capability review, approvals, invocation, version-pinned data
 grants, and tenant-administrator MCP templates, service identities, service
 grants, and global blocks. General tenant administration, preferences, and
@@ -84,7 +86,10 @@ time, and expiry as applicable. The lifetime is at most 60 seconds. Signed
 claims contain no maps, unordered fields, user paths, or physical locators.
 
 The operation vocabulary covers upload part, upload finalization, download,
-payload deletion, and payload scrub. Before touching storage, the worker
+payload deletion, and payload scrub. Collaboration uses the same signed
+capability envelope with dedicated scoped operation/resource bindings for CRDT
+object finalization and manifest reads; it never gives a browser or the
+collaboration role a payload mount. Before touching storage, the worker
 validates wire encoding, signature and key generation, audience and operation,
 time bounds, identifiers and ranges, fencing, replay state, and the current
 generation projection. Upload-part nonces are replay protected. The worker
@@ -97,6 +102,65 @@ short-lived, path-scoped `Secure` and `HttpOnly` capability cookie. Non-browser
 clients use `Authorization: fbcap1 <base64url-envelope>`. An admitted long
 stream rechecks the authoritative generation projection within 60 seconds and
 stops on mismatch or database uncertainty.
+
+## Markdown and collaboration contracts
+
+`filebelt-gfm-v1` accepts GitHub-Flavored Markdown with alerts, footnotes,
+Mermaid, and KaTeX. Raw HTML is rendered as literal text, not executed or
+sanitized HTML. Editable content is at most 2 MiB and viewable content is at
+most 8 MiB; invalid UTF-8 or a NUL byte is a fatal content error. The declared
+media type in `BeginUpload` is only a caller declaration. `Node.head_media_type`
+and `FileVersion.media_type` are trusted only after finalized bytes have been
+validated by the service.
+
+`GET .../collaboration` reports only the current durable room summary. `POST
+.../collaboration-grants` returns a no-store, opaque, one-use grant valid for
+at most 60 seconds; it is sent only in `filebelt.collaboration.v1`'s first
+`Authenticate` frame. WebSocket is the sole deployed transport. WebTransport
+has no Phase 5 listener, route, or configuration toggle; a future transport
+must repeat this contract review before it can carry these frames. Every
+participant reauthenticates within 60 seconds. Frame groups are capped at 2
+MiB, transferred chunks at 256 KiB, and use only the `yjs-v1` codec.
+The collaboration runtime verifies join grants exclusively with the configured
+API key generation. Its distinct collaboration capability key may sign only
+scoped storage capabilities and is never accepted as a join-grant issuer.
+An active room admits each opaque client identifier once; a second connection
+cannot replace the existing participant record and must reconnect with a new
+identifier.
+
+The collaboration role rejects a live source containing NUL before persisting
+or checkpointing it. It sends an acknowledgement only after the scoped I/O
+worker has finalized and fsynced the UUID-addressed CRDT object and PostgreSQL
+has fenced and committed its manifest. Awareness frames are ephemeral. A
+checkpoint is not an immutable file version; an explicit save consumes the
+checkpoint through the existing expected-head upload/commit path and creates a
+linear immutable version. `DELETE .../collaboration` discards dirty state; a
+head change outside the room freezes it for deterministic diff3 review.
+
+`POST .../markdown-import-intents` binds one short-lived import to an exact
+source drive/node/version and a new named sibling. A later `BeginUpload` may consume
+that `import_intent_id` or a `collaboration_checkpoint_id`, never both. Its
+version response includes trusted media type and provenance: origin, optional
+source version, creator display name, and whether MCP assisted the operation.
+The browser conversion path accepts only CSV, DOCX, ODP, ODS, ODT, PPTX, RTF,
+and XLSX at most 8 MiB. It uses the `officeparser/slim` browser module with OCR,
+attachment extraction, and remote assets disabled; conversion warnings,
+truncation, non-UTF-8 output, and NUL output fail rather than becoming an
+implicit save. The resulting Markdown remains a proposed new sibling and uses
+the exact import intent and ordinary upload/commit authorization path.
+
+The Markdown preview is a sandboxed opaque-origin iframe at
+`/markdown-preview/` with only `allow-scripts`. The parent has no Trusted Types
+policy; the child has only `filebelt-markdown-generated`, no network connection,
+and an allowlisted AST/message boundary. Mermaid and KaTeX output is sanitized
+before the child uses that policy. The child alone permits inline styles for
+that sanitized generated output; it does not permit inline script. The parent
+accepts only typed link messages
+from that frame and never treats preview output as authority. A data-free
+wildcard `postMessage` is permitted only for the initial connection handshake
+that transfers a dedicated `MessageChannel` port to the opaque child. All AST
+and link messages use that port, are bounded and typed, and the child
+recursively validates the complete AST before rendering it.
 
 ## MCP mediation contracts
 
@@ -116,6 +180,23 @@ JSON is a non-editable tree capped at depth 16, 200 entries per object or
 array, and 2,000 rendered values across the complete result. Media is decoded
 into a revocable Blob URL only after exact size and magic checks and is limited
 to 4 MiB and PNG, JPEG, WebP, MP3, Ogg, or WAV.
+
+For Markdown-capable MCP routes, `semantic_input` and `semantic_output` use
+the route-specific `filebelt.markdown.semantic.v1` envelope. Each is valid
+UTF-8 normalized to LF without NUL and is limited to 2 MiB measured as UTF-8
+bytes. Input additionally carries an exact node and immutable base-version
+context and is part of the exact invocation-intent digest; output remains a
+context-free data-only proposal and never becomes an implicit file save or
+version. Invocation persistence retains only the context and domain-separated
+normalized-source digests, never raw Markdown.
+The broker carries that envelope only in MCP request/result `_meta` under the
+`filebelt/semantic` key and rejects a malformed or oversized value on either
+side. A collaboration update may record a successful proposal only when the
+authority transaction matches tenant, principal, node, base version, and the
+staged normalized source-before/source-after digests. A later explicit save
+derives the version's `mcp_assisted` provenance solely from those verified
+groups; ordinary uploads, saves, and copies carry no MCP provenance field and
+clients cannot assert the provenance boolean themselves.
 Images are rejected above 4,096 pixels on either axis or 16 million pixels;
 audio is metadata-only until user action, never autoplays, and is rejected
 above five minutes. HTML, script, SVG, remote media URLs, and unrecognized
@@ -188,7 +269,7 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 3; older versions are rejected. `mcp.enabled`
+The current format is version 4; older versions are rejected. `mcp.enabled`
 defaults to false, and `mcp.runners.enabled` is a separate Kubernetes-only
 opt-in that requires broker/controller mTLS, a digest-pinned runner image, and
 the verified catalog inputs.

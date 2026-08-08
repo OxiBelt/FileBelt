@@ -9,6 +9,18 @@ criterion does not certify generic safe-to-deploy use.
 """
 implies = "safe-to-run"
 
+[[audits.arc-swap]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "1.9.2"
+notes = "Reviewed complete checksum-matched source and the default feature. It has no build script or ambient I/O. Its raw-pointer debt and reference-count paths preserve ownership through the sealed standard Arc/Rc implementations; FileBelt reaches it only through Yrs using standard Arc values, not a custom unsafe RefCnt implementation. Contention can affect availability but does not provide an untrusted memory-safety or authority boundary bypass."
+
+[[audits.async-lock]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "3.4.2"
+notes = "Reviewed complete checksum-matched source with the default std feature. It has no build script, filesystem, network, or process authority. Its UnsafeCell, guard lifetime, and atomic reader/writer transitions keep mutation behind acquired locks; misuse-capable raw operations are internal or explicitly unsafe. An untrusted workload can cause ordinary lock contention but cannot obtain a second mutable reference through the safe API."
+
 [[audits.cmpv2]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -195,6 +207,12 @@ criteria = "filebelt-constrained-deployment"
 version = "0.11.0"
 notes = "Reviewed complete checksum-matched defaults-off source. Generic authority pools do not associate every validFor window with the selected Fulcio, CT, or TSA material. FileBelt's only caller requires one bounded Fulcio, Rekor, and CT authority, no TSA, one authenticated Rekor v1 event with the exact log ID, and the selected integrated time inside all three windows."
 
+[[audits.smallstr]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.3.1"
+notes = "Reviewed complete checksum-matched source with the union feature selected by Yrs. It has no build script or ambient I/O. Unsafe UTF-8, slice, and union operations remain behind checked string construction and character-boundary calculations; the two unchecked public constructors require an explicit unsafe caller contract and are not used by FileBelt."
+
 [[audits.tls_codec]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -206,6 +224,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.4.2"
 notes = "Reviewed complete checksum-matched proc-macro source. It has no unsafe code or ambient I/O, generates sequential field decoding with discriminant rejection, and the conditional_deserialization feature is unselected."
+
+[[audits.tokio-tungstenite]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.29.0"
+notes = "Reviewed complete checksum-matched source with default connect, handshake, and stream features. It has no build script or unsafe code. Network connections are opened only through explicit caller-supplied Tokio streams or the optional connect API; FileBelt uses the Axum WebSocket server path behind OxiBelt. Framing and protocol parsing delegate to the separately audited Tungstenite crate."
 
 [[audits.tonic]]
 who = "OpenAI Codex"
@@ -231,6 +255,12 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 notes = "Reviewed complete checksum-matched source. It performs pure caller-driven tracing metadata and field serialization with no unsafe code, build script, or ambient I/O."
 
+[[audits.tungstenite]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.29.0"
+notes = "Reviewed complete checksum-matched source with the locked handshake features. It has no build script. UTF-8 unchecked conversions follow validation of the retained byte prefix, and masking uses alignment-safe slices; protocol input is length-checked before frame allocation and state transitions reject invalid handshakes. Stream I/O is supplied by the caller and carries no ambient credentials or authority."
+
 [[audits.x509-cert]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -242,3 +272,9 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.1.0"
 notes = "Reviewed complete checksum-matched safe DER timestamp-protocol structures. It has no build script, unsafe code, or ambient I/O; FileBelt rejects TSA material, so its CMP/CRMF dependency path is compiled but never reached."
+
+[[audits.yrs]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.27.3"
+notes = "Reviewed complete checksum-matched source with default features only; sync and weak features are unselected. It has no build script or ambient I/O. The CRDT's pointer, interior-mutability, and transaction unsafe blocks retain ownership in document/block-store lifetimes, while decoder unchecked UTF-8 follows validated wire-string reads. FileBelt additionally bounds each yjs-v1 group to 2 MiB and chunk to 256 KiB, serializes durable ordering through fenced PostgreSQL manifests, and does not expose Yrs raw-pointer APIs to untrusted callers."

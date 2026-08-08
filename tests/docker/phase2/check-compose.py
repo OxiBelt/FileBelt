@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 
-"""Render and validate the Phase 4 Docker trust and mount boundaries."""
+"""Render and validate the Phase 5 Docker trust and mount boundaries."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,20 @@ def main() -> int:
         cwd=ROOT,
         check=True,
     )
+    configurations = {}
+    for path in (
+        ROOT / "deploy/compose/filebelt.toml",
+        ROOT / "deploy/compose/filebelt-mcp.toml",
+        ROOT / "deploy/compose/filebelt-collaboration.toml",
+        ROOT / "ui/web/edge/oxibelt.toml",
+    ):
+        with path.open("rb") as source:
+            configurations[path.name] = tomllib.load(source)
+    for name in ("filebelt.toml", "filebelt-mcp.toml"):
+        collaboration_settings = configurations[name]["collaboration"]
+        assert collaboration_settings["enabled"] is True, name
+        assert collaboration_settings["capability_key_generation"] == 2, name
+        assert collaboration_settings["io_url"] == "http://filebelt-worker-io:8081/", name
     with tempfile.TemporaryDirectory(prefix="filebelt-phase2-compose-") as directory:
         state = Path(directory) / "state"
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
@@ -100,6 +115,7 @@ def main() -> int:
         "filebelt-worker-maintenance",
         "filebelt-io-database-unavailable",
         "filebelt-mcp-broker",
+        "filebelt-collaboration",
         "filebelt-mcp-egress",
     }
     for name in hardened:
@@ -114,6 +130,7 @@ def main() -> int:
     io = services["filebelt-worker-io"]
     maintenance = services["filebelt-worker-maintenance"]
     broker = services["filebelt-mcp-broker"]
+    collaboration = services["filebelt-collaboration"]
     gateway = services["filebelt-mcp-egress"]
     web = services["filebelt-web"]
     assert not api.get("volumes"), "the API must not mount payload storage"
@@ -124,8 +141,10 @@ def main() -> int:
     assert set(maintenance["networks"]) == {"control"}
     assert set(web["networks"]) == {"edge"}
     assert set(broker["networks"]) == {"control"}
+    assert set(collaboration["networks"]) == {"control", "edge"}
     assert set(gateway["networks"]) == {"control", "internet-egress"}
     assert not broker.get("volumes"), "the MCP broker must not mount payload storage"
+    assert not collaboration.get("volumes"), "collaboration must not mount payload storage"
     assert not gateway.get("volumes"), "the egress gateway must not mount payload storage"
     assert not web.get("volumes")
     assert secret_sources(web) == {
@@ -153,6 +172,24 @@ def main() -> int:
         "mcp-egress-client-private-key",
         "mcp-egress-ca-certificate",
     }
+    assert secret_sources(collaboration) == {
+        "collaboration-database-url",
+        "collaboration-capability-private-key",
+        "capability-public-keyset",
+    }
+    collaboration_config = next(
+        config
+        for config in collaboration["configs"]
+        if config["target"] == "/etc/filebelt/filebelt.toml"
+    )
+    assert collaboration_config["source"] == "filebelt-collaboration-config"
+    assert collaboration["profiles"] == ["core"]
+    assert collaboration["expose"] == ["8085", "9090"]
+    assert all(
+        not str(port).endswith("/udp")
+        for service in services.values()
+        for port in service.get("ports", []) + service.get("expose", [])
+    )
     assert secret_sources(gateway) == {
         "mcp-egress-server-certificate",
         "mcp-egress-server-private-key",
@@ -185,7 +222,7 @@ def main() -> int:
             assert "seccomp:unconfined" not in service.get("security_opt", []), name
     assert services["filebelt-io-database-unavailable"]["network_mode"] == "none"
 
-    print("Phase 4 Compose contract is valid")
+    print("Phase 5 Compose contract is valid")
     return 0
 
 

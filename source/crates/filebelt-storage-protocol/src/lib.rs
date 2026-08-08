@@ -25,7 +25,7 @@ mod generated {
 pub use generated::{CapabilityClaims, CapabilityOperation, SignedCapability};
 
 /// Public verification key indexed by rotation generation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerificationKey {
     pub generation: u32,
     pub public_key: Vec<u8>,
@@ -162,6 +162,44 @@ pub fn public_key(key_pair: &Ed25519KeyPair, generation: u32) -> VerificationKey
     }
 }
 
+pub fn parse_verification_keyset(
+    source: &str,
+    required_generation: u32,
+) -> Result<Vec<VerificationKey>, CapabilityError> {
+    let mut lines = source.lines();
+    if lines.next() != Some("filebelt-capability-keyset-v1") {
+        return Err(CapabilityError::InvalidEncoding);
+    }
+    let mut keys = Vec::new();
+    for line in lines {
+        let (generation, encoded) = line
+            .split_once(':')
+            .ok_or(CapabilityError::InvalidEncoding)?;
+        let generation = generation
+            .parse::<u32>()
+            .map_err(|_| CapabilityError::InvalidEncoding)?;
+        let public_key = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| CapabilityError::InvalidEncoding)?;
+        if generation == 0
+            || public_key.len() != 32
+            || keys
+                .iter()
+                .any(|key: &VerificationKey| key.generation == generation)
+        {
+            return Err(CapabilityError::InvalidEncoding);
+        }
+        keys.push(VerificationKey {
+            generation,
+            public_key,
+        });
+    }
+    if !keys.iter().any(|key| key.generation == required_generation) {
+        return Err(CapabilityError::UnknownKey);
+    }
+    Ok(keys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +282,21 @@ mod tests {
                 120,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn parses_bounded_versioned_keysets() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let encoded = URL_SAFE_NO_PAD.encode(pair.public_key().as_ref());
+        let keys =
+            parse_verification_keyset(&format!("filebelt-capability-keyset-v1\n2:{encoded}\n"), 2)
+                .unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].generation, 2);
+        assert_eq!(
+            parse_verification_keyset(&format!("filebelt-capability-keyset-v1\n2:{encoded}\n"), 1,),
+            Err(CapabilityError::UnknownKey)
         );
     }
 }

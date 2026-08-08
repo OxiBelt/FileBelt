@@ -1,0 +1,87 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.collaboration.enabled }}
+{{- $replicas := ternary 0 .Values.workloads.collaboration.replicas .Values.deployment.quiesced -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" . }}-collaboration
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  minReadySeconds: {{ .Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ .Values.deployment.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 8 }}
+      annotations:
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s" .Values.secrets.collaborationDatabase.generation .Values.secrets.collaborationCapabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.collaborationServerTls.generation .Values.secrets.collaborationIoClientTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-collaboration
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workloads.collaboration.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}}}
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+      containers:
+        - name: collaboration
+          image: {{ include "filebelt.image" (dict "root" . "role" "filebelt-collaboration") }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]
+          ports:
+            - {name: collaboration-ws, containerPort: 8085, protocol: TCP}
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workloads.collaboration.resources | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: database, mountPath: /run/secrets/collaboration-database-url, subPath: database-url, readOnly: true}
+            - {name: capability-private, mountPath: /run/secrets/collaboration-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: server-tls, mountPath: /run/secrets/collaboration-server-tls, readOnly: true}
+            - {name: io-client-tls, mountPath: /run/secrets/collaboration-io-client-tls, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
+        - name: database
+          secret: {secretName: {{ .Values.secrets.collaborationDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationDatabase.key }}, path: database-url}]}
+        - name: capability-private
+          secret: {secretName: {{ .Values.secrets.collaborationCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: capability-public
+          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: server-tls
+          secret:
+            secretName: {{ .Values.secrets.collaborationServerTls.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.collaborationServerTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.collaborationServerTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.collaborationServerTls.caKey }}, path: client-ca.crt}]
+        - name: io-client-tls
+          secret:
+            secretName: {{ .Values.secrets.collaborationIoClientTls.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.collaborationIoClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.collaborationIoClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.collaborationIoClientTls.caKey }}, path: server-ca.crt}]
+{{ include "filebelt.tmpVolume" . | indent 8 }}
+{{- end }}

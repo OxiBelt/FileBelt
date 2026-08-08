@@ -23,11 +23,22 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "filebelt.filebeltConfigName" -}}
-{{- printf "%s-config-%s" (include "filebelt.name" . | trunc 42 | trimSuffix "-") (.Values.configuration.filebelt | sha256sum | trunc 12) -}}
+{{- $configuration := include "filebelt.renderedFilebeltConfiguration" . -}}
+{{- printf "%s-config-%s" (include "filebelt.name" . | trunc 42 | trimSuffix "-") ($configuration | sha256sum | trunc 12) -}}
+{{- end -}}
+
+{{- define "filebelt.renderedFilebeltConfiguration" -}}
+{{- $configuration := tpl .Values.configuration.filebelt . -}}
+{{- if .Values.collaboration.enabled -}}
+{{- $configuration = replace "[collaboration]\nenabled = false" "[collaboration]\nenabled = true" $configuration -}}
+{{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $configuration -}}
+{{- end -}}
+{{- $configuration -}}
 {{- end -}}
 
 {{- define "filebelt.oxibeltConfigName" -}}
-{{- printf "%s-edge-%s" (include "filebelt.name" . | trunc 44 | trimSuffix "-") (.Values.configuration.oxibelt | sha256sum | trunc 12) -}}
+{{- $configuration := tpl .Values.configuration.oxibelt . -}}
+{{- printf "%s-edge-%s" (include "filebelt.name" . | trunc 44 | trimSuffix "-") ($configuration | sha256sum | trunc 12) -}}
 {{- end -}}
 
 {{- define "filebelt.secretGenerationDigest" -}}
@@ -39,8 +50,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "filebelt.validate" -}}
-{{- if not (hasPrefix "version = 3" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 3" -}}
+{{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
+{{- if not (hasPrefix "version = 4" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 4" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -54,6 +66,32 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (eq (len .Values.networkPolicy.dns.to) 0) (eq (len .Values.networkPolicy.postgres.to) 0) (eq (len .Values.networkPolicy.oidcGateway.to) 0) -}}
 {{- fail "DNS, PostgreSQL, and OIDC gateway peers must not be empty" -}}
 {{- end -}}
+{{- if .Values.collaboration.enabled -}}
+{{- if not (regexMatch "(?m)^\\[collaboration\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
+{{- fail "collaboration.enabled requires configuration.filebelt to enable collaboration" -}}
+{{- end -}}
+{{- $collaborationSections := regexSplit "(?m)^\\[backend_tls\\.collaboration\\]\\s*$" $renderedFilebeltConfig 2 -}}
+{{- if ne (len $collaborationSections) 2 -}}
+{{- fail "collaboration.enabled requires an exact backend_tls.collaboration section" -}}
+{{- end -}}
+{{- $collaborationTls := first (regexSplit "(?m)^\\[" (last $collaborationSections) 2) -}}
+{{- if or (not (contains "allowed_client_uri_sans = [\"spiffe://filebelt/web/collaboration\"]" $collaborationTls)) (contains "allowed_client_trust_domains" $collaborationTls) -}}
+{{- fail "collaboration backend TLS must permit only the exact FileBelt web SPIFFE identity" -}}
+{{- end -}}
+{{- $ioSections := regexSplit "(?m)^\\[backend_tls\\.io\\]\\s*$" $renderedFilebeltConfig 2 -}}
+{{- if ne (len $ioSections) 2 -}}
+{{- fail "collaboration.enabled requires an exact backend_tls.io section" -}}
+{{- end -}}
+{{- $ioTls := first (regexSplit "(?m)^\\[" (last $ioSections) 2) -}}
+{{- if or (not (contains "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
+{{- fail "I/O backend TLS must permit only the exact web, enabled MCP, and collaboration SPIFFE identities" -}}
+{{- end -}}
+{{- range $required := list "capability_public_key_file = \"/run/secrets/capability-public-keyset\"" "collaboration_ws = \"0.0.0.0:8085\"" "collaboration_webtransport = \"0.0.0.0:8086\"" "capability_key_generation = 2" "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/collaboration-io-client-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/collaboration-io-client-tls/tls.key\"" "server_ca_file = \"/run/secrets/collaboration-io-client-tls/server-ca.crt\"" -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
+{{- fail (printf "collaboration.enabled requires configuration.filebelt setting %s" $required) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if .Values.mcp.enabled -}}
 {{- if not .Values.networkPolicy.mcpGateway.enabled -}}
 {{- fail "mcp.enabled requires networkPolicy.mcpGateway.enabled" -}}
@@ -61,10 +99,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- if eq (len .Values.networkPolicy.mcpGateway.to) 0 -}}
 {{- fail "mcp.enabled requires a nonempty MCP gateway peer allowlist" -}}
 {{- end -}}
-{{- if not (regexMatch "(?m)^\\[mcp\\]\\s*$[\\s\\S]*^enabled = true\\s*$" .Values.configuration.filebelt) -}}
+{{- if not (regexMatch "(?m)^\\[mcp\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
 {{- fail "mcp.enabled requires configuration.filebelt to enable the MCP broker" -}}
 {{- end -}}
-{{- $brokerSections := regexSplit "(?m)^\\[backend_tls\\.mcp_broker\\]\\s*$" .Values.configuration.filebelt 2 -}}
+{{- $brokerSections := regexSplit "(?m)^\\[backend_tls\\.mcp_broker\\]\\s*$" $renderedFilebeltConfig 2 -}}
 {{- if ne (len $brokerSections) 2 -}}
 {{- fail "mcp.enabled requires an exact backend_tls.mcp_broker section" -}}
 {{- end -}}
@@ -76,7 +114,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (not (contains $brokerClientUris $brokerTls)) (contains "allowed_client_trust_domains" $brokerTls) -}}
 {{- fail "MCP broker backend TLS must permit only the exact FileBelt API and enabled runner SPIFFE identities" -}}
 {{- end -}}
-{{- $ioSections := regexSplit "(?m)^\\[backend_tls\\.io\\]\\s*$" .Values.configuration.filebelt 2 -}}
+{{- $ioSections := regexSplit "(?m)^\\[backend_tls\\.io\\]\\s*$" $renderedFilebeltConfig 2 -}}
 {{- if ne (len $ioSections) 2 -}}
 {{- fail "mcp.enabled requires an exact backend_tls.io section" -}}
 {{- end -}}
@@ -85,7 +123,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "I/O backend TLS must permit only the exact FileBelt web and MCP broker SPIFFE identities" -}}
 {{- end -}}
 {{- range $required := list "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/mcp-backend-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/mcp-backend-tls/tls.key\"" "server_ca_file = \"/run/secrets/mcp-backend-tls/server-ca.crt\"" -}}
-{{- if not (contains $required $.Values.configuration.filebelt) -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "mcp.enabled requires configuration.filebelt attachment setting %s" $required) -}}
 {{- end -}}
 {{- end -}}
@@ -94,7 +132,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if eq .Values.mcp.runners.namespace .Release.Namespace -}}
 {{- fail "mcp.runners.namespace must be a dedicated namespace separate from the FileBelt release namespace" -}}
 {{- end -}}
-{{- if not (contains "mcp_runner_relay = \"0.0.0.0:8084\"" .Values.configuration.filebelt) -}}
+{{- if not (contains "mcp_runner_relay = \"0.0.0.0:8084\"" $renderedFilebeltConfig) -}}
 {{- fail "mcp.runners.enabled requires configuration.filebelt listener mcp_runner_relay on 0.0.0.0:8084" -}}
 {{- end -}}
 {{- if not .Values.networkPolicy.kubernetesApi.enabled -}}
@@ -104,10 +142,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "mcp.runners.enabled requires an exact Kubernetes API peer allowlist" -}}
 {{- end -}}
 {{- $runnerImage := include "filebelt.image" (dict "root" . "role" "filebelt-mcp-runner") -}}
-{{- if not (contains (printf "runner_image = %q" $runnerImage) .Values.configuration.filebelt) -}}
+{{- if not (contains (printf "runner_image = %q" $runnerImage) $renderedFilebeltConfig) -}}
 {{- fail "mcp.runners.enabled requires configuration.filebelt runner_image to match the chart digest" -}}
 {{- end -}}
-{{- $runnerSections := regexSplit "(?m)^\\[mcp\\.runners\\]\\s*$" .Values.configuration.filebelt 2 -}}
+{{- $runnerSections := regexSplit "(?m)^\\[mcp\\.runners\\]\\s*$" $renderedFilebeltConfig 2 -}}
 {{- if ne (len $runnerSections) 2 -}}
 {{- fail "mcp.runners.enabled requires an exact mcp.runners configuration section" -}}
 {{- end -}}
@@ -116,10 +154,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "mcp.runners.enabled requires configuration.filebelt namespace to match mcp.runners.namespace" -}}
 {{- end -}}
 {{- $controllerUrl := printf "https://%s-controller.%s.svc:8083/" (include "filebelt.name" .) .Release.Namespace -}}
-{{- if not (contains (printf "controller_url = %q" $controllerUrl) .Values.configuration.filebelt) -}}
+{{- if not (contains (printf "controller_url = %q" $controllerUrl) $renderedFilebeltConfig) -}}
 {{- fail "mcp.runners.enabled requires configuration.filebelt controller_url to match the chart Service" -}}
 {{- end -}}
-{{- $controllerSections := regexSplit "(?m)^\\[backend_tls\\.controller\\]\\s*$" .Values.configuration.filebelt 2 -}}
+{{- $controllerSections := regexSplit "(?m)^\\[backend_tls\\.controller\\]\\s*$" $renderedFilebeltConfig 2 -}}
 {{- if ne (len $controllerSections) 2 -}}
 {{- fail "mcp.runners.enabled requires an exact backend_tls.controller section" -}}
 {{- end -}}
@@ -128,7 +166,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "controller backend TLS must permit only the exact FileBelt MCP broker SPIFFE identity" -}}
 {{- end -}}
 {{- range $required := list "catalog_file = \"/etc/filebelt/mcp/catalog/catalog.json\"" "trusted_root_file = \"/etc/filebelt/mcp/trust/trusted-root.json\"" "bundle_directory = \"/etc/filebelt/mcp/bundles\"" "controller_client_certificate_chain_file = \"/run/secrets/controller-client-tls/tls.crt\"" "controller_client_private_key_file = \"/run/secrets/controller-client-tls/tls.key\"" "controller_server_ca_file = \"/run/secrets/controller-client-tls/server-ca.crt\"" -}}
-{{- if not (contains $required $.Values.configuration.filebelt) -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "mcp.runners.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
 {{- end -}}

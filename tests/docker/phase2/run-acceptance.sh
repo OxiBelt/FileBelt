@@ -37,6 +37,7 @@ fi
 compose_state_dir="${host_repo_root}${local_state_dir#"${repo_root}"}"
 export FILEBELT_STATE_DIR=${compose_state_dir}
 export FILEBELT_CONFIG_FILE="${host_repo_root}/deploy/compose/filebelt.toml"
+export FILEBELT_COLLABORATION_CONFIG_FILE="${host_repo_root}/deploy/compose/filebelt-collaboration.toml"
 export FILEBELT_EDGE_CONFIG_FILE="${host_repo_root}/ui/web/edge/oxibelt.acceptance.toml"
 export FILEBELT_POSTGRES_ROLE_SCRIPT_FILE="${host_repo_root}/deploy/compose/postgres/bootstrap-runtime-roles.sh"
 export FILEBELT_POSTGRES_ROLES_FILE="${host_repo_root}/source/migrations/postgres/roles.sql"

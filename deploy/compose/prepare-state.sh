@@ -36,6 +36,7 @@ api_password=$(random_hex)
 io_password=$(random_hex)
 maintenance_password=$(random_hex)
 mcp_password=$(random_hex)
+collaboration_password=$(random_hex)
 
 printf '%s\n' "${owner_password}" >"${state_dir}/secrets/postgres-owner-password"
 printf '%s\n' "${migrator_password}" >"${state_dir}/secrets/migrator-database-password"
@@ -43,6 +44,7 @@ printf '%s\n' "${api_password}" >"${state_dir}/secrets/api-database-password"
 printf '%s\n' "${io_password}" >"${state_dir}/secrets/io-database-password"
 printf '%s\n' "${maintenance_password}" >"${state_dir}/secrets/maintenance-database-password"
 printf '%s\n' "${mcp_password}" >"${state_dir}/secrets/mcp-database-password"
+printf '%s\n' "${collaboration_password}" >"${state_dir}/secrets/collaboration-database-password"
 printf 'postgresql://filebelt_migrator_login:%s@postgres:5432/filebelt?sslmode=disable&options=-c%%20role%%3Dfilebelt_migrator\n' \
   "${migrator_password}" >"${state_dir}/secrets/migrator-database-url"
 printf 'postgresql://filebelt_api_login:%s@postgres:5432/filebelt?sslmode=disable\n' \
@@ -53,6 +55,8 @@ printf 'postgresql://filebelt_maintenance_login:%s@postgres:5432/filebelt?sslmod
   "${maintenance_password}" >"${state_dir}/secrets/maintenance-database-url"
 printf 'postgresql://filebelt_mcp_broker_login:%s@postgres:5432/filebelt?sslmode=disable\n' \
   "${mcp_password}" >"${state_dir}/secrets/mcp-database-url"
+printf 'postgresql://filebelt_collaboration_login:%s@postgres:5432/filebelt?sslmode=disable\n' \
+  "${collaboration_password}" >"${state_dir}/secrets/collaboration-database-url"
 vault_key=$(openssl rand -base64 32 | tr -d '\n')
 printf '{"format":"filebelt.mcp-keyring.v1","keys":[{"generation":1,"key_base64":"%s"}]}\n' \
   "${vault_key}" >"${state_dir}/secrets/mcp-vault-keyring.json"
@@ -61,7 +65,7 @@ openssl rand 32 >"${state_dir}/secrets/digest-key"
 
 openssl genpkey -algorithm ED25519 -outform DER \
   -out "${state_dir}/secrets/capability-private-key"
-public_key=$(
+api_public_key=$(
   openssl pkey -inform DER -in "${state_dir}/secrets/capability-private-key" \
     -pubout -outform DER |
     tail -c 32 |
@@ -69,7 +73,17 @@ public_key=$(
     tr '+/' '-_' |
     tr -d '=\n'
 )
-printf 'filebelt-capability-keyset-v1\n1:%s\n' "${public_key}" \
+openssl genpkey -algorithm ED25519 -outform DER \
+  -out "${state_dir}/secrets/collaboration-capability-private-key"
+collaboration_public_key=$(
+  openssl pkey -inform DER -in "${state_dir}/secrets/collaboration-capability-private-key" \
+    -pubout -outform DER |
+    tail -c 32 |
+    base64 |
+    tr '+/' '-_' |
+    tr -d '=\n'
+)
+printf 'filebelt-capability-keyset-v1\n1:%s\n2:%s\n' "${api_public_key}" "${collaboration_public_key}" \
   >"${state_dir}/secrets/capability-public-keyset"
 
 openssl req -x509 -newkey rsa:3072 -nodes -days 30 \

@@ -26,6 +26,7 @@ RUST_IMAGE_LICENSES = {
         "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0"
     ),
     "filebelt-media-controller": "Apache-2.0 AND MIT",
+    "filebelt-collaboration": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-mcp-broker": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-controller": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-mcp-runner": "Apache-2.0 AND MIT",
@@ -52,6 +53,7 @@ BINARIES = {
     "filebelt-worker-io": "/usr/local/bin/filebelt-worker-io",
     "filebelt-worker-maintenance": "/usr/local/bin/filebelt-worker-maintenance",
     "filebelt-media-controller": "/usr/local/bin/filebelt-media-controller",
+    "filebelt-collaboration": "/usr/local/bin/filebelt-collaboration",
     "filebelt-mcp-broker": "/usr/local/bin/filebelt-mcp-broker",
     "filebelt-controller": "/usr/local/bin/filebelt-controller",
     "filebelt-mcp-runner": "/usr/local/bin/filebelt-mcp-runner",
@@ -305,7 +307,10 @@ def validate(
         for key, value in expected_base_labels.items():
             if labels.get(key) != value:
                 raise ValidationError(f"web label {key} is not bound to the admitted OxiBelt base")
-        for asset in ("/srv/filebelt/web/index.html", "/srv/filebelt/markdown/index.js"):
+        for asset in (
+            "/srv/filebelt/web/index.html",
+            "/srv/filebelt/markdown-preview/index.html",
+        ):
             if not required_file(files, asset).data:
                 raise ValidationError(f"web artifact is missing: {asset}")
         edge_config = required_file(files, "/etc/oxibelt/config/oxibelt.toml").data
@@ -313,11 +318,16 @@ def validate(
             b'path_prefix = "/api/v1"',
             b'path_prefix = "/io/v1"',
             b'path_prefix = "/public/v1"',
+            b'path_prefix = "/collaboration/v1/ws"',
+            b'path_prefix = "/markdown-preview/"',
             b'mode = "overwrite"',
             b'retry_non_idempotent = false',
             b'value = "no-store"',
             b'spa_fallback = "/index.html"',
             b'http3 = false',
+            b"require-trusted-types-for 'script'",
+            b"trusted-types 'none'",
+            b"trusted-types filebelt-markdown-generated",
         ]:
             if contract not in edge_config:
                 raise ValidationError(f"web edge config is missing contract: {contract!r}")

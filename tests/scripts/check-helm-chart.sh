@@ -71,6 +71,37 @@ assert_document_not_contains() {
   fi
 }
 
+assert_rendered_toml() {
+  local file="$1" key="$2"
+  python3 - "${file}" "${key}" <<'PY'
+import sys
+import tomllib
+
+manifest_path, key = sys.argv[1:]
+needle = f"  {key}: |"
+for document in open(manifest_path, encoding="utf-8").read().split("\n---\n"):
+    lines = document.splitlines()
+    if "kind: ConfigMap" not in lines or needle not in lines:
+        continue
+    start = lines.index(needle) + 1
+    rendered = []
+    for line in lines[start:]:
+        if line.startswith("    "):
+            rendered.append(line[4:])
+        elif not line:
+            rendered.append("")
+        else:
+            break
+    try:
+        tomllib.loads("\n".join(rendered))
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"{manifest_path}: rendered {key} is invalid TOML: {error}") from error
+    raise SystemExit(0)
+
+raise SystemExit(f"{manifest_path}: could not find ConfigMap data key {key}")
+PY
+}
+
 expect_failure() {
   local name="$1"
   shift
@@ -80,7 +111,7 @@ expect_failure() {
   fi
 }
 
-for command in helm grep awk mktemp sed sha256sum; do
+for command in helm grep awk mktemp python3 sed sha256sum; do
   require_command "${command}"
 done
 
@@ -104,6 +135,10 @@ helm lint "${chart}" --strict --kube-version 1.36.0 \
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --values "${repo_root}/tests/kubernetes/values-ci.yaml" \
   >"${temporary}/render-ci-values.yaml"
+assert_rendered_toml "${default_manifest}" filebelt.toml
+assert_rendered_toml "${default_manifest}" oxibelt.toml
+assert_rendered_toml "${temporary}/render-ci-values.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/render-ci-values.yaml" oxibelt.toml
 assert_count "${default_manifest}" '^kind: Deployment$' 4
 assert_count "${default_manifest}" '^kind: Service$' 7
 assert_count "${default_manifest}" '^kind: ServiceAccount$' 5
@@ -155,12 +190,48 @@ assert_document_not_contains "${default_manifest}" Deployment filebelt-web 'clai
 assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'claimName:'
 assert_document_contains "${default_manifest}" Deployment filebelt-io 'claimName: filebelt-payloads'
 assert_document_contains "${default_manifest}" Deployment filebelt-maintenance 'claimName: filebelt-payloads'
+assert_not_contains "${default_manifest}" 'filebelt-collaboration'
+assert_not_contains "${default_manifest}" '/collaboration/v1/ws'
+assert_not_contains "${default_manifest}" '/collaboration/v1/wt'
+assert_not_contains "${default_manifest}" 'host_key_file = "/run/secrets/collaboration-quic-host-key/quic-host-key.b64"'
 for component in web api io maintenance; do
   assert_document_contains "${default_manifest}" Deployment "filebelt-${component}" 'readOnlyRootFilesystem: true'
   assert_document_contains "${default_manifest}" Deployment "filebelt-${component}" 'drop: ["ALL"]'
   assert_document_contains "${default_manifest}" Deployment "filebelt-${component}" 'type: RuntimeDefault'
   assert_document_contains "${default_manifest}" Deployment "filebelt-${component}" 'enableServiceLinks: false'
 done
+
+helm template phase5 "${chart}" --kube-version 1.36.0 \
+  --set collaboration.enabled=true >"${temporary}/collaboration.yaml"
+assert_rendered_toml "${temporary}/collaboration.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/collaboration.yaml" oxibelt.toml
+assert_count "${temporary}/collaboration.yaml" '^kind: Deployment$' 5
+assert_count "${temporary}/collaboration.yaml" '^kind: PodDisruptionBudget$' 4
+assert_count "${temporary}/collaboration.yaml" '^kind: NetworkPolicy$' 11
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'replicas: 2'
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'automountServiceAccountToken: false'
+assert_document_not_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'claimName:'
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'mountPath: /run/secrets/capability-public-keyset'
+assert_document_contains "${temporary}/collaboration.yaml" Service filebelt-collaboration 'port: 8085'
+assert_document_contains "${temporary}/collaboration.yaml" NetworkPolicy filebelt-collaboration-ingress 'port: collaboration-ws'
+assert_document_contains "${temporary}/collaboration.yaml" NetworkPolicy filebelt-collaboration-egress 'port: io'
+assert_contains "${temporary}/collaboration.yaml" 'path_prefix = "/collaboration/v1/ws"'
+assert_contains "${temporary}/collaboration.yaml" 'protocols = ["websocket"]'
+assert_not_contains "${temporary}/collaboration.yaml" 'path_prefix = "/collaboration/v1/wt"'
+assert_not_contains "${temporary}/collaboration.yaml" 'host_key_file = "/run/secrets/collaboration-quic-host-key/quic-host-key.b64"'
+
+if helm template phase5 "${chart}" --kube-version 1.36.0 \
+  --set collaboration.enabled=true \
+  --set collaboration.webtransport.enabled=true >"${temporary}/collaboration-webtransport.yaml" 2>/dev/null; then
+  echo "the chart must reject WebTransport until the runtime listener is implemented" >&2
+  exit 1
+fi
+preview_line=$(grep -n 'name = "filebelt-markdown-preview"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
+spa_line=$(grep -n 'name = "filebelt-spa"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
+if [ "${preview_line}" -ge "${spa_line}" ]; then
+  echo "opaque Markdown preview route must precede the SPA catch-all" >&2
+  exit 1
+fi
 
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set deployment.quiesced=true >"${temporary}/quiesced.yaml"
@@ -397,4 +468,4 @@ expect_failure runner_namespace_is_core \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 
-echo "Helm Phase 4 chart contract passed"
+echo "Helm Phase 5 chart contract passed"

@@ -15,6 +15,10 @@
 - MCP policy/vault schemas are forward-only. Retain every KEK generation named
   by `filebelt.recovery.checkpoint.v2`; disabling MCP never authorizes dropping
   its tables or deleting encrypted rows.
+- Collaboration room and manifest schemas are forward-only. A rollback fences
+  active rooms and retains their UUID CRDT objects and PostgreSQL manifest
+  evidence through the 30-day dirty-state retention period; Iggy and an
+  in-memory replica never substitute for that evidence.
 
 ## Failure before workload rollout
 
@@ -46,10 +50,25 @@ only the opt-in Job in the next Helm revision after evidence is retained.
    outbox polling, and two-user authorization behavior. If MCP remains enabled,
    also confirm broker/gateway mTLS, explicit approval, exact-version grant,
    revocation, and cross-user denial.
+   If collaboration remains enabled, also confirm first-frame grant replay
+   denial, 60-second reauthorization, durable ACK after manifest finalization,
+   external-head freeze, and retained diff3 review state.
 6. Record the failed digest/config and prevent it from being selected again.
 
 Do not roll back a Secret in place. Restore the previous versioned Secret name
 or contents, update the matching generation, and roll Pods deliberately.
+
+## Collaboration rollback
+
+Disable new collaboration grants at the API before removing an edge route or
+scaling the collaboration role. Drain connections, fence every remaining room,
+and wait until PostgreSQL records its final manifest state. Do not acknowledge
+or discard a group merely because a WebSocket connection closes.
+The previous binary may be selected only when it understands the expanded
+room/manifest schema; otherwise leave collaboration disabled while ordinary
+immutable versions remain available. Preserve dirty rooms for explicit diff3
+review or their fenced 30-day expiry. WebTransport has no Phase 5 deployment
+path and cannot be enabled or rolled back independently.
 
 ## MCP broker or runner rollback
 
@@ -65,7 +84,7 @@ invocations to reach a terminal state, then set `mcp.enabled=false`. Restore the
 recorded previous API/web images and configuration together so the public
 contract and SPA do not diverge. A binary expecting configuration version 2
 must receive its recorded version-2 ConfigMap; current binaries require version
-3. The expanded PostgreSQL schema and vault ciphertext remain in place.
+4. The expanded PostgreSQL schema and vault ciphertext remain in place.
 
 Never roll a catalog entry back by moving a digest or weakening signature
 policy. Select a previously reviewed immutable catalog/root/bundle ConfigMap and

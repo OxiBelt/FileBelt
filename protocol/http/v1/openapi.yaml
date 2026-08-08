@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: FileBelt HTTP API
   version: 1.0.0
-  description: Durable FileBelt control-plane, storage-grant, and outbound MCP broker contract.
+  description: Durable FileBelt control-plane, storage-grant, collaboration, and outbound MCP broker contract.
 servers:
   - url: /
 security:
@@ -219,6 +219,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Node"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration:
+    get:
+      operationId: getCollaborationSummary
+      description: Returns active Markdown collaboration state only to a principal currently authorized with READ_CONTENT and WRITE_CONTENT; collaboration has no spectator mode.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: "Current durable room summary. A missing active room is represented by `active: false`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollaborationSummary"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: discardCollaboration
+      description: Discards the caller-authorized dirty collaboration state. It requires DELETE and WRITE_CONTENT and never changes an immutable file version.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Dirty room state is fenced and scheduled for discard.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants:
+    post:
+      operationId: createCollaborationGrant
+      description: Issues one opaque, one-use, first-Protobuf-frame grant valid for at most 60 seconds. Neither the grant nor a session credential appears in an endpoint URL.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCollaborationGrant"
+      responses:
+        "201":
+          description: A no-store authorization grant and transport endpoints for one editing participant.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollaborationGrant"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents:
+    post:
+      operationId: createMarkdownImportIntent
+      description: Records the exact authorized source version and one new sibling target for a Markdown import. The returned intent can bind one later BeginUpload request only.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMarkdownImportIntent"
+      responses:
+        "201":
+          description: Exact, short-lived import intent. Authorization is revalidated when it is consumed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkdownImportIntent"
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/children:
@@ -1807,6 +1895,12 @@ components:
       type: string
       format: uuid
       pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    MediaType:
+      type: string
+      minLength: 1
+      maxLength: 255
+      pattern: "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+(?:;[A-Za-z0-9!#$&^_.+\u002d= ]+)?$"
+      description: A normalized media type. Values exposed on Node or FileVersion are trusted server-derived metadata; request values are declarations only.
     Problem:
       type: object
       additionalProperties: false
@@ -1968,6 +2062,7 @@ components:
         - updated_at
         - size_bytes
         - version_ordinal
+        - head_media_type
       properties:
         id:
           $ref: "#/components/schemas/UuidV4"
@@ -2011,6 +2106,10 @@ components:
               format: int64
               minimum: 1
             - type: "null"
+        head_media_type:
+          oneOf:
+            - $ref: "#/components/schemas/MediaType"
+            - type: "null"
     NodePage:
       type: object
       additionalProperties: false
@@ -2024,6 +2123,171 @@ components:
           oneOf:
             - type: string
             - type: "null"
+    CollaborationSummary:
+      type: object
+      additionalProperties: false
+      required: [active, room_id, codec, room_epoch, durable_sequence, base_version_id, current_head_version_id, dirty_expires_at, warning_at, frozen]
+      properties:
+        active:
+          type: boolean
+        room_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        codec:
+          oneOf:
+            - type: string
+              const: yjs-v1
+            - type: "null"
+        room_epoch:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+            - type: "null"
+        durable_sequence:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 0
+            - type: "null"
+        base_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        current_head_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        dirty_expires_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        warning_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        frozen:
+          type: boolean
+    CreateCollaborationGrant:
+      type: object
+      additionalProperties: false
+      required: [transport, client_id, presence_mode]
+      properties:
+        transport:
+          type: string
+          enum: [websocket]
+          description: Phase 5 uses WebSocket. WebTransport remains reserved until its runtime and deployment boundary receive a separate review.
+        client_id:
+          $ref: "#/components/schemas/UuidV4"
+        presence_mode:
+          type: string
+          enum: [pseudonym, display_name]
+          description: Pseudonyms are generated by FileBelt; display names come from the authenticated profile. Clients cannot supply collaborator labels.
+    CollaborationEndpoint:
+      type: object
+      additionalProperties: false
+      required: [transport, url]
+      properties:
+        transport:
+          type: string
+          enum: [websocket]
+        url:
+          type: string
+          format: uri
+          description: Endpoint only; it contains neither authorization material nor session credentials.
+    CollaborationGrant:
+      type: object
+      additionalProperties: false
+      required: [grant_id, authorization, expires_at, codec, protocol_version, presence_label, room, endpoints]
+      properties:
+        grant_id:
+          $ref: "#/components/schemas/UuidV4"
+        authorization:
+          type: string
+          x-sensitive: true
+          description: Opaque one-use value sent only in the first CollaborationFrame Authenticate message.
+        expires_at:
+          type: string
+          format: date-time
+        codec:
+          type: string
+          const: yjs-v1
+        protocol_version:
+          type: integer
+          minimum: 1
+          maximum: 1
+        presence_label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Server-derived privacy-safe label bound into the one-use grant.
+        room:
+          $ref: "#/components/schemas/CollaborationSummary"
+        endpoints:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/CollaborationEndpoint"
+    CreateMarkdownImportIntent:
+      type: object
+      additionalProperties: false
+      required: [source_version_id, target_name]
+      properties:
+        source_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        target_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Display name for a new file sibling of the source node. Existing nodes are never import targets.
+        target_media_type:
+          type: string
+          const: text/markdown
+    MarkdownImportIntent:
+      type: object
+      additionalProperties: false
+      required: [id, source_drive_id, source_node_id, source_version_id, target_parent_id, target_name, target_media_type, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        source_drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        source_node_id:
+          $ref: "#/components/schemas/UuidV4"
+        source_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        target_parent_id:
+          $ref: "#/components/schemas/UuidV4"
+        target_name:
+          type: string
+        target_media_type:
+          type: string
+          const: text/markdown
+        expires_at:
+          type: string
+          format: date-time
+    VersionProvenance:
+      type: object
+      additionalProperties: false
+      required: [origin, source_version_id, creator_display_name, mcp_assisted]
+      properties:
+        origin:
+          type: string
+          enum: [upload, markdown_save, collaboration_checkpoint, import, restore]
+        source_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        creator_display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        mcp_assisted:
+          type: boolean
     FileVersion:
       type: object
       additionalProperties: false
@@ -2036,6 +2300,8 @@ components:
         - restored_from_version_id
         - created_at
         - current
+        - media_type
+        - provenance
       properties:
         id:
           $ref: "#/components/schemas/UuidV4"
@@ -2060,6 +2326,10 @@ components:
           format: date-time
         current:
           type: boolean
+        media_type:
+          $ref: "#/components/schemas/MediaType"
+        provenance:
+          $ref: "#/components/schemas/VersionProvenance"
     VersionPage:
       type: object
       additionalProperties: false
@@ -2183,6 +2453,21 @@ components:
           type: integer
           format: int64
           minimum: 0
+        declared_media_type:
+          oneOf:
+            - $ref: "#/components/schemas/MediaType"
+            - type: "null"
+          description: Caller declaration only. The committed media type is trusted only after server validation of finalized bytes.
+        collaboration_checkpoint_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+          description: Durable collaboration checkpoint to consume for this immutable version. It is bound to this node and expected head.
+        import_intent_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+          description: Exact one-use Markdown import intent. It cannot be combined with a collaboration checkpoint.
     UploadAllocation:
       type: object
       additionalProperties: false
@@ -2791,6 +3076,11 @@ components:
           $ref: "#/components/schemas/McpCapabilityReference"
         arguments:
           description: Exact bounded JSON arguments included in the intent digest and resubmitted to the stream.
+        semantic_input:
+          oneOf:
+            - $ref: "#/components/schemas/McpSemanticInput"
+            - type: "null"
+          description: Route-specific normalized Markdown input with an exact node and immutable base-version context. Its UTF-8 byte length is capped at 2 MiB and is included in the exact intent digest.
         attachments:
           type: array
           maxItems: 4
@@ -2866,7 +3156,7 @@ components:
       properties:
         event:
           type: string
-          enum: [started, progress, text, json, media, error, completed]
+          enum: [started, progress, text, json, semantic, media, error, completed]
         invocation_id:
           $ref: "#/components/schemas/UuidV4"
         sequence:
@@ -2889,6 +3179,11 @@ components:
             - type: "null"
         json:
           description: Bounded JSON rendered as a non-editable tree, never as HTML.
+        semantic_output:
+          oneOf:
+            - $ref: "#/components/schemas/McpSemanticOutput"
+            - type: "null"
+          description: Route-specific semantic Markdown output with a UTF-8 byte cap of 2 MiB. It is rendered as data, not HTML.
         media:
           oneOf:
             - $ref: "#/components/schemas/McpSafeMedia"
@@ -2898,6 +3193,36 @@ components:
             - type: string
               pattern: "^mcp\\.[a-z0-9_.-]+$"
             - type: "null"
+    McpSemanticInput:
+      type: object
+      additionalProperties: false
+      required: [format, node_id, base_version_id, markdown]
+      properties:
+        format:
+          type: string
+          const: filebelt.markdown.semantic.v1
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+          description: Exact Markdown file node whose normalized source is proposed for transformation.
+        base_version_id:
+          $ref: "#/components/schemas/UuidV4"
+          description: Exact immutable base version for the proposed transformation.
+        markdown:
+          type: string
+          maxLength: 2097152
+          description: Valid UTF-8 Markdown normalized to LF without NUL; the route also enforces a 2 MiB UTF-8 byte limit.
+    McpSemanticOutput:
+      type: object
+      additionalProperties: false
+      required: [format, markdown]
+      properties:
+        format:
+          type: string
+          const: filebelt.markdown.semantic.v1
+        markdown:
+          type: string
+          maxLength: 2097152
+          description: Valid UTF-8 Markdown normalized to LF without NUL; the route also enforces a 2 MiB UTF-8 byte limit.
     McpSafeMedia:
       type: object
       additionalProperties: false

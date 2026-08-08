@@ -475,6 +475,7 @@ mod tests {
             limits: LimitConfig::default(),
             iggy: None,
             mcp: filebelt_control_protocol::McpConfig::default(),
+            collaboration: filebelt_control_protocol::CollaborationConfig::default(),
         };
         validate_public_key(&config, &signer).unwrap();
     }

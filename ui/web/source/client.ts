@@ -28,6 +28,41 @@ export interface PublicShareClient {
   exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant>;
 }
 
+export interface MarkdownSaveInput {
+  CheckpointId?: string;
+  Contents: Blob;
+  EntryId: string;
+  ExpectedHeadVersionId: string;
+  Name: string;
+}
+
+export interface MarkdownImportInput {
+  Contents: Blob;
+  EntryId: string;
+  SourceVersionId: string;
+  TargetName: string;
+}
+
+export interface MarkdownCollaborationGrant {
+  Authorization: string;
+  ClientId: string;
+  EndpointUrl: string;
+  PresenceLabel: string;
+  RoomId: string;
+}
+
+export interface MarkdownHead {
+  Contents: Blob;
+  VersionId: string;
+}
+
+export class VersionConflictError extends Error {
+  constructor() {
+    super("This file changed on the server. Your local edits are still available.");
+    this.name = "VersionConflictError";
+  }
+}
+
 /** Signals that the browser must start a fresh OIDC login flow. */
 export class AuthenticationRequiredError extends Error {
   constructor() {
@@ -41,10 +76,16 @@ export class AuthenticationRequiredError extends Error {
  * this interface without exposing transport details to React components.
  */
 export interface FileBeltClient {
+  beginMarkdownCollaboration(EntryId: string, ClientId: string): Promise<MarkdownCollaborationGrant | null>;
   createGroup(Name: string): Promise<void>;
   createShare(Input: CreateShareInput): Promise<void>;
   createSharedDrive(Name: string): Promise<void>;
   download(EntryId: string): Promise<Blob>;
+  importMarkdown(Input: MarkdownImportInput): Promise<string>;
+  readMarkdown(EntryId: string, VersionId: string): Promise<Blob>;
+  readMarkdownHead(EntryId: string): Promise<MarkdownHead>;
+  saveMarkdown(Input: MarkdownSaveInput): Promise<string>;
+  saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string>;
   getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot>;
   markPrivacyRead(): Promise<void>;
   restoreEntries(EntryIds: readonly string[]): Promise<void>;
@@ -71,7 +112,10 @@ const InitialSnapshot: WorkspaceSnapshot = {
   Entries: [
     {
       Id: Uuid("101"),
+      HeadVersionId: null,
       Kind: "folder",
+      MarkdownEligibility: "ineligible",
+      MediaType: null,
       ModifiedAt: "2026-08-06T09:24:00Z",
       Name: "Launch documents",
       Owner: "Avery Morgan",
@@ -83,7 +127,10 @@ const InitialSnapshot: WorkspaceSnapshot = {
     },
     {
       Id: Uuid("102"),
+      HeadVersionId: Uuid("301"),
       Kind: "file",
+      MarkdownEligibility: "ineligible",
+      MediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ModifiedAt: "2026-08-06T10:48:00Z",
       Name: "Q3 forecast.xlsx",
       Owner: "Avery Morgan",
@@ -95,7 +142,10 @@ const InitialSnapshot: WorkspaceSnapshot = {
     },
     {
       Id: Uuid("103"),
+      HeadVersionId: Uuid("302"),
       Kind: "file",
+      MarkdownEligibility: "ineligible",
+      MediaType: "application/pdf",
       ModifiedAt: "2026-08-05T16:12:00Z",
       Name: "Product brief.pdf",
       Owner: "Samir Haddad",
@@ -107,7 +157,10 @@ const InitialSnapshot: WorkspaceSnapshot = {
     },
     {
       Id: Uuid("104"),
+      HeadVersionId: Uuid("303"),
       Kind: "file",
+      MarkdownEligibility: "editable",
+      MediaType: "text/markdown",
       ModifiedAt: "2026-08-02T11:30:00Z",
       Name: "Archive notes.txt",
       Owner: "Avery Morgan",
@@ -119,7 +172,10 @@ const InitialSnapshot: WorkspaceSnapshot = {
     },
     {
       Id: Uuid("105"),
+      HeadVersionId: Uuid("304"),
       Kind: "file",
+      MarkdownEligibility: "viewable",
+      MediaType: "text/markdown",
       ModifiedAt: "2026-08-06T08:05:00Z",
       Name: "‫خطة المشروع‬.pdf",
       Owner: "Layla Hassan",
@@ -201,7 +257,10 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
       const Id = Uuid(String(++this.#Sequence));
       this.#Snapshot.Entries.unshift({
         Id,
+        HeadVersionId: Uuid(String(++this.#Sequence)),
         Kind: "file",
+        MarkdownEligibility: MarkdownEligibility(File.Name, File.Size, File.MediaType ?? null),
+        MediaType: File.MediaType ?? null,
         ModifiedAt: new Date().toISOString(),
         Name: File.Name,
         Owner: this.#Snapshot.CurrentUser.DisplayName,
@@ -219,6 +278,53 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
     if (Entry === undefined || Entry.Kind !== "file") throw new Error("The file is unavailable.");
     return new Blob([`FileBelt mock download for ${Entry.Name}\n`], { type: "text/plain" });
+  }
+
+  async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
+    if (Entry?.HeadVersionId !== VersionId || Entry.Kind !== "file") throw new Error("The requested file version is unavailable.");
+    return new Blob([`# ${Entry.Name}\n\nFileBelt Markdown content.\n`], { type: "text/markdown" });
+  }
+
+  async importMarkdown(Input: MarkdownImportInput): Promise<string> {
+    const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
+    if (Original?.HeadVersionId !== Input.SourceVersionId) throw new Error("The Office source version is unavailable.");
+    const Id = Uuid(String(++this.#Sequence));
+    const VersionId = Uuid(String(++this.#Sequence));
+    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, MarkdownEligibility: "editable", MediaType: "text/markdown", ModifiedAt: new Date().toISOString(), Name: Input.TargetName, Shared: false, Size: Input.Contents.size, Version: 1 });
+    return VersionId;
+  }
+
+  async beginMarkdownCollaboration(IgnoredEntryId: string, IgnoredClientId: string): Promise<null> {
+    void IgnoredEntryId;
+    void IgnoredClientId;
+    return null;
+  }
+
+  async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
+    if (Entry?.HeadVersionId === null || Entry?.HeadVersionId === undefined) throw new Error("The Markdown file has no current version.");
+    return { Contents: await this.readMarkdown(EntryId, Entry.HeadVersionId), VersionId: Entry.HeadVersionId };
+  }
+
+  async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
+    if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId) throw new VersionConflictError();
+    if (Entry.MarkdownEligibility !== "editable") throw new Error("This Markdown file is view-only.");
+    Entry.HeadVersionId = Uuid(String(++this.#Sequence));
+    Entry.ModifiedAt = new Date().toISOString();
+    Entry.Size = Input.Contents.size;
+    Entry.Version += 1;
+    return Entry.HeadVersionId;
+  }
+
+  async saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string> {
+    const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
+    if (Original === undefined) throw new Error("The source Markdown file is unavailable.");
+    const Id = Uuid(String(++this.#Sequence));
+    const VersionId = Uuid(String(++this.#Sequence));
+    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, ModifiedAt: new Date().toISOString(), Name: Input.Name, Shared: false, Size: Input.Contents.size, Version: 1 });
+    return VersionId;
   }
 
   async exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant> {
@@ -317,4 +423,10 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     const Wanted = new Set(EntryIds);
     this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) => Wanted.has(Entry.Id) ? Update(Entry) : Entry);
   }
+}
+
+function MarkdownEligibility(Name: string, Size: number, MediaType: string | null): FileEntry["MarkdownEligibility"] {
+  const IsMarkdown = MediaType === "text/markdown" || /\.(md|markdown|mdown|mkdn)$/i.test(Name);
+  if (!IsMarkdown || Size > 8 * 1024 * 1024) return "ineligible";
+  return Size <= 2 * 1024 * 1024 ? "editable" : "viewable";
 }

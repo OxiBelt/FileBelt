@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_collaboration_protocol::normalized_markdown_source_digest;
 use filebelt_control_protocol::{Config, DeploymentMode};
 use filebelt_database::mcp::{
     McpIdempotency, McpIdempotentWrite, McpRegistrationRecord, NewCapabilitySnapshot,
@@ -200,7 +201,32 @@ struct InvocationRequest {
     registration_id: Uuid,
     capability: CapabilityReference,
     arguments: Value,
+    #[serde(default)]
+    semantic_input: Option<SemanticMarkdownInput>,
     attachments: Vec<AttachmentBinding>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticMarkdownInput {
+    format: String,
+    node_id: Uuid,
+    base_version_id: Uuid,
+    markdown: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SemanticMarkdownOutput {
+    format: String,
+    markdown: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MarkdownSemanticProvenance {
+    node_id: Uuid,
+    base_version_id: Uuid,
+    input_digest: [u8; 32],
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -628,6 +654,7 @@ async fn update_registration(
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
         &arguments,
+        None,
         &[0; 32],
         None,
         Vec::new(),
@@ -659,6 +686,7 @@ async fn delete_registration(
         CURRENT_PROTOCOL,
         &serde_json::to_vec(&json!({"expected_revision": record.revision}))
             .map_err(|_| ApiError::internal())?,
+        None,
         &[0; 32],
         None,
         Vec::new(),
@@ -761,6 +789,7 @@ async fn put_credential(
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
         &arguments,
+        None,
         &[0; 32],
         None,
         Vec::new(),
@@ -791,6 +820,7 @@ async fn delete_credential(
         CURRENT_PROTOCOL,
         &serde_json::to_vec(&json!({"expected_revision": record.revision}))
             .map_err(|_| ApiError::internal())?,
+        None,
         &[0; 32],
         None,
         Vec::new(),
@@ -858,12 +888,14 @@ async fn start_oauth(
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
         &arguments,
+        None,
         &[0; 32],
         None,
         Vec::new(),
     )
     .await?;
     let authorization_url = result
+        .value
         .get("authorization_url")
         .and_then(Value::as_str)
         .and_then(|value| Url::parse(value).ok())
@@ -933,12 +965,14 @@ async fn complete_oauth(
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
         &arguments,
+        None,
         &[0; 32],
         None,
         Vec::new(),
     )
     .await?;
     let return_path = result
+        .value
         .get("return_path")
         .and_then(Value::as_str)
         .filter(|value| valid_mcp_return_path(value))
@@ -1491,10 +1525,7 @@ async fn create_intent(
             "The MCP capability is not in the current snapshot",
         ));
     }
-    let argument_digest = filebelt_mcp_policy::policy_json_digest(b"arguments", &request.arguments)
-        .map_err(|_| {
-            ApiError::bad_request("mcp.arguments.invalid", "The MCP arguments are invalid")
-        })?;
+    let argument_digest = invocation_argument_digest(&request)?;
     let attachment_value = serde_json::to_value(&request.attachments).map_err(|_| {
         ApiError::bad_request("mcp.attachments.invalid", "The MCP attachments are invalid")
     })?;
@@ -1591,13 +1622,22 @@ async fn stream_invocation(
     let attachment_claims =
         build_attachment_claims(&state, &session.record, &registration, &request.attachments)
             .await?;
+    let semantic_provenance = validate_markdown_semantic_provenance(
+        &state,
+        &session.record,
+        request.semantic_input.as_ref(),
+    )
+    .await?;
     let arguments = filebelt_mcp_policy::canonical_json(&request.arguments).map_err(|_| {
         ApiError::bad_request("mcp.arguments.invalid", "The MCP arguments are invalid")
     })?;
-    let argument_digest = filebelt_mcp_policy::policy_json_digest(b"arguments", &request.arguments)
-        .map_err(|_| {
-            ApiError::bad_request("mcp.arguments.invalid", "The MCP arguments are invalid")
-        })?;
+    let semantic_input = request
+        .semantic_input
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()
+        .map_err(|_| ApiError::internal())?;
+    let argument_digest = invocation_argument_digest(&request)?;
     let attachment_value = serde_json::to_value(&request.attachments).map_err(|_| {
         ApiError::bad_request("mcp.attachments.invalid", "The MCP attachments are invalid")
     })?;
@@ -1650,6 +1690,12 @@ async fn stream_invocation(
             authority_generation: generations.principal,
             admin_block_generation: generations.admin_block,
             request_bytes: arguments.len() as i64,
+            semantic_node_id: semantic_provenance.map(|provenance| provenance.node_id),
+            semantic_base_version_id: semantic_provenance
+                .map(|provenance| provenance.base_version_id),
+            semantic_input_digest: semantic_provenance
+                .as_ref()
+                .map(|provenance| &provenance.input_digest),
         })
         .await?;
     for (ordinal, claim) in attachment_claims.iter().enumerate() {
@@ -1704,6 +1750,7 @@ async fn stream_invocation(
         &request.application_id,
         protocol,
         &arguments,
+        semantic_input.as_deref(),
         &capability_fingerprint,
         Some(invocation_id),
         attachment_claims,
@@ -1713,20 +1760,54 @@ async fn stream_invocation(
         .database
         .mcp_invocation_is_active(state.tenant_id, session.record.principal_id, invocation_id)
         .await?;
-    let (outcome, reason, result) = match (active, result) {
+    let (mut outcome, mut reason, mut result) = match (active, result) {
         (false, _) => (
             "cancelled",
             Some("mcp.cancelled_by_principal"),
-            json!({"error": "mcp.cancelled_by_principal"}),
+            BrokerCallResult {
+                value: json!({"error": "mcp.cancelled_by_principal"}),
+                semantic: None,
+            },
         ),
         (true, Ok(result)) => ("succeeded", None, result),
         (true, Err(_)) => (
             "failed",
             Some("mcp.broker.unavailable"),
-            json!({"error": "mcp.broker.unavailable"}),
+            BrokerCallResult {
+                value: json!({"error": "mcp.broker.unavailable"}),
+                semantic: None,
+            },
         ),
     };
-    let result_bytes = serde_json::to_vec(&result).map_err(|_| ApiError::internal())?;
+    let semantic_output_digest = if outcome == "succeeded" {
+        match result
+            .semantic
+            .as_ref()
+            .map(validated_semantic_output_digest)
+            .transpose()
+        {
+            Ok(digest) => digest,
+            Err(_) => {
+                outcome = "failed";
+                reason = Some("mcp.broker.invalid_semantic");
+                result = BrokerCallResult {
+                    value: json!({"error": "mcp.broker.invalid_semantic"}),
+                    semantic: None,
+                };
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // A broker may return semantic data to a non-provenance MCP caller, but
+    // only a request that supplied the immutable Markdown context may persist
+    // an output digest as a collaboration provenance witness.
+    let semantic_output_digest = semantic_provenance
+        .is_some()
+        .then_some(semantic_output_digest)
+        .flatten();
+    let result_bytes = serde_json::to_vec(&result.value).map_err(|_| ApiError::internal())?;
     if active {
         state
             .database
@@ -1736,19 +1817,23 @@ async fn stream_invocation(
                 outcome,
                 result_bytes.len() as i64,
                 reason,
+                semantic_output_digest.as_ref(),
             )
             .await?;
     }
     let created_at = rfc3339(unix_time()?);
-    let events = [
+    let mut events = vec![
         json!({"event":"started","invocation_id":invocation_id,"sequence":0,"created_at":created_at}),
-        if outcome == "succeeded" {
-            json!({"event":"json","invocation_id":invocation_id,"sequence":1,"created_at":created_at,"json":result})
-        } else {
-            json!({"event":"error","invocation_id":invocation_id,"sequence":1,"created_at":created_at,"problem_code":reason})
-        },
-        json!({"event":"completed","invocation_id":invocation_id,"sequence":2,"created_at":created_at}),
     ];
+    if outcome == "succeeded" {
+        events.push(json!({"event":"json","invocation_id":invocation_id,"sequence":1,"created_at":created_at,"json":result.value}));
+        if let Some(semantic_output) = result.semantic {
+            events.push(json!({"event":"semantic","invocation_id":invocation_id,"sequence":2,"created_at":created_at,"semantic_output":semantic_output}));
+        }
+    } else {
+        events.push(json!({"event":"error","invocation_id":invocation_id,"sequence":1,"created_at":created_at,"problem_code":reason}));
+    }
+    events.push(json!({"event":"completed","invocation_id":invocation_id,"sequence":events.len(),"created_at":created_at}));
     let mut body = Vec::new();
     for event in events {
         serde_json::to_writer(&mut body, &event).map_err(|_| ApiError::internal())?;
@@ -2576,13 +2661,14 @@ async fn broker_probe(
             "filebelt.settings.mcp",
             protocol,
             &[],
+            None,
             &[0; 32],
             None,
             Vec::new(),
         )
         .await
         {
-            Ok(result) => return Ok((protocol.to_owned(), result)),
+            Ok(result) => return Ok((protocol.to_owned(), result.value)),
             Err(error) => last_error = Some(error),
         }
     }
@@ -2600,19 +2686,29 @@ async fn call_broker(
     application_id: &str,
     protocol: &str,
     arguments: &[u8],
+    semantic_input: Option<&[u8]>,
     capability_fingerprint: &[u8; 32],
     request_id: Option<Uuid>,
     attachments: Vec<AttachmentClaim>,
-) -> Result<Value, ApiError> {
+) -> Result<BrokerCallResult, ApiError> {
     let mcp = require_enabled(state)?;
     let generations = state
         .database
         .mcp_revocation_generations(state.tenant_id, session.principal_id, registration.id)
         .await?;
-    let arguments_digest = blake3::Hasher::new()
+    let mut arguments_hasher = blake3::Hasher::new();
+    arguments_hasher
         .update(ARGUMENT_DIGEST_DOMAIN)
-        .update(arguments)
-        .finalize();
+        .update(&(arguments.len() as u64).to_be_bytes())
+        .update(arguments);
+    if let Some(semantic_input) = semantic_input {
+        arguments_hasher
+            .update(&(semantic_input.len() as u64).to_be_bytes())
+            .update(semantic_input);
+    } else {
+        arguments_hasher.update(&0_u64.to_be_bytes());
+    }
+    let arguments_digest = arguments_hasher.finalize();
     let mut nonce = vec![0_u8; 32];
     getrandom::fill(&mut nonce).map_err(|_| ApiError::internal())?;
     let now = unix_time()?;
@@ -2650,6 +2746,7 @@ async fn call_broker(
         deadline_unix_milliseconds: now
             .saturating_add(state.config.mcp.limits.absolute_timeout_seconds as i64)
             .saturating_mul(1_000),
+        semantic_input_json: semantic_input.unwrap_or_default().to_vec(),
     };
     let response = mcp
         .broker
@@ -2672,7 +2769,19 @@ async fn call_broker(
         .iter()
         .find(|frame| frame.kind == InvocationFrameKind::Json as i32)
         .ok_or_else(mcp_unavailable)?;
-    serde_json::from_slice(&payload.payload).map_err(|_| mcp_unavailable())
+    let value = serde_json::from_slice(&payload.payload).map_err(|_| mcp_unavailable())?;
+    let semantic = frames
+        .iter()
+        .find(|frame| frame.kind == InvocationFrameKind::Semantic as i32)
+        .map(|frame| serde_json::from_slice(&frame.payload))
+        .transpose()
+        .map_err(|_| mcp_unavailable())?;
+    Ok(BrokerCallResult { value, semantic })
+}
+
+struct BrokerCallResult {
+    value: Value,
+    semantic: Option<Value>,
 }
 
 async fn read_bounded_broker_body(mut response: reqwest::Response) -> Result<Vec<u8>, ApiError> {
@@ -2848,6 +2957,12 @@ fn validate_invocation_request(
         )
         || decode_hash(&request.capability.fingerprint).is_err()
         || canonical.len() > state.config.mcp.limits.message_bytes as usize
+        || request.semantic_input.as_ref().is_some_and(|semantic| {
+            semantic.format != "filebelt.markdown.semantic.v1"
+                || semantic.markdown.len() > 2 * 1_024 * 1_024
+                || semantic.markdown.contains('\0')
+                || semantic.markdown.contains('\r')
+        })
         || request.attachments.len() > 4
         || request.attachments.iter().any(|attachment| {
             attachment.fields.is_empty()
@@ -2864,6 +2979,65 @@ fn validate_invocation_request(
         ));
     }
     Ok(())
+}
+
+async fn validate_markdown_semantic_provenance(
+    state: &AppState,
+    session: &filebelt_database::SessionRecord,
+    semantic: Option<&SemanticMarkdownInput>,
+) -> Result<Option<MarkdownSemanticProvenance>, ApiError> {
+    let Some(semantic) = semantic else {
+        return Ok(None);
+    };
+    let drive_id = state
+        .database
+        .mcp_markdown_context_drive(state.tenant_id, semantic.node_id, semantic.base_version_id)
+        .await?;
+    authorize(
+        &state.database,
+        state.tenant_id,
+        session.principal_id,
+        drive_id,
+        semantic.node_id,
+        Action::WriteContent,
+    )
+    .await?;
+    Ok(Some(MarkdownSemanticProvenance {
+        node_id: semantic.node_id,
+        base_version_id: semantic.base_version_id,
+        input_digest: normalized_markdown_source_digest(semantic.markdown.as_bytes()),
+    }))
+}
+
+fn validated_semantic_output_digest(value: &Value) -> Result<[u8; 32], ApiError> {
+    let semantic: SemanticMarkdownOutput =
+        serde_json::from_value(value.clone()).map_err(|_| mcp_unavailable())?;
+    if semantic.format != "filebelt.markdown.semantic.v1"
+        || semantic.markdown.len() > 2 * 1_024 * 1_024
+        || semantic.markdown.contains('\0')
+        || semantic.markdown.contains('\r')
+    {
+        return Err(mcp_unavailable());
+    }
+    Ok(normalized_markdown_source_digest(
+        semantic.markdown.as_bytes(),
+    ))
+}
+
+fn invocation_argument_digest(request: &InvocationRequest) -> Result<[u8; 32], ApiError> {
+    if request.semantic_input.is_none() {
+        return filebelt_mcp_policy::policy_json_digest(b"arguments", &request.arguments).map_err(
+            |_| ApiError::bad_request("mcp.arguments.invalid", "The MCP arguments are invalid"),
+        );
+    }
+    filebelt_mcp_policy::policy_json_digest(
+        b"arguments-and-semantic-input",
+        &json!({
+            "arguments": request.arguments,
+            "semantic_input": request.semantic_input,
+        }),
+    )
+    .map_err(|_| ApiError::bad_request("mcp.arguments.invalid", "The MCP arguments are invalid"))
 }
 
 async fn build_attachment_claims(
@@ -3883,5 +4057,67 @@ mod tests {
         assert_eq!(body.len(), 8);
         assert!(append_bounded_broker_chunk(&mut body, &[2], 8).is_err());
         assert_eq!(body.len(), 8);
+    }
+
+    #[test]
+    fn semantic_input_is_bound_into_the_approval_digest() {
+        let base = InvocationRequest {
+            application_id: "filebelt.markdown".into(),
+            registration_id: Uuid::new_v4(),
+            capability: CapabilityReference {
+                kind: "tool".into(),
+                name: "rewrite".into(),
+                fingerprint: "ab".repeat(32),
+            },
+            arguments: json!({"selection_start": 0, "selection_end": 3}),
+            semantic_input: None,
+            attachments: Vec::new(),
+        };
+        let mut first = base.clone();
+        first.semantic_input = Some(SemanticMarkdownInput {
+            format: "filebelt.markdown.semantic.v1".into(),
+            node_id: Uuid::new_v4(),
+            base_version_id: Uuid::new_v4(),
+            markdown: "one".into(),
+        });
+        let mut second = first.clone();
+        second.semantic_input.as_mut().unwrap().markdown = "two".into();
+
+        assert_ne!(
+            invocation_argument_digest(&base).unwrap(),
+            invocation_argument_digest(&first).unwrap()
+        );
+        assert_ne!(
+            invocation_argument_digest(&first).unwrap(),
+            invocation_argument_digest(&second).unwrap()
+        );
+    }
+
+    #[test]
+    fn semantic_output_digest_requires_normalized_output_shape() {
+        let expected = normalized_markdown_source_digest(b"# Proposed\n");
+        assert_eq!(
+            validated_semantic_output_digest(&json!({
+                "format": "filebelt.markdown.semantic.v1",
+                "markdown": "# Proposed\n",
+            }))
+            .unwrap(),
+            expected
+        );
+        assert!(
+            validated_semantic_output_digest(&json!({
+                "format": "filebelt.markdown.semantic.v1",
+                "node_id": Uuid::new_v4(),
+                "markdown": "# Proposed\n",
+            }))
+            .is_err()
+        );
+        assert!(
+            validated_semantic_output_digest(&json!({
+                "format": "filebelt.markdown.semantic.v1",
+                "markdown": "# Proposed\r\n",
+            }))
+            .is_err()
+        );
     }
 }

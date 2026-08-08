@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: true,
-  outputDir: "../../artifacts/playwright/mcp-settings",
+  outputDir: "../../artifacts/playwright/web",
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },

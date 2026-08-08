@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MockFileBeltClient } from "./client.js";
+import { MockFileBeltClient, VersionConflictError } from "./client.js";
 
 describe("MockFileBeltClient", () => {
   it("exercises trash, restore, upload, and share workflows through the API boundary", async () => {
@@ -44,5 +44,29 @@ describe("MockFileBeltClient", () => {
     expect(CurrentSession).toBeDefined();
     if (CurrentSession !== undefined) await Client.revokeSession(CurrentSession.Id);
     expect((await Client.getWorkspace()).Sessions.some(({ Id }) => Id === CurrentSession?.Id)).toBe(true);
+  });
+
+  it("reads an exact Markdown version and rejects stale replacement saves", async () => {
+    const Client = new MockFileBeltClient();
+    const Snapshot = await Client.getWorkspace();
+    const Markdown = Snapshot.Entries.find(({ MarkdownEligibility }) => MarkdownEligibility === "editable");
+    expect(Markdown?.HeadVersionId).not.toBeNull();
+    if (Markdown?.HeadVersionId === null || Markdown === undefined) return;
+
+    expect(await (await Client.readMarkdown(Markdown.Id, Markdown.HeadVersionId)).text()).toContain("FileBelt Markdown content");
+    const NewVersion = await Client.saveMarkdown({ Contents: new Blob(["# changed"], { type: "text/markdown" }), EntryId: Markdown.Id, ExpectedHeadVersionId: Markdown.HeadVersionId, Name: Markdown.Name });
+    expect(NewVersion).not.toBe(Markdown.HeadVersionId);
+    await expect(Client.saveMarkdown({ Contents: new Blob(["# stale"], { type: "text/markdown" }), EntryId: Markdown.Id, ExpectedHeadVersionId: Markdown.HeadVersionId, Name: Markdown.Name })).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  it("imports an exact Office source version as a new Markdown sibling", async () => {
+    const Client = new MockFileBeltClient();
+    const Snapshot = await Client.getWorkspace();
+    const Office = Snapshot.Entries.find(({ Name }) => Name.endsWith(".xlsx"));
+    expect(Office?.HeadVersionId).not.toBeNull();
+    if (Office?.HeadVersionId === null || Office === undefined) return;
+    await Client.importMarkdown({ Contents: new Blob(["# Imported"], { type: "text/markdown" }), EntryId: Office.Id, SourceVersionId: Office.HeadVersionId, TargetName: "Q3 forecast.md" });
+    const Imported = (await Client.getWorkspace()).Entries.find(({ Name }) => Name === "Q3 forecast.md");
+    expect(Imported).toMatchObject({ MarkdownEligibility: "editable", MediaType: "text/markdown", Version: 1 });
   });
 });

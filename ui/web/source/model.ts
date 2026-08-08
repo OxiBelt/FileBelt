@@ -11,15 +11,20 @@ export type RouteId =
   | "shares"
   | "sessions"
   | "privacy"
-  | "mcp";
+  | "mcp"
+  | "markdown";
 
 export type EntryKind = "file" | "folder";
 export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";
+export type MarkdownEligibility = "editable" | "ineligible" | "viewable";
 
 export interface FileEntry {
+  HeadVersionId: string | null;
   Id: string;
   Kind: EntryKind;
   ModifiedAt: string;
+  MarkdownEligibility: MarkdownEligibility;
+  MediaType: string | null;
   Name: string;
   Owner: string;
   Shared: boolean;
@@ -114,6 +119,7 @@ export interface WorkspaceSnapshot {
 
 export interface UploadCandidate {
   Data?: Blob;
+  MediaType?: string;
   Name: string;
   Size: number;
 }

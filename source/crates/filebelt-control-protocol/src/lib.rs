@@ -14,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 3;
+pub const CONFIG_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +39,8 @@ pub struct Config {
     pub iggy: Option<IggyConfig>,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub collaboration: CollaborationConfig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,6 +106,8 @@ pub struct BackendTlsConfig {
     pub mcp_broker: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub controller: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub collaboration: Option<BackendServerTlsConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -198,6 +202,10 @@ pub struct ListenerConfig {
     pub mcp_runner_relay: SocketAddr,
     #[serde(default = "default_controller_listener")]
     pub controller: SocketAddr,
+    #[serde(default = "default_collaboration_ws_listener")]
+    pub collaboration_ws: SocketAddr,
+    #[serde(default = "default_collaboration_webtransport_listener")]
+    pub collaboration_webtransport: SocketAddr,
     /// Permit an unspecified bind address inside an explicitly isolated
     /// container network.
     #[serde(default)]
@@ -213,7 +221,108 @@ impl Default for ListenerConfig {
             mcp_broker: default_mcp_broker_listener(),
             mcp_runner_relay: default_mcp_runner_relay_listener(),
             controller: default_controller_listener(),
+            collaboration_ws: default_collaboration_ws_listener(),
+            collaboration_webtransport: default_collaboration_webtransport_listener(),
             allow_container_wildcard: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollaborationConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub database_url_file: Option<PathBuf>,
+    #[serde(default)]
+    pub capability_private_key_file: Option<PathBuf>,
+    #[serde(default = "default_collaboration_capability_key_generation")]
+    pub capability_key_generation: u32,
+    #[serde(default)]
+    pub io_url: Option<Url>,
+    #[serde(default)]
+    pub client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub webtransport_enabled: bool,
+    #[serde(default)]
+    pub limits: CollaborationLimitConfig,
+}
+
+impl Default for CollaborationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            database_url_file: None,
+            capability_private_key_file: None,
+            capability_key_generation: default_collaboration_capability_key_generation(),
+            io_url: None,
+            client_certificate_chain_file: None,
+            client_private_key_file: None,
+            server_ca_file: None,
+            webtransport_enabled: false,
+            limits: CollaborationLimitConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollaborationLimitConfig {
+    #[serde(default = "default_collaboration_participants")]
+    pub max_participants: u32,
+    #[serde(default = "default_collaboration_update_bytes")]
+    pub max_update_bytes: u64,
+    #[serde(default = "default_collaboration_group_bytes")]
+    pub max_operation_group_bytes: u64,
+    #[serde(default = "default_collaboration_client_updates")]
+    pub client_updates_per_second: u32,
+    #[serde(default = "default_collaboration_client_bytes")]
+    pub client_bytes_per_second: u64,
+    #[serde(default = "default_collaboration_room_updates")]
+    pub room_updates_per_second: u32,
+    #[serde(default = "default_collaboration_room_bytes")]
+    pub room_bytes_per_second: u64,
+    #[serde(default = "default_collaboration_awareness_bytes")]
+    pub max_awareness_bytes: u64,
+    #[serde(default = "default_collaboration_client_awareness")]
+    pub client_awareness_per_second: u32,
+    #[serde(default = "default_collaboration_room_awareness")]
+    pub room_awareness_per_second: u32,
+    #[serde(default = "default_collaboration_state_bytes")]
+    pub max_state_bytes: u64,
+    #[serde(default = "default_collaboration_retained_bytes")]
+    pub max_retained_room_bytes: u64,
+    #[serde(default = "default_collaboration_recheck_seconds")]
+    pub generation_recheck_seconds: u64,
+    #[serde(default = "default_collaboration_dirty_retention_seconds")]
+    pub dirty_retention_seconds: u64,
+    #[serde(default = "default_collaboration_warning_seconds")]
+    pub expiry_warning_seconds: u64,
+}
+
+impl Default for CollaborationLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_participants: default_collaboration_participants(),
+            max_update_bytes: default_collaboration_update_bytes(),
+            max_operation_group_bytes: default_collaboration_group_bytes(),
+            client_updates_per_second: default_collaboration_client_updates(),
+            client_bytes_per_second: default_collaboration_client_bytes(),
+            room_updates_per_second: default_collaboration_room_updates(),
+            room_bytes_per_second: default_collaboration_room_bytes(),
+            max_awareness_bytes: default_collaboration_awareness_bytes(),
+            client_awareness_per_second: default_collaboration_client_awareness(),
+            room_awareness_per_second: default_collaboration_room_awareness(),
+            max_state_bytes: default_collaboration_state_bytes(),
+            max_retained_room_bytes: default_collaboration_retained_bytes(),
+            generation_recheck_seconds: default_collaboration_recheck_seconds(),
+            dirty_retention_seconds: default_collaboration_dirty_retention_seconds(),
+            expiry_warning_seconds: default_collaboration_warning_seconds(),
         }
     }
 }
@@ -599,7 +708,16 @@ impl Config {
                 || (self.mcp.enabled && self.listeners.mcp_broker.ip().is_unspecified())
                 || (self.mcp.runners.enabled
                     && self.listeners.mcp_runner_relay.ip().is_unspecified())
-                || (self.mcp.runners.enabled && self.listeners.controller.ip().is_unspecified()))
+                || (self.mcp.runners.enabled && self.listeners.controller.ip().is_unspecified())
+                || (self.collaboration.enabled
+                    && self.listeners.collaboration_ws.ip().is_unspecified())
+                || (self.collaboration.enabled
+                    && self.collaboration.webtransport_enabled
+                    && self
+                        .listeners
+                        .collaboration_webtransport
+                        .ip()
+                        .is_unspecified()))
         {
             return Err(invalid(
                 "backend wildcard listeners require allow_container_wildcard",
@@ -618,6 +736,9 @@ impl Config {
             }
             if let Some(controller) = &tls.controller {
                 validate_backend_tls(controller)?;
+            }
+            if let Some(collaboration) = &tls.collaboration {
+                validate_backend_tls(collaboration)?;
             }
         }
         let sample_ratio = self.telemetry.effective_trace_sample_ratio();
@@ -709,6 +830,88 @@ impl Config {
             ));
         }
         self.validate_mcp()?;
+        self.validate_collaboration()?;
+        Ok(())
+    }
+
+    fn validate_collaboration(&self) -> Result<(), ConfigError> {
+        let collaboration = &self.collaboration;
+        validate_collaboration_limits(&collaboration.limits)?;
+        if collaboration.webtransport_enabled {
+            return Err(invalid(
+                "WebTransport is reserved until the collaboration runtime listener is implemented",
+            ));
+        }
+        if !collaboration.enabled {
+            return Ok(());
+        }
+        if [
+            collaboration.database_url_file.as_ref(),
+            collaboration.capability_private_key_file.as_ref(),
+        ]
+        .into_iter()
+        .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "enabled collaboration requires absolute database and capability key paths",
+            ));
+        }
+        if collaboration.capability_key_generation == 0
+            || collaboration.capability_key_generation == self.keys.current_generation
+        {
+            return Err(invalid(
+                "collaboration capability key generation must be positive and distinct from the API generation",
+            ));
+        }
+        let io_url = collaboration
+            .io_url
+            .as_ref()
+            .ok_or_else(|| invalid("enabled collaboration requires an internal I/O URL"))?;
+        let expected_scheme = if self.deployment.mode == DeploymentMode::Kubernetes {
+            "https"
+        } else {
+            "http"
+        };
+        if io_url.scheme() != expected_scheme
+            || io_url.host_str().is_none()
+            || io_url.port().is_none()
+            || io_url.path() != "/"
+            || io_url.query().is_some()
+            || io_url.fragment().is_some()
+            || !io_url.username().is_empty()
+            || io_url.password().is_some()
+        {
+            return Err(invalid("collaboration internal I/O URL is invalid"));
+        }
+        if self.listeners.collaboration_ws == self.listeners.collaboration_webtransport {
+            return Err(invalid(
+                "collaboration WebSocket and WebTransport listeners must be distinct",
+            ));
+        }
+        if self.deployment.mode == DeploymentMode::Kubernetes {
+            if [
+                collaboration.client_certificate_chain_file.as_ref(),
+                collaboration.client_private_key_file.as_ref(),
+                collaboration.server_ca_file.as_ref(),
+            ]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+            {
+                return Err(invalid(
+                    "Kubernetes collaboration requires absolute I/O client TLS paths",
+                ));
+            }
+            if self
+                .backend_tls
+                .as_ref()
+                .and_then(|tls| tls.collaboration.as_ref())
+                .is_none()
+            {
+                return Err(invalid(
+                    "Kubernetes collaboration requires backend mTLS configuration",
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -1082,6 +1285,36 @@ fn validate_mcp_limits(limits: &McpLimitConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn validate_collaboration_limits(limits: &CollaborationLimitConfig) -> Result<(), ConfigError> {
+    if !(1..=32).contains(&limits.max_participants)
+        || !(16_384..=262_144).contains(&limits.max_update_bytes)
+        || limits.max_operation_group_bytes < limits.max_update_bytes
+        || limits.max_operation_group_bytes > 2_097_152
+        || !(1..=50).contains(&limits.client_updates_per_second)
+        || !(262_144..=2_097_152).contains(&limits.client_bytes_per_second)
+        || limits.room_updates_per_second < limits.client_updates_per_second
+        || limits.room_updates_per_second > 500
+        || limits.room_bytes_per_second < limits.client_bytes_per_second
+        || limits.room_bytes_per_second > 16_777_216
+        || !(1_024..=8_192).contains(&limits.max_awareness_bytes)
+        || !(1..=10).contains(&limits.client_awareness_per_second)
+        || limits.room_awareness_per_second < limits.client_awareness_per_second
+        || limits.room_awareness_per_second > 100
+        || !(2_097_152..=67_108_864).contains(&limits.max_state_bytes)
+        || limits.max_retained_room_bytes < limits.max_state_bytes
+        || limits.max_retained_room_bytes > 268_435_456
+        || !(1..=60).contains(&limits.generation_recheck_seconds)
+        || limits.dirty_retention_seconds != 2_592_000
+        || limits.expiry_warning_seconds != 1_987_200
+        || limits.expiry_warning_seconds >= limits.dirty_retention_seconds
+    {
+        return Err(invalid(
+            "collaboration limits are outside the accepted Large profile",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_policy_name(name: &str, kind: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > 63
@@ -1176,6 +1409,60 @@ fn default_mcp_runner_relay_listener() -> SocketAddr {
 }
 fn default_controller_listener() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8083))
+}
+fn default_collaboration_ws_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8085))
+}
+fn default_collaboration_webtransport_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8086))
+}
+const fn default_collaboration_participants() -> u32 {
+    32
+}
+const fn default_collaboration_capability_key_generation() -> u32 {
+    2
+}
+const fn default_collaboration_update_bytes() -> u64 {
+    262_144
+}
+const fn default_collaboration_group_bytes() -> u64 {
+    2_097_152
+}
+const fn default_collaboration_client_updates() -> u32 {
+    50
+}
+const fn default_collaboration_client_bytes() -> u64 {
+    2_097_152
+}
+const fn default_collaboration_room_updates() -> u32 {
+    500
+}
+const fn default_collaboration_room_bytes() -> u64 {
+    16_777_216
+}
+const fn default_collaboration_awareness_bytes() -> u64 {
+    8_192
+}
+const fn default_collaboration_client_awareness() -> u32 {
+    10
+}
+const fn default_collaboration_room_awareness() -> u32 {
+    100
+}
+const fn default_collaboration_state_bytes() -> u64 {
+    67_108_864
+}
+const fn default_collaboration_retained_bytes() -> u64 {
+    268_435_456
+}
+const fn default_collaboration_recheck_seconds() -> u64 {
+    60
+}
+const fn default_collaboration_dirty_retention_seconds() -> u64 {
+    2_592_000
+}
+const fn default_collaboration_warning_seconds() -> u64 {
+    1_987_200
 }
 fn default_mcp_callback_path() -> String {
     "/api/v1/mcp/oauth/callback".into()
@@ -1318,6 +1605,7 @@ mod tests {
             limits: LimitConfig::default(),
             iggy: None,
             mcp: McpConfig::default(),
+            collaboration: CollaborationConfig::default(),
         }
     }
     #[test]
@@ -1380,6 +1668,7 @@ mod tests {
             },
             mcp_broker: None,
             controller: None,
+            collaboration: None,
         });
         candidate.validate().unwrap();
     }
@@ -1433,6 +1722,7 @@ mod tests {
             io: shared,
             mcp_broker: None,
             controller: None,
+            collaboration: None,
         });
         assert!(candidate.validate().is_err());
     }
@@ -1457,6 +1747,7 @@ mod tests {
             },
             mcp_broker: None,
             controller: None,
+            collaboration: None,
         });
         assert!(candidate.validate().is_err());
 
@@ -1473,6 +1764,7 @@ mod tests {
             io: shared_domain,
             mcp_broker: None,
             controller: None,
+            collaboration: None,
         });
         assert!(candidate.validate().is_err());
     }

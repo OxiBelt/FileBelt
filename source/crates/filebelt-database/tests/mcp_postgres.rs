@@ -407,6 +407,9 @@ async fn mcp_schema_enforces_tenant_isolation_and_secret_privileges() {
             authority_generation: generations.principal,
             admin_block_generation: generations.admin_block,
             request_bytes: 1,
+            semantic_node_id: None,
+            semantic_base_version_id: None,
+            semantic_input_digest: None,
         })
         .await
         .expect("active invocation");

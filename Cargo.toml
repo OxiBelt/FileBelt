@@ -4,6 +4,7 @@
 members = [
   "source",
   "source/apps/filebelt-api",
+  "source/apps/filebelt-collaboration",
   "source/apps/filebelt-worker-io",
   "source/apps/filebelt-worker-maintenance",
   "source/apps/filebelt-media-controller",
@@ -24,6 +25,7 @@ members = [
   "source/crates/filebelt-mcp-protocol",
   "source/crates/filebelt-mcp-vault",
   "source/crates/filebelt-control-protocol",
+  "source/crates/filebelt-collaboration-protocol",
   "source/crates/filebelt-runtime",
   "source/crates/filebelt-deployment-diagnostics",
   "fuzz",
@@ -51,12 +53,13 @@ publish = false
 anyhow = "=1.0.104"
 argon2 = { version = "=0.5.3", features = ["std"] }
 aws-lc-rs = { version = "=1.17.3", default-features = false }
-axum = { version = "=0.8.9", features = ["http1", "http2", "json", "macros", "tokio"] }
+axum = { version = "=0.8.9", features = ["http1", "http2", "json", "macros", "tokio", "ws"] }
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 blake3 = "=1.8.6"
 bytes = "=1.12.1"
 clap = { version = "=4.6.5", features = ["derive"] }
 filebelt-authz = { version = "=0.1.0", path = "source/crates/filebelt-authz" }
+filebelt-collaboration-protocol = { version = "=0.1.0", path = "source/crates/filebelt-collaboration-protocol" }
 filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-database" }
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }
 filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
@@ -105,6 +108,7 @@ url = { version = "=2.5.8", features = ["serde"] }
 uuid = { version = "=1.24.0", features = ["serde", "v4"] }
 zeroize = "=1.9.0"
 x509-parser = "=0.18.1"
+yrs = "=0.27.3"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

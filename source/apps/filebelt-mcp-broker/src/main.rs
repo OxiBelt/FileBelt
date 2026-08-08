@@ -61,6 +61,7 @@ const INTERNAL_CONTENT_TYPE: &str = "application/vnd.filebelt.mcp.v1+protobuf";
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 const CONTROLLER_RESPONSE_MAX_BYTES: usize = 16_384;
 const MAX_STDIO_MESSAGES_PER_REQUEST: usize = 128;
+const MAX_SEMANTIC_MARKDOWN_BYTES: usize = 2 * 1_024 * 1_024;
 
 #[derive(Debug, Parser)]
 #[command(name = "filebelt-mcp-broker", disable_version_flag = true)]
@@ -682,6 +683,7 @@ async fn invoke(
     .map_err(|_| BrokerError::forbidden("mcp.delegation.invalid"))?;
     if Uuid::parse_str(&request.request_id).is_err()
         || request.arguments_json.len() > state.limits.message_bytes as usize
+        || request.semantic_input_json.len() > MAX_SEMANTIC_MARKDOWN_BYTES + 128
         || request.deadline_unix_milliseconds <= now.saturating_mul(1_000)
         || request.deadline_unix_milliseconds
             > now.saturating_add(state.limits.absolute_timeout_seconds as i64) * 1_000
@@ -692,10 +694,23 @@ async fn invoke(
     {
         return Err(BrokerError::bad_request("mcp.request.invalid"));
     }
-    let digest = blake3::Hasher::new()
+    let semantic_input = parse_semantic_markdown_input(&request.semantic_input_json)?;
+    if operation != McpOperation::Invoke && semantic_input.is_some() {
+        return Err(BrokerError::bad_request("mcp.semantic.operation_invalid"));
+    }
+    let mut arguments_hasher = blake3::Hasher::new();
+    arguments_hasher
         .update(ARGUMENT_DIGEST_DOMAIN)
-        .update(&request.arguments_json)
-        .finalize();
+        .update(&(request.arguments_json.len() as u64).to_be_bytes())
+        .update(&request.arguments_json);
+    if request.semantic_input_json.is_empty() {
+        arguments_hasher.update(&0_u64.to_be_bytes());
+    } else {
+        arguments_hasher
+            .update(&(request.semantic_input_json.len() as u64).to_be_bytes())
+            .update(&request.semantic_input_json);
+    }
+    let digest = arguments_hasher.finalize();
     if claims.arguments_digest != digest.as_bytes() {
         return Err(BrokerError::forbidden("mcp.arguments.mismatch"));
     }
@@ -2755,18 +2770,7 @@ async fn stdio_session_operation(
     }
     let arguments: Value = serde_json::from_slice(arguments_json)
         .map_err(|_| BrokerError::bad_request("mcp.arguments.invalid"))?;
-    let (method, parameters) = match McpPrimitive::try_from(request.primitive).ok() {
-        Some(McpPrimitive::Tool) => (
-            "tools/call",
-            json!({"name": request.capability_name, "arguments": arguments}),
-        ),
-        Some(McpPrimitive::Resource) => ("resources/read", json!({"uri": request.capability_name})),
-        Some(McpPrimitive::Prompt) => (
-            "prompts/get",
-            json!({"name": request.capability_name, "arguments": arguments}),
-        ),
-        _ => return Err(BrokerError::bad_request("mcp.primitive.invalid")),
-    };
+    let (method, parameters) = invocation_parameters(request, arguments)?;
     let result = session.request(5, method, parameters).await?;
     validate_result(request.primitive, &result)?;
     session.close().await?;
@@ -2999,18 +3003,7 @@ async fn remote_operation(
     }
     let arguments: Value = serde_json::from_slice(arguments_json)
         .map_err(|_| BrokerError::bad_request("mcp.arguments.invalid"))?;
-    let (method, parameters) = match McpPrimitive::try_from(request.primitive).ok() {
-        Some(McpPrimitive::Tool) => (
-            "tools/call",
-            json!({"name": request.capability_name, "arguments": arguments}),
-        ),
-        Some(McpPrimitive::Resource) => ("resources/read", json!({"uri": request.capability_name})),
-        Some(McpPrimitive::Prompt) => (
-            "prompts/get",
-            json!({"name": request.capability_name, "arguments": arguments}),
-        ),
-        _ => return Err(BrokerError::bad_request("mcp.primitive.invalid")),
-    };
+    let (method, parameters) = invocation_parameters(request, arguments)?;
     let result = session
         .request(
             5,
@@ -3331,6 +3324,104 @@ fn validate_media(block: &Value, allowed: &[&str]) -> Result<(), BrokerError> {
     Ok(())
 }
 
+fn parse_semantic_markdown_input(bytes: &[u8]) -> Result<Option<Value>, BrokerError> {
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let value: Value = serde_json::from_slice(bytes)
+        .map_err(|_| BrokerError::bad_request("mcp.semantic.invalid"))?;
+    validate_semantic_markdown_input(&value)
+        .map_err(|_| BrokerError::bad_request("mcp.semantic.invalid"))?;
+    Ok(Some(value))
+}
+
+fn validate_semantic_markdown_input(value: &Value) -> Result<(), ()> {
+    let object = value.as_object().ok_or(())?;
+    if object.len() != 4
+        || object.get("format").and_then(Value::as_str) != Some("filebelt.markdown.semantic.v1")
+        || object
+            .get("node_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_none()
+        || object
+            .get("base_version_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_none()
+    {
+        return Err(());
+    }
+    let markdown = object.get("markdown").and_then(Value::as_str).ok_or(())?;
+    if markdown.len() > MAX_SEMANTIC_MARKDOWN_BYTES
+        || markdown.contains('\0')
+        || markdown.contains('\r')
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn validate_semantic_markdown_output(value: &Value) -> Result<(), ()> {
+    let object = value.as_object().ok_or(())?;
+    if object.len() != 2
+        || object.get("format").and_then(Value::as_str) != Some("filebelt.markdown.semantic.v1")
+    {
+        return Err(());
+    }
+    let markdown = object.get("markdown").and_then(Value::as_str).ok_or(())?;
+    if markdown.len() > MAX_SEMANTIC_MARKDOWN_BYTES
+        || markdown.contains('\0')
+        || markdown.contains('\r')
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn invocation_parameters(
+    request: &InvocationRequest,
+    arguments: Value,
+) -> Result<(&'static str, Value), BrokerError> {
+    let metadata = parse_semantic_markdown_input(&request.semantic_input_json)?
+        .map(|semantic| json!({"filebelt/semantic": semantic}));
+    let mut parameters = match McpPrimitive::try_from(request.primitive).ok() {
+        Some(McpPrimitive::Tool) => (
+            "tools/call",
+            json!({"name": request.capability_name, "arguments": arguments}),
+        ),
+        Some(McpPrimitive::Resource) => ("resources/read", json!({"uri": request.capability_name})),
+        Some(McpPrimitive::Prompt) => (
+            "prompts/get",
+            json!({"name": request.capability_name, "arguments": arguments}),
+        ),
+        _ => return Err(BrokerError::bad_request("mcp.primitive.invalid")),
+    };
+    if let Some(metadata) = metadata {
+        parameters
+            .1
+            .as_object_mut()
+            .ok_or_else(|| BrokerError::bad_request("mcp.arguments.invalid"))?
+            .insert("_meta".into(), metadata);
+    }
+    Ok(parameters)
+}
+
+fn semantic_output(result: &Value) -> Result<Option<Vec<u8>>, BrokerError> {
+    let Some(value) = result
+        .get("_meta")
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("filebelt/semantic"))
+    else {
+        return Ok(None);
+    };
+    validate_semantic_markdown_output(value)
+        .map_err(|_| BrokerError::bad_gateway("mcp.remote.semantic_invalid"))?;
+    serde_json::to_vec(value)
+        .map(Some)
+        .map_err(|_| BrokerError::bad_gateway("mcp.remote.semantic_invalid"))
+}
+
 fn result_frames(
     request_id: &str,
     result: Value,
@@ -3341,7 +3432,8 @@ fn result_frames(
     if payload.len() > limit {
         return Err(BrokerError::bad_gateway("mcp.remote.result_too_large"));
     }
-    Ok(vec![
+    let semantic = semantic_output(&result)?;
+    let mut frames = vec![
         InvocationFrame {
             request_id: request_id.to_owned(),
             sequence: 1,
@@ -3358,15 +3450,26 @@ fn result_frames(
             code: String::new(),
             terminal: false,
         },
-        InvocationFrame {
+    ];
+    if let Some(payload) = semantic {
+        frames.push(InvocationFrame {
             request_id: request_id.to_owned(),
             sequence: 3,
-            kind: InvocationFrameKind::Complete as i32,
-            payload: Vec::new(),
+            kind: InvocationFrameKind::Semantic as i32,
+            payload,
             code: String::new(),
-            terminal: true,
-        },
-    ])
+            terminal: false,
+        });
+    }
+    frames.push(InvocationFrame {
+        request_id: request_id.to_owned(),
+        sequence: frames.len() as u64 + 1,
+        kind: InvocationFrameKind::Complete as i32,
+        payload: Vec::new(),
+        code: String::new(),
+        terminal: true,
+    });
+    Ok(frames)
 }
 
 impl ConcurrencyLimits {
@@ -3714,6 +3817,71 @@ mod tests {
             validate_content_blocks(
                 &json!({"content": [{"type":"resource","resource":{"uri":"https://example.test"}}]})
             )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn semantic_markdown_is_bounded_and_forwarded_as_metadata() {
+        let semantic = json!({
+            "format": "filebelt.markdown.semantic.v1",
+            "node_id": Uuid::new_v4(),
+            "base_version_id": Uuid::new_v4(),
+            "markdown": "# Proposed\n",
+        });
+        let request = InvocationRequest {
+            primitive: McpPrimitive::Tool as i32,
+            capability_name: "rewrite".into(),
+            semantic_input_json: serde_json::to_vec(&semantic).unwrap(),
+            ..Default::default()
+        };
+        let (method, parameters) =
+            invocation_parameters(&request, json!({"tone":"plain"})).unwrap();
+        assert_eq!(method, "tools/call");
+        assert_eq!(parameters["_meta"]["filebelt/semantic"], semantic);
+        assert_eq!(parameters["arguments"], json!({"tone":"plain"}));
+
+        let invalid = serde_json::to_vec(&json!({
+            "format": "filebelt.markdown.semantic.v1",
+            "node_id": Uuid::new_v4(),
+            "base_version_id": Uuid::new_v4(),
+            "markdown": "bad\u{0}source",
+        }))
+        .unwrap();
+        assert_eq!(
+            parse_semantic_markdown_input(&invalid).unwrap_err().code,
+            "mcp.semantic.invalid"
+        );
+    }
+
+    #[test]
+    fn semantic_result_is_a_distinct_nonterminal_proposal_frame() {
+        let result = json!({
+            "content": [{"type":"text","text":"proposal"}],
+            "_meta": {
+                "filebelt/semantic": {
+                    "format": "filebelt.markdown.semantic.v1",
+                    "markdown": "# Proposal\n",
+                }
+            }
+        });
+        let frames = result_frames("00000000-0000-4000-8000-000000000000", result, 8_192).unwrap();
+        assert_eq!(frames.len(), 4);
+        assert_eq!(frames[2].kind, InvocationFrameKind::Semantic as i32);
+        assert!(!frames[2].terminal);
+        assert_eq!(frames[3].kind, InvocationFrameKind::Complete as i32);
+        assert!(frames[3].terminal);
+    }
+
+    #[test]
+    fn semantic_result_cannot_redefine_input_context() {
+        assert!(
+            validate_semantic_markdown_output(&json!({
+                "format": "filebelt.markdown.semantic.v1",
+                "node_id": Uuid::new_v4(),
+                "base_version_id": Uuid::new_v4(),
+                "markdown": "# Proposal\n",
+            }))
             .is_err()
         );
     }

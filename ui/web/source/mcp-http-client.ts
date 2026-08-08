@@ -384,7 +384,7 @@ function BlockRuleView(Value: AdminBlockRuleResponse): AdminMcpBlockRuleView {
 }
 
 function InvocationRequest(Input: McpInvocationInput): InvocationRequest {
-  return { application_id: Input.ApplicationId, arguments: Input.Arguments, attachments: [], capability: { fingerprint: Input.Capability.Fingerprint, kind: Input.Capability.Kind, name: Input.Capability.Name }, registration_id: Input.RegistrationId };
+  return { application_id: Input.ApplicationId, arguments: Input.Arguments, attachments: [], capability: { fingerprint: Input.Capability.Fingerprint, kind: Input.Capability.Kind, name: Input.Capability.Name }, registration_id: Input.RegistrationId, ...(Input.SemanticInput === undefined ? {} : { semantic_input: { base_version_id: Input.SemanticInput.BaseVersionId, format: "filebelt.markdown.semantic.v1", markdown: Input.SemanticInput.Markdown, node_id: Input.SemanticInput.NodeId } }) };
 }
 
 function RegistrationExport(Value: unknown): components["schemas"]["McpRegistrationExport"] {
@@ -395,6 +395,7 @@ function RegistrationExport(Value: unknown): components["schemas"]["McpRegistrat
 }
 
 function InvocationEventView(Value: InvocationEvent): McpInvocationEventView {
+  if (Value.semantic_output?.format === "filebelt.markdown.semantic.v1" && typeof Value.semantic_output.markdown === "string") return { InvocationId: Value.invocation_id, Kind: "semanticMarkdown", Value: { Markdown: Value.semantic_output.markdown } };
   if (Value.event === "text" && typeof Value.text === "string") return { Kind: "text", Value: Value.text };
   if (Value.event === "json") return { Kind: "json", Value: Value.json };
   if (Value.event === "media" && Value.media !== null && Value.media !== undefined) return { Kind: "media", Value: { Base64: Value.media.base64, MimeType: Value.media.mime_type, SizeBytes: Value.media.size_bytes } };

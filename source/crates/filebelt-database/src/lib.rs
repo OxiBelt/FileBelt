@@ -4,6 +4,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod collaboration;
 pub mod mcp;
 
 use filebelt_events_protocol::EventEnvelope;
@@ -127,6 +128,7 @@ pub struct NodeRecord {
     pub updated_at: String,
     pub size_bytes: Option<i64>,
     pub version_ordinal: Option<i64>,
+    pub head_media_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +141,11 @@ pub struct FileVersionRecord {
     pub restored_from_version_id: Option<Uuid>,
     pub created_at: String,
     pub current: bool,
+    pub media_type: Option<String>,
+    pub origin_kind: String,
+    pub source_version_id: Option<Uuid>,
+    pub creator_display_name: Option<String>,
+    pub mcp_assisted: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -209,6 +216,9 @@ pub struct UploadRecord {
     pub part_count: i32,
     pub fencing_token: i64,
     pub state: String,
+    pub declared_media_type: Option<String>,
+    pub collaboration_checkpoint_id: Option<Uuid>,
+    pub import_intent_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -723,7 +733,7 @@ impl Database {
         drive_id: Uuid,
         node_id: Uuid,
     ) -> Result<NodeRecord, DatabaseError> {
-        let row = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3")
+        let row = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3")
             .bind(tenant_id)
             .bind(drive_id)
             .bind(node_id)
@@ -739,7 +749,7 @@ impl Database {
         drive_id: Uuid,
         parent_id: Uuid,
     ) -> Result<Vec<NodeRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.parent_id=$3 AND n.trash_root_id IS NULL ORDER BY n.kind DESC,n.name_key,n.id")
+        let rows = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.parent_id=$3 AND n.trash_root_id IS NULL ORDER BY n.kind DESC,n.name_key,n.id")
             .bind(tenant_id).bind(drive_id).bind(parent_id).fetch_all(&self.pool).await?;
         Ok(rows.iter().map(node_from_row).collect())
     }
@@ -749,7 +759,7 @@ impl Database {
         tenant_id: Uuid,
         drive_id: Uuid,
     ) -> Result<Vec<NodeRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.trash_root_id=n.id ORDER BY n.kind DESC,n.name_key,n.id")
+        let rows = sqlx::query("SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.trash_root_id=n.id ORDER BY n.kind DESC,n.name_key,n.id")
             .bind(tenant_id)
             .bind(drive_id)
             .fetch_all(&self.pool)
@@ -762,7 +772,7 @@ impl Database {
         tenant_id: Uuid,
         principal_id: Uuid,
     ) -> Result<Vec<NodeRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT DISTINCT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal FROM nodes n JOIN node_ancestry na ON na.tenant_id=n.tenant_id AND na.drive_id=n.drive_id AND na.descendant_id=n.id JOIN acl_entries a ON a.tenant_id=na.tenant_id AND a.drive_id=na.drive_id AND a.resource_id=na.ancestor_id LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.trash_root_id IS NULL AND a.effect='allow' AND a.action='READ_METADATA' AND (a.principal_id=$2 OR a.principal_id IN (SELECT g.principal_id FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2)) AND ((na.depth=0 AND a.inheritance IN ('self','self_and_descendants')) OR (na.depth>0 AND a.inheritance IN ('descendants','self_and_descendants'))) ORDER BY n.kind DESC,n.name_key,n.id")
+        let rows = sqlx::query("SELECT DISTINCT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n JOIN node_ancestry na ON na.tenant_id=n.tenant_id AND na.drive_id=n.drive_id AND na.descendant_id=n.id JOIN acl_entries a ON a.tenant_id=na.tenant_id AND a.drive_id=na.drive_id AND a.resource_id=na.ancestor_id LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.trash_root_id IS NULL AND a.effect='allow' AND a.action='READ_METADATA' AND (a.principal_id=$2 OR a.principal_id IN (SELECT g.principal_id FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2)) AND ((na.depth=0 AND a.inheritance IN ('self','self_and_descendants')) OR (na.depth>0 AND a.inheritance IN ('descendants','self_and_descendants'))) ORDER BY n.kind DESC,n.name_key,n.id")
             .bind(tenant_id)
             .bind(principal_id)
             .fetch_all(&self.pool)
@@ -776,7 +786,7 @@ impl Database {
         drive_id: Uuid,
         node_id: Uuid,
     ) -> Result<Vec<FileVersionRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT v.id,v.node_id,v.ordinal,v.size_bytes,v.created_by,v.restored_from_version_id,v.created_at::text,(n.head_version_id=v.id) AS current FROM nodes n JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 AND n.kind='file' ORDER BY v.ordinal DESC,v.id")
+        let rows = sqlx::query("SELECT v.id,v.node_id,v.ordinal,v.size_bytes,v.created_by,v.restored_from_version_id,v.created_at::text,(n.head_version_id=v.id) AS current,v.media_type,v.origin_kind,v.source_version_id,v.creator_display_name,v.mcp_assisted FROM nodes n JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 AND n.kind='file' ORDER BY v.ordinal DESC,v.id")
             .bind(tenant_id)
             .bind(drive_id)
             .bind(node_id)
@@ -859,7 +869,7 @@ impl Database {
             .await?
             .get(0);
         let id = Uuid::new_v4();
-        let created_at: String = sqlx::query("INSERT INTO file_versions (tenant_id,node_id,id,ordinal,payload_id,size_bytes,blake3,media_type,created_by,restored_from_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at::text")
+        let created = sqlx::query("INSERT INTO file_versions (tenant_id,node_id,id,ordinal,payload_id,size_bytes,blake3,media_type,created_by,restored_from_version_id,origin_kind,source_version_id,creator_display_name) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'restore',$10,u.display_name FROM api_sessions s JOIN users u ON u.tenant_id=s.tenant_id AND u.id=s.user_id WHERE s.tenant_id=$1 AND s.id=$11 RETURNING created_at::text,creator_display_name")
             .bind(tenant_id)
             .bind(node_id)
             .bind(id)
@@ -870,9 +880,11 @@ impl Database {
             .bind(source.get::<Option<String>, _>("media_type"))
             .bind(actor_principal_id)
             .bind(source_version_id)
+            .bind(session_id)
             .fetch_one(&mut *transaction)
-            .await?
-            .get(0);
+            .await?;
+        let created_at: String = created.get("created_at");
+        let creator_display_name: Option<String> = created.get("creator_display_name");
         sqlx::query("UPDATE nodes SET head_version_id=$4,updated_at=clock_timestamp() WHERE tenant_id=$1 AND drive_id=$2 AND id=$3")
             .bind(tenant_id)
             .bind(drive_id)
@@ -880,6 +892,18 @@ impl Database {
             .bind(id)
             .execute(&mut *transaction)
             .await?;
+        sqlx::query(
+            "UPDATE filebelt_collaboration.epochs e SET state='frozen', \
+             freeze_reason='external_head',fencing_token=fencing_token+1 \
+             FROM filebelt_collaboration.rooms r \
+             WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 \
+               AND e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.state='active'",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .bind(node_id)
+        .execute(&mut *transaction)
+        .await?;
         insert_audit(
             &mut transaction,
             tenant_id,
@@ -912,6 +936,11 @@ impl Database {
             restored_from_version_id: Some(source_version_id),
             created_at,
             current: true,
+            media_type: source.get("media_type"),
+            origin_kind: "restore".into(),
+            source_version_id: Some(source_version_id),
+            creator_display_name,
+            mcp_assisted: false,
         })
     }
 
@@ -1470,6 +1499,9 @@ impl Database {
         chunk_size: i32,
         part_count: i32,
         layout: &str,
+        declared_media_type: Option<&str>,
+        collaboration_checkpoint_id: Option<Uuid>,
+        import_intent_id: Option<Uuid>,
         ttl_seconds: i64,
         membership_generation: i64,
         drive_acl_generation: i64,
@@ -1480,6 +1512,12 @@ impl Database {
         if !matches!(layout, "whole" | "chunked")
             || (layout == "whole" && part_count != 1)
             || (layout == "chunked" && part_count < 2)
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        if collaboration_checkpoint_id.is_some() && import_intent_id.is_some()
+            || collaboration_checkpoint_id.is_some() && node_id.is_none()
+            || import_intent_id.is_some() && node_id.is_some()
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
@@ -1530,6 +1568,64 @@ impl Database {
                 return Err(DatabaseError::StaleGeneration);
             }
         }
+        if let Some(checkpoint_id) = collaboration_checkpoint_id {
+            sqlx::query(
+                "SELECT 1 FROM filebelt_collaboration.checkpoints WHERE tenant_id=$1 AND id=$2 \
+                 AND node_id=$3 AND base_version_id=$4 AND created_by=$5 AND state='prepared' \
+                 AND expires_at>clock_timestamp() FOR UPDATE",
+            )
+            .bind(tenant_id)
+            .bind(checkpoint_id)
+            .bind(node_id.ok_or(DatabaseError::InvalidPersistedValue)?)
+            .bind(expected_head.ok_or(DatabaseError::InvalidPersistedValue)?)
+            .bind(actor)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(DatabaseError::StaleGeneration)?;
+        }
+        if let Some(intent_id) = import_intent_id {
+            let intent = sqlx::query(
+                "SELECT source_node_id,target_parent_id,target_display_name,target_name_key,principal_id,session_id, \
+                        source_membership_generation,source_drive_acl_generation,source_namespace_generation,source_resource_acl_generation, \
+                        target_membership_generation,target_drive_acl_generation,target_namespace_generation,target_resource_acl_generation \
+                 FROM filebelt_collaboration.import_intents WHERE tenant_id=$1 AND id=$2 \
+                   AND drive_id=$3 AND state='active' AND expires_at>clock_timestamp() FOR UPDATE",
+            )
+            .bind(tenant_id)
+            .bind(intent_id)
+            .bind(drive_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(DatabaseError::StaleGeneration)?;
+            if intent.get::<Uuid, _>("target_parent_id") != parent_id
+                || intent.get::<String, _>("target_display_name") != display_name
+                || intent.get::<String, _>("target_name_key") != name_key
+                || intent.get::<Uuid, _>("principal_id") != actor
+                || intent.get::<Uuid, _>("session_id") != session_id
+                || intent.get::<i64, _>("target_membership_generation") != membership_generation
+                || intent.get::<i64, _>("target_drive_acl_generation") != drive_acl_generation
+                || intent.get::<i64, _>("target_namespace_generation") != namespace_generation
+                || intent.get::<i64, _>("target_resource_acl_generation") != resource_acl_generation
+                || declared_media_type != Some("text/markdown")
+            {
+                return Err(DatabaseError::StaleGeneration);
+            }
+            lock_authorization_fence(
+                &mut transaction,
+                tenant_id,
+                actor,
+                session_id,
+                drive_id,
+                intent.get("source_node_id"),
+                [
+                    intent.get("source_membership_generation"),
+                    intent.get("source_drive_acl_generation"),
+                    intent.get("source_namespace_generation"),
+                    intent.get("source_resource_acl_generation"),
+                ],
+            )
+            .await?;
+        }
         let backend_id: Uuid = sqlx::query(
             "SELECT id FROM storage_backends WHERE tenant_id=$1 AND kind='posix' FOR UPDATE",
         )
@@ -1550,8 +1646,8 @@ impl Database {
         let locator = Uuid::new_v4();
         sqlx::query("INSERT INTO payload_objects (tenant_id,id,drive_id,backend_id,locator,layout,state,size_bytes) VALUES ($1,$2,$3,$4,$5,$6,'staging',$7)")
             .bind(tenant_id).bind(payload_id).bind(drive_id).bind(backend_id).bind(locator).bind(layout).bind(declared_size).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO upload_sessions (tenant_id,id,drive_id,node_id,parent_id,owner_principal_id,payload_id,expected_head_version_id,target_display_name,target_name_key,declared_size_bytes,chunk_size_bytes,part_count,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'open',clock_timestamp()+make_interval(secs=>$14))")
-            .bind(tenant_id).bind(upload_id).bind(drive_id).bind(node_id).bind(parent_id).bind(actor).bind(payload_id).bind(expected_head).bind(display_name).bind(name_key).bind(declared_size).bind(chunk_size).bind(part_count).bind(ttl_seconds).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO upload_sessions (tenant_id,id,drive_id,node_id,parent_id,owner_principal_id,payload_id,expected_head_version_id,target_display_name,target_name_key,declared_size_bytes,chunk_size_bytes,part_count,declared_media_type,collaboration_checkpoint_id,import_intent_id,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'open',clock_timestamp()+make_interval(secs=>$17))")
+            .bind(tenant_id).bind(upload_id).bind(drive_id).bind(node_id).bind(parent_id).bind(actor).bind(payload_id).bind(expected_head).bind(display_name).bind(name_key).bind(declared_size).bind(chunk_size).bind(part_count).bind(declared_media_type).bind(collaboration_checkpoint_id).bind(import_intent_id).bind(ttl_seconds).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO quota_reservations (tenant_id,id,drive_id,upload_id,bytes,state,expires_at) VALUES ($1,$2,$3,$4,$5,'active',clock_timestamp()+make_interval(secs=>$6))")
             .bind(tenant_id).bind(Uuid::new_v4()).bind(drive_id).bind(upload_id).bind(declared_size).bind(ttl_seconds).execute(&mut *transaction).await?;
         for part in 0..part_count {
@@ -1590,6 +1686,9 @@ impl Database {
             part_count,
             fencing_token: 1,
             state: "open".into(),
+            declared_media_type: declared_media_type.map(str::to_owned),
+            collaboration_checkpoint_id,
+            import_intent_id,
         })
     }
 
@@ -1915,8 +2014,91 @@ impl Database {
         let payload_id: Uuid = row.get("payload_id");
         let size: i64 = row.get("declared_size_bytes");
         let digest: Vec<u8> = row.get("blake3");
-        sqlx::query("INSERT INTO file_versions (tenant_id,node_id,id,ordinal,payload_id,size_bytes,blake3,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(tenant_id).bind(node_id).bind(version_id).bind(ordinal).bind(payload_id).bind(size).bind(&digest).bind(actor).execute(&mut *transaction).await?;
+        let declared_media_type: Option<String> = row.get("declared_media_type");
+        let checkpoint_id: Option<Uuid> = row.get("collaboration_checkpoint_id");
+        let import_intent_id: Option<Uuid> = row.get("import_intent_id");
+        let (origin_kind, source_version_id, mcp_assisted) = if let Some(checkpoint_id) =
+            checkpoint_id
+        {
+            let checkpoint = sqlx::query(
+                "SELECT base_version_id,source_size_bytes,source_blake3,mcp_assisted \
+                 FROM filebelt_collaboration.checkpoints WHERE tenant_id=$1 AND id=$2 \
+                   AND node_id=$3 AND created_by=$4 AND state='prepared' \
+                   AND expires_at>clock_timestamp() FOR UPDATE",
+            )
+            .bind(tenant_id)
+            .bind(checkpoint_id)
+            .bind(node_id)
+            .bind(actor)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(DatabaseError::StaleGeneration)?;
+            if checkpoint.get::<Uuid, _>("base_version_id")
+                != expected.ok_or(DatabaseError::StaleGeneration)?
+                || checkpoint.get::<i64, _>("source_size_bytes") != size
+                || checkpoint.get::<Vec<u8>, _>("source_blake3") != digest
+                || declared_media_type.as_deref() != Some("text/markdown")
+            {
+                return Err(DatabaseError::Conflict);
+            }
+            (
+                "collaboration_checkpoint",
+                Some(checkpoint.get("base_version_id")),
+                checkpoint.get("mcp_assisted"),
+            )
+        } else if let Some(import_intent_id) = import_intent_id {
+            let intent = sqlx::query(
+                    "SELECT source_node_id,source_version_id,source_membership_generation, \
+                            source_drive_acl_generation,source_namespace_generation,source_resource_acl_generation \
+                     FROM filebelt_collaboration.import_intents \
+                 WHERE tenant_id=$1 AND id=$2 AND principal_id=$3 AND session_id=$4 \
+                   AND state='active' AND expires_at>clock_timestamp() FOR UPDATE",
+                )
+                .bind(tenant_id)
+                .bind(import_intent_id)
+                .bind(actor)
+                .bind(session_id)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(DatabaseError::StaleGeneration)?;
+            if declared_media_type.as_deref() != Some("text/markdown") {
+                return Err(DatabaseError::Conflict);
+            }
+            lock_authorization_fence(
+                &mut transaction,
+                tenant_id,
+                actor,
+                session_id,
+                drive_id,
+                intent.get("source_node_id"),
+                [
+                    intent.get("source_membership_generation"),
+                    intent.get("source_drive_acl_generation"),
+                    intent.get("source_namespace_generation"),
+                    intent.get("source_resource_acl_generation"),
+                ],
+            )
+            .await?;
+            ("import", Some(intent.get("source_version_id")), false)
+        } else if row.get::<Option<Uuid>, _>("node_id").is_some()
+            && declared_media_type.as_deref() == Some("text/markdown")
+        {
+            ("markdown_save", expected, false)
+        } else {
+            ("upload", None, false)
+        };
+        let creator_display_name: String = sqlx::query_scalar(
+            "SELECT u.display_name FROM api_sessions s JOIN users u \
+             ON u.tenant_id=s.tenant_id AND u.id=s.user_id \
+             WHERE s.tenant_id=$1 AND s.id=$2 AND s.principal_id=$3",
+        )
+        .bind(tenant_id)
+        .bind(session_id)
+        .bind(actor)
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query("INSERT INTO file_versions (tenant_id,node_id,id,ordinal,payload_id,size_bytes,blake3,media_type,created_by,origin_kind,source_version_id,creator_display_name,mcp_assisted) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+            .bind(tenant_id).bind(node_id).bind(version_id).bind(ordinal).bind(payload_id).bind(size).bind(&digest).bind(&declared_media_type).bind(actor).bind(origin_kind).bind(source_version_id).bind(&creator_display_name).bind(mcp_assisted).execute(&mut *transaction).await?;
         sqlx::query("UPDATE nodes SET head_version_id=$4,namespace_generation=namespace_generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND drive_id=$2 AND id=$3")
             .bind(tenant_id).bind(drive_id).bind(node_id).bind(version_id).execute(&mut *transaction).await?;
         sqlx::query("UPDATE payload_objects SET state='referenced',referenced_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2")
@@ -1926,6 +2108,64 @@ impl Database {
             .bind(upload_id)
             .execute(&mut *transaction)
             .await?;
+        if let Some(checkpoint_id) = checkpoint_id {
+            let checkpoint_updated = sqlx::query(
+                "UPDATE filebelt_collaboration.checkpoints SET state='committed', \
+                 committed_version_id=$3,consumed_at=clock_timestamp() \
+                 WHERE tenant_id=$1 AND id=$2 AND state='prepared'",
+            )
+            .bind(tenant_id)
+            .bind(checkpoint_id)
+            .bind(version_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            let epoch_updated = sqlx::query(
+                "UPDATE filebelt_collaboration.epochs e SET state='closed',dirty=false, \
+                 closed_at=clock_timestamp(),fencing_token=fencing_token+1 \
+                 FROM filebelt_collaboration.checkpoints c \
+                 WHERE c.tenant_id=$1 AND c.id=$2 AND e.tenant_id=c.tenant_id \
+                   AND e.room_id=c.room_id AND e.epoch=c.epoch AND e.state='active'",
+            )
+            .bind(tenant_id)
+            .bind(checkpoint_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            if checkpoint_updated != 1 || epoch_updated != 1 {
+                return Err(DatabaseError::Conflict);
+            }
+        } else {
+            sqlx::query(
+                "UPDATE filebelt_collaboration.epochs e SET state='frozen', \
+                 freeze_reason='external_head',fencing_token=fencing_token+1 \
+                 FROM filebelt_collaboration.rooms r \
+                 WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 \
+                   AND e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.state='active'",
+            )
+            .bind(tenant_id)
+            .bind(drive_id)
+            .bind(node_id)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        if let Some(import_intent_id) = import_intent_id {
+            let consumed = sqlx::query(
+                "UPDATE filebelt_collaboration.import_intents SET state='consumed', \
+                 consumed_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 \
+                   AND principal_id=$3 AND session_id=$4 AND state='active'",
+            )
+            .bind(tenant_id)
+            .bind(import_intent_id)
+            .bind(actor)
+            .bind(session_id)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            if consumed != 1 {
+                return Err(DatabaseError::Conflict);
+            }
+        }
         sqlx::query(
             "UPDATE quota_reservations SET state='committed' WHERE tenant_id=$1 AND upload_id=$2",
         )
@@ -2261,6 +2501,40 @@ async fn lock_authorization_fence(
     Ok(())
 }
 
+/// Fence a collaboration manifest against the exact session and Virtual ACL
+/// projection without giving the collaboration role mutation rights on policy
+/// rows. `FOR SHARE` conflicts with the authorization-changing updates that
+/// advance the corresponding generation.
+async fn lock_collaboration_authorization_fence(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    actor_principal_id: Uuid,
+    session_id: Uuid,
+    drive_id: Uuid,
+    resource_id: Uuid,
+    expected: [i64; 4],
+) -> Result<(), DatabaseError> {
+    let current = sqlx::query("SELECT p.generation AS membership_generation,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.acl_generation AS resource_acl_generation FROM api_sessions s JOIN users u ON u.tenant_id=s.tenant_id AND u.id=s.user_id JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.principal_id JOIN drives d ON d.tenant_id=s.tenant_id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id WHERE s.tenant_id=$1 AND s.id=$2 AND s.principal_id=$3 AND s.revoked_at IS NULL AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() AND u.status='active' AND p.disabled_at IS NULL AND d.id=$4 AND n.id=$5 FOR SHARE OF s,u,p,d,n")
+        .bind(tenant_id)
+        .bind(session_id)
+        .bind(actor_principal_id)
+        .bind(drive_id)
+        .bind(resource_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(DatabaseError::StaleGeneration)?;
+    let actual: [i64; 4] = [
+        current.get("membership_generation"),
+        current.get("drive_acl_generation"),
+        current.get("namespace_generation"),
+        current.get("resource_acl_generation"),
+    ];
+    if actual != expected {
+        return Err(DatabaseError::StaleGeneration);
+    }
+    Ok(())
+}
+
 fn share_preset_actions(preset: &str) -> Result<&'static [&'static str], DatabaseError> {
     const VIEWER: &[&str] = &["READ_METADATA", "LIST_CHILDREN", "READ_CONTENT"];
     const CONTRIBUTOR: &[&str] = &[
@@ -2304,6 +2578,11 @@ fn file_version_from_row(row: &sqlx::postgres::PgRow) -> FileVersionRecord {
         restored_from_version_id: row.get("restored_from_version_id"),
         created_at: row.get("created_at"),
         current: row.get("current"),
+        media_type: row.get("media_type"),
+        origin_kind: row.get("origin_kind"),
+        source_version_id: row.get("source_version_id"),
+        creator_display_name: row.get("creator_display_name"),
+        mcp_assisted: row.get("mcp_assisted"),
     }
 }
 
@@ -2322,6 +2601,7 @@ fn node_from_row(row: &sqlx::postgres::PgRow) -> NodeRecord {
         updated_at: row.get("updated_at_text"),
         size_bytes: row.get("size_bytes"),
         version_ordinal: row.get("version_ordinal"),
+        head_media_type: row.get("head_media_type"),
     }
 }
 fn upload_from_row(row: &sqlx::postgres::PgRow) -> UploadRecord {
@@ -2343,6 +2623,9 @@ fn upload_from_row(row: &sqlx::postgres::PgRow) -> UploadRecord {
         part_count: row.get("part_count"),
         fencing_token: row.get("fencing_token"),
         state: row.get("state"),
+        declared_media_type: row.get("declared_media_type"),
+        collaboration_checkpoint_id: row.get("collaboration_checkpoint_id"),
+        import_intent_id: row.get("import_intent_id"),
     }
 }
 fn map_conflict(error: sqlx::Error) -> DatabaseError {
@@ -2482,6 +2765,21 @@ mod tests {
     }
 
     #[test]
+    fn collaboration_fence_uses_shared_locks_without_policy_mutation_privileges() {
+        let source = include_str!("lib.rs");
+        let fence = source
+            .split_once("async fn lock_collaboration_authorization_fence")
+            .expect("collaboration fence exists")
+            .1
+            .split_once("fn share_preset_actions")
+            .expect("share presets follow fences")
+            .0;
+        assert!(fence.contains("FOR SHARE OF s,u,p,d,n"));
+        assert!(fence.contains("u.status='active'"));
+        assert!(!fence.contains("FOR UPDATE"));
+    }
+
+    #[test]
     fn oidc_attempts_are_reclaimed_and_admission_bounded() {
         let source = include_str!("lib.rs");
         let create_attempt = source
@@ -2546,6 +2844,28 @@ mod tests {
             .find("UPDATE drives SET reserved_bytes")
             .expect("drive reservation exists");
         assert!(backend_lock < drive_reservation);
+    }
+
+    #[test]
+    fn direct_uploads_cannot_claim_mcp_provenance() {
+        let source = include_str!("lib.rs");
+        let begin_upload = source
+            .split_once("pub async fn begin_upload")
+            .expect("begin upload exists")
+            .1
+            .split_once("pub async fn upload(")
+            .expect("upload follows begin upload")
+            .0;
+        assert!(!begin_upload.contains("mcp_invocation_id"));
+
+        let commit = source
+            .split_once("pub async fn commit_upload")
+            .expect("commit exists")
+            .1
+            .split_once("pub async fn payload_for_node")
+            .expect("payload lookup follows commit")
+            .0;
+        assert!(!commit.contains("mcp_invocation_id"));
     }
 
     #[test]

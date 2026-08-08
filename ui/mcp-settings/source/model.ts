@@ -76,6 +76,17 @@ export interface McpInvocationInput {
     Name: string;
   };
   RegistrationId: string;
+  SemanticInput?: McpSemanticInput;
+}
+
+export interface McpSemanticInput {
+  BaseVersionId: string;
+  Markdown: string;
+  NodeId: string;
+}
+
+export interface McpSemanticMarkdown {
+  Markdown: string;
 }
 
 export interface McpInvocationIntentView {
@@ -94,6 +105,7 @@ export type McpInvocationEventView =
   | { Kind: "error"; ProblemCode: string }
   | { Kind: "json"; Value: unknown }
   | { Kind: "media"; Value: SafeMediaValue }
+  | { InvocationId: string; Kind: "semanticMarkdown"; Value: McpSemanticMarkdown }
   | { Kind: "text"; Value: string };
 
 export interface AdminMcpTemplateView {

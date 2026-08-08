@@ -46,6 +46,10 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: mcp-broker}
         {{- end }}
+        {{- if and $root.Values.collaboration.enabled (eq $component "io") }}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: collaboration}
+        {{- end }}
       ports: [{port: {{ $component }}, protocol: TCP}]
 ---
 {{- end }}
@@ -61,7 +65,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: [web, api, io, maintenance{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}]
+        values: [web, api, io, maintenance{{ if .Values.collaboration.enabled }}, collaboration{{ end }}{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}]
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -92,6 +96,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}
       ports: [{port: io, protocol: TCP}]
+    {{- if .Values.collaboration.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+      ports: [{port: collaboration-ws, protocol: TCP}]
+    {{- end }}
     {{- if .Values.networkPolicy.otlp.enabled }}
     - to:
 {{ toYaml .Values.networkPolicy.otlp.to | indent 8 }}
@@ -138,6 +148,51 @@ spec:
     - to:
 {{ toYaml $root.Values.networkPolicy.otlp.to | indent 8 }}
       ports: [{port: {{ $root.Values.networkPolicy.otlp.port }}, protocol: TCP}]
+    {{- end }}
+---
+{{- end }}
+{{- if .Values.collaboration.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-collaboration-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+      ports: [{port: collaboration-ws, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-collaboration-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+  policyTypes: [Egress]
+  egress:
+    - to:
+{{ toYaml .Values.networkPolicy.dns.to | indent 8 }}
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to:
+{{ toYaml .Values.networkPolicy.postgres.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.postgres.port }}, protocol: TCP}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: io}
+      ports: [{port: io, protocol: TCP}]
+    {{- if .Values.networkPolicy.otlp.enabled }}
+    - to:
+{{ toYaml .Values.networkPolicy.otlp.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.otlp.port }}, protocol: TCP}]
     {{- end }}
 ---
 {{- end }}

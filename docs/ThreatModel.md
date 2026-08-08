@@ -1,18 +1,20 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 4 Kubernetes and MCP Threat Model
+# Phase 5 Kubernetes, MCP, and Markdown Collaboration Threat Model
 
-- Date: 2026-08-07
+- Date: 2026-08-08
 - Owner: `@PiQuark6046`
 - Scope: repository and image supply chain, OIDC and browser sessions, tenant
   administration, namespace and Virtual ACL, REST and authenticated sharing,
   OxiBelt, capability-limited storage workers, PostgreSQL, UUID payload
-  storage, durable jobs, optional Iggy, audit, MCP registrations and vault,
+  storage, durable jobs, optional Iggy, audit, Markdown rendering and
+  collaboration rooms, MCP registrations and vault,
   remote MCP mediation, one-shot curated runners, Kubernetes 1.34-1.36,
   NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
 - Excluded: managed-cluster/provider internals, online backup, HA/PITR and
-  numeric production RPO/RTO, adapters, media, Markdown editing,
-  ONLYOFFICE, WebTransport, and application encryption
+  numeric production RPO/RTO, adapters (including the separately governed
+  ONLYOFFICE serving adapter), media, application encryption, and any
+  collaboration codec other than Yjs/Yrs `yjs-v1`
 
 ## Assets and security objectives
 
@@ -44,6 +46,12 @@
 - Remote and stdio MCP servers cannot select arbitrary egress, images,
   commands, resources, Kubernetes authority, payload mounts, or FileBelt
   credentials.
+- Markdown preview content is isolated in an opaque-origin, sandboxed iframe;
+  generated markup can reach only the child Trusted Types policy after reviewed
+  sanitization, and conversion output is never an implicit write authority.
+- MCP-assisted Markdown provenance cannot be asserted by a browser client or
+  inferred from an unrelated invocation: it is bound to the exact tenant,
+  principal, node, immutable base version, and normalized source transition.
 - Pull-request inputs cannot cross license regions, publish artifacts, or
   broaden a FileBelt Pod's privileges. Tag-only promotion publishes only
   previously validated immutable subjects.
@@ -107,6 +115,12 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Remote endpoint performs SSRF, DNS rebinding, or trust-profile escape | Broker has no direct Internet path; mTLS gateway receives exact target origin/profile and enforces host, CIDR, port, CA, redirect, and resolved-address policy on every connection | Gateway redirect/rebinding/private-address and NetworkPolicy denial tests |
 | Remote capability drifts after approval | Immutable snapshot and descriptor fingerprint; enablement requires exact review; rediscovery/drift disables authority until review | Capability drift, fingerprint, and enablement-state tests |
 | Browser silently approves or replays changed arguments | Five-minute intent with server-derived keyed argument/attachment digests; explicit confirmation; one-shot atomic approval; exact request resubmission | Browser no-preapproval, changed-request, second-use, and cross-session tests |
+| Collaborator falsely labels an unrelated edit as MCP-assisted | Invocation retains only exact node/base-version context and normalized input/output digests; the fenced collaboration manifest transaction matches those values with tenant and principal; direct upload/save/copy routes expose no invocation-provenance binding | Cross-node, base-version, principal, before/after-digest, direct-upload, and duplicate-update provenance tests |
+| Collaboration grant is replayed, leaked in a URL, or used by a spectator | Opaque one-use first-frame-only grant, <=60-second expiry, no URL/session secret, exact principal/session/room/generation binding, and READ_CONTENT plus WRITE_CONTENT admission with no spectator mode | URL/referrer, replay, cross-session, expired-grant, and read-only-user denial tests |
+| CRDT update is acknowledged then lost or reordered | 256 KiB chunk and 2 MiB group bounds; ACK only after I/O finalize/file-and-directory fsync and fenced PostgreSQL manifest commit; reconstruct from ordered manifests, never Iggy | Kill-point, duplicate/group-order, restart, and Iggy-down recovery tests |
+| ACL revoke or external head change silently merges dirty edits | Reauthorize at most every 60 seconds; fence/freeze on generation or head change; preserve 30-day dirty state for explicit deterministic diff3 review | ACL-revoke, head-race, reconnect, diff3, day-23 warning, and day-30 expiry tests |
+| Markdown or MCP semantic data executes markup or exhausts resources | filebelt-gfm-v1 renders raw HTML literally; strict UTF-8/no-NUL validation; 2 MiB edit/semantic and 8 MiB view bounds; Mermaid/KaTeX run only in reviewed, isolated render paths | XSS, malformed-UTF8, NUL, size-bound, Mermaid/KaTeX, and semantic-output tests |
+| Preview frame or converted Office document escapes its browser boundary | Opaque-origin `sandbox=allow-scripts` preview, parent Trusted Types policy `none`, child-only generated-markup policy and inline-style allowance for sanitized Mermaid/KaTeX output (never inline script), a data-free handshake that transfers a dedicated MessageChannel port for typed recursive-AST validation, and `officeparser/slim` with OCR, attachments, and remote assets disabled | Chromium/Firefox iframe CSP, Trusted Types, postMessage/MessageChannel, Office-format, warning, and size-bound tests |
 | Data grant follows a moving file head or reaches another server | Grant binds destination registration, drive/node and immutable version, disclosures, expiry, and ACL/namespace generations; revalidate before transfer | Version-head race, registration-swap, revoke, and ACL-generation tests |
 | Service identity or saved grant becomes broad ambient authority | Exact SPIFFE binding, application/capability/arguments/data-grant set, hourly quota and <=30-day expiry; suspend/delete revokes dependent state | SPIFFE mismatch, attenuation, quota, expiry, and service-revocation tests |
 | Malicious result executes script or exhausts the browser | Render text literally, JSON as a bounded non-editable tree, and only allowlisted magic-checked media through Blob URLs; no HTML injection or autoplay | Chromium/Firefox script-result, media-bound, CSP, and accessibility tests |
@@ -207,6 +221,6 @@ acceptance of the current locked graph rather than a complete source audit, so
 their review debt remains until equivalent audit evidence replaces them.
 
 The threat model must be extended before enabling a second issuer, another
-tenant per deployment, a service mesh, an adapter, WebTransport, media, MCP
+tenant per deployment, a service mesh, an adapter, media, MCP
 sampling/elicitation or payload-write mediation, application
 encryption/deduplication, multi-root/RWO storage, or online backup.

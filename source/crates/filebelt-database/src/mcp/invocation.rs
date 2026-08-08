@@ -81,6 +81,11 @@ pub struct NewMcpInvocation<'a> {
     pub authority_generation: i64,
     pub admin_block_generation: i64,
     pub request_bytes: i64,
+    /// Provenance evidence for a Markdown semantic proposal. These are only
+    /// normalized-source digests and immutable identifiers, never Markdown.
+    pub semantic_node_id: Option<Uuid>,
+    pub semantic_base_version_id: Option<Uuid>,
+    pub semantic_input_digest: Option<&'a [u8; 32]>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -281,11 +286,20 @@ impl Database {
         &self,
         input: &NewMcpInvocation<'_>,
     ) -> Result<(), DatabaseError> {
+        let semantic_context_is_complete = matches!(
+            (
+                input.semantic_node_id,
+                input.semantic_base_version_id,
+                input.semantic_input_digest,
+            ),
+            (None, None, None) | (Some(_), Some(_), Some(_))
+        );
         if input.request_bytes < 0
             || !matches!(
                 input.primitive,
                 "resource_read" | "prompt_get" | "tool_call"
             )
+            || !semantic_context_is_complete
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
@@ -301,12 +315,14 @@ impl Database {
         if block_generation != input.admin_block_generation {
             return Err(DatabaseError::StaleGeneration);
         }
-        let inserted = sqlx::query("INSERT INTO filebelt_mcp.invocations (tenant_id,id,registration_id,principal_id,application_id,primitive,capability_fingerprint,approval_id,registration_generation,authority_generation,admin_block_generation,state,request_bytes,started_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',$12,clock_timestamp() FROM filebelt_mcp.registrations r JOIN public.principals p ON p.tenant_id=r.tenant_id AND p.id=$4 WHERE r.tenant_id=$1 AND r.id=$3 AND r.enabled AND r.revocation_generation=$9 AND r.revoked_at IS NULL AND r.deleted_at IS NULL AND p.generation=$10 AND p.disabled_at IS NULL")
+        let inserted = sqlx::query("INSERT INTO filebelt_mcp.invocations (tenant_id,id,registration_id,principal_id,application_id,primitive,capability_fingerprint,approval_id,registration_generation,authority_generation,admin_block_generation,state,request_bytes,semantic_node_id,semantic_base_version_id,semantic_input_digest,started_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',$12,$13,$14,$15,clock_timestamp() FROM filebelt_mcp.registrations r JOIN public.principals p ON p.tenant_id=r.tenant_id AND p.id=$4 WHERE r.tenant_id=$1 AND r.id=$3 AND r.enabled AND r.revocation_generation=$9 AND r.revoked_at IS NULL AND r.deleted_at IS NULL AND p.generation=$10 AND p.disabled_at IS NULL")
             .bind(input.tenant_id).bind(input.id).bind(input.registration_id)
             .bind(input.principal_id).bind(input.application_id).bind(input.primitive)
             .bind(input.capability_fingerprint.as_slice()).bind(input.approval_id)
             .bind(input.registration_generation).bind(input.authority_generation)
             .bind(input.admin_block_generation).bind(input.request_bytes)
+            .bind(input.semantic_node_id).bind(input.semantic_base_version_id)
+            .bind(input.semantic_input_digest.map(AsRef::as_ref))
             .execute(&mut *transaction).await?.rows_affected();
         if inserted != 1 {
             return Err(DatabaseError::StaleGeneration);
@@ -322,23 +338,49 @@ impl Database {
         state: &str,
         response_bytes: i64,
         reason_code: Option<&str>,
+        semantic_output_digest: Option<&[u8; 32]>,
     ) -> Result<(), DatabaseError> {
         if response_bytes < 0
             || !matches!(
                 state,
                 "succeeded" | "denied" | "failed" | "cancelled" | "interrupted"
             )
+            || semantic_output_digest.is_some() && state != "succeeded"
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
-        let affected = sqlx::query("UPDATE filebelt_mcp.invocations SET state=$3,response_bytes=$4,reason_code=$5,finished_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','running')")
+        let affected = sqlx::query("UPDATE filebelt_mcp.invocations SET state=$3,response_bytes=$4,reason_code=$5,semantic_output_digest=$6,finished_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','running')")
             .bind(tenant_id).bind(id).bind(state).bind(response_bytes).bind(reason_code)
+            .bind(semantic_output_digest.map(AsRef::as_ref))
             .execute(&self.pool).await?.rows_affected();
         if affected == 1 {
             Ok(())
         } else {
             Err(DatabaseError::Conflict)
         }
+    }
+
+    /// Resolves a Markdown proposal's target only when its claimed immutable
+    /// base version belongs to that exact live file node. Authorization stays
+    /// in the API layer; this method deliberately returns no source bytes.
+    pub async fn mcp_markdown_context_drive(
+        &self,
+        tenant_id: Uuid,
+        node_id: Uuid,
+        base_version_id: Uuid,
+    ) -> Result<Uuid, DatabaseError> {
+        sqlx::query_scalar(
+            "SELECT n.drive_id FROM public.nodes n JOIN public.file_versions v \
+             ON v.tenant_id=n.tenant_id AND v.node_id=n.id \
+             WHERE n.tenant_id=$1 AND n.id=$2 AND n.kind='file' \
+               AND n.trash_root_id IS NULL AND v.id=$3",
+        )
+        .bind(tenant_id)
+        .bind(node_id)
+        .bind(base_version_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(DatabaseError::NotFound)
     }
 
     pub async fn mcp_activity(
@@ -476,5 +518,20 @@ mod tests {
         ] {
             assert!(!production.contains(prohibited));
         }
+    }
+
+    #[test]
+    fn semantic_provenance_persists_context_and_digests_but_not_markdown() {
+        let source = include_str!("invocation.rs");
+        let production = source.split("#[cfg(test)]").next().expect("source prefix");
+        for required in [
+            "semantic_node_id",
+            "semantic_base_version_id",
+            "semantic_input_digest",
+            "semantic_output_digest",
+        ] {
+            assert!(production.contains(required), "missing {required}");
+        }
+        assert!(!production.contains("semantic_markdown: String"));
     }
 }

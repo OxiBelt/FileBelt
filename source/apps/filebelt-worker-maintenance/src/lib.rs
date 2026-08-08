@@ -56,6 +56,10 @@ pub struct ReconcileReport {
     pub expired_capability_nonces_removed: u64,
     pub retained_consumer_deduplications_removed: u64,
     pub retained_outbox_events_removed: u64,
+    pub collaboration_warnings_emitted: u64,
+    pub collaboration_epochs_expired: u64,
+    pub collaboration_payload_deletions_enqueued: u64,
+    pub collaboration_objects_abandoned: u64,
 }
 
 #[derive(Debug, Error)]
@@ -123,6 +127,10 @@ impl Maintenance {
         let expired_capability_nonces_removed = self.cleanup_expired_capability_nonces().await?;
         let (retained_consumer_deduplications_removed, retained_outbox_events_removed) =
             self.cleanup_retained_outbox().await?;
+        let collaboration_retention = self
+            .database
+            .collaboration_retention_sweep(self.tenant_id, RECONCILE_BATCH_SIZE)
+            .await?;
         Ok(ReconcileReport {
             reopened_finalizations,
             expired_uploads,
@@ -134,6 +142,11 @@ impl Maintenance {
             expired_capability_nonces_removed,
             retained_consumer_deduplications_removed,
             retained_outbox_events_removed,
+            collaboration_warnings_emitted: collaboration_retention.warnings_emitted,
+            collaboration_epochs_expired: collaboration_retention.epochs_expired,
+            collaboration_payload_deletions_enqueued: collaboration_retention
+                .payload_deletions_enqueued,
+            collaboration_objects_abandoned: collaboration_retention.objects_abandoned,
         })
     }
 
@@ -251,20 +264,43 @@ impl Maintenance {
         if payload.state == "deleted" {
             return Ok(JobDisposition::Complete("already_deleted"));
         }
-        if !matches!(payload.state.as_str(), "delete_intent" | "deleting") {
+        if !matches!(
+            payload.state.as_str(),
+            "delete_intent" | "deleting" | "abandoned"
+        ) {
             return Err(MaintenanceError::InvalidJob);
         }
-        sqlx::query("UPDATE payload_objects SET state='deleting' WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'")
-            .bind(job.tenant_id)
-            .bind(payload_id)
-            .execute(self.database.pool())
-            .await?;
+        if payload.state == "delete_intent" {
+            sqlx::query("UPDATE payload_objects SET state='deleting' WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'")
+                .bind(job.tenant_id)
+                .bind(payload_id)
+                .execute(self.database.pool())
+                .await?;
+        }
         let storage = self.storage.clone();
         let payload_for_delete = payload.clone();
-        let upload = self
+        let upload = match self
             .database
             .upload_for_payload(job.tenant_id, payload_id)
-            .await?;
+            .await
+        {
+            Ok(upload) => upload,
+            Err(DatabaseError::NotFound) => {
+                let storage = self.storage.clone();
+                let payload_for_delete = payload.clone();
+                tokio::task::spawn_blocking(move || {
+                    storage.delete_payload(&payload_for_delete)?;
+                    storage.remove_staging_locator(payload_for_delete.locator)
+                })
+                .await
+                .map_err(|_| StorageError::Join)??;
+                self.database
+                    .complete_collaboration_payload_deletion(job.tenant_id, payload_id)
+                    .await?;
+                return Ok(JobDisposition::Complete("collaboration_payload_deleted"));
+            }
+            Err(error) => return Err(error.into()),
+        };
         let parts = self
             .database
             .upload_parts(job.tenant_id, upload.upload_id)
@@ -688,6 +724,36 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn reconciliation_includes_collaboration_retention_before_payload_jobs_run() {
+        let source = include_str!("lib.rs");
+        let reconcile = source
+            .split_once("pub async fn reconcile")
+            .expect("reconcile exists")
+            .1
+            .split_once("pub async fn run_one_job")
+            .expect("job loop follows reconcile")
+            .0;
+        assert!(reconcile.contains("collaboration_retention_sweep"));
+        assert!(reconcile.contains("collaboration_payload_deletions_enqueued"));
+        assert!(reconcile.contains("collaboration_objects_abandoned"));
+    }
+
+    #[test]
+    fn collaboration_payload_deletion_removes_staging_and_final_bytes() {
+        let source = include_str!("lib.rs");
+        let deletion = source
+            .split_once("async fn delete_payload")
+            .expect("payload deletion exists")
+            .1
+            .split_once("async fn scrub_payload")
+            .expect("scrubbing follows deletion")
+            .0;
+        assert!(deletion.contains("storage.delete_payload(&payload_for_delete)?"));
+        assert!(deletion.contains("storage.remove_staging_locator(payload_for_delete.locator)"));
+        assert!(deletion.contains("complete_collaboration_payload_deletion"));
     }
 
     #[test]

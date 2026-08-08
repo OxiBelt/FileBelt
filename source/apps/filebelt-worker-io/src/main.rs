@@ -27,6 +27,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
+use filebelt_database::collaboration::{
+    CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
+    CollaborationObjectRecord,
+};
 use filebelt_database::{Database, DatabaseError, UploadRecord};
 use filebelt_runtime::{
     MtlsListener, OperationsState, certificate_not_after_unix_seconds, init_telemetry,
@@ -115,6 +119,15 @@ struct PartResult {
 #[derive(Serialize)]
 struct FinalizeResult {
     upload_id: Uuid,
+    payload_id: Uuid,
+    size_bytes: u64,
+    blake3: String,
+    state: &'static str,
+}
+
+#[derive(Serialize)]
+struct CollaborationObjectResult {
+    object_id: Uuid,
     payload_id: Uuid,
     size_bytes: u64,
     blake3: String,
@@ -237,6 +250,16 @@ async fn serve(config: Config) -> Result<(), String> {
         .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
         .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
         .route("/io/v1/downloads/{grant_id}", get(download).head(download))
+        .route(
+            "/io/v1/collaboration/{object_id}",
+            put(write_collaboration_object)
+                .get(read_collaboration_object)
+                .head(read_collaboration_object),
+        )
+        .route(
+            "/io/v1/collaboration/{object_id}/finalize",
+            post(finalize_collaboration_object),
+        )
         .fallback(not_found)
         .layer(axum::middleware::from_fn(trace_request))
         .layer(axum::middleware::from_fn_with_state(
@@ -701,6 +724,217 @@ async fn download(
     builder.body(body).map_err(|_| AppError::Internal)
 }
 
+async fn write_collaboration_object(
+    State(state): State<AppState>,
+    Path(object_id): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<CollaborationObjectResult>, AppError> {
+    let object_id =
+        Uuid::parse_str(&object_id).map_err(|_| AppError::BadRequest("invalid_object_id"))?;
+    let authorized = authorize(
+        &state,
+        &headers,
+        CapabilityOperation::WriteCollaborationObject,
+    )
+    .await?;
+    let object = state
+        .database
+        .collaboration_object(authorized.tenant_id, object_id)
+        .await?;
+    validate_collaboration_capability(&authorized, &object, state.backend_id)?;
+    check_generations(&state, &authorized, object.drive_id).await?;
+    if object.state != "staging" {
+        return Err(AppError::Conflict("collaboration_object_not_staging"));
+    }
+    let expected_size = u64::try_from(object.reserved_bytes).map_err(|_| AppError::Internal)?;
+    validate_exact_range(&authorized, expected_size)?;
+    if let Some(length) = headers.get(CONTENT_LENGTH) {
+        let length = length
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or(AppError::BadRequest("invalid_content_length"))?;
+        if length != expected_size {
+            return Err(AppError::Conflict("object_size_mismatch"));
+        }
+    }
+    consume_nonce(&state, &authorized, "write_collaboration_object").await?;
+    let temporary = state
+        .storage
+        .staging_temporary_path(object.payload_locator, authorized.capability_id)
+        .map_err(storage_error)?;
+    let (size, digest) = write_body(body, &temporary, expected_size).await?;
+    let storage = state.storage.clone();
+    let publish_path = temporary.clone();
+    tokio::task::spawn_blocking(move || {
+        storage.publish_staging_part(&publish_path, object.payload_locator, size, &digest)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    Ok(Json(CollaborationObjectResult {
+        object_id,
+        payload_id: object.payload_id,
+        size_bytes: size,
+        blake3: hex_digest(&digest),
+        state: "staged",
+    }))
+}
+
+async fn finalize_collaboration_object(
+    State(state): State<AppState>,
+    Path(object_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<CollaborationObjectResult>, AppError> {
+    let object_id =
+        Uuid::parse_str(&object_id).map_err(|_| AppError::BadRequest("invalid_object_id"))?;
+    let authorized = authorize(
+        &state,
+        &headers,
+        CapabilityOperation::FinalizeCollaborationObject,
+    )
+    .await?;
+    let object = state
+        .database
+        .collaboration_object(authorized.tenant_id, object_id)
+        .await?;
+    validate_collaboration_capability(&authorized, &object, state.backend_id)?;
+    check_generations(&state, &authorized, object.drive_id).await?;
+    let expected_size = u64::try_from(object.reserved_bytes).map_err(|_| AppError::Internal)?;
+    validate_exact_range(&authorized, expected_size)?;
+    consume_nonce(&state, &authorized, "finalize_collaboration_object").await?;
+    let verify_storage = state.storage.clone();
+    let staged = tokio::task::spawn_blocking(move || {
+        verify_storage.verify_staging_object(object.payload_locator, expected_size)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, object.payload_id)
+        .await?;
+    let storage = state.storage.clone();
+    let finalized = tokio::task::spawn_blocking(move || {
+        storage.finalize_whole_object(&payload, staged.size, &staged.digest)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    check_generations(&state, &authorized, object.drive_id).await?;
+    state
+        .database
+        .collaboration_finalize_object(
+            authorized.tenant_id,
+            object_id,
+            object.fencing_token,
+            CollaborationAuthorizationContext {
+                principal_id: authorized.principal_id,
+                session_id: authorized.session_id,
+                drive_id: object.drive_id,
+                node_id: authorized.resource_id,
+                generations: CollaborationAuthorizationGenerations {
+                    membership: i64::try_from(authorized.claims.membership_generation)
+                        .map_err(|_| AppError::Unauthorized)?,
+                    drive_acl: i64::try_from(authorized.claims.drive_acl_generation)
+                        .map_err(|_| AppError::Unauthorized)?,
+                    namespace: i64::try_from(authorized.claims.namespace_generation)
+                        .map_err(|_| AppError::Unauthorized)?,
+                    resource_acl: i64::try_from(authorized.claims.resource_acl_generation)
+                        .map_err(|_| AppError::Unauthorized)?,
+                },
+            },
+            i64::try_from(finalized.size).map_err(|_| AppError::Internal)?,
+            &finalized.digest,
+        )
+        .await?;
+    let storage = state.storage.clone();
+    if let Err(error) =
+        tokio::task::spawn_blocking(move || storage.remove_staging_locator(object.payload_locator))
+            .await
+            .map_err(|_| StorageError::Join)
+            .and_then(|result| result)
+    {
+        warn!(%object_id, %error, "collaboration staging cleanup deferred");
+    }
+    Ok(Json(CollaborationObjectResult {
+        object_id,
+        payload_id: object.payload_id,
+        size_bytes: finalized.size,
+        blake3: hex_digest(&finalized.digest),
+        state: "durable",
+    }))
+}
+
+async fn read_collaboration_object(
+    State(state): State<AppState>,
+    Path(object_id): Path<String>,
+    headers: HeaderMap,
+    request: Request<Body>,
+) -> Result<Response, AppError> {
+    let object_id =
+        Uuid::parse_str(&object_id).map_err(|_| AppError::BadRequest("invalid_object_id"))?;
+    let authorized = authorize(
+        &state,
+        &headers,
+        CapabilityOperation::ReadCollaborationObject,
+    )
+    .await?;
+    let object = state
+        .database
+        .collaboration_object(authorized.tenant_id, object_id)
+        .await?;
+    validate_collaboration_capability(&authorized, &object, state.backend_id)?;
+    if object.state != "durable" {
+        return Err(AppError::Conflict("collaboration_object_not_durable"));
+    }
+    check_generations(&state, &authorized, object.drive_id).await?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, object.payload_id)
+        .await?;
+    if !matches!(payload.state.as_str(), "finalized" | "referenced") {
+        return Err(AppError::Conflict("payload_not_finalized"));
+    }
+    let size = u64::try_from(payload.size_bytes).map_err(|_| AppError::Internal)?;
+    let (start, end, partial) = requested_range(headers.get(RANGE), size, &authorized.claims)?;
+    let storage = state.storage.clone();
+    let segments = tokio::task::spawn_blocking(move || {
+        storage.verified_whole_object_segment(&payload, start, end)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    let response_length = if size == 0 { 0 } else { end - start + 1 };
+    let mut builder = Response::builder()
+        .status(if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(ACCEPT_RANGES, "bytes")
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, response_length.to_string())
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff");
+    if partial {
+        builder = builder.header(CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
+    }
+    let body = if request.method() == Method::HEAD || size == 0 {
+        Body::empty()
+    } else {
+        Body::from_stream(download_stream(
+            state.database.clone(),
+            authorized,
+            object.drive_id,
+            segments,
+            state.generation_recheck,
+        ))
+    };
+    builder.body(body).map_err(|_| AppError::Internal)
+}
+
 fn download_stream(
     database: Database,
     authorized: AuthorizedCapability,
@@ -861,6 +1095,41 @@ fn validate_upload_capability(
         return Err(AppError::Forbidden);
     }
     Ok(())
+}
+
+fn validate_collaboration_capability(
+    authorized: &AuthorizedCapability,
+    object: &CollaborationObjectRecord,
+    configured_backend_id: Uuid,
+) -> Result<(), AppError> {
+    if parse_required_uuid(&authorized.claims.grant_id)? != object.id
+        || parse_required_uuid(&authorized.claims.upload_id)? != object.room_id
+        || parse_required_uuid(&authorized.claims.payload_id)? != object.payload_id
+        || authorized.resource_id != object.node_id
+        || object.backend_id != configured_backend_id
+        || object.fencing_token
+            != i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+fn validate_exact_range(
+    authorized: &AuthorizedCapability,
+    expected_size: u64,
+) -> Result<(), AppError> {
+    if authorized.claims.range_start != 0
+        || (expected_size == 0 && authorized.claims.range_end != 0)
+        || (expected_size > 0 && authorized.claims.range_end != expected_size - 1)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+fn hex_digest(digest: &[u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 async fn consume_nonce(
@@ -1094,6 +1363,7 @@ fn storage_error(error: StorageError) -> AppError {
         StorageError::CorruptObject | StorageError::UnsafeObject => {
             AppError::Conflict("storage_integrity_failure")
         }
+        StorageError::InvalidContent => AppError::Conflict("content_profile_invalid"),
         StorageError::Io(_) | StorageError::Join => AppError::Internal,
     }
 }

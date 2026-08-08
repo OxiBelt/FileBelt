@@ -29,6 +29,16 @@ service invocation grants, OAuth attempts, invocation intents/activity,
 rate buckets, PostgreSQL runner-slot reservations, runner leases, deletion
 tombstones, and a separate encrypted vault schema.
 
+Migration `000003_phase5_markdown.sql` records tenant-scoped Markdown rooms,
+their epochs and frozen/ended state, participants, one-use grant consumption,
+and a strictly ordered fenced manifest for every durable Yjs update group and
+checkpoint. It also extends MCP invocation activity with an exact Markdown
+node/base-version context and domain-separated normalized source digests; raw
+Markdown never enters invocation persistence. PostgreSQL is authoritative for
+those rooms, manifests, and provenance evidence. CRDT bytes use separately UUID-addressed payload objects through new scoped I/O
+capabilities; Iggy may notify a replica but cannot establish room state,
+durability, authorization, sequence, or acknowledgement.
+
 Logical identifiers and physical storage locators are independently generated
 UUIDv4 values. Public UUID strings use canonical lowercase form. Composite
 keys and foreign keys carry tenant and drive boundaries. A transactional
@@ -138,6 +148,67 @@ immutable linear version. The file head advances only when the expected head
 matches. Metadata-only changes create no content version. Restoring history
 creates a new head that references retained immutable content; it does not
 mutate an old version or create sibling conflict versions.
+
+Markdown explicit save consumes a durable collaboration checkpoint through the
+ordinary expected-head upload/commit transaction and creates the same linear
+immutable version as any other content update. It records validated media type
+and provenance (`origin`, optional source version, creator display name, and
+MCP-assisted flag). The MCP-assisted flag is true only when a durable group
+transaction matched a successful invocation's tenant, principal, node, immutable
+base version, and normalized source-before/source-after digests; direct uploads,
+saves, and copies cannot attach an invocation identifier. A source-to-Markdown conversion first records an exact
+import intent; it is not inferred from an upload declaration or a browser
+conversion result. Browser Office conversion is bounded and local-only: it
+cannot overwrite the source, create a version without the import intent, or
+turn extracted attachments, OCR, or remote assets into payload reads. A concurrent
+head change outside a room freezes its dirty state rather than creating a
+sibling version or silently applying a CRDT merge.
+
+## Collaboration durability and recovery
+
+The collaboration role is a dedicated Rust process using Yrs `0.27.3`; the
+browser uses Yjs `13.6.32`. A room accepts only `yjs-v1` groups no larger than
+2 MiB, assembled from chunks no larger than 256 KiB. The role writes each
+group through a scoped `fbcap1` collaboration-object capability. It returns an
+acknowledgement only after the I/O worker has finalized the UUID payload,
+fsynced the file and parent-directory state, and a fenced PostgreSQL
+transaction has revalidated the participant session and Virtual ACL generation
+projection and committed the corresponding manifest sequence. A restarted
+role reconstructs room state from the PostgreSQL manifest sequence and the
+referenced payload objects; it never reconstructs authority or order from an
+event stream.
+
+Every payload row has an immutable authority class. Collaboration manifests
+carry a foreign key to the `collaboration` class, and the collaboration runtime
+can access payload rows only through a security-barrier view filtered to that
+class. It therefore cannot turn an ordinary file payload into a collaboration
+object even if the collaboration database credential and capability signer are
+both compromised.
+
+Before the first snapshot, each epoch reconstructs its source bootstrap with a
+deterministic Yjs client identifier derived from the room, epoch, and immutable
+base version. This keeps bootstrap item identities stable across replica
+restarts so acknowledged update groups remain replayable; the identifier is not
+an authorization or identity credential.
+
+Dirty rooms retain their latest durable manifests for 30 days after the last
+authorized activity. The service records a one-time operator-visible warning
+marker at day 23 and then freezes and expires the room at day 30 according to a
+fenced retention transition; cleanup removes
+only unreferenced CRDT objects after recovery evidence is preserved. Snapshot
+compaction supersedes covered update and snapshot objects; maintenance waits a
+one-day recovery window before enqueueing their physical deletion. An explicit
+discard immediately fences dirty state and advances it to the same cleanup
+path. A failed write, finalization, manifest attempt, or snapshot commit marks
+its unreferenced object for idempotent deletion; expired staging reservations
+and finalized objects without a manifest are reaped by maintenance, with the
+reservation or committed-byte accounting released exactly once. Physical
+cleanup leaves a never-finalized object and payload in the explicit `abandoned`
+terminal state; only an object that acquired a final size and digest reaches
+the durable `tombstoned` terminal state. Local
+offline edits are deliberately not a durable service record. On external-head,
+authorization, or recovery freeze, retained room data is available only for
+explicit deterministic diff3 review against its base and current head.
 
 Versions remain until permanent node purge. Moving a node to trash snapshots
 its retention deadline and original location. Purge first records a fenced
@@ -288,13 +359,17 @@ two-user authorization acceptance must pass before traffic returns.
 
 The current checkpoint and verification formats are
 `filebelt.recovery.checkpoint.v2` and `filebelt.recovery.verification.v2`.
-Version 2 adds MCP registration, deletion-tombstone, active runner-slot,
-secret-envelope, and OAuth attempt inventories and records every referenced MCP vault KEK generation
-without granting recovery access to ciphertext, nonce, issuer, or secret kind.
-The checkpoint remains bounded to 1 MiB. Restore verification fails when an MCP
-inventory, KEK generation, migration checksum, audit watermark, or payload
-manifest differs. Operators must restore the vault keyring generations required
-by the checkpoint before enabling the broker or any MCP authentication flow.
+Version 2 adds collaboration room/manifest/checkpoint inventory and dirty-room
+retention deadlines, plus MCP registration, deletion-tombstone, active
+runner-slot, secret-envelope, and OAuth attempt inventories. It records every
+referenced MCP vault KEK generation without granting recovery access to
+ciphertext, nonce, issuer, or secret kind. The checkpoint remains bounded to 1
+MiB. Restore verification fails when a collaboration inventory or retention
+deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
+or payload manifest differs. Operators must restore the capability verification
+keyset that contains both API and collaboration public keys before enabling I/O
+or collaboration, and must restore vault KEK generations before enabling the
+broker or any MCP authentication flow.
 
 FileBelt does not currently promise online backup, PITR, high availability, or
 numeric RPO/RTO. The detailed procedures are

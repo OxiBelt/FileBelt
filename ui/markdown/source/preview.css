@@ -1,0 +1,38 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+}
+
+pre,
+table {
+  max-width: 100%;
+  overflow: auto;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+td {
+  border: 1px solid CanvasText;
+  padding: 0.25rem 0.5rem;
+}
+
+button,
+a {
+  color: LinkText;
+}
+
+[data-filebelt-alert] {
+  border-inline-start: 0.25rem solid Highlight;
+  padding-inline-start: 0.75rem;
+}

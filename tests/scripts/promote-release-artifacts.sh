@@ -58,11 +58,12 @@ jq -e --arg registry "${registry}" '
   and (.source.revision | test("^[0-9a-f]{40}$"))
   and (.source.created | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and .runtime == {uid:10001,gid:10001}
-  and (.images | length) == 9
+  and (.images | length) == 10
   and ([.images[].role] | sort) == ([
     "filebelt-api",
     "filebelt-mcp-broker",
     "filebelt-media-controller",
+    "filebelt-collaboration",
     "filebelt-controller",
     "filebelt-mcp-runner",
     "filebelt-tools",
@@ -80,6 +81,7 @@ active_roles=(
   filebelt-api
   filebelt-worker-io
   filebelt-worker-maintenance
+  filebelt-collaboration
   filebelt-mcp-broker
   filebelt-controller
   filebelt-mcp-runner

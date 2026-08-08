@@ -14,6 +14,7 @@ export interface FileTableProps {
   dispatchSelection(Action: SelectionAction): void;
   Entries: readonly FileEntry[];
   onOpenActions(Entry: FileEntry, Anchor: HTMLElement): void;
+  onOpenEntry(Entry: FileEntry): void;
   Selection: SelectionState;
   Strings: Strings;
 }
@@ -37,6 +38,7 @@ export function FileTable({
   dispatchSelection: DispatchSelection,
   Entries,
   onOpenActions: OnOpenActions,
+  onOpenEntry: OnOpenEntry,
   Selection,
   Strings,
 }: FileTableProps): ReactNode {
@@ -48,6 +50,11 @@ export function FileTable({
   };
 
   const OnRowKeyDown = (Event: KeyboardEvent<HTMLTableRowElement>, Entry: FileEntry, Index: number): void => {
+    if (Event.key === "Enter" && Entry.MarkdownEligibility !== "ineligible") {
+      Event.preventDefault();
+      OnOpenEntry(Entry);
+      return;
+    }
     if ((Event.ctrlKey || Event.metaKey) && Event.key.toLowerCase() === "a") {
       Event.preventDefault();
       DispatchSelection({ OrderedIds, Type: "all" });
@@ -108,6 +115,7 @@ export function FileTable({
                 id={`file-row-${Entry.Id}`}
                 key={Entry.Id}
                 onClick={(Event) => OnRowClick(Event, Entry)}
+                onDoubleClick={() => { if (Entry.MarkdownEligibility !== "ineligible") OnOpenEntry(Entry); }}
                 onContextMenu={(Event) => {
                   Event.preventDefault();
                   if (!Selected) DispatchSelection({ Id: Entry.Id, Type: "replace" });

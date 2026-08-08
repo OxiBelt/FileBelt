@@ -9,6 +9,13 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_collaboration_protocol::{
+    CollaborationGrantClaims, PresenceMode, grant_digest, sign_grant,
+};
+use filebelt_database::collaboration::{
+    CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
+    CollaborationImportIntentInput,
+};
 use filebelt_database::{
     DirectShareRecord, DriveRecord, FileVersionRecord, NodeRecord, UploadRecord,
 };
@@ -19,6 +26,7 @@ use filebelt_storage_protocol::{
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq as _;
+use url::Url;
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -34,6 +42,18 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/drives", routing::get(list_drives))
         .route("/drives/{drive_id}", routing::get(get_drive))
         .route("/drives/{drive_id}/nodes/{node_id}", routing::get(get_node))
+        .route(
+            "/drives/{drive_id}/nodes/{node_id}/collaboration",
+            routing::get(get_collaboration_summary).delete(discard_collaboration),
+        )
+        .route(
+            "/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
+            routing::post(create_collaboration_grant),
+        )
+        .route(
+            "/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
+            routing::post(create_markdown_import_intent),
+        )
         .route(
             "/drives/{drive_id}/nodes/{node_id}/children",
             routing::get(list_children),
@@ -118,6 +138,77 @@ struct NodeResponse {
     updated_at: String,
     size_bytes: Option<i64>,
     version_ordinal: Option<i64>,
+    head_media_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CollaborationSummaryResponse {
+    active: bool,
+    room_id: Option<Uuid>,
+    codec: Option<String>,
+    room_epoch: Option<i64>,
+    durable_sequence: Option<i64>,
+    base_version_id: Option<Uuid>,
+    current_head_version_id: Option<Uuid>,
+    dirty_expires_at: Option<String>,
+    warning_at: Option<String>,
+    frozen: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CreateCollaborationGrantRequest {
+    transport: CollaborationTransport,
+    client_id: String,
+    presence_mode: CollaborationPresenceMode,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CollaborationPresenceMode {
+    Pseudonym,
+    DisplayName,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CollaborationTransport {
+    Websocket,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CollaborationGrantResponse {
+    grant_id: Uuid,
+    authorization: String,
+    expires_at: String,
+    codec: String,
+    protocol_version: u8,
+    presence_label: String,
+    room: CollaborationSummaryResponse,
+    endpoints: Vec<CollaborationEndpointResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CollaborationEndpointResponse {
+    transport: String,
+    url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CreateMarkdownImportIntentRequest {
+    source_version_id: String,
+    target_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct MarkdownImportIntentResponse {
+    id: Uuid,
+    source_drive_id: Uuid,
+    source_node_id: Uuid,
+    source_version_id: Uuid,
+    target_parent_id: Uuid,
+    target_name: String,
+    target_media_type: String,
+    expires_at: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -134,6 +225,9 @@ struct BeginUploadRequest {
     expected_parent_generation: Option<i64>,
     name: String,
     declared_size_bytes: u64,
+    declared_media_type: Option<String>,
+    collaboration_checkpoint_id: Option<String>,
+    import_intent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -205,6 +299,16 @@ struct VersionResponse {
     restored_from_version_id: Option<Uuid>,
     created_at: String,
     current: bool,
+    media_type: String,
+    provenance: VersionProvenanceResponse,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct VersionProvenanceResponse {
+    origin: String,
+    source_version_id: Option<Uuid>,
+    creator_display_name: String,
+    mcp_assisted: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -510,6 +614,459 @@ async fn create_directory(
     )
 }
 
+async fn get_collaboration_summary(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<CollaborationSummaryResponse>, ApiError> {
+    let session = authenticate(&state, &headers).await?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    authorize(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        drive_id,
+        node_id,
+        Action::ReadContent,
+    )
+    .await?;
+    authorize(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        drive_id,
+        node_id,
+        Action::WriteContent,
+    )
+    .await?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    let Some(room) = state
+        .database
+        .collaboration_room(state.tenant_id, drive_id, node_id)
+        .await?
+    else {
+        return Ok(Json(CollaborationSummaryResponse {
+            active: false,
+            room_id: None,
+            codec: None,
+            room_epoch: None,
+            durable_sequence: None,
+            base_version_id: None,
+            current_head_version_id: node.head_version_id,
+            dirty_expires_at: None,
+            warning_at: None,
+            frozen: false,
+        }));
+    };
+    Ok(Json(collaboration_summary_response(
+        &room,
+        node.head_version_id,
+    )?))
+}
+
+async fn create_collaboration_grant(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<CreateCollaborationGrantRequest>,
+) -> Result<Response, ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let key = idempotency_key(&headers)?;
+    if !state.config.collaboration.enabled {
+        return Err(ApiError::not_found());
+    }
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    let client_id = parse_uuid_v4(&request.client_id)?;
+    let fingerprint = fingerprint(&(drive_id, node_id, &request))?;
+    if let Some(response) = replay::<CollaborationGrantResponse>(
+        &state,
+        &session,
+        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
+        key,
+        &fingerprint,
+    )
+    .await?
+    {
+        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
+        return Ok((status, Json(response.1)).into_response());
+    }
+    let read = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::ReadContent,
+    )
+    .await?;
+    let write = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::WriteContent,
+    )
+    .await?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    let base = node.head_version_id.ok_or_else(|| {
+        ApiError::bad_request(
+            "collaboration.head_required",
+            "Markdown collaboration requires an immutable base version",
+        )
+    })?;
+    let room = state
+        .database
+        .collaboration_get_or_create_room(
+            state.tenant_id,
+            drive_id,
+            node_id,
+            base,
+            session.record.principal_id,
+        )
+        .await?;
+    require_same_generations(read, write)?;
+    let now = unix_time()?;
+    let expires = now + 60;
+    let mut nonce = [0_u8; 32];
+    getrandom::fill(&mut nonce).map_err(|_| ApiError::internal())?;
+    let bootstrap_payload = state
+        .database
+        .payload_for_node(state.tenant_id, node_id, Some(base))
+        .await?;
+    let bootstrap_claims = CapabilityClaims {
+        capability_id: Uuid::new_v4().to_string(),
+        audience: CAPABILITY_AUDIENCE.into(),
+        operation: CapabilityOperation::Download as i32,
+        tenant_id: state.tenant_id.to_string(),
+        principal_id: session.record.principal_id.to_string(),
+        session_id: session.record.session_id.to_string(),
+        resource_id: node_id.to_string(),
+        upload_id: String::new(),
+        payload_id: bootstrap_payload.payload_id.to_string(),
+        part_number: 0,
+        range_start: 0,
+        range_end: u64::try_from(bootstrap_payload.size_bytes.saturating_sub(1)).unwrap_or(0),
+        resource_acl_generation: write.resource_acl_generation,
+        membership_generation: write.membership_generation,
+        namespace_generation: write.namespace_generation,
+        fencing_token: 0,
+        nonce: random_nonce()?,
+        issued_at_unix_seconds: now,
+        expires_at_unix_seconds: expires,
+        drive_acl_generation: write.drive_acl_generation,
+        grant_id: Uuid::new_v4().to_string(),
+    };
+    let bootstrap_download_capability = sign_capability(
+        &bootstrap_claims,
+        state.config.keys.current_generation,
+        &state.capability_signer,
+    );
+    let grant_id = Uuid::new_v4();
+    let mode = match request.presence_mode {
+        CollaborationPresenceMode::Pseudonym => PresenceMode::Pseudonym,
+        CollaborationPresenceMode::DisplayName => PresenceMode::DisplayName,
+    };
+    let presence_label = match request.presence_mode {
+        CollaborationPresenceMode::Pseudonym => {
+            let digest = blake3::hash(client_id.as_bytes());
+            format!("Editor-{}", &digest.to_hex()[..8])
+        }
+        CollaborationPresenceMode::DisplayName => session.record.display_name.clone(),
+    };
+    let claims = CollaborationGrantClaims {
+        grant_id: grant_id.to_string(),
+        tenant_id: state.tenant_id.to_string(),
+        room_id: room.room_id.to_string(),
+        room_epoch: u64::try_from(room.epoch).map_err(|_| ApiError::internal())?,
+        drive_id: drive_id.to_string(),
+        node_id: node_id.to_string(),
+        base_version_id: base.to_string(),
+        principal_id: session.record.principal_id.to_string(),
+        session_id: session.record.session_id.to_string(),
+        client_id: client_id.to_string(),
+        presence_mode: mode as i32,
+        presence_label: presence_label.clone(),
+        resource_acl_generation: write.resource_acl_generation,
+        drive_acl_generation: write.drive_acl_generation,
+        membership_generation: write.membership_generation,
+        namespace_generation: write.namespace_generation,
+        can_checkpoint: true,
+        issued_at_unix_seconds: now,
+        expires_at_unix_seconds: expires,
+        nonce: nonce.to_vec(),
+        bootstrap_download_capability,
+    };
+    let wire = sign_grant(
+        &claims,
+        state.config.keys.current_generation,
+        &state.capability_signer,
+    );
+    let digest = grant_digest(&wire);
+    let grant = state
+        .database
+        .collaboration_create_join_grant(
+            state.tenant_id,
+            grant_id,
+            room.room_id,
+            room.epoch,
+            &digest,
+            session.record.principal_id,
+            session.record.session_id,
+            client_id,
+            match request.presence_mode {
+                CollaborationPresenceMode::Pseudonym => "pseudonym",
+                CollaborationPresenceMode::DisplayName => "display_name",
+            },
+            &presence_label,
+            generation_i64(write.resource_acl_generation)?,
+            generation_i64(write.drive_acl_generation)?,
+            generation_i64(read.membership_generation)?,
+            generation_i64(read.namespace_generation)?,
+            true,
+        )
+        .await?;
+    let mut endpoint = Url::parse(&state.public_origin).map_err(|_| ApiError::internal())?;
+    endpoint
+        .set_scheme("wss")
+        .map_err(|()| ApiError::internal())?;
+    endpoint.set_path("/collaboration/v1/ws");
+    let response = CollaborationGrantResponse {
+        grant_id: grant.id,
+        authorization: wire,
+        expires_at: postgres_timestamp(&grant.expires_at)?,
+        codec: "yjs-v1".into(),
+        protocol_version: 1,
+        presence_label,
+        room: collaboration_summary_response(&room, node.head_version_id)?,
+        endpoints: vec![CollaborationEndpointResponse {
+            transport: "websocket".into(),
+            url: endpoint.to_string(),
+        }],
+    };
+    let response = store_idempotent(
+        &state,
+        &session,
+        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
+        key,
+        &fingerprint,
+        StatusCode::CREATED,
+        &response,
+    )
+    .await?;
+    let mut http = (StatusCode::CREATED, Json(response)).into_response();
+    http.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(http)
+}
+
+async fn discard_collaboration(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let key = idempotency_key(&headers)?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    let fingerprint = fingerprint(&(drive_id, node_id))?;
+    if let Some(response) = replay::<()>(
+        &state,
+        &session,
+        "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration",
+        key,
+        &fingerprint,
+    )
+    .await?
+    {
+        return StatusCode::from_u16(response.0).map_err(|_| ApiError::internal());
+    }
+    let delete_grant = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::Delete,
+    )
+    .await?;
+    let write_grant = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::WriteContent,
+    )
+    .await?;
+    require_same_generations(delete_grant, write_grant)?;
+    let room = state
+        .database
+        .collaboration_room(state.tenant_id, drive_id, node_id)
+        .await?
+        .ok_or_else(ApiError::not_found)?;
+    state
+        .database
+        .collaboration_discard(
+            state.tenant_id,
+            room.room_id,
+            room.epoch,
+            CollaborationAuthorizationContext {
+                principal_id: session.record.principal_id,
+                session_id: session.record.session_id,
+                drive_id,
+                node_id,
+                generations: CollaborationAuthorizationGenerations {
+                    membership: generation_i64(delete_grant.membership_generation)?,
+                    drive_acl: generation_i64(delete_grant.drive_acl_generation)?,
+                    namespace: generation_i64(delete_grant.namespace_generation)?,
+                    resource_acl: generation_i64(delete_grant.resource_acl_generation)?,
+                },
+            },
+        )
+        .await?;
+    store_idempotent(
+        &state,
+        &session,
+        "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration",
+        key,
+        &fingerprint,
+        StatusCode::NO_CONTENT,
+        &(),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn create_markdown_import_intent(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<CreateMarkdownImportIntentRequest>,
+) -> Result<(StatusCode, Json<MarkdownImportIntentResponse>), ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let key = idempotency_key(&headers)?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    let version_id = parse_uuid_v4(&request.source_version_id)?;
+    let name = NormalizedName::new(&request.target_name)
+        .map_err(|error| ApiError::bad_request(error.code(), "The target file name is invalid"))?;
+    let fingerprint = fingerprint(&(drive_id, node_id, version_id, &request))?;
+    if let Some(response) = replay::<MarkdownImportIntentResponse>(
+        &state,
+        &session,
+        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
+        key,
+        &fingerprint,
+    )
+    .await?
+    {
+        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
+        return Ok((status, Json(response.1)));
+    }
+    let read = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::ReadContent,
+    )
+    .await?;
+    let source = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    let parent_id = source.parent_id.ok_or_else(ApiError::not_found)?;
+    let create = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        parent_id,
+        Action::CreateChild,
+    )
+    .await?;
+    let intent = state
+        .database
+        .collaboration_create_import_intent(CollaborationImportIntentInput {
+            tenant_id: state.tenant_id,
+            drive_id,
+            source_node_id: node_id,
+            source_version_id: version_id,
+            principal_id: session.record.principal_id,
+            session_id: session.record.session_id,
+            source_generations: CollaborationAuthorizationGenerations {
+                membership: generation_i64(read.membership_generation)?,
+                drive_acl: generation_i64(read.drive_acl_generation)?,
+                namespace: generation_i64(read.namespace_generation)?,
+                resource_acl: generation_i64(read.resource_acl_generation)?,
+            },
+            target_generations: CollaborationAuthorizationGenerations {
+                membership: generation_i64(create.membership_generation)?,
+                drive_acl: generation_i64(create.drive_acl_generation)?,
+                namespace: generation_i64(create.namespace_generation)?,
+                resource_acl: generation_i64(create.resource_acl_generation)?,
+            },
+            target_display_name: name.display(),
+            target_name_key: name.comparison_key(),
+        })
+        .await?;
+    let response = MarkdownImportIntentResponse {
+        id: intent.id,
+        source_drive_id: drive_id,
+        source_node_id: node_id,
+        source_version_id: version_id,
+        target_parent_id: intent.target_parent_id,
+        target_name: intent.target_display_name,
+        target_media_type: "text/markdown".into(),
+        expires_at: postgres_timestamp(&intent.expires_at)?,
+    };
+    let response = store_idempotent(
+        &state,
+        &session,
+        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
+        key,
+        &fingerprint,
+        StatusCode::CREATED,
+        &response,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+fn collaboration_summary_response(
+    room: &filebelt_database::collaboration::CollaborationSummaryRecord,
+    current_head_version_id: Option<Uuid>,
+) -> Result<CollaborationSummaryResponse, ApiError> {
+    Ok(CollaborationSummaryResponse {
+        active: room.state == "active",
+        room_id: Some(room.room_id),
+        codec: Some("yjs-v1".into()),
+        room_epoch: Some(room.epoch),
+        durable_sequence: Some(room.durable_sequence),
+        base_version_id: Some(room.base_version_id),
+        current_head_version_id,
+        dirty_expires_at: Some(postgres_timestamp(&room.expires_at)?),
+        warning_at: Some(postgres_timestamp(&room.warning_at)?),
+        frozen: room.state == "frozen",
+    })
+}
+
 async fn begin_upload(
     State(state): State<AppState>,
     Path(drive_id): Path<String>,
@@ -526,6 +1083,27 @@ async fn begin_upload(
         .as_deref()
         .map(parse_uuid_v4)
         .transpose()?;
+    let collaboration_checkpoint_id = request
+        .collaboration_checkpoint_id
+        .as_deref()
+        .map(parse_uuid_v4)
+        .transpose()?;
+    let import_intent_id = request
+        .import_intent_id
+        .as_deref()
+        .map(parse_uuid_v4)
+        .transpose()?;
+    let declared_media_type = request.declared_media_type.as_deref();
+    if declared_media_type == Some("text/markdown") && request.declared_size_bytes > 2_097_152
+        || collaboration_checkpoint_id.is_some() && import_intent_id.is_some()
+        || collaboration_checkpoint_id.is_some() && node_id.is_none()
+        || import_intent_id.is_some() && node_id.is_some()
+    {
+        return Err(ApiError::bad_request(
+            "upload.binding_invalid",
+            "The upload media type or Markdown binding is invalid",
+        ));
+    }
     if (node_id.is_none()
         && (request.expected_parent_generation.is_none() || expected_head.is_some()))
         || (node_id.is_some() && expected_head.is_none())
@@ -618,6 +1196,9 @@ async fn begin_upload(
             chunk_size,
             part_count,
             layout,
+            declared_media_type,
+            collaboration_checkpoint_id,
+            import_intent_id,
             i64::try_from(state.config.limits.upload_ttl_seconds)
                 .map_err(|_| ApiError::internal())?,
             generation_i64(grant.membership_generation)?,
@@ -1923,6 +2504,7 @@ impl TryFrom<NodeRecord> for NodeResponse {
             updated_at: postgres_timestamp(&value.updated_at)?,
             size_bytes: value.size_bytes,
             version_ordinal: value.version_ordinal,
+            head_media_type: value.head_media_type,
         })
     }
 }
@@ -1940,6 +2522,17 @@ impl TryFrom<FileVersionRecord> for VersionResponse {
             restored_from_version_id: value.restored_from_version_id,
             created_at: postgres_timestamp(&value.created_at)?,
             current: value.current,
+            media_type: value
+                .media_type
+                .unwrap_or_else(|| "application/octet-stream".into()),
+            provenance: VersionProvenanceResponse {
+                origin: value.origin_kind,
+                source_version_id: value.source_version_id,
+                creator_display_name: value
+                    .creator_display_name
+                    .unwrap_or_else(|| value.created_by.to_string()),
+                mcp_assisted: value.mcp_assisted,
+            },
         })
     }
 }
@@ -1994,6 +2587,61 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
+    fn collaboration_grant_request_binds_client_and_presence() {
+        let request: super::CreateCollaborationGrantRequest = serde_json::from_str(
+            r#"{"transport":"websocket","client_id":"550e8400-e29b-41d4-a716-446655440000","presence_mode":"pseudonym"}"#,
+        )
+        .expect("valid collaboration grant request");
+        assert_eq!(request.client_id, "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn markdown_import_intent_requires_a_new_sibling_name() {
+        let request: super::CreateMarkdownImportIntentRequest = serde_json::from_str(
+            r#"{"source_version_id":"550e8400-e29b-41d4-a716-446655440000","target_name":"imported.md"}"#,
+        )
+        .expect("valid sibling import request");
+        assert_eq!(request.target_name, "imported.md");
+    }
+
+    #[test]
+    fn markdown_control_plane_mutations_replay_idempotent_responses() {
+        let source = include_str!("resources.rs");
+        for handler in [
+            "async fn create_collaboration_grant",
+            "async fn discard_collaboration",
+            "async fn create_markdown_import_intent",
+        ] {
+            let tail = source.split_once(handler).expect("handler exists").1;
+            assert!(tail.contains("replay::<"));
+            assert!(tail.contains("store_idempotent("));
+        }
+    }
+
+    #[test]
+    fn discard_requires_matching_delete_and_write_generations_at_the_database_fence() {
+        let source = include_str!("resources.rs");
+        let discard = source
+            .split_once("async fn discard_collaboration")
+            .expect("discard handler exists")
+            .1
+            .split_once("async fn create_markdown_import_intent")
+            .expect("import intent follows discard")
+            .0;
+        for required in [
+            "let delete_grant = authorize_session_bound(",
+            "Action::Delete",
+            "let write_grant = authorize_session_bound(",
+            "Action::WriteContent",
+            "require_same_generations(delete_grant, write_grant)?",
+            "CollaborationAuthorizationContext",
+            ".collaboration_discard(",
+        ] {
+            assert!(discard.contains(required), "missing {required}");
+        }
+    }
+
+    #[test]
     fn upload_layout_respects_whole_threshold_and_chunk_boundaries() {
         assert_eq!(
             upload_layout_and_part_count(0, 16, 32).unwrap(),
@@ -2037,6 +2685,19 @@ mod tests {
     }
 
     #[test]
+    fn begin_upload_does_not_accept_mcp_provenance() {
+        let source = include_str!("resources.rs");
+        let begin_upload = source
+            .split_once("async fn begin_upload")
+            .expect("begin upload exists")
+            .1
+            .split_once("async fn get_upload")
+            .expect("get upload follows begin upload")
+            .0;
+        assert!(!begin_upload.contains("mcp_invocation_id"));
+    }
+
+    #[test]
     fn commit_upload_existence_hides_foreign_uploads_before_fence_checks() {
         let source = include_str!("resources.rs");
         let commit = source
@@ -2075,6 +2736,9 @@ mod tests {
             part_count: 3,
             fencing_token: 1,
             state: "allocated".into(),
+            declared_media_type: None,
+            collaboration_checkpoint_id: None,
+            import_intent_id: None,
         };
 
         assert_eq!(
@@ -2121,6 +2785,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".into(),
             size_bytes: None,
             version_ordinal: None,
+            head_media_type: None,
         };
         let cursor = decode_cursor(&encode_cursor(&node)).unwrap();
         assert_eq!(cursor.kind, node.kind);
@@ -2145,6 +2810,7 @@ mod tests {
             updated_at: "2026-08-06 12:30:00+00".into(),
             size_bytes: Some(1),
             version_ordinal: Some(1),
+            head_media_type: None,
         };
         let target = shared_candidate_authorization(&node);
         assert_eq!(target, (node.drive_id, node.id, Action::ReadMetadata));

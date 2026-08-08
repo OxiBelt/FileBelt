@@ -136,6 +136,7 @@ services:
       - io-database-password
       - maintenance-database-password
       - mcp-database-password
+      - collaboration-database-password
     configs:
       - source: postgres-database-role-script
         target: /opt/filebelt/bootstrap-database-roles.sh
@@ -345,6 +346,32 @@ services:
     expose: ["8082", "8084", "9090"]
     restart: unless-stopped
 
+  filebelt-collaboration:
+    <<: *filebelt-service
+    build:
+      <<: *filebelt-build
+      target: filebelt-collaboration
+      args:
+        <<: *filebelt-build-args
+        FILEBELT_ROLE: filebelt-collaboration
+    image: filebelt-collaboration:phase5
+    profiles: [core]
+    command: [serve, --config, /etc/filebelt/filebelt.toml]
+    secrets:
+      - collaboration-database-url
+      - collaboration-capability-private-key
+      - capability-public-keyset
+    configs:
+      - source: filebelt-collaboration-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444
+    networks: [control, edge]
+    depends_on:
+      postgres-runtime-roles: {condition: service_completed_successfully}
+      filebelt-worker-io: {condition: service_started}
+    expose: ["8085", "9090"]
+    restart: unless-stopped
+
   filebelt-web:
     <<: *filebelt-service
     build:
@@ -437,6 +464,8 @@ volumes:
 configs:
   filebelt-config:
     file: ${FILEBELT_CONFIG_FILE:-./filebelt.toml}
+  filebelt-collaboration-config:
+    file: ${FILEBELT_COLLABORATION_CONFIG_FILE:-./filebelt-collaboration.toml}
   filebelt-acceptance-edge-config:
     file: ${FILEBELT_EDGE_CONFIG_FILE:-../../ui/web/edge/oxibelt.acceptance.toml}
   postgres-database-role-script:
@@ -461,6 +490,8 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-password
   mcp-database-password:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-password
+  collaboration-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-database-password
   api-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-database-url
   io-database-url:
@@ -469,12 +500,16 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/maintenance-database-url
   mcp-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-url
+  collaboration-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-database-url
   mcp-vault-keyring:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-vault-keyring.json
   oidc-client-secret:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret
   capability-private-key:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-private-key
+  collaboration-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-capability-private-key
   capability-public-keyset:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-public-keyset
   digest-key:

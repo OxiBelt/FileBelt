@@ -152,6 +152,38 @@ projection no less often than every 60 seconds. Iggy may prompt an earlier
 check, but database uncertainty or missing notification delivery never permits
 access.
 
+## Markdown editing and collaboration authorization
+
+Markdown editing introduces no Virtual ACL action. Opening or participating in
+a collaboration room requires both `READ_CONTENT` and `WRITE_CONTENT`; there
+is no read-only spectator membership. Saving the room as an immutable version
+also requires `CREATE_VERSION`. Discarding dirty room state requires `DELETE`
+and `WRITE_CONTENT`, and copying a document requires `CREATE_CHILD` on the
+destination parent. These checks are made from the current ACL, rather than
+from a browser tab, transport connection, or possession of a collaboration
+grant.
+
+A room grant is a one-use, opaque 60-second credential bound to tenant,
+principal, session, drive, node, room epoch, and the ACL, membership, and
+namespace generations observed at issuance. It is presented only as the first
+Protobuf frame over WebSocket; neither a grant nor a session value is placed in
+a URL. WebTransport is not deployed in Phase 5. The collaboration role
+revalidates this binding on admission and at least every 60 seconds thereafter.
+Any authorization or namespace change freezes the room before it can accept a
+further update. The final object, manifest/checkpoint, and explicit discard
+transactions lock the participant session and exact generation projection; the
+discard route also requires matching `DELETE` and `WRITE_CONTENT` grants. A
+revalidation race therefore cannot create an acknowledged update or discard
+dirty state. Iggy can shorten detection latency but is never authorization or
+revocation authority.
+
+An external committed head change freezes rather than merges a dirty room.
+Participants review the preserved dirty document against the immutable base
+and new head using a deterministic diff3 workflow, then explicitly save a new
+expected-head version or discard it. Offline state is local to a live tab only:
+the service does not persist, synchronize, or authorize an offline draft until
+the tab reconnects and passes current authorization.
+
 ## MCP principals, approvals, and data grants
 
 An MCP registration is owned by exactly one internal user or service principal

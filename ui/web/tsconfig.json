@@ -10,6 +10,7 @@
     "paths": {
       "@filebelt/admin": ["../admin/source/index.tsx"],
       "@filebelt/design-system": ["../design-system/source/index.tsx"],
+      "@filebelt/markdown": ["../markdown/source/index.ts"],
       "@filebelt/mcp-settings": ["../mcp-settings/source/index.tsx"]
     },
     "skipLibCheck": true,

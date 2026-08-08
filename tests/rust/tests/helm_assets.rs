@@ -6,7 +6,7 @@ use std::fs;
 use filebelt_repository_tests::repository_root;
 
 #[test]
-fn phase4_chart_has_the_production_assets_and_exact_role_contract() {
+fn phase5_chart_has_the_production_assets_and_exact_role_contract() {
     let root = repository_root();
     let chart = root.join("deploy/helm/filebelt");
     let metadata = fs::read_to_string(chart.join("Chart.yaml")).expect("chart metadata");
@@ -35,6 +35,7 @@ fn phase4_chart_has_the_production_assets_and_exact_role_contract() {
         [
             "NOTES.txt",
             "_helpers.tpl",
+            "collaboration-deployment.yaml",
             "configmaps.yaml",
             "deployments.yaml",
             "monitoring.yaml",
@@ -50,7 +51,7 @@ fn phase4_chart_has_the_production_assets_and_exact_role_contract() {
         .map(str::to_owned)
         .collect()
     );
-    assert!(metadata.contains("filebelt.dev/phase: \"4\""));
+    assert!(metadata.contains("filebelt.dev/phase: \"5\""));
     assert!(metadata.contains("kubeVersion: \">=1.34.0-0 <1.37.0-0\""));
     for role in [
         "filebelt-api",
@@ -58,6 +59,7 @@ fn phase4_chart_has_the_production_assets_and_exact_role_contract() {
         "filebelt-worker-maintenance",
         "filebelt-tools",
         "filebelt-web",
+        "filebelt-collaboration",
         "filebelt-mcp-broker",
         "filebelt-controller",
         "filebelt-mcp-runner",

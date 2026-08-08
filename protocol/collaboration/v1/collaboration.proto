@@ -1,0 +1,201 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.collaboration.v1;
+
+// Frames are carried over the Phase 5 WebSocket endpoint. The encoding remains
+// transport-neutral for a future reviewed transport. The first application
+// frame is Authenticate; grants never appear in a URL or transport header.
+message CollaborationFrame {
+  oneof frame {
+    Authenticate authenticate = 1;
+    SyncRequest sync_request = 2;
+    SyncChunk sync_chunk = 3;
+    UpdateGroup update_group = 4;
+    Acknowledgement acknowledgement = 5;
+    Awareness awareness = 6;
+    Checkpoint checkpoint = 7;
+    Freeze freeze = 8;
+    CollaborationError error = 9;
+    Heartbeat heartbeat = 10;
+    CheckpointRequest checkpoint_request = 11;
+  }
+}
+
+message Authenticate {
+  // One-use opaque grant from the control-plane API, valid for at most 60
+  // seconds. It is consumed only after all bound fields are revalidated.
+  bytes grant = 1;
+  string room_id = 2;
+  CollaborationCodec codec = 3;
+  uint32 protocol_version = 4;
+}
+
+// Deterministic claims signed by the control-plane API. The encoded claims are
+// wrapped in SignedCollaborationGrant and sent only in Authenticate.grant.
+message CollaborationGrantClaims {
+  string grant_id = 1;
+  string tenant_id = 2;
+  string room_id = 3;
+  uint64 room_epoch = 4;
+  string drive_id = 5;
+  string node_id = 6;
+  string base_version_id = 7;
+  string principal_id = 8;
+  string session_id = 9;
+  string client_id = 10;
+  PresenceMode presence_mode = 11;
+  string presence_label = 12;
+  uint64 resource_acl_generation = 13;
+  uint64 drive_acl_generation = 14;
+  uint64 membership_generation = 15;
+  uint64 namespace_generation = 16;
+  bool can_checkpoint = 17;
+  int64 issued_at_unix_seconds = 18;
+  int64 expires_at_unix_seconds = 19;
+  bytes nonce = 20;
+  string bootstrap_download_capability = 21;
+}
+
+message SignedCollaborationGrant {
+  uint32 key_generation = 1;
+  bytes claims = 2;
+  bytes signature = 3;
+}
+
+message SyncRequest {
+  uint64 known_sequence = 1;
+  bytes state_vector = 2;
+}
+
+message SyncChunk {
+  uint64 sequence = 1;
+  uint32 chunk_index = 2;
+  uint32 chunk_count = 3;
+  bytes update = 4;
+  bool snapshot = 5;
+}
+
+// A group contains at most 2 MiB of update bytes and each transferred chunk
+// contains at most 256 KiB. The server acknowledges only durable manifests.
+message UpdateGroup {
+  string client_update_id = 1;
+  uint64 base_sequence = 2;
+  repeated UpdateChunk chunks = 3;
+  // Optional successful MCP invocation whose semantic proposal produced this
+  // edit. The authority matches tenant, principal, target node, immutable
+  // base version, and normalized source-before/source-after digests.
+  string mcp_invocation_id = 4;
+}
+
+message UpdateChunk {
+  // Chunks are ordered fragments of one atomic Yjs v1 update. Receivers
+  // concatenate the complete group before decoding or making it visible.
+  uint32 chunk_index = 1;
+  bytes update = 2;
+}
+
+message Acknowledgement {
+  string client_update_id = 1;
+  uint64 durable_sequence = 2;
+  string manifest_id = 3;
+}
+
+// Awareness is ephemeral and is neither a version nor authoritative state.
+message Awareness {
+  string client_id = 1;
+  string display_label = 2;
+  uint32 same_user_tabs = 3;
+  bytes cursor_anchor = 4;
+  bytes cursor_head = 5;
+  PresenceState state = 6;
+  uint32 color_index = 7;
+}
+
+message Checkpoint {
+  string checkpoint_id = 1;
+  uint64 durable_sequence = 2;
+  CheckpointState state = 3;
+  string version_id = 4;
+}
+
+// A participant requests a short-lived immutable-version binding only after
+// every local update through expected_durable_sequence has been acknowledged.
+message CheckpointRequest {
+  uint64 expected_durable_sequence = 1;
+}
+
+message Freeze {
+  FreezeReason reason = 1;
+  string current_head_version_id = 2;
+  uint64 room_epoch = 3;
+}
+
+message CollaborationError {
+  CollaborationErrorCode code = 1;
+  string message = 2;
+  uint64 retry_after_millis = 3;
+}
+
+message Heartbeat {
+  uint64 durable_sequence = 1;
+  int64 sent_at_unix_millis = 2;
+}
+
+enum CollaborationCodec {
+  COLLABORATION_CODEC_UNSPECIFIED = 0;
+  COLLABORATION_CODEC_YJS_V1 = 1;
+}
+
+enum PresenceMode {
+  PRESENCE_MODE_UNSPECIFIED = 0;
+  PRESENCE_MODE_PSEUDONYM = 1;
+  PRESENCE_MODE_DISPLAY_NAME = 2;
+}
+
+enum PresenceState {
+  PRESENCE_STATE_UNSPECIFIED = 0;
+  PRESENCE_STATE_JOINED = 1;
+  PRESENCE_STATE_UPDATED = 2;
+  PRESENCE_STATE_LEFT = 3;
+}
+
+enum CheckpointState {
+  CHECKPOINT_STATE_UNSPECIFIED = 0;
+  CHECKPOINT_STATE_PENDING = 1;
+  CHECKPOINT_STATE_DURABLE = 2;
+  CHECKPOINT_STATE_SAVED = 3;
+  CHECKPOINT_STATE_FAILED = 4;
+}
+
+enum FreezeReason {
+  FREEZE_REASON_UNSPECIFIED = 0;
+  FREEZE_REASON_HEAD_CHANGED = 1;
+  FREEZE_REASON_AUTHORIZATION_CHANGED = 2;
+  FREEZE_REASON_ROOM_ENDED = 3;
+  FREEZE_REASON_RECOVERY = 4;
+  FREEZE_REASON_QUOTA = 5;
+  FREEZE_REASON_STATE_LIMIT = 6;
+  FREEZE_REASON_RETAINED_PAYLOAD_LIMIT = 7;
+  FREEZE_REASON_EXPIRED = 8;
+  FREEZE_REASON_DISCARDED = 9;
+}
+
+enum CollaborationErrorCode {
+  COLLABORATION_ERROR_CODE_UNSPECIFIED = 0;
+  COLLABORATION_ERROR_CODE_AUTHENTICATION_REQUIRED = 1;
+  COLLABORATION_ERROR_CODE_GRANT_EXPIRED = 2;
+  COLLABORATION_ERROR_CODE_GRANT_CONSUMED = 3;
+  COLLABORATION_ERROR_CODE_REAUTHENTICATION_REQUIRED = 4;
+  COLLABORATION_ERROR_CODE_UPDATE_TOO_LARGE = 5;
+  COLLABORATION_ERROR_CODE_ROOM_FROZEN = 6;
+  COLLABORATION_ERROR_CODE_CONFLICT_REVIEW_REQUIRED = 7;
+  COLLABORATION_ERROR_CODE_PROTOCOL_VIOLATION = 8;
+  COLLABORATION_ERROR_CODE_QUOTA_EXCEEDED = 9;
+  COLLABORATION_ERROR_CODE_STATE_LIMIT = 10;
+  COLLABORATION_ERROR_CODE_RATE_LIMITED = 11;
+  COLLABORATION_ERROR_CODE_ROOM_LIMIT = 12;
+  COLLABORATION_ERROR_CODE_UNAVAILABLE = 13;
+  COLLABORATION_ERROR_CODE_INTERNAL = 14;
+}

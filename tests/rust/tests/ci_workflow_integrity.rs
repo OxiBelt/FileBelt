@@ -163,6 +163,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-api",
         "filebelt-worker-io",
         "filebelt-worker-maintenance",
+        "filebelt-collaboration",
         "filebelt-mcp-broker",
         "filebelt-controller",
         "filebelt-mcp-runner",

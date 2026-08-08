@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version = 4
+public_origin = "https://filebelt.localhost:8443/"
+
+[deployment]
+mode = "development"
+
+[tenant]
+slug = "development"
+
+[[tenant.administrator]]
+issuer = "http://filebelt-oidc:8083/"
+subject = "filebelt-development-admin"
+
+[database]
+url_file = "/run/secrets/collaboration-database-url"
+max_connections = 16
+
+[oidc]
+issuer = "http://filebelt-oidc:8083/"
+client_id = "filebelt"
+client_secret_file = "/run/secrets/oidc-client-secret"
+callback_path = "/api/v1/auth/callback"
+development_allow_insecure = true
+
+[storage]
+root = "/var/lib/filebelt/payloads"
+backend_id = "00000000-0000-4000-8000-000000000001"
+
+[keys]
+capability_private_key_file = "/run/secrets/collaboration-capability-private-key"
+capability_public_key_file = "/run/secrets/capability-public-keyset"
+digest_key_file = "/run/secrets/digest-key"
+current_generation = 1
+
+[listeners]
+api = "0.0.0.0:8080"
+io = "0.0.0.0:8081"
+mcp_broker = "0.0.0.0:8082"
+controller = "0.0.0.0:8083"
+mcp_runner_relay = "0.0.0.0:8084"
+collaboration_ws = "0.0.0.0:8085"
+collaboration_webtransport = "0.0.0.0:8086"
+operations = "0.0.0.0:9090"
+allow_container_wildcard = true
+
+[telemetry]
+log_format = "text"
+prometheus_enabled = true
+
+[collaboration]
+enabled = true
+database_url_file = "/run/secrets/collaboration-database-url"
+capability_private_key_file = "/run/secrets/collaboration-capability-private-key"
+capability_key_generation = 2
+io_url = "http://filebelt-worker-io:8081/"
+webtransport_enabled = false
+
+[limits]
+whole_threshold_bytes = 33554432
+chunk_size_bytes = 16777216
+max_parts = 65536
+max_file_bytes = 1099511627776
+upload_ttl_seconds = 604800
+generation_recheck_seconds = 60
+orphan_grace_seconds = 86400
+expired_part_grace_seconds = 86400
+private_drive_quota_bytes = 1099511627776
+shared_drive_quota_bytes = 10995116277760
+
+[iggy]
+endpoint = "tcp://filebelt-iggy:8090"
+stream = "filebelt"
+partitions = 16

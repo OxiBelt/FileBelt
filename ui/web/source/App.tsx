@@ -16,6 +16,8 @@ import {
   Clock3,
   CloudUpload,
   Download,
+  FilePenLine,
+  FileOutput,
   Files,
   FolderClock,
   FolderInput,
@@ -37,6 +39,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
+import type { FileBeltReference } from "@filebelt/markdown";
 
 import {
   BidiText,
@@ -59,6 +62,7 @@ import { En } from "./strings.js";
 
 const AdminPanel = lazy(() => import("@filebelt/admin"));
 const McpSettings = lazy(() => import("@filebelt/mcp-settings"));
+const MarkdownFileView = lazy(async () => ({ default: (await import("./MarkdownFileView.js")).MarkdownFileView }));
 const PreferencesKey = "filebelt.appearance.v1";
 
 interface Preferences {
@@ -96,26 +100,66 @@ const RoutePaths: Record<RouteId, string> = {
   sessions: "/sessions",
   privacy: "/privacy",
   mcp: "/settings/mcp",
+  markdown: "/markdown",
 };
 
 function RouteFromPath(Pathname: string): RouteId | "admin" {
   if (Pathname === "/admin" || Pathname.startsWith("/admin/")) return "admin";
   if (Pathname === "/settings/mcp" || Pathname.startsWith("/settings/mcp/")) return "mcp";
+  if (/^\/markdown\/[0-9a-f-]+$/i.test(Pathname)) return "markdown";
   return (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as RouteId | undefined) ?? "drive";
 }
 
-function useRoute(): [RouteId | "admin", (Route: RouteId | "admin") => void] {
+export type NavigationGuard = (Continue: () => void) => void;
+
+function useRoute(): [RouteId | "admin", (Route: RouteId | "admin") => void, (EntryId: string) => void, (Guard: NavigationGuard | undefined) => void] {
   const [Route, SetRoute] = useState<RouteId | "admin">(() => RouteFromPath(window.location.pathname));
+  const ActivePathReference = useRef(window.location.pathname);
+  const GuardReference = useRef<NavigationGuard | undefined>(undefined);
   useEffect(() => {
-    const OnPopState = (): void => SetRoute(RouteFromPath(window.location.pathname));
+    const OnPopState = (): void => {
+      const NextPath = window.location.pathname;
+      const NextRoute = RouteFromPath(NextPath);
+      const Guard = GuardReference.current;
+      if (Guard === undefined) {
+        ActivePathReference.current = NextPath;
+        SetRoute(NextRoute);
+        return;
+      }
+      // The browser already changed history. Restore the active route until the
+      // user chooses how to handle its unsaved source.
+      window.history.pushState({}, "", ActivePathReference.current);
+      Guard(() => {
+        window.history.pushState({}, "", NextPath);
+        ActivePathReference.current = NextPath;
+        SetRoute(NextRoute);
+      });
+    };
     window.addEventListener("popstate", OnPopState);
     return () => window.removeEventListener("popstate", OnPopState);
-  }, []);
-  const Navigate = (Next: RouteId | "admin"): void => {
-    window.history.pushState({}, "", Next === "admin" ? "/admin" : RoutePaths[Next]);
-    SetRoute(Next);
+  }, [Route]);
+  const Guarded = (Continue: () => void): void => {
+    const Guard = GuardReference.current;
+    if (Guard === undefined) Continue();
+    else Guard(Continue);
   };
-  return [Route, Navigate];
+  const Navigate = (Next: RouteId | "admin"): void => {
+    Guarded(() => {
+      const NextPath = Next === "admin" ? "/admin" : RoutePaths[Next];
+      window.history.pushState({}, "", NextPath);
+      ActivePathReference.current = NextPath;
+      SetRoute(Next);
+    });
+  };
+  const OpenMarkdown = (EntryId: string): void => {
+    Guarded(() => {
+      const NextPath = `/markdown/${EntryId}`;
+      window.history.pushState({}, "", NextPath);
+      ActivePathReference.current = NextPath;
+      SetRoute("markdown");
+    });
+  };
+  return [Route, Navigate, OpenMarkdown, (Guard: NavigationGuard | undefined) => { GuardReference.current = Guard; }];
 }
 
 function SaveBlob(Blob: Blob, Name: string): void {
@@ -132,6 +176,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
     admin: En.admin,
     drive: En.myDrive,
     mcp: En.mcp,
+    markdown: En.markdown,
     privacy: En.privacy,
     recent: En.recent,
     sessions: En.sessions,
@@ -165,7 +210,7 @@ export function SignInPrompt(): ReactNode {
 }
 
 export function App({ Client, McpClient }: AppProps): ReactNode {
-  const [Route, Navigate] = useRoute();
+  const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
   const [Search, SetSearch] = useState("");
@@ -242,9 +287,18 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
   const SelectedEntries = Snapshot?.Entries.filter(({ Id }) => Selection.SelectedIds.has(Id)) ?? [];
   const PrimarySelection = SelectedEntries.at(-1);
   const ActionEntry = Snapshot?.Entries.find(({ Id }) => Id === ActionEntryId);
+  const MarkdownEntryId = Route === "markdown" ? window.location.pathname.split("/")[2] : undefined;
+  const MarkdownEntry = Snapshot?.Entries.find(({ Id }) => Id === MarkdownEntryId);
+  const OpenFileBeltReference = (Target: FileBeltReference): boolean => {
+    // Snapshot membership is a UX hint only; the destination read still obtains
+    // a new server-authorized grant before rendering any content.
+    if (!Snapshot?.Entries.some(({ Id }) => Id === Target.NodeId)) return false;
+    OpenMarkdown(Target.NodeId);
+    return true;
+  };
 
   const OnFiles = (Event: ChangeEvent<HTMLInputElement>): void => {
-    const Candidates = [...(Event.currentTarget.files ?? [])].map((File) => ({ Data: File, Name: File.name, Size: File.size }));
+    const Candidates = [...(Event.currentTarget.files ?? [])].map((File) => ({ Data: File, ...(File.type.length === 0 ? {} : { MediaType: File.type }), Name: File.name, Size: File.size }));
     Event.currentTarget.value = "";
     if (Candidates.length > 0) void Mutate(() => Client.upload(Candidates), En.uploadCompleted(Candidates.length));
   };
@@ -260,6 +314,20 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
     } finally {
       SetBusy(false);
     }
+  };
+
+  const ImportOfficeEntry = async (Entry: FileEntry): Promise<void> => {
+    if (Entry.Kind !== "file" || Entry.HeadVersionId === null || !IsOfficeImportCandidate(Entry)) return;
+    const TargetName = MarkdownImportName(Entry.Name);
+    await Mutate(async () => {
+      const Markdown = await import("@filebelt/markdown");
+      const SourceType = Markdown.OfficeImportType(Entry.Name);
+      if (SourceType === null) throw new Error(En.markdownImportUnavailable);
+      const Source = await Client.readMarkdown(Entry.Id, Entry.HeadVersionId as string);
+      const Contents = new Uint8Array(await Source.arrayBuffer());
+      const Converted = await Markdown.ImportOfficeMarkdown({ Contents, SourceType });
+      await Client.importMarkdown({ Contents: new Blob([Converted], { type: "text/markdown" }), EntryId: Entry.Id, SourceVersionId: Entry.HeadVersionId as string, TargetName });
+    }, En.markdownImportCompleted(TargetName));
   };
 
   const ChangePreference = (Patch: Partial<Preferences>): void => SetPreferences((Current) => ({ ...Current, ...Patch }));
@@ -333,6 +401,8 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
               {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
               {Route === "mcp" && McpClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><McpSettings Client={McpClient} IsTenantAdmin={Snapshot.CurrentUser.IsTenantAdmin} /></Suspense> : null}
               {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
+              {Route === "markdown" && MarkdownEntry !== undefined ? <Suspense fallback={<Spinner label={En.markdownLoading} />}><MarkdownFileView Client={Client} Entry={MarkdownEntry} {...(McpClient === undefined ? {} : { McpClient })} OnClose={() => Navigate("drive")} OnFileBeltLink={OpenFileBeltReference} OnNavigationGuardChange={SetNavigationGuard} OnSaved={() => void Refresh()} /></Suspense> : null}
+              {Route === "markdown" && MarkdownEntry === undefined ? <div className="fb-error" role="alert">{En.markdownUnavailable}</div> : null}
               {["drive", "shared-drives", "shared", "recent", "trash"].includes(Route) ? (
                 <section aria-labelledby="files-heading" className="fb-files-view">
                   <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.files}</p><h1 id="files-heading">{RouteTitle(Route)}</h1></div><div className="fb-heading-actions"><Tooltip content={En.refresh} relationship="label"><Button appearance="subtle" icon={<RefreshCw />} onClick={() => void Refresh()} /></Tooltip><Button appearance="primary" icon={<Upload />} onClick={() => FileInput.current?.click()}>{En.upload}</Button><input accept="*/*" aria-label={En.uploadHint} hidden multiple onChange={OnFiles} ref={FileInput} type="file" /></div></header>
@@ -342,9 +412,11 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
                     <Button disabled={SelectedEntries.length === 0 || Busy} icon={Route === "trash" ? <FolderInput /> : <Trash2 />} onClick={() => void Mutate(() => Route === "trash" ? Client.restoreEntries(SelectedEntries.map(({ Id }) => Id)) : Client.trashEntries(SelectedEntries.map(({ Id }) => Id)), Route === "trash" ? En.itemsRestored : En.itemsTrashed)}>{Route === "trash" ? En.restore : En.moveToTrash}</Button>
                     <Button disabled={PrimarySelection === undefined} icon={<History />} onClick={() => Navigate("versions")}>{En.versions}</Button>
                     <Button disabled={PrimarySelection === undefined} icon={<Link2 />} onClick={() => Navigate("shares")}>{En.shares}</Button>
+                    <Button disabled={PrimarySelection === undefined || PrimarySelection.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => PrimarySelection === undefined ? undefined : OpenMarkdown(PrimarySelection.Id)}>{En.openMarkdown}</Button>
+                    <Button disabled={PrimarySelection === undefined || !IsOfficeImportCandidate(PrimarySelection) || Busy} icon={<FileOutput />} onClick={() => PrimarySelection === undefined ? undefined : void ImportOfficeEntry(PrimarySelection)}>{En.importMarkdown}</Button>
                   </div>
                   <div className="fb-content-split">
-                    <FileTable dispatchSelection={DispatchSelection} Entries={Entries} onOpenActions={(Entry) => { DispatchSelection({ Id: Entry.Id, Type: "replace" }); SetActionEntryId(Entry.Id); }} Selection={Selection} Strings={En} />
+                    <FileTable dispatchSelection={DispatchSelection} Entries={Entries} onOpenActions={(Entry) => { DispatchSelection({ Id: Entry.Id, Type: "replace" }); SetActionEntryId(Entry.Id); }} onOpenEntry={(Entry) => OpenMarkdown(Entry.Id)} Selection={Selection} Strings={En} />
                     <aside aria-label={En.details} className="fb-details-pane">
                       {PrimarySelection === undefined ? <p className="fb-muted">{En.noSelection}</p> : <><div className="fb-details-icon"><FileBeltIcon Icon={PrimarySelection.Kind === "folder" ? FolderClock : Files} size={28} /></div><h2><BidiText>{PrimarySelection.Name}</BidiText></h2><dl><div><dt>{En.owner}</dt><dd><BidiText>{PrimarySelection.Owner}</BidiText></dd></div><div><dt>{En.version}</dt><dd>{PrimarySelection.Version}</dd></div><div><dt>{En.status}</dt><dd><StatusPill Kind="success">{En.ready}</StatusPill></dd></div></dl><Button appearance="secondary" icon={<MoreHorizontal />} onClick={() => SetActionEntryId(PrimarySelection.Id)}>{En.openMenu}</Button></>}
                     </aside>
@@ -360,7 +432,9 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
           <div className="fb-action-backdrop" onClick={() => SetActionEntryId(null)} role="presentation">
             <div aria-label={En.selectionActions} className="fb-action-menu" onClick={(Event) => Event.stopPropagation()} onKeyDown={(Event) => { if (Event.key === "Escape") SetActionEntryId(null); }} role="menu">
               <strong><BidiText>{ActionEntry.Name}</BidiText></strong>
+              <Button appearance="subtle" disabled={ActionEntry.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => { SetActionEntryId(null); OpenMarkdown(ActionEntry.Id); }} role="menuitem">{En.openMarkdown}</Button>
               <Button appearance="subtle" disabled={ActionEntry.Kind !== "file"} icon={<Download />} onClick={() => { SetActionEntryId(null); void DownloadEntry(ActionEntry); }} role="menuitem">{En.download}</Button>
+              <Button appearance="subtle" disabled={!IsOfficeImportCandidate(ActionEntry) || Busy} icon={<FileOutput />} onClick={() => { SetActionEntryId(null); void ImportOfficeEntry(ActionEntry); }} role="menuitem">{En.importMarkdown}</Button>
               <Button appearance="subtle" icon={<Link2 />} onClick={() => { SetActionEntryId(null); Navigate("shares"); }} role="menuitem">{En.shares}</Button>
               <Button appearance="subtle" icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />} onClick={() => { SetActionEntryId(null); void Mutate(() => ActionEntry.Trashed ? Client.restoreEntries([ActionEntry.Id]) : Client.trashEntries([ActionEntry.Id]), ActionEntry.Trashed ? En.itemsRestored : En.itemsTrashed); }} role="menuitem">{ActionEntry.Trashed ? En.restore : En.moveToTrash}</Button>
               <Button appearance="secondary" onClick={() => SetActionEntryId(null)} role="menuitem">{En.close}</Button>
@@ -370,4 +444,12 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
       </div>
     </FileBeltProvider>
   );
+}
+
+function IsOfficeImportCandidate(Entry: FileEntry): boolean {
+  return Entry.Kind === "file" && Entry.HeadVersionId !== null && Entry.Size !== null && Entry.Size <= 8 * 1024 * 1024 && /\.(?:csv|docx|odp|ods|odt|pptx|rtf|xlsx)$/i.test(Entry.Name);
+}
+
+function MarkdownImportName(Name: string): string {
+  return `${Name.replace(/\.[^.]+$/, "") || "Imported document"}.md`;
 }

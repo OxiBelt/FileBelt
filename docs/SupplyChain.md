@@ -162,9 +162,31 @@ deterministic public-client generator; Phase 4 regeneration covers all MCP
 personal, administrative, intent/approval, OAuth, and data-grant schemas.
 Generated output is committed and drift checked.
 
-The nine-role image plan adds `filebelt-controller` and
-`filebelt-mcp-runner` and activates `filebelt-mcp-broker`. Broker and controller
-use `Apache-2.0 AND MIT AND CDLA-Permissive-2.0`; runner uses
+Phase 5 admits `officeparser@7.5.1` only through its browser `slim` entry point
+for the bounded local Office-to-Markdown proposal path. Its transitive
+`tesseract.js@7.0.0` postinstall remains disabled by the empty lifecycle-script
+allowlist and `pnpm --ignore-scripts`; FileBelt does not enable OCR, download
+language data, extract attachments, or fetch remote document assets. The
+lockfile-pinned package and its transitive `pdfjs-dist` and Tesseract/WASM
+artifacts remain subject to the license, audit, bundle, and browser-boundary
+checks. No Node lifecycle exception is admitted.
+
+The Phase 5 Markdown bundle selects DOMPurify's Apache-2.0 branch from its
+`(MPL-2.0 OR Apache-2.0)` distribution and admits `robust-predicates@3.0.3`
+under the Unlicense. `khroma@2.1.0` ships an MIT license file but omits a
+package metadata field, so the policy records an exact package-and-version MIT
+correction; an `Unknown` license remains a failure for every other package.
+
+The collaboration image admits Yrs `0.27.3` and the exact CRDT-support graph
+through local `safe-to-deploy` audits, not Cargo Vet exemptions. The WebSocket
+support graph is audited at its locked `tokio-tungstenite@0.29.0` and
+`tungstenite@0.29.0` versions. These audits are evidence for the exact source
+and features in `Cargo.lock`; an update requires a new review.
+
+The ten-image plan adds `filebelt-collaboration` to the prior nine roles. Nine
+roles are deployable and publishable; the media controller remains probe-only.
+Collaboration, broker, and controller use
+`Apache-2.0 AND MIT AND CDLA-Permissive-2.0`; runner uses
 `Apache-2.0 AND MIT`. SBOM, notices, Cargo Vet, Cargo Deny, advisory, native
 linkage, and three-platform evidence apply independently to each role. A
 third-party catalog server is never promoted as a FileBelt image and must carry
@@ -173,7 +195,7 @@ its own license, notices, source, signature, digest, and vulnerability review.
 ## OCI evidence
 
 Phase 1 image builds use digest-pinned Dockerfile frontends and bases and create
-local Docker image archives only. Each of the nine roles is checked against an
+local Docker image archives only. Each of the ten image roles is checked against an
 immutable plan containing its repository, version, source revision and ref,
 build kind, license, and platform. The archive must contain the corresponding
 static Rust probe or web assets, the expected license evidence, numeric
@@ -287,11 +309,11 @@ contexts or retained evidence. Docker and browser logs redact these values.
 Fault and restore artifacts are sensitive local test output and use
 deterministic cleanup.
 
-## Phase 4 Kubernetes and publication evidence
+## Phase 5 Kubernetes and publication evidence
 
-Phase 4 uses a nine-role build and evidence matrix and admits eight
-deployable/publishable roles: API, I/O, maintenance, MCP broker, controller,
-runner, tools, and web. The media controller remains probe-only, has no Helm
+Phase 5 uses a ten-image build and evidence matrix and admits nine
+deployable/publishable roles: API, I/O, maintenance, collaboration, MCP broker,
+controller, runner, tools, and web. The media controller remains probe-only, has no Helm
 workload, and is not promoted to GHCR. MCP broker and controller workloads and
 one-shot runner Pods are separately disabled by default. The Helm chart creates
 no PostgreSQL, Iggy, OIDC, egress gateway, certificate issuer, monitoring stack,

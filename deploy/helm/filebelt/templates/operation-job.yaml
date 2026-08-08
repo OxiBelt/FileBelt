@@ -51,7 +51,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "tools-operation") | indent 8 }}
         filebelt.dev/operation-type: {{ $type | quote }}
       annotations:
-        checksum/config: {{ .Values.configuration.filebelt | sha256sum | quote }}
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
         checksum/secret-generations: {{ include "filebelt.secretGenerationDigest" . | quote }}
         filebelt.dev/operation-id: {{ .Values.operation.operationId | quote }}
     spec:

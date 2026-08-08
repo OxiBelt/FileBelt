@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains nine Apache-region images on
+The current build matrix contains ten Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -49,6 +49,7 @@ The current build matrix contains nine Apache-region images on
 | `filebelt-worker-maintenance` | Active and publishable. Leases durable jobs and reconciles, deletes, and scrubs through a narrow PostgreSQL role and one payload mount. |
 | `filebelt-tools` | Active and publishable. Runs bounded, explicit configuration, migration, bootstrap, key, audit, job, storage, and recovery commands with command-specific credentials and mounts. |
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
+| `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
@@ -80,6 +81,7 @@ their lifetime.
 | --- | ---: | --- |
 | API | 8080 | OxiBelt and internal broker only |
 | I/O | 8081 | OxiBelt and internal broker only |
+| Collaboration | 8085 | OxiBelt only; WebSocket is the sole Phase 5 browser transport |
 | MCP broker request API | 8082 | API only, mTLS in Kubernetes |
 | Runner controller | 8083 | MCP broker only, mTLS |
 | MCP runner relay | 8084 | one-shot runner relay only, mTLS |
@@ -137,8 +139,8 @@ such as compression, tar order, and BuildKit bookkeeping.
 Build and pull-request jobs are read-only and cannot publish packages, create
 releases, or mint attestations. The tag-only release workflow verifies an
 authorized signed SemVer tag, consumes already validated archives without
-rebuilding, promotes API, I/O, maintenance, MCP broker, controller, runner,
-tools, and web manifests to GHCR, publishes the versioned Helm chart at
+rebuilding, promotes API, I/O, maintenance, collaboration, MCP broker,
+controller, runner, tools, and web manifests to GHCR, publishes the versioned Helm chart at
 `oci://ghcr.io/oxibelt/charts/filebelt`, attaches GitHub artifact attestations,
 reads every digest back, and creates a checksummed immutable GitHub Release.
 Publication permission exists only in the promotion job. Published versions
@@ -148,7 +150,14 @@ are never moved or automatically deleted for rollback.
 
 FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.3. The chart
 always creates four replaceable workload definitions: OxiBelt web, API, I/O
-worker, and maintenance worker. `mcp.enabled=true` additionally creates the
+worker, and maintenance worker. `collaboration.enabled=true` additionally
+creates the collaboration Deployment and Service; it requires the approved
+collaboration schema, I/O capability verification path, and exact image
+digest. WebSocket is enabled with the public edge route. WebTransport is
+reserved until a separately reviewed runtime listener, H3 edge route, UDP
+Service, QUIC host-key lifecycle, and browser compatibility evidence land
+together; Phase 5 chart values deliberately expose no WebTransport toggle or
+UDP route. `mcp.enabled=true` additionally creates the
 broker Deployment and Services. The separate `mcp.runners.enabled=true`
 opt-in creates the core controller Deployment, a narrow Role/RoleBinding and
 runner ServiceAccount in the pre-created runner namespace, and permits one-shot
@@ -169,9 +178,9 @@ ownership, and no-follow probe. Only I/O, maintenance, and explicit storage or
 recovery Jobs mount the claim; API and web never do. FileBelt never changes or
 deletes the claim.
 
-Production chart values select all eight deployable workload images by
-lowercase `sha256:` digest: the five core images plus broker, controller, and
-runner. Registry mirrors may replace only the registry authority; they do not
+Production chart values select all nine deployable workload images by
+lowercase `sha256:` digest: API, I/O, maintenance, tools, web, collaboration,
+broker, controller, and runner. Registry mirrors may replace only the registry authority; they do not
 change repository, role, digest, authorization, or license semantics. A
 catalog server image is separately pinned by digest and admitted only after its
 offline Sigstore bundle, expected identity/issuer, license, source, command,
@@ -182,7 +191,7 @@ v1 proof-and-promise whose authenticated integrated time is inside all three
 windows. Root and bundle rotation is an atomic operator change; overlapping or
 unbounded authority projections fail closed.
 
-Web, API, and I/O default to two replicas and have `minAvailable: 1`
+Web, API, I/O, and collaboration default to two replicas and have `minAvailable: 1`
 PodDisruptionBudgets. An enabled broker and controller also default to two
 replicas with `minAvailable: 1`; the controller stays in the core namespace but
 elects one 15-second Lease holder and receives Pod/Secret/Lease authority only
@@ -201,8 +210,9 @@ The core namespace and the exclusive runner namespace are ingress- and
 egress-default-deny. NetworkPolicy permits only:
 
 - the configured public L4 peer to OxiBelt;
-- OxiBelt to the API and I/O backends;
+- OxiBelt to the API, I/O, and collaboration backends;
 - role-specific PostgreSQL and optional Iggy paths;
+- collaboration to PostgreSQL and the I/O capability endpoint only;
 - configured DNS, monitoring, and OTLP peers;
 - API access to the operator-managed OIDC CONNECT gateway;
 - broker access to PostgreSQL, API/I/O, the controller when enabled, and the
@@ -215,7 +225,7 @@ egress-default-deny. NetworkPolicy permits only:
 Catch-all IPv4 or IPv6 egress is rejected. Calico and Cilium acceptance tests
 qualify the portable NetworkPolicy graph.
 
-Backend API and I/O traffic uses TLS 1.3 mutual authentication. OxiBelt has a
+Backend API, I/O, and collaboration traffic uses TLS 1.3 mutual authentication. OxiBelt has a
 distinct client certificate for each upstream. FileBelt validates the operator
 CA, client-authentication purpose, and exact configured URI SAN; one retiring
 identity may overlap during rotation. OxiBelt validates each service DNS SAN.
@@ -229,9 +239,19 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 3; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 4; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
-Prometheus metrics. Enabled MCP additionally requires the broker database URL,
+Prometheus metrics. Enabled collaboration additionally requires the
+collaboration database URL/TLS identity, the combined API-generation-1 and
+collaboration-generation-2 capability verification keyset, distinct
+collaboration signing key, internal I/O capability endpoint and TLS identity,
+60-second maximum reauthentication interval, 30-day dirty-room retention, and
+a day-23 warning threshold. `webtransport_enabled` remains false in the typed
+runtime configuration and is not an operator-facing deployment option. Enabled
+collaboration filters join-grant verification to API generation 1; the
+generation-2 collaboration key remains storage-capability-only even though both
+public keys share the restored verification keyset. Enabled
+MCP additionally requires the broker database URL,
 vault keyring, broker URL/TLS, gateway URL/TLS, the internal I/O URL and
 broker-to-I/O client TLS, and at least one named trust profile. The I/O server
 allowlist admits the broker's exact attachment identity; the broker uses a
@@ -246,6 +266,14 @@ restart-only and stored in content-addressed immutable ConfigMaps. Existing
 Secret content is projected by named key; an explicit generation change
 triggers its controlled rollout.
 
+The Compose edge configuration keeps the exact WebSocket route and the
+`core` profile starts the collaboration role with its distinct database and
+signing-key mounts. The shared API configuration enables grant issuance and
+includes absolute collaboration paths only for typed validation; the API does
+not mount the collaboration database or signing key. Operators exercise the
+functional path with the `core` profile. Compose never publishes backend ports
+or a UDP/WebTransport port.
+
 ## Administration, observability, and recovery
 
 Database migration, grants verification, tenant bootstrap, storage probe,
@@ -255,6 +283,17 @@ upgrade applies migration under the migrator role while old workloads remain
 pinned, pauses for the database owner to apply the reviewed `grants.sql`, runs
 grant/schema verification, and only then rolls workloads. The chart never
 receives owner credentials and never applies a down migration.
+
+Phase 5 collaboration rollout is staged. First apply its forward room/manifest
+migration and reviewed narrow grants while collaboration admission is disabled,
+then take a coordinated checkpoint. Enable WebSocket collaboration only after
+the I/O finalize/fsync-to-manifest ACK path, 60-second authorization checks,
+external-head freeze, reconnect, diff3, and dirty-retention tests pass.
+WebTransport is not deployed in Phase 5. Its later admission requires a new
+transport review and cannot be enabled by changing a Helm value. On a fault,
+stop new grants, drain connections, fence rooms, and preserve dirty manifests
+for review; never
+acknowledge an update from an event or in-memory replica state.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate

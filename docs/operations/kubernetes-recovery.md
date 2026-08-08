@@ -17,9 +17,12 @@ sensitive operational evidence.
 ## Create a coordinated backup
 
 1. Record the chart revision, selected workload image digests, ConfigMap
-   identities, Secret generations, capability and MCP KEK generations, runner
+   identities, Secret generations, API and collaboration capability-key
+   generations and the combined verification keyset, MCP KEK generations, runner
    catalog/root/bundle identities, and certificate overlap.
-2. Stop new MCP admission and cancel active invocations while the controller is
+2. Stop new collaboration grants, fence active rooms, and wait for every
+   durable CRDT group to reach a PostgreSQL manifest terminal state. Stop new
+   MCP admission and cancel active invocations while the controller is
    still running. Wait for runner Pods and bootstrap Secrets to reconcile, then
    upgrade to `deployment.quiesced=true` with no administrative Job enabled.
    Wait for web/API/I/O/maintenance/broker/controller Pods and all remaining
@@ -46,20 +49,22 @@ unredacted logs in ordinary CI artifacts.
    reviewed grants, and grant/schema verification.
 4. Run configuration validation and the storage semantics probe.
 5. Run `filebeltctl recovery verify` against the saved checkpoint. Migrations,
-   tenant/backend identity, audit watermark, payload counts/bytes, MCP
+   tenant/backend identity, audit watermark, payload counts/bytes,
+   collaboration room/manifest inventory and dirty-retention deadlines, MCP
    registration/tombstone/vault inventories, every referenced MCP KEK
    generation, and the deterministic expected-payload inventory hash must
    agree. The emitted schema is `filebelt.recovery.verification.v2`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
-   deletion intent, quarantine, MCP invocation/runner leases and revocation
+   deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP invocation/runner leases and revocation
    tombstones, job attempts, outbox, and audit continuity.
 7. Start a full scrub with a new run UUID and the exact tenant-slug
    confirmation. Wait for every scrub job and require zero failed,
    operator-blocked, or quarantined payloads.
-8. Enable maintenance, I/O, API, and web in that order. Enable the broker and
+8. Enable maintenance, I/O, API, web, and collaboration in that order. Enable the broker and
    controller later and separately. Repeat two-user login,
    list, upload, download/range, version restore, direct share, revoke, and
-   cross-user denial checks, followed by MCP registration, explicit approval,
+   cross-user denial, collaboration durable-ACK/reconnect/freeze checks,
+   followed by MCP registration, explicit approval,
    exact-version data disclosure, broker-mediated authenticated test, and
    revocation checks.
 9. Capture only redacted verification metadata. Delete the recovery namespace,

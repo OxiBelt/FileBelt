@@ -25,11 +25,15 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_mcp_broker') THEN
     CREATE ROLE filebelt_mcp_broker NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_collaboration') THEN
+    CREATE ROLE filebelt_collaboration NOLOGIN;
+  END IF;
 END
 $$;
 
 GRANT USAGE, CREATE ON SCHEMA public TO filebelt_migrator;
 CREATE SCHEMA IF NOT EXISTS filebelt_mcp;
 CREATE SCHEMA IF NOT EXISTS filebelt_mcp_vault;
-REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault TO filebelt_migrator;
+CREATE SCHEMA IF NOT EXISTS filebelt_collaboration;
+REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration TO filebelt_migrator;

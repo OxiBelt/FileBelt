@@ -2,8 +2,8 @@
 
 -- MCP metadata and policy state are deliberately separated from encrypted
 -- credential material. Runtime grants are maintained in grants.sql.
-CREATE SCHEMA IF NOT EXISTS filebelt_mcp;
-CREATE SCHEMA IF NOT EXISTS filebelt_mcp_vault;
+-- The database owner creates both schemas through roles.sql before the
+-- restricted migrator runs this forward-only migration.
 
 CREATE TABLE filebelt_mcp.service_principals (
   tenant_id uuid NOT NULL, id uuid NOT NULL, principal_id uuid NOT NULL,

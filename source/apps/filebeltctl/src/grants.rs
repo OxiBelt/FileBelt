@@ -18,8 +18,14 @@ const ROLES: &[&str] = &[
     "filebelt_audit_exporter",
     "filebelt_recovery",
     "filebelt_mcp_broker",
+    "filebelt_collaboration",
 ];
-const SCHEMAS: &[&str] = &["public", "filebelt_mcp", "filebelt_mcp_vault"];
+const SCHEMAS: &[&str] = &[
+    "public",
+    "filebelt_mcp",
+    "filebelt_mcp_vault",
+    "filebelt_collaboration",
+];
 const TABLE_PRIVILEGES: &[&str] = &[
     "SELECT",
     "INSERT",
@@ -183,9 +189,17 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
         "public" => true,
         "filebelt_mcp" => matches!(
             role,
-            "filebelt_api" | "filebelt_recovery" | "filebelt_mcp_broker"
+            "filebelt_api" | "filebelt_recovery" | "filebelt_mcp_broker" | "filebelt_collaboration"
         ),
         "filebelt_mcp_vault" => matches!(role, "filebelt_recovery" | "filebelt_mcp_broker"),
+        "filebelt_collaboration" => matches!(
+            role,
+            "filebelt_api"
+                | "filebelt_io"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_collaboration"
+        ),
         _ => false,
     }
 }
@@ -295,6 +309,9 @@ async fn verify_column_privileges(
 }
 
 fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &str) -> bool {
+    if schema == "filebelt_collaboration" {
+        return expected_collaboration_table_privilege(role, table, privilege);
+    }
     if schema == "filebelt_mcp" {
         return expected_mcp_table_privilege(role, table, privilege);
     }
@@ -341,6 +358,66 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
         }
         "filebelt_audit_exporter" | "filebelt_recovery" | "filebelt_mcp_broker" => false,
+        "filebelt_collaboration" => table == "authorization_generations" && privilege == "SELECT",
+        _ => false,
+    }
+}
+
+fn expected_collaboration_table_privilege(role: &str, table: &str, privilege: &str) -> bool {
+    match role {
+        "filebelt_api" => {
+            matches!(
+                table,
+                "rooms" | "epochs" | "join_grants" | "checkpoints" | "import_intents"
+            ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+                || matches!(table, "update_groups" | "snapshots" | "objects")
+                    && privilege == "SELECT"
+        }
+        "filebelt_collaboration" => {
+            matches!(
+                table,
+                "rooms"
+                    | "epochs"
+                    | "objects"
+                    | "object_reservations"
+                    | "update_groups"
+                    | "update_chunks"
+                    | "snapshots"
+                    | "join_grants"
+                    | "checkpoints"
+                    | "leases"
+                    | "participants"
+                    | "payload_objects"
+            ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+        }
+        "filebelt_io" => {
+            matches!(table, "objects" | "object_reservations" | "payload_objects")
+                && matches!(privilege, "SELECT" | "UPDATE")
+                || table == "epochs" && privilege == "SELECT"
+        }
+        "filebelt_maintenance" => {
+            matches!(
+                table,
+                "epochs"
+                    | "objects"
+                    | "object_reservations"
+                    | "update_groups"
+                    | "update_chunks"
+                    | "snapshots"
+                    | "join_grants"
+                    | "checkpoints"
+                    | "import_intents"
+                    | "leases"
+                    | "participants"
+            ) && matches!(privilege, "SELECT" | "UPDATE" | "DELETE")
+                || table == "payload_objects" && matches!(privilege, "SELECT" | "UPDATE")
+        }
+        "filebelt_recovery" => {
+            matches!(
+                table,
+                "rooms" | "epochs" | "objects" | "update_groups" | "snapshots" | "checkpoints"
+            ) && privilege == "SELECT"
+        }
         _ => false,
     }
 }
@@ -436,6 +513,12 @@ fn expected_column_privilege(
                     && matches!(column, "tenant_id" | "attempt_id" | "kek_generation")));
     }
     if schema == "filebelt_mcp" {
+        if role == "filebelt_collaboration" && table == "invocations" && privilege == "SELECT" {
+            return matches!(
+                column,
+                "tenant_id" | "id" | "principal_id" | "application_id" | "state"
+            );
+        }
         if role == "filebelt_api" && table == "registrations" && privilege == "UPDATE" {
             return matches!(
                 column,
@@ -579,6 +662,64 @@ fn expected_column_privilege(
                         ))
                     || (table == "file_versions"
                         && matches!(column, "tenant_id" | "id" | "node_id")))
+        }
+        "filebelt_collaboration" => {
+            if privilege == "UPDATE" {
+                return table == "drives"
+                    && matches!(column, "reserved_bytes" | "used_physical_bytes");
+            }
+            privilege == "SELECT"
+                && match table {
+                    "tenants" => matches!(column, "id" | "slug"),
+                    "principals" => matches!(
+                        column,
+                        "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                    ),
+                    "storage_backends" => matches!(
+                        column,
+                        "tenant_id"
+                            | "id"
+                            | "kind"
+                            | "storage_ready"
+                            | "capacity_total_bytes"
+                            | "capacity_free_bytes"
+                            | "capacity_checked_at"
+                    ),
+                    "api_sessions" => matches!(
+                        column,
+                        "tenant_id"
+                            | "id"
+                            | "principal_id"
+                            | "idle_expires_at"
+                            | "absolute_expires_at"
+                            | "revoked_at"
+                    ),
+                    "nodes" => matches!(
+                        column,
+                        "tenant_id"
+                            | "id"
+                            | "drive_id"
+                            | "head_version_id"
+                            | "acl_generation"
+                            | "namespace_generation"
+                            | "trash_root_id"
+                    ),
+                    "file_versions" => matches!(
+                        column,
+                        "tenant_id" | "id" | "node_id" | "size_bytes" | "blake3" | "media_type"
+                    ),
+                    "drives" => matches!(
+                        column,
+                        "tenant_id"
+                            | "id"
+                            | "acl_generation"
+                            | "namespace_generation"
+                            | "reserved_bytes"
+                            | "used_physical_bytes"
+                            | "quota_bytes"
+                    ),
+                    _ => false,
+                }
         }
         _ => false,
     }
@@ -769,6 +910,18 @@ mod tests {
             "endpoint_uri",
             "UPDATE"
         ));
+        assert!(!expected_table_privilege(
+            "filebelt_collaboration",
+            "public",
+            "payload_objects",
+            "SELECT"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_collaboration",
+            "filebelt_collaboration",
+            "payload_objects",
+            "SELECT"
+        ));
     }
 
     #[test]
@@ -779,12 +932,30 @@ mod tests {
             "filebelt_audit_exporter",
             "filebelt_recovery",
             "filebelt_mcp_broker",
+            "filebelt_collaboration",
         ] {
             assert!(roles.contains(&format!("CREATE ROLE {role} NOLOGIN")));
             assert!(grants.contains(role));
         }
         assert!(!roles.contains("ALTER DEFAULT PRIVILEGES"));
         assert!(!grants.contains("ALTER DEFAULT PRIVILEGES"));
+    }
+
+    #[test]
+    fn database_owner_bootstraps_non_public_schemas() {
+        let roles = include_str!("../../../migrations/postgres/roles.sql");
+        let phase4 = include_str!("../../../migrations/postgres/000002_phase4_mcp.sql");
+        let phase5 = include_str!("../../../migrations/postgres/000003_phase5_markdown.sql");
+
+        for schema in [
+            "filebelt_mcp",
+            "filebelt_mcp_vault",
+            "filebelt_collaboration",
+        ] {
+            assert!(roles.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
+            assert!(!phase4.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
+            assert!(!phase5.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
+        }
     }
 
     #[tokio::test]

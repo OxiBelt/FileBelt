@@ -179,6 +179,56 @@ select:focus-visible,
   display: none !important;
 }
 
+.fb-markdown-view {
+  display: grid;
+  gap: var(--fb-space);
+  min-width: 0;
+}
+
+.fb-markdown-view [data-filebelt-markdown-mode] {
+  display: grid;
+  gap: var(--fb-space);
+  min-width: 0;
+}
+
+.fb-markdown-view [role="tablist"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fb-markdown-view [role="tab"] {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  color: var(--fb-text-primary);
+  min-height: var(--fb-control-size);
+  padding: 6px 12px;
+}
+
+.fb-markdown-view [role="tab"][aria-selected="true"] {
+  background: var(--fb-bg-selected);
+  border-color: var(--fb-accent);
+}
+
+.fb-markdown-view [data-filebelt-markdown-editor="source"] {
+  border: 1px solid var(--fb-border-subtle);
+  min-height: 24rem;
+}
+
+.fb-markdown-view article {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  overflow-wrap: anywhere;
+  padding: var(--fb-space);
+}
+
+.fb-markdown-view .filebelt-markdown-preview {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  min-height: 24rem;
+  width: 100%;
+}
+
 .fb-navigation {
   background: var(--fb-bg-surface-1);
   border-right: 1px solid var(--fb-border-subtle);

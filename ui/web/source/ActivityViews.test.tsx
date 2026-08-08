@@ -10,9 +10,12 @@ import { En } from "./strings.js";
 describe("SharesView", () => {
   it("filters same-named shares by immutable resource identity", () => {
     const Selected: FileEntry = {
+      HeadVersionId: "00000000-0000-4000-8000-000000000012",
       Id: "00000000-0000-4000-8000-000000000101",
       Kind: "file",
       ModifiedAt: "2026-08-06T12:00:00Z",
+      MarkdownEligibility: "ineligible",
+      MediaType: null,
       Name: "same-name.txt",
       Owner: "Owner",
       Shared: true,

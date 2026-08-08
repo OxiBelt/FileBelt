@@ -20,6 +20,20 @@ spec:
       protocol: TCP
 ---
 {{- end }}
+{{- if .Values.collaboration.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" . }}-collaboration
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+  ports:
+    - {name: collaboration-ws, port: 8085, targetPort: collaboration-ws, protocol: TCP}
+---
+{{- end }}
 {{- if .Values.mcp.enabled }}
 apiVersion: v1
 kind: Service
@@ -51,6 +65,7 @@ spec:
 ---
 {{- end }}
 {{- $metricsComponents := list "web" "api" "io" "maintenance" -}}
+{{- if .Values.collaboration.enabled }}{{- $metricsComponents = append $metricsComponents "collaboration" -}}{{- end }}
 {{- if .Values.mcp.enabled }}{{- $metricsComponents = append $metricsComponents "mcp-broker" -}}{{- end }}
 {{- if .Values.mcp.runners.enabled }}{{- $metricsComponents = append $metricsComponents "controller" -}}{{- end }}
 {{- range $component := $metricsComponents }}

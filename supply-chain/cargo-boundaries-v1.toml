@@ -90,6 +90,51 @@ forbidden_package_prefixes = []
 filebelt-control-protocol = []
 
 [[graph_profiles]]
+label = "collaboration protocol"
+package = "filebelt-collaboration-protocol"
+manifest = "source/crates/filebelt-collaboration-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "sqlx",
+  "tokio-postgres",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-collaboration-protocol = []
+
+[[graph_profiles]]
+label = "Markdown collaboration service"
+package = "filebelt-collaboration"
+manifest = "source/apps/filebelt-collaboration/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "oauth2",
+  "openidconnect",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-collaboration = []
+filebelt-collaboration-protocol = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-mcp-policy = []
+filebelt-runtime = []
+filebelt-storage-protocol = []
+
+[[graph_profiles]]
 label = "shared service runtime"
 package = "filebelt-runtime"
 manifest = "source/crates/filebelt-runtime/Cargo.toml"
@@ -362,6 +407,7 @@ forbidden_package_prefixes = []
 filebelt-api = []
 filebelt-authz = []
 filebelt-build-identity = []
+filebelt-collaboration-protocol = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -441,6 +487,8 @@ packages = [
   "filebelt-api",
   "filebelt-authz",
   "filebelt-build-identity",
+  "filebelt-collaboration",
+  "filebelt-collaboration-protocol",
   "filebelt-control-protocol",
   "filebelt-controller",
   "filebelt-database",
@@ -513,8 +561,12 @@ forbidden_paths = [
 ]
 
 [[source_boundaries]]
-label = "workers cannot absorb API authentication or sessions"
-packages = ["filebelt-worker-io", "filebelt-worker-maintenance"]
+label = "workers and collaboration cannot absorb API authentication or sessions"
+packages = [
+  "filebelt-collaboration",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+]
 forbidden_paths = [
   "filebelt_api",
   "filebelt_authz",
@@ -526,6 +578,7 @@ forbidden_paths = [
 label = "protocol packages remain transport and persistence neutral"
 packages = [
   "filebelt-document-protocol",
+  "filebelt-collaboration-protocol",
   "filebelt-events-protocol",
   "filebelt-storage-protocol",
   "filebelt-vfs-protocol",
@@ -575,6 +628,24 @@ public_modules = []
 wildcard_reexports = []
 
 [[public_surfaces]]
+package = "filebelt-collaboration-protocol"
+crate_root = "source/crates/filebelt-collaboration-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-collaboration"
+crate_root = "source/apps/filebelt-collaboration/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-collaboration"
+crate_root = "source/apps/filebelt-collaboration/src/lib.rs"
+public_modules = ["io_client", "server"]
+wildcard_reexports = []
+
+[[public_surfaces]]
 package = "filebelt-runtime"
 crate_root = "source/crates/filebelt-runtime/src/lib.rs"
 public_modules = []
@@ -595,7 +666,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["mcp"]
+public_modules = ["collaboration", "mcp"]
 wildcard_reexports = []
 
 [[public_surfaces]]

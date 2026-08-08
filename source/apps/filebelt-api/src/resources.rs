@@ -17,7 +17,8 @@ use filebelt_database::collaboration::{
     CollaborationImportIntentInput,
 };
 use filebelt_database::{
-    DirectShareRecord, DriveRecord, FileVersionRecord, NodeRecord, UploadRecord,
+    AdvancedAclEntryInput, AdvancedAclEntryRecord, DatabaseError, DirectShareRecord, DriveRecord,
+    FileVersionRecord, NodeRecord, UploadRecord,
 };
 use filebelt_domain::{Action, NormalizedName};
 use filebelt_storage_protocol::{
@@ -84,6 +85,10 @@ pub(crate) fn router() -> Router<AppState> {
         .route(
             "/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}",
             routing::delete(revoke_share),
+        )
+        .route(
+            "/drives/{drive_id}/nodes/{node_id}/acl",
+            routing::get(list_acl).put(replace_acl),
         )
         .route(
             "/drives/{drive_id}/nodes/{node_id}/trash",
@@ -376,6 +381,44 @@ struct DirectShareResponse {
     preset: String,
     inheritance: String,
     created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AclPrincipalSelector {
+    kind: String,
+    verified_email: Option<String>,
+    group_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AclEntryMutation {
+    action: String,
+    effect: String,
+    inheritance: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ReplaceAclRequest {
+    principal: AclPrincipalSelector,
+    entries: Vec<AclEntryMutation>,
+}
+
+#[derive(Debug, Serialize)]
+struct AclEntryResponse {
+    principal_id: Uuid,
+    principal_kind: String,
+    display_name: String,
+    verified_email: Option<String>,
+    action: String,
+    effect: String,
+    inheritance: String,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AclCollectionResponse {
+    supported_actions: Vec<&'static str>,
+    entries: Vec<AclEntryResponse>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1762,6 +1805,163 @@ async fn revoke_share(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+async fn list_acl(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let session = authenticate(&state, &headers).await?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    authorize(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        drive_id,
+        node_id,
+        Action::ManageAcl,
+    )
+    .await?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    let entries = state
+        .database
+        .list_advanced_acl_entries(state.tenant_id, drive_id, node_id)
+        .await?;
+    json_with_etag(StatusCode::OK, &acl_collection(entries), node_etag(&node))
+}
+
+async fn replace_acl(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceAclRequest>,
+) -> Result<Response, ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    require_acl_etag(&headers, &node_etag(&node))?;
+    if request.entries.len() > Action::ALL.len() {
+        return Err(ApiError::bad_request(
+            "acl.entries_invalid",
+            "An ACL replacement may contain at most one entry per action",
+        ));
+    }
+    let manage_grant = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::ManageAcl,
+    )
+    .await?;
+    let mut actions = std::collections::BTreeSet::new();
+    for entry in &request.entries {
+        let action = parse_acl_action(&entry.action)?;
+        if !actions.insert(action)
+            || !matches!(entry.effect.as_str(), "allow" | "deny")
+            || !matches!(
+                entry.inheritance.as_str(),
+                "self" | "descendants" | "self_and_descendants"
+            )
+        {
+            return Err(ApiError::bad_request(
+                "acl.entries_invalid",
+                "ACL actions, effects, or inheritance values are invalid",
+            ));
+        }
+        let delegated_grant = authorize_session_bound(
+            &state.database,
+            state.tenant_id,
+            session.record.principal_id,
+            session.record.session_id,
+            drive_id,
+            node_id,
+            action,
+        )
+        .await?;
+        require_same_generations(manage_grant, delegated_grant)?;
+    }
+    let group_id = request
+        .principal
+        .group_id
+        .as_deref()
+        .map(parse_uuid_v4)
+        .transpose()?;
+    match request.principal.kind.as_str() {
+        "user"
+            if request.principal.verified_email.is_some()
+                && request.principal.group_id.is_none() => {}
+        "group"
+            if request.principal.group_id.is_some()
+                && request.principal.verified_email.is_none() => {}
+        _ => {
+            return Err(ApiError::bad_request(
+                "acl.principal_invalid",
+                "Select exactly one verified user or local group",
+            ));
+        }
+    }
+    let entries = request
+        .entries
+        .iter()
+        .map(|entry| AdvancedAclEntryInput {
+            action: entry.action.as_str(),
+            effect: entry.effect.as_str(),
+            inheritance: entry.inheritance.as_str(),
+        })
+        .collect::<Vec<_>>();
+    let replacement = state
+        .database
+        .replace_advanced_acl_entries(
+            state.tenant_id,
+            session.record.principal_id,
+            session.record.session_id,
+            drive_id,
+            node_id,
+            &request.principal.kind,
+            request.principal.verified_email.as_deref(),
+            group_id,
+            &entries,
+            generation_i64(manage_grant.membership_generation)?,
+            generation_i64(manage_grant.drive_acl_generation)?,
+            generation_i64(manage_grant.namespace_generation)?,
+            generation_i64(manage_grant.resource_acl_generation)?,
+        )
+        .await;
+    if matches!(replacement, Err(DatabaseError::StaleGeneration)) {
+        return Err(ApiError::conflict(
+            "acl.etag_stale",
+            "The ACL changed while the replacement was being applied",
+        ));
+    }
+    let (_, generation) = replacement.map_err(ApiError::from)?;
+    let current = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    if current.acl_generation != generation {
+        return Err(ApiError::internal());
+    }
+    let entries = state
+        .database
+        .list_advanced_acl_entries(state.tenant_id, drive_id, node_id)
+        .await?;
+    json_with_etag(
+        StatusCode::OK,
+        &acl_collection(entries),
+        node_etag(&current),
+    )
+}
+
 async fn trash_node(
     State(state): State<AppState>,
     Path((drive_id, node_id)): Path<(String, String)>,
@@ -2175,6 +2375,51 @@ fn require_same_generations(
     }
 }
 
+fn parse_acl_action(value: &str) -> Result<Action, ApiError> {
+    Action::ALL
+        .into_iter()
+        .find(|action| action.as_str() == value)
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "acl.action_invalid",
+                "The ACL action is not part of the stable action vocabulary",
+            )
+        })
+}
+
+fn require_acl_etag(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
+    if headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+        != Some(expected)
+    {
+        return Err(ApiError::conflict(
+            "acl.etag_stale",
+            "The ACL changed before the replacement was applied",
+        ));
+    }
+    Ok(())
+}
+
+fn acl_collection(entries: Vec<AdvancedAclEntryRecord>) -> AclCollectionResponse {
+    AclCollectionResponse {
+        supported_actions: Action::ALL.into_iter().map(Action::as_str).collect(),
+        entries: entries
+            .into_iter()
+            .map(|entry| AclEntryResponse {
+                principal_id: entry.principal_id,
+                principal_kind: entry.principal_kind,
+                display_name: entry.display_name,
+                verified_email: entry.verified_email,
+                action: entry.action,
+                effect: entry.effect,
+                inheritance: entry.inheritance,
+                source: entry.source,
+            })
+            .collect(),
+    }
+}
+
 fn direct_share_parameters(
     request: &CreateShareRequest,
 ) -> Result<(String, &'static str, &'static str), ApiError> {
@@ -2576,8 +2821,9 @@ mod tests {
     use super::{
         CreateShareRequest, ShareInheritance, ShareKind, SharePreset, decode_cursor,
         decode_part_cursor, decode_version_cursor, direct_share_parameters, encode_cursor,
-        encode_part_cursor, require_same_generations, rfc3339, share_preset_delegated_actions,
-        shared_candidate_authorization, upload_capability_range, upload_layout_and_part_count,
+        encode_part_cursor, parse_acl_action, require_same_generations, rfc3339,
+        share_preset_delegated_actions, shared_candidate_authorization, upload_capability_range,
+        upload_layout_and_part_count,
     };
     use crate::policy::AuthorizationGrant;
     use base64::Engine as _;
@@ -2593,6 +2839,29 @@ mod tests {
         )
         .expect("valid collaboration grant request");
         assert_eq!(request.client_id, "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn advanced_acl_uses_the_complete_stable_action_vocabulary() {
+        for action in Action::ALL {
+            assert_eq!(
+                parse_acl_action(action.as_str()).expect("known action"),
+                action
+            );
+        }
+        assert!(parse_acl_action("read_content").is_err());
+
+        let source = include_str!("resources.rs");
+        let handler = source
+            .split_once("async fn replace_acl")
+            .expect("replace ACL handler exists")
+            .1
+            .split_once("async fn trash_node")
+            .expect("trash handler follows replace ACL")
+            .0;
+        assert!(handler.contains("Action::ManageAcl"));
+        assert!(handler.contains("require_acl_etag"));
+        assert!(handler.contains("require_same_generations"));
     }
 
     #[test]

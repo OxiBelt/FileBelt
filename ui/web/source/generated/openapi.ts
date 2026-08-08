@@ -234,6 +234,24 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/acl": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived rows are included as read-only projections. */
+        readonly get: operations["listAdvancedAcl"];
+        /** @description Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every referenced action. */
+        readonly put: operations["replaceAdvancedAcl"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/children": {
         readonly parameters: {
             readonly query?: never;
@@ -982,6 +1000,39 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        readonly AclCollection: {
+            readonly entries: readonly components["schemas"]["AclEntry"][];
+            readonly supported_actions: readonly string[];
+        };
+        readonly AclEntry: {
+            /** @enum {string} */
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "USE_MCP" | "MOUNT" | "EXPORT";
+            readonly display_name: string;
+            /** @enum {string} */
+            readonly effect: "allow" | "deny";
+            /** @enum {string} */
+            readonly inheritance: "self" | "descendants" | "self_and_descendants";
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly principal_kind: "user" | "group";
+            /** @enum {string} */
+            readonly source: "advanced" | "share";
+            readonly verified_email: string | null;
+        };
+        readonly AclEntryMutation: {
+            /** @enum {string} */
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "USE_MCP" | "MOUNT" | "EXPORT";
+            /** @enum {string} */
+            readonly effect: "allow" | "deny";
+            /** @enum {string} */
+            readonly inheritance: "self" | "descendants" | "self_and_descendants";
+        };
+        readonly AclPrincipalSelector: {
+            readonly group_id: components["schemas"]["UuidV4"] | null;
+            /** @enum {string} */
+            readonly kind: "user" | "group";
+            readonly verified_email: string | null;
+        };
         readonly AdminMcpBlockRule: {
             /** Format: date-time */
             readonly created_at: string;
@@ -1615,6 +1666,10 @@ export interface components {
             /** @enum {string} */
             readonly kind: "bearer" | "api_key";
             readonly secret: string;
+        };
+        readonly ReplaceAcl: {
+            readonly entries: readonly components["schemas"]["AclEntryMutation"][];
+            readonly principal: components["schemas"]["AclPrincipalSelector"];
         };
         readonly RestoreVersion: {
             readonly expected_head_version_id: components["schemas"]["UuidV4"];
@@ -2425,6 +2480,75 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["Node"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listAdvancedAcl: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current direct ACL rows and the stable action vocabulary. */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AclCollection"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly replaceAdvancedAcl: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ReplaceAcl"];
+            };
+        };
+        readonly responses: {
+            /** @description ACL replacement committed at the returned ETag generation. */
+            readonly 200: {
+                headers: {
+                    readonly ETag?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AclCollection"];
+                };
+            };
+            /** @description The supplied ETag is stale or the owner row would be changed. */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];

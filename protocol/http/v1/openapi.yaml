@@ -569,6 +569,61 @@ paths:
           description: All entries in the target principal's direct share preset are revoked transactionally.
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/acl:
+    get:
+      operationId: listAdvancedAcl
+      description: Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived rows are included as read-only projections.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: Current direct ACL rows and the stable action vocabulary.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AclCollection"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: replaceAdvancedAcl
+      description: Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every referenced action.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceAcl"
+      responses:
+        "200":
+          description: ACL replacement committed at the returned ETag generation.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AclCollection"
+        "409":
+          description: The supplied ETag is stale or the owner row would be changed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/trash:
     post:
       operationId: trashNode
@@ -2402,6 +2457,95 @@ components:
         created_at:
           type: string
           format: date-time
+    AclPrincipalSelector:
+      type: object
+      additionalProperties: false
+      required: [kind, verified_email, group_id]
+      properties:
+        kind:
+          type: string
+          enum: [user, group]
+        verified_email:
+          oneOf:
+            - type: string
+              format: email
+              maxLength: 320
+            - type: "null"
+        group_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+    AclEntryMutation:
+      type: object
+      additionalProperties: false
+      required: [action, effect, inheritance]
+      properties:
+        action:
+          type: string
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, USE_MCP, MOUNT, EXPORT]
+        effect:
+          type: string
+          enum: [allow, deny]
+        inheritance:
+          type: string
+          enum: [self, descendants, self_and_descendants]
+    ReplaceAcl:
+      type: object
+      additionalProperties: false
+      required: [principal, entries]
+      properties:
+        principal:
+          $ref: "#/components/schemas/AclPrincipalSelector"
+        entries:
+          type: array
+          maxItems: 19
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AclEntryMutation"
+    AclEntry:
+      type: object
+      additionalProperties: false
+      required: [principal_id, principal_kind, display_name, verified_email, action, effect, inheritance, source]
+      properties:
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        principal_kind:
+          type: string
+          enum: [user, group]
+        display_name:
+          type: string
+        verified_email:
+          oneOf:
+            - type: string
+              format: email
+            - type: "null"
+        action:
+          type: string
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, USE_MCP, MOUNT, EXPORT]
+        effect:
+          type: string
+          enum: [allow, deny]
+        inheritance:
+          type: string
+          enum: [self, descendants, self_and_descendants]
+        source:
+          type: string
+          enum: [advanced, share]
+    AclCollection:
+      type: object
+      additionalProperties: false
+      required: [supported_actions, entries]
+      properties:
+        supported_actions:
+          type: array
+          minItems: 19
+          maxItems: 19
+          items:
+            type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AclEntry"
     NamespaceMutation:
       type: object
       additionalProperties: false

@@ -7,6 +7,7 @@
 pub mod collaboration;
 pub mod mcp;
 
+use filebelt_domain::Action;
 use filebelt_events_protocol::EventEnvelope;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -156,6 +157,25 @@ pub struct DirectShareRecord {
     pub preset: String,
     pub inheritance: String,
     pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AdvancedAclEntryRecord {
+    pub principal_id: Uuid,
+    pub principal_kind: String,
+    pub display_name: String,
+    pub verified_email: Option<String>,
+    pub action: String,
+    pub effect: String,
+    pub inheritance: String,
+    pub source: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AdvancedAclEntryInput<'a> {
+    pub action: &'a str,
+    pub effect: &'a str,
+    pub inheritance: &'a str,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -818,6 +838,200 @@ impl Database {
                 created_at: row.get("created_at"),
             })
             .collect())
+    }
+
+    pub async fn list_advanced_acl_entries(
+        &self,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        resource_id: Uuid,
+    ) -> Result<Vec<AdvancedAclEntryRecord>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT a.principal_id,p.kind AS principal_kind, \
+                    COALESCE(u.display_name,g.display_name,a.principal_id::text) AS display_name, \
+                    u.verified_email,a.action,a.effect,a.inheritance, \
+                    CASE WHEN a.direct_share_id IS NULL THEN 'advanced' ELSE 'share' END AS source \
+             FROM acl_entries a \
+             JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.principal_id \
+             LEFT JOIN users u ON u.tenant_id=p.tenant_id AND u.principal_id=p.id \
+             LEFT JOIN groups g ON g.tenant_id=p.tenant_id AND g.principal_id=p.id \
+             WHERE a.tenant_id=$1 AND a.drive_id=$2 AND a.resource_id=$3 \
+             ORDER BY p.kind,lower(COALESCE(u.display_name,g.display_name,a.principal_id::text)), \
+                      a.principal_id,a.action,a.inheritance,a.effect",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .bind(resource_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| AdvancedAclEntryRecord {
+                principal_id: row.get("principal_id"),
+                principal_kind: row.get("principal_kind"),
+                display_name: row.get("display_name"),
+                verified_email: row.get("verified_email"),
+                action: row.get("action"),
+                effect: row.get("effect"),
+                inheritance: row.get("inheritance"),
+                source: row.get("source"),
+            })
+            .collect())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn replace_advanced_acl_entries(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        resource_id: Uuid,
+        target_kind: &str,
+        verified_email: Option<&str>,
+        group_id: Option<Uuid>,
+        entries: &[AdvancedAclEntryInput<'_>],
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+    ) -> Result<(Uuid, i64), DatabaseError> {
+        if entries.len() > Action::ALL.len()
+            || entries.iter().any(|entry| {
+                !Action::ALL
+                    .iter()
+                    .any(|action| action.as_str() == entry.action)
+                    || !matches!(entry.effect, "allow" | "deny")
+                    || !matches!(
+                        entry.inheritance,
+                        "self" | "descendants" | "self_and_descendants"
+                    )
+            })
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool.begin().await?;
+        lock_authorization_fence(
+            &mut transaction,
+            tenant_id,
+            actor_principal_id,
+            session_id,
+            drive_id,
+            resource_id,
+            [
+                membership_generation,
+                drive_acl_generation,
+                namespace_generation,
+                resource_acl_generation,
+            ],
+        )
+        .await?;
+        let target_principal_id = match target_kind {
+            "user" => {
+                let email = verified_email
+                    .map(str::trim)
+                    .filter(|email| !email.is_empty() && email.len() <= 320)
+                    .ok_or(DatabaseError::InvalidPersistedValue)?;
+                sqlx::query_scalar(
+                    "SELECT u.principal_id FROM users u \
+                     JOIN principals p ON p.tenant_id=u.tenant_id AND p.id=u.principal_id \
+                     WHERE u.tenant_id=$1 AND lower(u.verified_email)=lower($2) \
+                       AND u.status='active' AND p.disabled_at IS NULL FOR SHARE OF u,p",
+                )
+                .bind(tenant_id)
+                .bind(email)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(DatabaseError::NotFound)?
+            }
+            "group" => {
+                let id = group_id.ok_or(DatabaseError::InvalidPersistedValue)?;
+                sqlx::query_scalar(
+                    "SELECT g.principal_id FROM groups g \
+                     JOIN principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id \
+                     WHERE g.tenant_id=$1 AND g.id=$2 AND p.disabled_at IS NULL \
+                     FOR SHARE OF g,p",
+                )
+                .bind(tenant_id)
+                .bind(id)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(DatabaseError::NotFound)?
+            }
+            _ => return Err(DatabaseError::InvalidPersistedValue),
+        };
+        let owner_principal_id: Uuid = sqlx::query_scalar(
+            "SELECT owner_principal_id FROM drives WHERE tenant_id=$1 AND id=$2",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+        if target_principal_id == owner_principal_id {
+            return Err(DatabaseError::Conflict);
+        }
+        sqlx::query(
+            "DELETE FROM acl_entries WHERE tenant_id=$1 AND drive_id=$2 AND resource_id=$3 \
+             AND principal_id=$4 AND direct_share_id IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .bind(resource_id)
+        .bind(target_principal_id)
+        .execute(&mut *transaction)
+        .await?;
+        for entry in entries {
+            sqlx::query(
+                "INSERT INTO acl_entries \
+                 (tenant_id,drive_id,resource_id,id,principal_id,action,effect,inheritance,created_by,generation) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1)",
+            )
+            .bind(tenant_id)
+            .bind(drive_id)
+            .bind(resource_id)
+            .bind(Uuid::new_v4())
+            .bind(target_principal_id)
+            .bind(entry.action)
+            .bind(entry.effect)
+            .bind(entry.inheritance)
+            .bind(actor_principal_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+        }
+        let generation: i64 = sqlx::query_scalar(
+            "SELECT acl_generation FROM nodes WHERE tenant_id=$1 AND drive_id=$2 AND id=$3",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .bind(resource_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            tenant_id,
+            Some(actor_principal_id),
+            Some(target_principal_id),
+            Some(resource_id),
+            "acl.replace",
+            "allowed",
+            "manage_acl_allowed",
+            true,
+            json!({"entry_count":entries.len(),"target_kind":target_kind}),
+        )
+        .await?;
+        insert_outbox(
+            &mut transaction,
+            tenant_id,
+            "filebelt.v1.acl.changed",
+            "node",
+            resource_id,
+            generation,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok((target_principal_id, generation))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2762,6 +2976,22 @@ mod tests {
         assert!(create_directory.contains("session_id: Uuid"));
         assert!(create_directory.contains("lock_authorization_fence("));
         assert!(create_directory.contains("expected_generation"));
+    }
+
+    #[test]
+    fn advanced_acl_replacement_is_fenced_and_preserves_share_rows() {
+        let source = include_str!("lib.rs");
+        let replacement = source
+            .split_once("pub async fn replace_advanced_acl_entries")
+            .expect("advanced ACL replacement exists")
+            .1
+            .split_once("pub async fn restore_file_version")
+            .expect("restore follows ACL replacement")
+            .0;
+        assert!(replacement.contains("lock_authorization_fence("));
+        assert!(replacement.contains("direct_share_id IS NULL"));
+        assert!(replacement.contains("target_principal_id == owner_principal_id"));
+        assert!(replacement.contains("filebelt.v1.acl.changed"));
     }
 
     #[test]

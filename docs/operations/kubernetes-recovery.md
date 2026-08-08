@@ -17,8 +17,8 @@ sensitive operational evidence.
 ## Create a coordinated backup
 
 1. Record the chart revision, selected workload image digests, ConfigMap
-   identities, Secret generations, API and collaboration capability-key
-   generations and the combined verification keyset, MCP KEK generations, runner
+   identities, Secret generations, API, collaboration, and mount capability-key
+   generations and the combined verification keyset, MCP and mount KEK generations, runner
    catalog/root/bundle identities, and certificate overlap.
 2. Stop new collaboration grants, fence active rooms, and wait for every
    durable CRDT group to reach a PostgreSQL manifest terminal state. Stop new
@@ -52,11 +52,15 @@ unredacted logs in ordinary CI artifacts.
    tenant/backend identity, audit watermark, payload counts/bytes,
    collaboration room/manifest inventory and dirty-retention deadlines, MCP
    registration/tombstone/vault inventories, every referenced MCP KEK
-   generation, and the deterministic expected-payload inventory hash must
+   generation, retained mount policy/vault inventory and every referenced mount
+   KEK generation, and the deterministic expected-payload inventory hash must
    agree. The emitted schema is `filebelt.recovery.verification.v2`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
-   deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP invocation/runner leases and revocation
-   tombstones, job attempts, outbox, and audit continuity.
+   deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP
+   invocation/runner leases and revocation tombstones, mount
+   device/gateway/session/handle/lock fences, job attempts, outbox, and audit
+   continuity. Advance gateway epochs and expire restored mount runtime state;
+   keep mount workloads disabled.
 7. Start a full scrub with a new run UUID and the exact tenant-slug
    confirmation. Wait for every scrub job and require zero failed,
    operator-blocked, or quarantined payloads.
@@ -88,5 +92,9 @@ unredacted logs in ordinary CI artifacts.
   revoke and cryptographically erase the registrations under an explicit
   incident plan. Core file operations may resume only after proving they remain
   isolated from the disabled MCP path.
+- Lost mount KEK or generation-3 signing material: keep mount admission
+  disabled. Revoke affected credentials and gateway runtime state under an
+  explicit incident plan; do not derive a verifier from a tailstate volume or
+  reuse an API/collaboration signing key.
 - Partial scrub: rerun the same run UUID to resume idempotently. Do not treat a
   partial run as verification.

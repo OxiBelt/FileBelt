@@ -143,6 +143,22 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(release.contains("sha256sum --check SHA256SUMS"));
     assert!(release.contains("refusing to replace existing Helm release"));
     assert!(release.contains("--verify-tag"));
+    for release_role in ["filebelt-vfs", "filebelt-headscale-sync"] {
+        assert!(
+            release.contains(release_role),
+            "release promotion must carry {release_role}"
+        );
+        assert!(
+            dry_run.contains("Build all twelve Apache roles"),
+            "dry-run must build the complete Apache image plan"
+        );
+    }
+    for output in [
+        "steps.subjects.outputs.vfs",
+        "steps.subjects.outputs.headscale_sync",
+    ] {
+        assert!(release.contains(output), "release must attest {output}");
+    }
 
     let exact_artifact =
         fs::read_to_string(root.join("tests/scripts/run-kubernetes-release-gate.sh"))
@@ -168,6 +184,8 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-controller",
         "filebelt-mcp-runner",
         "filebelt-tools",
+        "filebelt-vfs",
+        "filebelt-headscale-sync",
         "filebelt-web",
     ] {
         assert!(active_roles.contains(active));

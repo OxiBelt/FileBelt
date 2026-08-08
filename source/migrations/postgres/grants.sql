@@ -283,10 +283,14 @@ GRANT SELECT (tenant_id,user_id,issuer,subject,disabled_at) ON external_identiti
 GRANT SELECT, INSERT, UPDATE ON filebelt_mount.headscale_devices
   TO filebelt_headscale_sync;
 
--- The I/O worker handles UUID-scoped mount staging only after fbcap2
--- admission. Lock and policy decisions remain in VFS/PostgreSQL.
+-- The I/O worker handles immutable range reads and UUID-scoped mount staging
+-- only after fbcap2 admission. Lock and policy decisions remain in
+-- VFS/PostgreSQL; the I/O role receives no mount-vault access.
 GRANT SELECT, UPDATE ON filebelt_mount.write_sessions,
   filebelt_mount.write_chunks TO filebelt_io;
+GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
+  filebelt_mount.headscale_devices, filebelt_mount.gateway_epochs,
+  filebelt_mount.sessions, filebelt_mount.handles TO filebelt_io;
 
 GRANT SELECT, UPDATE, DELETE ON
   filebelt_mount.sessions, filebelt_mount.session_receipts,

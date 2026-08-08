@@ -91,7 +91,7 @@ server_validate() {
     kubectl_cmd apply --server-side --dry-run=server --field-manager=filebelt-acceptance \
       --filename - >"${output}"
 
-  if [[ "${operation}" != "base" && "${operation}" != "mcp" ]]; then
+  if [[ "${operation}" != "base" && "${operation}" != "mcp" && "${operation}" != "mounts" ]]; then
     grep -E '^job\.batch/filebelt-' "${output}" >/dev/null \
       || die "${operation} did not produce an API-valid operation Job"
   fi
@@ -261,6 +261,15 @@ server_validate mcp \
   --set networkPolicy.kubernetesApi.enabled=true \
   --set-json "networkPolicy.kubernetesApi.to=[{\"ipBlock\":{\"cidr\":\"${api_cidr}\"}}]" \
   --set-file configuration.filebelt="${mcp_config}"
+
+# Phase 6 is also a live restricted-admission check. It deliberately remains
+# quiesced, so no adapter image, Headscale credential, or operator RWO claim is
+# consumed; the API server still validates the StatefulSet, sidecars, Services,
+# PDB, and default-deny policy topology.
+server_validate mounts \
+  --set mounts.enabled=true \
+  --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
+  --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"filebelt-tailnet"}}}]'
 helm --kubeconfig "${KUBECONFIG}" upgrade --install "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --values "${ci_values}" \

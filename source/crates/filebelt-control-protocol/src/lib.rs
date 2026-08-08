@@ -14,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 4;
+pub const CONFIG_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +41,8 @@ pub struct Config {
     pub mcp: McpConfig,
     #[serde(default)]
     pub collaboration: CollaborationConfig,
+    #[serde(default)]
+    pub mounts: MountConfig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -108,6 +110,10 @@ pub struct BackendTlsConfig {
     pub controller: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub collaboration: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub vfs: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub vfs_management: Option<BackendServerTlsConfig>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,6 +212,10 @@ pub struct ListenerConfig {
     pub collaboration_ws: SocketAddr,
     #[serde(default = "default_collaboration_webtransport_listener")]
     pub collaboration_webtransport: SocketAddr,
+    #[serde(default = "default_vfs_listener")]
+    pub vfs: SocketAddr,
+    #[serde(default = "default_vfs_management_listener")]
+    pub vfs_management: SocketAddr,
     /// Permit an unspecified bind address inside an explicitly isolated
     /// container network.
     #[serde(default)]
@@ -223,7 +233,96 @@ impl Default for ListenerConfig {
             controller: default_controller_listener(),
             collaboration_ws: default_collaboration_ws_listener(),
             collaboration_webtransport: default_collaboration_webtransport_listener(),
+            vfs: default_vfs_listener(),
+            vfs_management: default_vfs_management_listener(),
             allow_container_wildcard: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub database_url_file: Option<PathBuf>,
+    #[serde(default)]
+    pub vault_keyring_file: Option<PathBuf>,
+    #[serde(default = "default_key_generation")]
+    pub vault_key_generation: u32,
+    #[serde(default)]
+    pub capability_private_key_file: Option<PathBuf>,
+    #[serde(default = "default_mount_capability_key_generation")]
+    pub capability_key_generation: u32,
+    #[serde(default)]
+    pub io_url: Option<Url>,
+    #[serde(default)]
+    pub io_client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub io_client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub io_server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub management_url: Option<Url>,
+    #[serde(default)]
+    pub management_client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub management_client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub management_server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub headscale: HeadscaleSyncConfig,
+}
+
+impl Default for MountConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            database_url_file: None,
+            vault_keyring_file: None,
+            vault_key_generation: default_key_generation(),
+            capability_private_key_file: None,
+            capability_key_generation: default_mount_capability_key_generation(),
+            io_url: None,
+            io_client_certificate_chain_file: None,
+            io_client_private_key_file: None,
+            io_server_ca_file: None,
+            management_url: None,
+            management_client_certificate_chain_file: None,
+            management_client_private_key_file: None,
+            management_server_ca_file: None,
+            headscale: HeadscaleSyncConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeadscaleSyncConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub api_url: Option<Url>,
+    #[serde(default)]
+    pub api_token_file: Option<PathBuf>,
+    #[serde(default)]
+    pub server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub oidc_issuer: Option<Url>,
+    #[serde(default = "default_headscale_sync_seconds")]
+    pub sync_seconds: u64,
+}
+
+impl Default for HeadscaleSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_url: None,
+            api_token_file: None,
+            server_ca_file: None,
+            oidc_issuer: None,
+            sync_seconds: default_headscale_sync_seconds(),
         }
     }
 }
@@ -717,7 +816,9 @@ impl Config {
                         .listeners
                         .collaboration_webtransport
                         .ip()
-                        .is_unspecified()))
+                        .is_unspecified())
+                || (self.mounts.enabled && self.listeners.vfs.ip().is_unspecified())
+                || (self.mounts.enabled && self.listeners.vfs_management.ip().is_unspecified()))
         {
             return Err(invalid(
                 "backend wildcard listeners require allow_container_wildcard",
@@ -739,6 +840,12 @@ impl Config {
             }
             if let Some(collaboration) = &tls.collaboration {
                 validate_backend_tls(collaboration)?;
+            }
+            if let Some(vfs) = &tls.vfs {
+                validate_backend_tls(vfs)?;
+            }
+            if let Some(vfs_management) = &tls.vfs_management {
+                validate_backend_tls(vfs_management)?;
             }
         }
         let sample_ratio = self.telemetry.effective_trace_sample_ratio();
@@ -831,6 +938,141 @@ impl Config {
         }
         self.validate_mcp()?;
         self.validate_collaboration()?;
+        self.validate_mounts()?;
+        Ok(())
+    }
+
+    fn validate_mounts(&self) -> Result<(), ConfigError> {
+        let mounts = &self.mounts;
+        if !mounts.enabled {
+            if mounts.headscale.enabled {
+                return Err(invalid(
+                    "Headscale synchronization requires mounts.enabled=true",
+                ));
+            }
+            return Ok(());
+        }
+        if mounts.vault_key_generation == 0
+            || mounts.capability_key_generation == 0
+            || mounts.capability_key_generation == self.keys.current_generation
+            || (self.collaboration.enabled
+                && mounts.capability_key_generation == self.collaboration.capability_key_generation)
+            || [
+                mounts.database_url_file.as_ref(),
+                mounts.vault_keyring_file.as_ref(),
+                mounts.capability_private_key_file.as_ref(),
+            ]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "enabled mounts require absolute database, vault, and capability-key paths plus a distinct positive capability generation",
+            ));
+        }
+        let expected_scheme = if self.deployment.mode == DeploymentMode::Kubernetes {
+            "https"
+        } else {
+            "http"
+        };
+        let io_url = mounts
+            .io_url
+            .as_ref()
+            .ok_or_else(|| invalid("enabled mounts require an internal I/O URL"))?;
+        if io_url.scheme() != expected_scheme
+            || io_url.host_str().is_none()
+            || io_url.port().is_none()
+            || io_url.path() != "/"
+            || !io_url.username().is_empty()
+            || io_url.password().is_some()
+            || io_url.query().is_some()
+            || io_url.fragment().is_some()
+        {
+            return Err(invalid("VFS I/O URL is invalid"));
+        }
+        let management = mounts
+            .management_url
+            .as_ref()
+            .ok_or_else(|| invalid("enabled mounts require an internal VFS management URL"))?;
+        if management.scheme() != expected_scheme
+            || management.host_str().is_none()
+            || management.port().is_none()
+            || management.path() != "/"
+            || !management.username().is_empty()
+            || management.password().is_some()
+            || management.query().is_some()
+            || management.fragment().is_some()
+        {
+            return Err(invalid("VFS management URL is invalid"));
+        }
+        if self.deployment.mode == DeploymentMode::Kubernetes
+            && (self
+                .backend_tls
+                .as_ref()
+                .and_then(|tls| tls.vfs.as_ref())
+                .is_none()
+                || self
+                    .backend_tls
+                    .as_ref()
+                    .and_then(|tls| tls.vfs_management.as_ref())
+                    .is_none()
+                || [
+                    mounts.io_client_certificate_chain_file.as_ref(),
+                    mounts.io_client_private_key_file.as_ref(),
+                    mounts.io_server_ca_file.as_ref(),
+                    mounts.management_client_certificate_chain_file.as_ref(),
+                    mounts.management_client_private_key_file.as_ref(),
+                    mounts.management_server_ca_file.as_ref(),
+                ]
+                .into_iter()
+                .any(|path| path.is_none_or(|path| !path.is_absolute())))
+        {
+            return Err(invalid(
+                "Kubernetes mounts require separate VFS I/O and management mTLS identities",
+            ));
+        }
+        let headscale = &mounts.headscale;
+        if !headscale.enabled {
+            return Ok(());
+        }
+        if !(5..=300).contains(&headscale.sync_seconds)
+            || [
+                headscale.api_token_file.as_ref(),
+                headscale.server_ca_file.as_ref(),
+            ]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "Headscale sync requires absolute token and CA paths and a 5 to 300 second interval",
+            ));
+        }
+        let api = headscale
+            .api_url
+            .as_ref()
+            .ok_or_else(|| invalid("Headscale sync requires an API URL"))?;
+        if api.scheme() != "https"
+            || api.host_str().is_none()
+            || api.path() != "/"
+            || !api.username().is_empty()
+            || api.password().is_some()
+            || api.query().is_some()
+            || api.fragment().is_some()
+        {
+            return Err(invalid("Headscale API URL must be a bare HTTPS origin"));
+        }
+        let issuer = headscale
+            .oidc_issuer
+            .as_ref()
+            .ok_or_else(|| invalid("Headscale sync requires the exact OIDC issuer"))?;
+        if issuer.scheme() != "https"
+            || issuer.host_str().is_none()
+            || !issuer.username().is_empty()
+            || issuer.password().is_some()
+            || issuer.query().is_some()
+            || issuer.fragment().is_some()
+        {
+            return Err(invalid("Headscale OIDC issuer must use HTTPS"));
+        }
         Ok(())
     }
 
@@ -1416,11 +1658,23 @@ fn default_collaboration_ws_listener() -> SocketAddr {
 fn default_collaboration_webtransport_listener() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8086))
 }
+fn default_vfs_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8087))
+}
+fn default_vfs_management_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8088))
+}
+const fn default_headscale_sync_seconds() -> u64 {
+    15
+}
 const fn default_collaboration_participants() -> u32 {
     32
 }
 const fn default_collaboration_capability_key_generation() -> u32 {
     2
+}
+const fn default_mount_capability_key_generation() -> u32 {
+    3
 }
 const fn default_collaboration_update_bytes() -> u64 {
     262_144
@@ -1606,6 +1860,7 @@ mod tests {
             iggy: None,
             mcp: McpConfig::default(),
             collaboration: CollaborationConfig::default(),
+            mounts: MountConfig::default(),
         }
     }
     #[test]
@@ -1669,6 +1924,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            vfs: None,
+            vfs_management: None,
         });
         candidate.validate().unwrap();
     }
@@ -1708,6 +1965,29 @@ mod tests {
         assert!(candidate.validate().is_err());
     }
     #[test]
+    fn headscale_sync_requires_exact_https_issuer() {
+        let mut candidate = config();
+        candidate.mounts.enabled = true;
+        candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
+        candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
+        candidate.mounts.capability_private_key_file =
+            Some("/run/secrets/mount-capability.pk8".into());
+        candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8091/").unwrap());
+        candidate.mounts.headscale.enabled = true;
+        candidate.mounts.headscale.api_url =
+            Some(Url::parse("https://headscale.example.test/").unwrap());
+        candidate.mounts.headscale.api_token_file = Some("/run/secrets/headscale-api-token".into());
+        candidate.mounts.headscale.server_ca_file = Some("/run/secrets/headscale-ca.crt".into());
+        candidate.mounts.headscale.oidc_issuer =
+            Some(Url::parse("https://issuer.example.test/tenant").unwrap());
+        candidate.validate().unwrap();
+
+        candidate.mounts.headscale.oidc_issuer =
+            Some(Url::parse("https://issuer.example.test/tenant?client=filebelt").unwrap());
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
     fn backend_tls_rejects_role_identity_overlap() {
         let mut candidate = config();
         let shared = BackendServerTlsConfig {
@@ -1723,6 +2003,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            vfs: None,
+            vfs_management: None,
         });
         assert!(candidate.validate().is_err());
     }
@@ -1748,6 +2030,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            vfs: None,
+            vfs_management: None,
         });
         assert!(candidate.validate().is_err());
 
@@ -1765,6 +2049,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            vfs: None,
+            vfs_management: None,
         });
         assert!(candidate.validate().is_err());
     }

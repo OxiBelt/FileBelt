@@ -21,6 +21,8 @@ ACTIVE_ROLES = (
     "filebelt-controller",
     "filebelt-mcp-runner",
     "filebelt-tools",
+    "filebelt-vfs",
+    "filebelt-headscale-sync",
     "filebelt-web",
 )
 ARCHITECTURES = ("amd64", "arm64", "riscv64")

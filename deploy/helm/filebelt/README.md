@@ -2,7 +2,7 @@
 
 # FileBelt Helm chart
 
-This chart deploys the supported Phase 4 FileBelt application boundary on
+This chart deploys the supported Phase 6 FileBelt application boundary on
 Kubernetes `1.34` through `1.36`. It deliberately does not install PostgreSQL,
 Iggy, an OIDC provider, an OIDC egress gateway, an ingress controller, storage,
 cert-manager, an MCP egress gateway, or a monitoring stack. Install it in a
@@ -25,7 +25,16 @@ dynamically rather than as a Deployment. They use a digest-pinned trusted relay
 sidecar, a verified catalog server image, no service-account token, no payload
 mount, and a runner-namespace default-deny policy.
 
-It never renders a StatefulSet, HPA, Secret, PVC, dependency fixture, media
+`mounts.enabled=true` renders the disabled-preview VFS and Headscale-sync
+Deployments plus SMB and explicit-FTPS gateway StatefulSets. Each gateway has a
+tailscaled sidecar, its own operator-provided RWO tailstate claim, kernel
+networking, and an exact default-deny policy path. VFS and Headscale sync do not
+receive tailscaled, TUN, tailstate, or payload mounts. Do not enable this
+preview in production from this revision: the copyleft adapter images are not
+part of the Apache release and the Samba authentication/session IPC path is
+still fail-closed.
+
+It never renders an HPA, Secret, PVC, dependency fixture, media
 controller, cluster-scoped RBAC, ClusterRole, or ClusterRoleBinding. The API,
 broker, controller, and runners have no payload mount. Only I/O, maintenance,
 and explicitly selected storage/recovery Jobs mount the existing payload
@@ -57,7 +66,9 @@ and the generated edge configuration can use stable Service DNS names.
 
 Every production image is selected by a lower-case `sha256:` digest. The
 all-zero values are static-validation sentinels, not installable artifacts;
-replace all eight before live installation.
+replace all eleven deployable Apache workload digests before live installation.
+The adapter all-zero digests are additionally non-published sentinels and
+cannot be made production-ready by changing only a value.
 
 ## Configuration and credentials
 
@@ -71,7 +82,7 @@ all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
 
-The default `filebelt.toml` is version 3 in Kubernetes mode and configures the
+The default `filebelt.toml` is version 5 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
 logs, Prometheus, and the OIDC egress proxy. Replace the example origin,
 issuer, tenant, administrator, backend UUID, certificate identities, and edge
@@ -131,6 +142,11 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | MCP gateway and backend client TLS | certificate, key, and `server-ca.crt` | Broker |
 | controller server/client TLS | certificate, key, and exact CA keys | Controller and broker |
 | runner broker/gateway TLS | `tls.crt`, `tls.key`, `ca.crt` | Trusted relay sidecar only; create in `mcp.runners.namespace` |
+| `vfsDatabase` and `headscaleSyncDatabase` | `database-url` | VFS and Headscale synchronization |
+| `mountVaultKeyring` | `keyring.json` | VFS verifier vault only |
+| `mountCapabilityPrivateKey` | `private-key` | VFS generation-3 `fbcap2` signer only |
+| VFS server, management, and I/O client TLS | certificate, key, and exact CA keys | Gateways, API, VFS, and I/O |
+| `headscaleApiToken` and `headscaleServerCa` | `token` and `ca.crt` | Headscale synchronization only |
 
 Secret names are not rollouts by themselves. Generations make an in-place
 Secret rotation explicit and auditable. Rotate backend certificates by first
@@ -160,6 +176,9 @@ The chart permits only these application paths:
   runner relay sidecars to broker and the exact MCP gateway, with no DNS
   egress from runner Pods;
 - an administrative Job to DNS and PostgreSQL.
+- when mount preview is rendered, API to VFS management; gateways to VFS;
+  VFS to PostgreSQL and I/O; I/O ingress from VFS; Headscale sync to PostgreSQL
+  and the exact Headscale peer; and exact tailnet ingress to gateway ports.
 
 `networkPolicy` peers accept Kubernetes namespace/Pod selectors or bounded
 `ipBlock` CIDRs. The chart rejects `0.0.0.0/0` and `::/0`. Set every external
@@ -255,7 +274,8 @@ tests/scripts/check-helm-chart.sh
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
 negative schema/helper cases, proves core and MCP workload/RBAC/mount
-boundaries, validates
+boundaries, renders the disabled mount preview and rejects unsafe TUN/tailstate
+or peer combinations, validates
 quiescing and administrative Jobs, and rejects unexpected resource kinds. A
 connected test cluster must additionally run server-side dry-run under the
 restricted Pod Security Standard and the Kind/Minikube lifecycle, NetworkPolicy,

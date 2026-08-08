@@ -56,6 +56,13 @@ adapters ──process boundary──> Apache protocol contract
 - `filebelt-worker-maintenance` uses fenced job, payload, and reconciliation
   repositories. Iggy is an optional wake-up adapter outside its correctness
   path.
+- `filebelt-vfs` consumes the generic VFS schema, mount database repository,
+  mount verifier vault, and `fbcap2` signer. It does not depend on Samba,
+  libunftp, host filesystem identity, storage implementation code, or payload
+  paths.
+- `filebelt-headscale-sync` consumes the external Headscale HTTP API and the
+  narrow atomic device-observation repository. It cannot issue credentials,
+  create sessions, evaluate filesystem ownership, or sign capabilities.
 - `filebeltctl` composes explicit operator commands. It must not make a library
   package depend on CLI types or silently widen a service's database role.
 - `filebelt-runtime` owns transport TLS, operations endpoints, bounded metrics,
@@ -65,7 +72,7 @@ adapters ──process boundary──> Apache protocol contract
 - `@filebelt/web` and `@filebelt/admin` consume one generated OpenAPI client.
   Admin UI is a lazy route, not a separate authority; hiding a control is not
   authorization.
-- OxiBelt, PostgreSQL, OIDC, and Iggy are replaceable external processes.
+- OxiBelt, PostgreSQL, OIDC, Iggy, and Headscale are replaceable external processes.
   Apache packages may depend on reviewed generic clients or schemas, never on
   their internal source or deployment-specific row/config types.
 
@@ -94,10 +101,19 @@ API. OxiBelt remains a replaceable process boundary and its client-certificate
 support is consumed only through generated configuration and HTTPS.
 
 The chart mounts the existing payload claim only into I/O, maintenance, and
-explicit storage recovery Jobs. API and web remain storage-library- and
-payload-mount-free. Database migration, audit export, and recovery use separate
-group roles; adding an operator command never widens a serving role. Prometheus
-and OTLP are output protocols and cannot become policy or durability inputs.
+explicit storage recovery Jobs. API, web, VFS, Headscale sync, and protocol
+gateways remain storage-library- and payload-mount-free. Database migration,
+audit export, and recovery use separate group roles; adding an operator command
+never widens a serving role. Prometheus and OTLP are output protocols and
+cannot become policy or durability inputs.
+
+The SMB and explicit-FTPS crates live in independent GPL workspaces and may
+depend on the committed Apache VFS protocol through an ordinary replaceable
+client boundary. They may not be root Cargo members or path dependencies of an
+Apache package. Their adapter-local lockfiles, notices, source offers, build
+roots, and image evidence remain separate. Helm may describe both processes,
+but rendering a Pod neither changes dependency direction nor proves license or
+release readiness.
 
 ## Change review
 

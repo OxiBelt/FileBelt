@@ -3,6 +3,7 @@
 
 # Rust
 /target/
+/adapters/*/target/
 **/*.rs.bk
 
 # Python

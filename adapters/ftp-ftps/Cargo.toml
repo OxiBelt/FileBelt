@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[workspace]
+members = ["."]
+resolver = "3"
+
+[package]
+name = "filebelt-ftp-ftps-gateway"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+# The server-facing bridge is intentionally isolated from the protocol-neutral
+# policy module. Do not update this without the adapter dependency/license
+# review and a regenerated adapter-local lockfile.
+async-trait = "=0.1.92"
+bytes = "=1.12.1"
+filebelt-vfs-protocol = { path = "../../source/crates/filebelt-vfs-protocol" }
+libunftp = "=0.23.0"
+prost = "=0.14.4"
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs"] }
+tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-stream = "=0.1.19"
+tokio-util = { version = "=0.7.19", features = ["io"] }
+unftp-core = "=0.1.0"
+uuid = { version = "=1.24.0", features = ["v4"] }
+zeroize = "=1.9.0"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"

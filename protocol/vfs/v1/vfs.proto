@@ -1,0 +1,284 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.vfs.v1;
+
+// Protocol-neutral request envelope shared by mount adapters. No field carries
+// a host path, POSIX identity, SMB object, FTP daemon type, or payload locator.
+message VfsRequest {
+  uint32 protocol_version = 1;
+  string request_id = 2;
+  string tenant_id = 3;
+  MountProtocol protocol = 4;
+  string gateway_id = 5;
+  uint64 gateway_epoch = 6;
+  string session_id = 7;
+  uint64 credential_generation = 8;
+  uint64 authorization_generation = 9;
+
+  oneof operation {
+    AuthenticateRequest authenticate = 20;
+    ListRequest list = 21;
+    StatRequest stat = 22;
+    OpenRequest open = 23;
+    ReadRequest read = 24;
+    WriteRequest write = 25;
+    FlushRequest flush = 26;
+    CommitRequest commit = 27;
+    CloseRequest close = 28;
+    CreateRequest create = 29;
+    MkdirRequest mkdir = 30;
+    RenameRequest rename = 31;
+    RemoveRequest remove = 32;
+    SetAttributesRequest set_attributes = 33;
+    LockRequest lock = 34;
+    UnlockRequest unlock = 35;
+    LeaseAcknowledgeRequest lease_acknowledge = 36;
+    AllocatePassivePortRequest allocate_passive_port = 37;
+    HeartbeatRequest heartbeat = 38;
+    EndSessionRequest end_session = 39;
+    GatewayHelloRequest gateway_hello = 40;
+  }
+}
+
+enum MountProtocol {
+  MOUNT_PROTOCOL_UNSPECIFIED = 0;
+  MOUNT_PROTOCOL_SMB = 1;
+  MOUNT_PROTOCOL_FTPS = 2;
+}
+
+enum AuthenticationScheme {
+  AUTHENTICATION_SCHEME_UNSPECIFIED = 0;
+  AUTHENTICATION_SCHEME_NTLMV2_RESPONSE = 1;
+  // The ephemeral password is transported only inside the mTLS VFS request.
+  // Core verifies it against an encrypted HMAC-derived verifier and never
+  // persists it. The stable wire name describes the verifier, not a proof
+  // computed by the gateway.
+  AUTHENTICATION_SCHEME_PASSWORD_HMAC_SHA256 = 2;
+}
+
+message AuthenticateRequest {
+  string username = 1;
+  AuthenticationScheme scheme = 2;
+  bytes exchange = 3;
+  bytes channel_binding = 4;
+  string source_address = 5;
+  string device_id = 6;
+}
+
+message ListRequest {
+  string drive_id = 1;
+  string directory_id = 2;
+  string cursor = 3;
+  uint32 limit = 4;
+}
+
+message StatRequest {
+  string drive_id = 1;
+  string resource_id = 2;
+}
+
+message OpenRequest {
+  string drive_id = 1;
+  string resource_id = 2;
+  string expected_version_id = 3;
+  repeated VfsAction requested_actions = 4;
+  bool share_read = 5;
+  bool share_write = 6;
+  bool share_delete = 7;
+}
+
+message ReadRequest {
+  string handle_id = 1;
+  uint64 offset = 2;
+  uint64 length = 3;
+}
+
+message WriteRequest {
+  string handle_id = 1;
+  string write_session_id = 2;
+  uint64 fencing_token = 3;
+  uint64 offset = 4;
+  bytes data = 5;
+}
+
+message FlushRequest {
+  string handle_id = 1;
+  string write_session_id = 2;
+  uint64 fencing_token = 3;
+}
+
+message CommitRequest {
+  string handle_id = 1;
+  string write_session_id = 2;
+  uint64 fencing_token = 3;
+  string expected_head_version_id = 4;
+}
+
+message CloseRequest {
+  string handle_id = 1;
+}
+
+message CreateRequest {
+  string drive_id = 1;
+  string parent_id = 2;
+  string display_name = 3;
+  uint64 expected_parent_generation = 4;
+  repeated VfsAction requested_actions = 5;
+}
+
+message MkdirRequest {
+  string drive_id = 1;
+  string parent_id = 2;
+  string display_name = 3;
+  uint64 expected_parent_generation = 4;
+}
+
+message RenameRequest {
+  string drive_id = 1;
+  string resource_id = 2;
+  string target_parent_id = 3;
+  string target_display_name = 4;
+  uint64 expected_namespace_generation = 5;
+}
+
+message RemoveRequest {
+  string drive_id = 1;
+  string resource_id = 2;
+  uint64 expected_namespace_generation = 3;
+  bool recursive = 4;
+}
+
+message SetAttributesRequest {
+  string drive_id = 1;
+  string resource_id = 2;
+  optional int64 modified_at_unix_seconds = 3;
+  optional int64 accessed_at_unix_seconds = 4;
+  optional bool read_only = 5;
+}
+
+message LockRequest {
+  string handle_id = 1;
+  string owner_key = 2;
+  uint64 offset = 3;
+  uint64 length = 4;
+  bool exclusive = 5;
+}
+
+message UnlockRequest {
+  string handle_id = 1;
+  string lock_id = 2;
+}
+
+message LeaseAcknowledgeRequest {
+  string handle_id = 1;
+  string lease_id = 2;
+  uint64 fencing_token = 3;
+  LeaseState state = 4;
+}
+
+message AllocatePassivePortRequest {
+  string source_address = 1;
+  bytes binding_digest = 2;
+}
+
+message HeartbeatRequest {}
+
+message EndSessionRequest {
+  string reason_code = 1;
+}
+
+message GatewayHelloRequest {
+  string shard_key = 1;
+}
+
+enum VfsAction {
+  VFS_ACTION_UNSPECIFIED = 0;
+  VFS_ACTION_READ_METADATA = 1;
+  VFS_ACTION_READ_CONTENT = 2;
+  VFS_ACTION_CREATE_CHILD = 3;
+  VFS_ACTION_WRITE_CONTENT = 4;
+  VFS_ACTION_DELETE = 5;
+  VFS_ACTION_RENAME = 6;
+  VFS_ACTION_MOVE = 7;
+  VFS_ACTION_WRITE_METADATA = 8;
+  VFS_ACTION_MANAGE_LOCK = 9;
+}
+
+enum LeaseState {
+  LEASE_STATE_UNSPECIFIED = 0;
+  LEASE_STATE_GRANTED = 1;
+  LEASE_STATE_BREAKING = 2;
+  LEASE_STATE_BROKEN = 3;
+  LEASE_STATE_RELEASED = 4;
+}
+
+message VfsResponse {
+  uint32 protocol_version = 1;
+  string request_id = 2;
+  VfsError error = 3;
+  string reason_code = 4;
+  string session_id = 5;
+  string handle_id = 6;
+  string write_session_id = 7;
+  string lock_id = 8;
+  string lease_id = 9;
+  string version_id = 10;
+  uint64 credential_generation = 11;
+  uint64 authorization_generation = 12;
+  uint64 fencing_token = 13;
+  uint32 passive_port = 14;
+  bytes data = 15;
+  NodeAttributes attributes = 16;
+  repeated DirectoryEntry entries = 17;
+  string next_cursor = 18;
+  uint64 gateway_epoch = 19;
+}
+
+message DirectoryEntry {
+  string resource_id = 1;
+  string display_name = 2;
+  NodeAttributes attributes = 3;
+}
+
+message NodeAttributes {
+  NodeKind kind = 1;
+  uint64 size_bytes = 2;
+  string head_version_id = 3;
+  uint64 namespace_generation = 4;
+  uint64 acl_generation = 5;
+  int64 modified_at_unix_seconds = 6;
+  bool read_only = 7;
+}
+
+enum NodeKind {
+  NODE_KIND_UNSPECIFIED = 0;
+  NODE_KIND_FILE = 1;
+  NODE_KIND_DIRECTORY = 2;
+}
+
+// Stable errors are intentionally smaller than any adapter-native status set.
+// Adapters own the reviewed mapping to NTSTATUS or FTP reply codes.
+enum VfsError {
+  VFS_ERROR_UNSPECIFIED = 0;
+  VFS_ERROR_OK = 1;
+  VFS_ERROR_INVALID_REQUEST = 2;
+  VFS_ERROR_UNAUTHENTICATED = 3;
+  VFS_ERROR_ACCESS_DENIED = 4;
+  VFS_ERROR_NOT_FOUND = 5;
+  VFS_ERROR_ALREADY_EXISTS = 6;
+  VFS_ERROR_NOT_DIRECTORY = 7;
+  VFS_ERROR_IS_DIRECTORY = 8;
+  VFS_ERROR_DIRECTORY_NOT_EMPTY = 9;
+  VFS_ERROR_NAME_INVALID = 10;
+  VFS_ERROR_CONFLICT = 11;
+  VFS_ERROR_STALE_GENERATION = 12;
+  VFS_ERROR_LOCK_CONFLICT = 13;
+  VFS_ERROR_LEASE_BREAK_REQUIRED = 14;
+  VFS_ERROR_QUOTA_EXCEEDED = 15;
+  VFS_ERROR_STORAGE_UNAVAILABLE = 16;
+  VFS_ERROR_RATE_LIMITED = 17;
+  VFS_ERROR_NOT_SUPPORTED = 18;
+  VFS_ERROR_UNAVAILABLE = 19;
+}

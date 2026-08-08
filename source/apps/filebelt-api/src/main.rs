@@ -15,6 +15,7 @@ mod app;
 mod auth;
 mod error;
 mod mcp;
+mod mounts;
 mod policy;
 mod resources;
 

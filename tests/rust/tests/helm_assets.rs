@@ -6,7 +6,7 @@ use std::fs;
 use filebelt_repository_tests::repository_root;
 
 #[test]
-fn phase5_chart_has_the_production_assets_and_exact_role_contract() {
+fn phase6_chart_has_the_production_assets_and_exact_role_contract() {
     let root = repository_root();
     let chart = root.join("deploy/helm/filebelt");
     let metadata = fs::read_to_string(chart.join("Chart.yaml")).expect("chart metadata");
@@ -41,6 +41,7 @@ fn phase5_chart_has_the_production_assets_and_exact_role_contract() {
             "monitoring.yaml",
             "mcp-deployments.yaml",
             "mcp-rbac.yaml",
+            "mounts.yaml",
             "networkpolicies.yaml",
             "operation-job.yaml",
             "pdbs.yaml",
@@ -63,6 +64,11 @@ fn phase5_chart_has_the_production_assets_and_exact_role_contract() {
         "filebelt-mcp-broker",
         "filebelt-controller",
         "filebelt-mcp-runner",
+        "filebelt-vfs",
+        "filebelt-headscale-sync",
+        "filebelt-smb-gateway",
+        "filebelt-ftp-ftps-gateway",
+        "tailscaled",
     ] {
         assert!(
             schema["properties"]["images"]["properties"]
@@ -99,4 +105,8 @@ fn phase5_chart_has_the_production_assets_and_exact_role_contract() {
         "#/definitions/dnsLabel"
     );
     assert!(values.contains("    namespace: filebelt-mcp-runners"));
+    assert_eq!(
+        schema["properties"]["mounts"]["properties"]["enabled"]["type"],
+        "boolean"
+    );
 }

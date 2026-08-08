@@ -61,7 +61,7 @@ jobs:
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
-      - name: Build and validate all ten role contracts
+      - name: Build and validate all twelve Apache role contracts
         run: >-
           tests/scripts/run-image-matrix.sh
           --plan artifacts/phase3/image-plan.json
@@ -302,6 +302,8 @@ jobs:
             maintenance:filebelt-worker-maintenance \
             collaboration:filebelt-collaboration \
             tools:filebelt-tools \
+            vfs:filebelt-vfs \
+            headscale_sync:filebelt-headscale-sync \
             web:filebelt-web; do
             key=${item%%:*}
             role=${item#*:}
@@ -357,6 +359,18 @@ jobs:
         with:
           subject-name: ghcr.io/oxibelt/filebelt-tools
           subject-digest: ${{ steps.subjects.outputs.tools }}
+          push-to-registry: false
+      - name: Attest VFS image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-vfs
+          subject-digest: ${{ steps.subjects.outputs.vfs }}
+          push-to-registry: false
+      - name: Attest Headscale synchronization image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-headscale-sync
+          subject-digest: ${{ steps.subjects.outputs.headscale_sync }}
           push-to-registry: false
       - name: Attest web image index
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1

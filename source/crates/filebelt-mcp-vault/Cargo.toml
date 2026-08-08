@@ -10,17 +10,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-aws-lc-rs.workspace = true
-base64.workspace = true
-getrandom.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
+filebelt-secret-vault.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

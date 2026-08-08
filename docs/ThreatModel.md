@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 5 Kubernetes, MCP, and Markdown Collaboration Threat Model
+# Phase 6 Kubernetes, Mount, MCP, and Markdown Collaboration Threat Model
 
 - Date: 2026-08-08
 - Owner: `@PiQuark6046`
@@ -9,11 +9,13 @@
   OxiBelt, capability-limited storage workers, PostgreSQL, UUID payload
   storage, durable jobs, optional Iggy, audit, Markdown rendering and
   collaboration rooms, MCP registrations and vault,
-  remote MCP mediation, one-shot curated runners, Kubernetes 1.34-1.36,
+  remote MCP mediation, one-shot curated runners, read-only mount VFS,
+  Headscale device synchronization, GPL SMB/explicit-FTPS process boundaries,
+  Kubernetes 1.34-1.36,
   NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
 - Excluded: managed-cluster/provider internals, online backup, HA/PITR and
-  numeric production RPO/RTO, adapters (including the separately governed
-  ONLYOFFICE serving adapter), media, application encryption, and any
+  numeric production RPO/RTO, the separately governed ONLYOFFICE serving
+  adapter, media, application encryption, mount writes, and any
   collaboration codec other than Yjs/Yrs `yjs-v1`
 
 ## Assets and security objectives
@@ -55,6 +57,13 @@
 - Pull-request inputs cannot cross license regions, publish artifacts, or
   broaden a FileBelt Pod's privileges. Tag-only promotion publishes only
   previously validated immutable subjects.
+- SMB and explicit-FTPS paths resolve the same internal principal and Virtual
+  ACL as the web API. Gateway, credential, device, session, handle, and lock
+  authority remains fenced in PostgreSQL; Headscale, Tailscale, adapter memory,
+  and host ownership are never authorization truth.
+- Raw mount passwords are one-time or ephemeral, verifier ciphertext is bound
+  to a distinct mount-vault context, and the mount signing key cannot mint API
+  or collaboration authority. VFS and adapters have no payload mount.
 
 ## Trust boundaries and data flow
 
@@ -74,6 +83,11 @@ browser ──session+CSRF──> API ──signed fbmcp1/mTLS──> MCP broker
                               │                         └──mTLS──> controller ──namespaced API──> one-shot runner Pod
                               └──exact version/data grant──> I/O worker             ├──trusted relay──> broker/gateway
                                                                                      └──stdio──> untrusted catalog server
+
+Headscale API ──TLS/token──> Headscale sync ──atomic device snapshot──> PostgreSQL
+tailnet client ──SMB/explicit FTPS──> GPL gateway ──mTLS/VFS v1──> VFS
+                                                                  ├──> PostgreSQL
+                                                                  └──fbcap2/mTLS──> I/O worker ──> RWX payload root
 ```
 
 OxiBelt terminates public TLS. Kubernetes API and I/O backends require TLS 1.3
@@ -97,6 +111,17 @@ Pods have no DNS egress: the trusted controller resolves the broker and gateway
 to bounded numeric address lists, and the relay rejects hostnames while keeping
 TLS server-name authentication separate.
 
+VFS and Headscale sync are Apache processes with distinct narrow PostgreSQL
+roles and no payload mount. The VFS is the only process that decrypts a mount
+verifier and signs generation-3 `fbcap2`; the I/O worker verifies that envelope
+and authoritative handle/version fences before reading bytes. GPL gateways are
+replaceable clients of the generic mTLS protocol and receive no database,
+vault, signing, browser-session, Kubernetes-token, or payload authority.
+Headscale and the gateway tailnet are external trust inputs, not policy stores.
+Only gateway sidecars receive `NET_ADMIN`, `/dev/net/tun`, and protocol-local
+RWO tailstate. The mount topology is disabled because the Samba IPC and both
+adapter release images lack production acceptance evidence.
+
 The production namespace is one trusted FileBelt deployment and tenant.
 Adjacent Pods and compromised public clients are hostile. The Kubernetes
 control plane, cluster and node administrators, CNI, CSI/storage provider,
@@ -110,6 +135,15 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Threat | Control | Required evidence |
 | --- | --- | --- |
 | OIDC login injection, replay, or callback confusion | Exact issuer and callback allowlists; code+PKCE, state, nonce, signature, audience, and time validation | OIDC negative and replay tests |
+| Mount credential bypasses Virtual ACL or survives a policy change | Random protocol credential resolves one internal principal; every operation revalidates policy, credential, drive, namespace, membership, resource, ACL, gateway, device, and session generations in PostgreSQL | Two-user allow/deny, policy-replace, ACL-revoke, credential-revoke, and stale-handle tests |
+| Raw FTPS password or SMB verifier leaks through browser, logs, adapter memory, or another tenant | One-time create response, recent-OIDC requirement, mTLS-only ephemeral FTPS exchange, zeroization of FileBelt-owned serialization and VFS buffers, bounded framework command lifetime, encrypted verifier-only vault with context-bound AAD and distinct KEK, stable redacted errors | UI/browser-storage, log-redaction, zeroization, vault context-swap, and cross-tenant tests |
+| Brute force exhausts verifier comparison or reveals valid usernames | Keyed username/source throttle in PostgreSQL, constant verifier comparison, uniform authentication failure, bounded session/credential lifetimes | Rate-window, successful-clear, unknown-user equivalence, and concurrent-attempt tests |
+| Stale or malicious Headscale data authorizes another principal or preserves a disappeared device | Exact OIDC issuer/subject mapping; ignore tagged/service nodes; validate bounded full snapshot, duplicate IDs and expiry before one atomic replacement; device ownership generation fences sessions | Partial/malformed/duplicate/expired snapshot, identity swap, disappearance, and rollback tests |
+| Gateway restart or another replica replays an opaque session | PostgreSQL gateway epoch returned by zero-epoch hello and bound to every request/session/handle; restart or retirement invalidates dependent state | Cross-gateway, stale-epoch, restart, request-correlation, and expiry tests |
+| Mount capability is replayed, widened, or accepted as API authority | Distinct `fbcap2` prefix and generation-3 key; exact read audience/range/version/handle/generation claims, random nonce, <=15-second expiry, I/O PostgreSQL revalidation | Prefix/key confusion, claim mutation, stale-handle/version, range, expiry, and cross-audience tests |
+| Compromised VFS or gateway reads arbitrary payload paths | No payload mount; VFS can issue read-only `fbcap2` only for an admitted handle; I/O resolves UUID locator through narrow immutable-version state; gateway receives only bytes and generic IDs | Container mount, DB grant, arbitrary-ID, write-operation, and direct-worker denial tests |
+| Adapter falls back to local filesystem or crosses the license boundary | Apache core imports only generic schema; separate GPL workspaces/processes/images/notices/source offers; Samba callbacks return `ENOSYS` until reviewed IPC exists; adapters disabled by default | Cargo boundary, dependency graph, ABI callback, local-fallback, REUSE, notice, source-offer, and image-plan tests |
+| Tailnet sidecar or state expands core Pod authority | Tailscaled exists only beside gateways, kernel networking is explicit, non-privileged sidecar has only `NET_ADMIN` and one `/dev/net/tun`, separate RWO state, no ServiceAccount token, default-deny peers | Rendered securityContext/device/mount/RBAC and NetworkPolicy tests |
 | MCP OAuth callback is mixed up, replayed, or used for another server | Ten-minute one-shot server-held attempt bound to user, session, registration, credential generation, issuer, exact callback and local return path; every credential/config change erases pending attempts; PKCE/state and resource/audience binding; no token passthrough | MCP OAuth fixture, generation change, mix-up, expiry, replay, and audience tests |
 | MCP credential is exposed to the API, browser, logs, or another registration | Separate vault schema and broker role; AES-256-GCM envelope with context-bound AAD and KEK generation; write-only UI; configuration PATCH is broker-mediated cryptographic erasure through one narrow definer function | Database privilege, direct-config denial, vault context-swap, browser-storage, redaction, and deletion tests |
 | Remote endpoint performs SSRF, DNS rebinding, or trust-profile escape | Broker has no direct Internet path; mTLS gateway receives exact target origin/profile and enforces host, CIDR, port, CA, redirect, and resolved-address policy on every connection | Gateway redirect/rebinding/private-address and NetworkPolicy denial tests |
@@ -196,8 +230,9 @@ default durable retention is 365 days and the user-visible privacy subset is
 ## Residual risk
 
 The single maintainer, cluster/operator plane, storage/database providers,
-certificate issuer, OIDC and MCP egress gateways, configured OIDC issuer, MCP
-vault KEK custodian, and runner-catalog signing authorities remain
+certificate issuer, OIDC and MCP egress gateways, configured OIDC issuer,
+Headscale/tailnet operator, MCP and mount vault KEK custodians, and
+runner-catalog signing authorities remain
 concentrations of trust. A compromised API signing key can issue byte or MCP
 delegations until the key generation is retired, although claims and worker or
 broker generation checks limit scope and time. A storage or database
@@ -215,12 +250,17 @@ and separate broker/gateway authentication limit but do not eliminate that
 risk. A malicious admitted server can consume its assigned CPU, memory, and
 ephemeral storage and return adversarial data until its deadline; it cannot be
 made trustworthy by sandboxing.
+The mount topology remains disabled by default and is not production-ready in
+this revision: the SMB gateway has no reviewed Samba authentication/session IPC
+path, neither adapter has qualified release-image evidence, and the FTPS bridge
+has no live VFS/certificate end-to-end result. These are explicit delivery
+gates, not risks accepted by enabling the current preview.
 Dependency scans, attestations, and signed source mappings reduce known
 supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so
 their review debt remains until equivalent audit evidence replaces them.
 
 The threat model must be extended before enabling a second issuer, another
-tenant per deployment, a service mesh, an adapter, media, MCP
+tenant per deployment, a service mesh, another adapter, mount writes, media, MCP
 sampling/elicitation or payload-write mediation, application
 encryption/deduplication, multi-root/RWO storage, or online backup.

@@ -27,6 +27,7 @@ import {
   Menu as MenuIcon,
   Moon,
   MoreHorizontal,
+  Network,
   RefreshCw,
   Search as SearchIcon,
   ServerCog,
@@ -57,11 +58,13 @@ import { AuthenticationRequiredError } from "./client.js";
 import type { FileBeltClient } from "./client.js";
 import { FileTable } from "./FileTable.js";
 import type { FileEntry, RouteId, WorkspaceSnapshot } from "./model.js";
+import type { MountSettingsClient } from "./mount-http-client.js";
 import { EmptySelection, SelectionReducer } from "./selection.js";
 import { En } from "./strings.js";
 
 const AdminPanel = lazy(() => import("@filebelt/admin"));
 const McpSettings = lazy(() => import("@filebelt/mcp-settings"));
+const MountSettings = lazy(async () => ({ default: (await import("./MountSettings.js")).MountSettings }));
 const MarkdownFileView = lazy(async () => ({ default: (await import("./MarkdownFileView.js")).MarkdownFileView }));
 const PreferencesKey = "filebelt.appearance.v1";
 
@@ -100,12 +103,14 @@ const RoutePaths: Record<RouteId, string> = {
   sessions: "/sessions",
   privacy: "/privacy",
   mcp: "/settings/mcp",
+  mounts: "/settings/mounts",
   markdown: "/markdown",
 };
 
 function RouteFromPath(Pathname: string): RouteId | "admin" {
   if (Pathname === "/admin" || Pathname.startsWith("/admin/")) return "admin";
   if (Pathname === "/settings/mcp" || Pathname.startsWith("/settings/mcp/")) return "mcp";
+  if (Pathname === "/settings/mounts") return "mounts";
   if (/^\/markdown\/[0-9a-f-]+$/i.test(Pathname)) return "markdown";
   return (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as RouteId | undefined) ?? "drive";
 }
@@ -176,6 +181,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
     admin: En.admin,
     drive: En.myDrive,
     mcp: En.mcp,
+    mounts: En.mounts,
     markdown: En.markdown,
     privacy: En.privacy,
     recent: En.recent,
@@ -193,6 +199,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
 interface AppProps {
   Client: FileBeltClient;
   McpClient?: McpSettingsClient;
+  MountClient?: MountSettingsClient;
 }
 
 export function OidcLoginHref(): string {
@@ -209,7 +216,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
-export function App({ Client, McpClient }: AppProps): ReactNode {
+export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
   const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
@@ -344,6 +351,7 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
     { Icon: ShieldCheck, Id: "sessions", Label: En.sessions },
     { Icon: Bell, Id: "privacy", Label: En.privacy },
     { Icon: ServerCog, Id: "mcp", Label: En.mcp },
+    { Icon: Network, Id: "mounts", Label: En.mounts },
     ...(Snapshot?.CurrentUser.IsTenantAdmin === true ? [{ Icon: Settings2, Id: "admin" as const, Label: En.admin }] : []),
   ];
 
@@ -401,6 +409,8 @@ export function App({ Client, McpClient }: AppProps): ReactNode {
               {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
               {Route === "mcp" && McpClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><McpSettings Client={McpClient} IsTenantAdmin={Snapshot.CurrentUser.IsTenantAdmin} /></Suspense> : null}
               {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
+              {Route === "mounts" && MountClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><MountSettings Client={MountClient} /></Suspense> : null}
+              {Route === "mounts" && MountClient === undefined ? <div className="fb-error" role="alert">Mount settings are unavailable.</div> : null}
               {Route === "markdown" && MarkdownEntry !== undefined ? <Suspense fallback={<Spinner label={En.markdownLoading} />}><MarkdownFileView Client={Client} Entry={MarkdownEntry} {...(McpClient === undefined ? {} : { McpClient })} OnClose={() => Navigate("drive")} OnFileBeltLink={OpenFileBeltReference} OnNavigationGuardChange={SetNavigationGuard} OnSaved={() => void Refresh()} /></Suspense> : null}
               {Route === "markdown" && MarkdownEntry === undefined ? <div className="fb-error" role="alert">{En.markdownUnavailable}</div> : null}
               {["drive", "shared-drives", "shared", "recent", "trash"].includes(Route) ? (

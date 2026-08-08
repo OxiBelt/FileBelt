@@ -54,6 +54,15 @@ for mcp_boundary in \
   assert_contains "${kind_script}" "${mcp_boundary}"
 done
 
+for mount_boundary in \
+  "server_validate mounts" \
+  "mounts.enabled=true" \
+  "networkPolicy.headscale.to" \
+  "networkPolicy.mountIngress.from" \
+  "StatefulSet, sidecars"; do
+  assert_contains "${kind_script}" "${mount_boundary}"
+done
+
 assert_contains "${network_script}" \
   "registry.k8s.io/e2e-test-images/agnhost:2.61@sha256:101f3357d1ad890c3090e78ea6c6a47dc5137cbe19836796e13d5dcb2b84d2e6"
 assert_contains "${network_script}" \

@@ -152,6 +152,44 @@ projection no less often than every 60 seconds. Iggy may prompt an earlier
 check, but database uncertainty or missing notification delivery never permits
 access.
 
+## SMB and explicit-FTPS mount authorization
+
+Mount access is an optional, read-only projection of the same logical
+namespace and Virtual ACL. It introduces no filesystem user, ownership rule,
+or parallel permission model. Every gateway authentication resolves a random,
+protocol-specific credential to one internal user principal. Every path
+component is then resolved through the VFS below one selected drive root, and
+each list, metadata, open, read, lock, and close operation revalidates the
+current credential, policy, device, session, drive, namespace, membership,
+resource, and ACL generation fences in PostgreSQL. Unauthorized and missing
+objects use the same existence-hiding result.
+
+A principal owns one policy revision per protocol. A policy is disabled by
+default, selects at most 256 currently accessible drives, and is read-only in
+this release. Enabling or replacing a policy advances its authorization
+generation and revokes every credential and active session issued under the
+previous revision. Credential creation requires a browser session with OIDC
+authentication no more than ten minutes old. FileBelt returns the random
+username and password exactly once, stores only an envelope-encrypted verifier,
+and never accepts the principal's FileBelt or OIDC password at a gateway.
+
+A credential may optionally bind to one current Headscale device. Device
+identity is the exact OIDC issuer and subject resolved to an already active
+FileBelt user; email, display name, Headscale tags, service nodes, and host
+UID/GID never establish ownership. The synchronization role validates a whole
+Headscale node snapshot before replacing device observations atomically.
+Malformed, duplicate, expired, tagged, service, or unresolvable nodes cannot
+partially refresh authority. A device disappearance or ownership change
+advances its fence and closes dependent access on the next operation.
+
+Gateway instances identify themselves over mTLS and hold a PostgreSQL-backed
+epoch. Restarting or retiring a gateway advances that epoch so an opaque
+adapter session cannot be replayed at another instance. Open handles are
+session-scoped, share-mode conflicts and byte-range locks are authoritative in
+PostgreSQL, and session idle/absolute expiry is checked on every operation.
+No mount authorization depends on Headscale packet delivery, Iggy delivery, or
+an adapter-local path or UUID cache.
+
 ## Markdown editing and collaboration authorization
 
 Markdown editing introduces no Virtual ACL action. Opening or participating in

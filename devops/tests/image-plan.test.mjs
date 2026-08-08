@@ -25,6 +25,9 @@ import {
   SourceUrl,
   ValidateImagePlan,
   WebImageLicense,
+  AdapterImagePlan,
+  AdapterImagePlanSchemaVersion,
+  AdapterImageRoles,
 } from "../dist/index.js";
 
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
@@ -42,7 +45,7 @@ function buildSource(overrides = {}) {
   };
 }
 
-test("build plan contains the ten fixed roles and immutable runtime contract", () => {
+test("build plan contains the twelve fixed roles and immutable runtime contract", () => {
   const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
 
   assert.equal(plan.schemaVersion, 1);
@@ -67,6 +70,8 @@ test("build plan contains the ten fixed roles and immutable runtime contract", (
       "filebelt-controller": RustCdlaImageLicense,
       "filebelt-mcp-runner": RustImageLicense,
       "filebelt-tools": RustIggyImageLicense,
+      "filebelt-vfs": RustCdlaImageLicense,
+      "filebelt-headscale-sync": RustCdlaImageLicense,
       "filebelt-web": WebImageLicense,
     }[image.role];
     assert.equal(image.license, expectedLicense);
@@ -177,6 +182,19 @@ test("build plan contains the ten fixed roles and immutable runtime contract", (
     },
   });
   assert.equal(plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary, "filebeltctl");
+});
+
+test("copyleft adapter evidence remains outside the Apache core image plan", () => {
+  assert.equal(AdapterImagePlanSchemaVersion, 1);
+  assert.deepEqual(
+    AdapterImagePlan.map(({ role }) => role),
+    AdapterImageRoles,
+  );
+  for (const image of AdapterImagePlan) {
+    assert.equal(image.repository, `ghcr.io/oxibelt/${image.role}`);
+    assert.equal(image.license, "GPL-3.0-or-later");
+    assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/main\/adapters\//);
+  }
 });
 
 test("release plans accept exact stable and prerelease SemVer tags", () => {

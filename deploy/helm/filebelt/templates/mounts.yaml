@@ -1,0 +1,211 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- if .Values.mounts.enabled }}
+{{- $root := . -}}
+{{- $tailstateMount := "/var/lib/tailscale" -}}
+{{- $tailscaledImage := include "filebelt.image" (dict "root" . "role" "tailscaled") -}}
+{{- range $workload := list (dict "name" "vfs" "role" "filebelt-vfs" "values" .Values.mounts.vfs) (dict "name" "headscale-sync" "role" "filebelt-headscale-sync" "values" .Values.mounts.headscaleSync) }}
+{{- $replicas := ternary 0 $workload.values.replicas $root.Values.deployment.quiesced -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $workload.name }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $workload.name) | indent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  minReadySeconds: {{ $root.Values.deployment.minReadySeconds }}
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: {{ $root.Values.deployment.revisionHistoryLimit }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $workload.name }}}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $workload.name) | indent 8 }}
+      annotations:
+        checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" $root | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s:%s:%s:%s" $root.Values.secrets.vfsDatabase.generation $root.Values.secrets.headscaleSyncDatabase.generation $root.Values.secrets.mountVaultKeyring.generation $root.Values.secrets.mountCapabilityPrivateKey.generation $root.Values.secrets.digestKey.generation $root.Values.secrets.vfsServerTls.generation $root.Values.secrets.vfsManagementServerTls.generation $root.Values.secrets.vfsIoClientTls.generation $root.Values.secrets.headscaleApiToken.generation $root.Values.secrets.headscaleServerCa.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" $root }}-{{ $workload.name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+{{ include "filebelt.podSecurityContext" $root | indent 8 }}
+      containers:
+        - name: {{ $workload.name }}
+          image: {{ include "filebelt.image" (dict "root" $root "role" $workload.role) }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]
+          ports:
+          {{- if eq $workload.name "vfs" }}
+            - {name: vfs, containerPort: 8087, protocol: TCP}
+            - {name: management, containerPort: 8088, protocol: TCP}
+          {{- end }}
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" $root | indent 12 }}
+          resources:
+{{ toYaml $workload.values.resources | indent 12 }}
+          volumeMounts:
+            - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: database, mountPath: /run/secrets/mount-database-url, subPath: database-url, readOnly: true}
+          {{- if eq $workload.name "vfs" }}
+            - {name: vault, mountPath: /run/secrets/mount-vault-keyring.json, subPath: keyring.json, readOnly: true}
+            - {name: capability-private, mountPath: /run/secrets/mount-capability-private-key, subPath: capability-private-key, readOnly: true}
+            - {name: digest-key, mountPath: /run/secrets/digest-key, subPath: digest-key, readOnly: true}
+            - {name: vfs-server-tls, mountPath: /run/secrets/vfs-server-tls, readOnly: true}
+            - {name: management-server-tls, mountPath: /run/secrets/vfs-management-server-tls, readOnly: true}
+            - {name: io-client-tls, mountPath: /run/secrets/vfs-io-client-tls, readOnly: true}
+          {{- else }}
+            - {name: headscale-token, mountPath: /run/secrets/headscale-api-token, subPath: token, readOnly: true}
+            - {name: headscale-ca, mountPath: /run/secrets/headscale-server-ca/ca.crt, subPath: ca.crt, readOnly: true}
+          {{- end }}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+{{ include "filebelt.filebeltConfigVolume" $root | indent 8 }}
+        - name: database
+          secret: {secretName: {{ ternary $root.Values.secrets.vfsDatabase.name $root.Values.secrets.headscaleSyncDatabase.name (eq $workload.name "vfs") }}, defaultMode: 0440, items: [{key: {{ ternary $root.Values.secrets.vfsDatabase.key $root.Values.secrets.headscaleSyncDatabase.key (eq $workload.name "vfs") }}, path: database-url}]}
+{{- if eq $workload.name "vfs" }}
+        - name: vault
+          secret: {secretName: {{ $root.Values.secrets.mountVaultKeyring.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountVaultKeyring.key }}, path: keyring.json}]}
+        - name: capability-private
+          secret: {secretName: {{ $root.Values.secrets.mountCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountCapabilityPrivateKey.key }}, path: capability-private-key}]}
+        - name: digest-key
+          secret: {secretName: {{ $root.Values.secrets.digestKey.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.digestKey.key }}, path: digest-key}]}
+        - name: vfs-server-tls
+          secret: {secretName: {{ $root.Values.secrets.vfsServerTls.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.vfsServerTls.certificateKey }}, path: tls.crt}, {key: {{ $root.Values.secrets.vfsServerTls.privateKeyKey }}, path: tls.key}, {key: {{ $root.Values.secrets.vfsServerTls.caKey }}, path: client-ca.crt}]}
+        - name: management-server-tls
+          secret: {secretName: {{ $root.Values.secrets.vfsManagementServerTls.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.vfsManagementServerTls.certificateKey }}, path: tls.crt}, {key: {{ $root.Values.secrets.vfsManagementServerTls.privateKeyKey }}, path: tls.key}, {key: {{ $root.Values.secrets.vfsManagementServerTls.caKey }}, path: client-ca.crt}]}
+        - name: io-client-tls
+          secret: {secretName: {{ $root.Values.secrets.vfsIoClientTls.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.vfsIoClientTls.certificateKey }}, path: tls.crt}, {key: {{ $root.Values.secrets.vfsIoClientTls.privateKeyKey }}, path: tls.key}, {key: {{ $root.Values.secrets.vfsIoClientTls.caKey }}, path: server-ca.crt}]}
+{{- else }}
+        - name: headscale-token
+          secret: {secretName: {{ $root.Values.secrets.headscaleApiToken.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.headscaleApiToken.key }}, path: token}]}
+        - name: headscale-ca
+          secret: {secretName: {{ $root.Values.secrets.headscaleServerCa.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.headscaleServerCa.key }}, path: ca.crt}]}
+{{- end }}
+{{ include "filebelt.tmpVolume" $root | indent 8 }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" $root }}-vfs
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" "vfs") | indent 4 }}
+spec:
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+  ports: [{name: vfs, port: 8087, targetPort: vfs, protocol: TCP}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" $root }}-vfs-management
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" "vfs") | indent 4 }}
+spec:
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+  ports: [{name: management, port: 8088, targetPort: management, protocol: TCP}]
+---
+{{- range $gateway := list (dict "name" "smb-gateway" "role" "filebelt-smb-gateway" "values" .Values.mounts.smb "ports" (list (dict "name" "smb" "port" 445))) (dict "name" "ftp-ftps-gateway" "role" "filebelt-ftp-ftps-gateway" "values" .Values.mounts.ftpFtps "ports" (list (dict "name" "ftps" "port" 2121))) }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $gateway.name }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $gateway.name) | indent 4 }}
+spec:
+  serviceName: {{ include "filebelt.name" $root }}-{{ $gateway.name }}
+  replicas: {{ ternary 0 1 $root.Values.deployment.quiesced }}
+  podManagementPolicy: OrderedReady
+  updateStrategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $gateway.name }}}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $gateway.name) | indent 8 }}
+      annotations:
+        filebelt.dev/adapter-license: {{ (index $root.Values.images $gateway.role).license | quote }}
+        filebelt.dev/adapter-source: {{ (index $root.Values.images $gateway.role).source | quote }}
+        checksum/tailnet-auth: {{ $root.Values.mounts.headscale.authKeySecret.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" $root }}-{{ $gateway.name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+{{ include "filebelt.podSecurityContext" $root | indent 8 }}
+      containers:
+        - name: {{ $gateway.name }}
+          image: {{ include "filebelt.image" (dict "root" $root "role" $gateway.role) }}
+          imagePullPolicy: IfNotPresent
+          ports:
+          {{- if eq $gateway.name "smb-gateway" }}
+            - {name: smb, containerPort: 445, protocol: TCP}
+          {{- else }}
+            - {name: ftps, containerPort: 2121, protocol: TCP}
+          {{- end }}
+          {{- if eq $gateway.name "ftp-ftps-gateway" }}
+          {{- range $index, $port := $root.Values.mounts.ftpFtps.passivePorts }}
+            - {name: {{ printf "passive-%d" $index }}, containerPort: {{ $port }}, protocol: TCP}
+          {{- end }}
+          {{- end }}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" $root | indent 12 }}
+          resources:
+{{ toYaml $gateway.values.resources | indent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+        - name: tailscaled
+          image: {{ $tailscaledImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TS_AUTHKEY, valueFrom: {secretKeyRef: {name: {{ $root.Values.mounts.headscale.authKeySecret.name }}, key: {{ $root.Values.mounts.headscale.authKeySecret.key }}}}}
+            - {name: TS_LOGIN_SERVER, value: {{ $root.Values.mounts.headscale.address | quote }}}
+            - {name: TS_STATE_DIR, value: /var/lib/tailscale}
+          securityContext:
+{{ include "filebelt.tailscaledSecurityContext" $root | indent 12 }}
+          resources:
+{{ toYaml $gateway.values.resources | indent 12 }}
+          volumeMounts:
+            - {name: tailstate, mountPath: {{ $tailstateMount }}}
+            - {name: tun, mountPath: /dev/net/tun}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tailstate
+          persistentVolumeClaim: {claimName: {{ $gateway.values.tailstateClaim }}}
+        - name: tun
+          hostPath: {path: /dev/net/tun, type: CharDevice}
+{{ include "filebelt.tmpVolume" $root | indent 8 }}
+---
+{{- end }}
+{{- range $gateway := list (dict "name" "smb-gateway" "ports" (list (dict "name" "smb" "port" 445))) (dict "name" "ftp-ftps-gateway" "ports" (list (dict "name" "ftps" "port" 2121))) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $gateway.name }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $gateway.name) | indent 4 }}
+spec:
+  clusterIP: None
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $gateway.name }}}
+  ports:
+  {{- if eq $gateway.name "smb-gateway" }}
+    - {name: smb, port: 445, targetPort: smb, protocol: TCP}
+  {{- else }}
+    - {name: ftps, port: 2121, targetPort: ftps, protocol: TCP}
+  {{- end }}
+  {{- if eq $gateway.name "ftp-ftps-gateway" }}
+  {{- range $index, $port := $root.Values.mounts.ftpFtps.passivePorts }}
+    - {name: {{ printf "passive-%d" $index }}, port: {{ $port }}, targetPort: {{ printf "passive-%d" $index }}, protocol: TCP}
+  {{- end }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}

@@ -54,3 +54,18 @@ spec:
   selector:
     matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: controller}
 {{- end }}
+{{- if .Values.mounts.enabled }}
+{{- range $component := list "vfs" "smb-gateway" "ftp-ftps-gateway" }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt.name" $ }}-{{ $component }}
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $ "component" $component) | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+{{- end }}
+{{- end }}

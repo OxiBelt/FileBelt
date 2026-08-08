@@ -239,6 +239,7 @@ fn policy_registers_every_apache_production_manifest() {
     let registered: BTreeSet<_> = policy
         .profiles
         .iter()
+        .filter(|profile| !profile.manifest.starts_with(&policy.adapter_root))
         .map(|profile| profile.manifest.clone())
         .collect();
 

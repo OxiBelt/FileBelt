@@ -11,7 +11,7 @@ chart="${repo_root}/deploy/helm/filebelt"
 temporary=""
 
 die() {
-  echo "Helm Phase 4 chart check: $*" >&2
+  echo "Helm chart check: $*" >&2
   exit 1
 }
 
@@ -163,6 +163,10 @@ assert_not_contains "${default_manifest}" 'filebelt-media-controller'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-broker'
 assert_not_contains "${default_manifest}" 'filebelt-controller'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-runner'
+assert_document_not_contains "${default_manifest}" Deployment filebelt-vfs 'name: filebelt-vfs'
+assert_document_not_contains "${default_manifest}" Deployment filebelt-headscale-sync 'name: filebelt-headscale-sync'
+assert_document_not_contains "${default_manifest}" StatefulSet filebelt-smb-gateway 'name: filebelt-smb-gateway'
+assert_document_not_contains "${default_manifest}" StatefulSet filebelt-ftp-ftps-gateway 'name: filebelt-ftp-ftps-gateway'
 assert_not_contains "${default_manifest}" 'serviceAccountToken:'
 assert_not_contains "${default_manifest}" 'hostPath:'
 assert_document_contains "${default_manifest}" Service filebelt-api 'targetPort: api'
@@ -395,6 +399,40 @@ assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'chec
 assert_not_contains "${temporary}/mcp.yaml" 'kind: ClusterRole'
 assert_not_contains "${temporary}/mcp.yaml" 'hostPath:'
 
+helm template phase6 "${chart}" --kube-version 1.36.0 \
+  --set mounts.enabled=true \
+  --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
+  --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]' \
+  >"${temporary}/mounts.yaml"
+assert_count "${temporary}/mounts.yaml" '^kind: Deployment$' 6
+assert_count "${temporary}/mounts.yaml" '^kind: StatefulSet$' 2
+assert_count "${temporary}/mounts.yaml" '^kind: PodDisruptionBudget$' 6
+assert_count "${temporary}/mounts.yaml" '^kind: NetworkPolicy$' 16
+assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'image: ghcr.io/oxibelt/filebelt-vfs@sha256:'
+assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'name: tailscaled'
+assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'claimName:'
+assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/mount-database-url'
+assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/vfs-server-tls'
+assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'name: tailscaled'
+assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'claimName:'
+assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'mountPath: /run/secrets/headscale-api-token'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-smb-gateway 'replicas: 1'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-smb-gateway 'filebelt.dev/adapter-license: "GPL-3.0-or-later"'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-smb-gateway 'claimName: filebelt-smb-tailstate'
+assert_document_contains "${temporary}/mounts.yaml" PodDisruptionBudget filebelt-smb-gateway 'minAvailable: 1'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-ftp-ftps-gateway 'claimName: filebelt-ftp-ftps-tailstate'
+assert_document_contains "${temporary}/mounts.yaml" Service filebelt-ftp-ftps-gateway 'port: 30000'
+assert_document_contains "${temporary}/mounts.yaml" Service filebelt-ftp-ftps-gateway 'port: 30001'
+assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-smb-gateway-ingress 'port: smb'
+assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-ftp-ftps-gateway-ingress 'port: passive-0'
+assert_document_not_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-vfs-egress 'port: 443'
+assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-vfs-egress 'port: io'
+assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-io-ingress 'app.kubernetes.io/component: vfs'
+assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-vfs-ingress 'port: management'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-smb-gateway 'hostPath: {path: /dev/net/tun, type: CharDevice}'
+assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-ftp-ftps-gateway 'add: ["NET_ADMIN"]'
+assert_not_contains "${temporary}/mounts.yaml" 'TS_USERSPACE'
+
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set mcp.enabled=true \
   --set mcp.runners.enabled=true \
@@ -454,6 +492,7 @@ expect_failure old_config --skip-schema-validation \
   --set-string 'configuration.filebelt=version = 1'
 expect_failure monitoring_crd_absent --set monitoring.serviceMonitor.enabled=true
 expect_failure mcp_without_gateway --set mcp.enabled=true
+expect_failure mounts_without_headscale --set mounts.enabled=true
 expect_failure runners_without_kubernetes_api \
   --set mcp.enabled=true \
   --set mcp.runners.enabled=true \
@@ -468,4 +507,4 @@ expect_failure runner_namespace_is_core \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 
-echo "Helm Phase 5 chart contract passed"
+echo "Helm Phase 6 chart contract passed"

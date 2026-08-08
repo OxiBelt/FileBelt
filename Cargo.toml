@@ -12,6 +12,8 @@ members = [
   "source/apps/filebelt-mcp-runner",
   "source/apps/filebelt-controller",
   "source/apps/filebeltctl",
+  "source/apps/filebelt-vfs",
+  "source/apps/filebelt-headscale-sync",
   "source/crates/filebelt-build-identity",
   "source/crates/filebelt-domain",
   "source/crates/filebelt-authz",
@@ -24,6 +26,7 @@ members = [
   "source/crates/filebelt-mcp-policy",
   "source/crates/filebelt-mcp-protocol",
   "source/crates/filebelt-mcp-vault",
+  "source/crates/filebelt-secret-vault",
   "source/crates/filebelt-control-protocol",
   "source/crates/filebelt-collaboration-protocol",
   "source/crates/filebelt-runtime",
@@ -67,6 +70,7 @@ filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-
 filebelt-mcp-policy = { version = "=0.1.0", path = "source/crates/filebelt-mcp-policy" }
 filebelt-mcp-protocol = { version = "=0.1.0", path = "source/crates/filebelt-mcp-protocol" }
 filebelt-mcp-vault = { version = "=0.1.0", path = "source/crates/filebelt-mcp-vault" }
+filebelt-secret-vault = { version = "=0.1.0", path = "source/crates/filebelt-secret-vault" }
 filebelt-runtime = { version = "=0.1.0", path = "source/crates/filebelt-runtime" }
 filebelt-storage = { version = "=0.1.0", path = "source/crates/filebelt-storage" }
 filebelt-storage-protocol = { version = "=0.1.0", path = "source/crates/filebelt-storage-protocol" }
@@ -77,6 +81,7 @@ http = "=1.5.0"
 http-body-util = "=0.1.4"
 iggy = "=0.8.0"
 jiff = "=0.2.35"
+md4 = { version = "=0.11.0", default-features = false }
 openidconnect = { version = "=4.0.1", default-features = false, features = ["reqwest"] }
 opentelemetry = { version = "=0.31.0", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }

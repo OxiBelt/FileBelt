@@ -10,7 +10,10 @@ The chart deploys web, API, I/O, and maintenance Deployments and explicit
 administrative Jobs. MCP broker and runner-controller Deployments are separate
 opt-ins and disabled by default; the controller creates bounded one-shot runner
 Pods. The chart does not deploy PostgreSQL, OIDC, Iggy, either egress gateway,
-certificate issuer, monitoring stack, StatefulSet, or persistent volume.
+certificate issuer, monitoring stack, or persistent volume. The disabled mount
+preview renders two gateway StatefulSets only when `mounts.enabled=true`; this
+revision is not production-admissible because its copyleft adapter images and
+SMB IPC acceptance are incomplete.
 
 Operators provide:
 
@@ -29,6 +32,11 @@ Operators provide:
   digest-pinned runner image, a schema-v1 runner catalog, offline Sigstore
   trusted root/bundles, an exact Kubernetes API NetworkPolicy peer, and a
   pre-created exclusive runner namespace separate from the release namespace;
+- before any future mount enablement, external Headscale `0.29.3`, API token and
+  CA, VFS/Headscale database logins, a distinct mount-vault keyring,
+  generation-3 capability signing key and combined public keyset, VFS/API/I/O
+  mTLS identities, gateway tailnet auth, node `/dev/net/tun`, and one distinct
+  operator-owned RWO tailstate claim per gateway;
 - a public L4/TCP path to the web ClusterIP Service; and
 - optional Prometheus and OTLP endpoints.
 
@@ -54,11 +62,13 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 6. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Confirm `filebelt.toml` uses format 3. If MCP is enabled, validate the
+7. Confirm `filebelt.toml` uses format 5. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
    `mcp.runners.namespace` and must not equal the release namespace.
+   Keep `mounts.enabled=false`; a render that enables it is preview evidence,
+   not authorization to expose SMB or FTPS.
 8. Render with strict lint and server-side dry-run before changing the release.
    For runners, inspect the namespaced Role and prove it cannot read or mutate
    resources outside the runner namespace.
@@ -99,6 +109,9 @@ per Helm revision and capture its status/log before disabling it.
     bootstrap Secret cleanup, cross-namespace RBAC denial in the core
     namespace, no runner DNS egress, per-principal/tenant quotas, and absence
     of secrets in the untrusted server container.
+11. Do not enable mount gateways in this revision. Retain the disabled render,
+    migration/grant verification, and VFS/Headscale image evidence so a later
+    qualified adapter release can stage activation without rewriting schema.
 
 ## Staged upgrade
 
@@ -122,6 +135,12 @@ Never combine a new workload image/config rollout with the migration revision.
    storage, OIDC, TLS, and error metrics. When enabled, repeat the MCP
    approval/data-grant/revocation path before enabling runners in a separate
    revision.
+
+For the additive mount migrations, keep mount workloads disabled while the DBA
+applies VFS and Headscale grants. Provision the generation-3 public key in I/O
+before any VFS signer could start. Rollback leaves migrations `000004` and
+`000005`, the mount KEK, and the retiring public key in place; never drop the
+schemas or remove key material referenced by recovery evidence.
 
 The migration ledger is forward-only. Expand-compatible schema changes precede
 rollout; contract migrations occur only after the documented compatibility
@@ -170,6 +189,13 @@ rotation procedure.
 - Controller outage: existing one-shot Pods remain deadline-bounded; no new
   runner is admitted without exactly one leader. Restore leadership and verify
   orphan Pod/Secret reconciliation before resuming runner traffic.
+- Headscale outage: synchronization makes no partial device update; keep mount
+  admission disabled and do not extend device freshness or derive authority
+  from cached tailnet state.
+- VFS or gateway incident: disable gateway admission, advance the affected
+  gateway epoch, revoke sessions/handles/locks in PostgreSQL, and preserve
+  redacted protocol/request evidence. Never mount payload storage into VFS or
+  an adapter as a recovery shortcut.
 
 Use the private metrics and structured logs described in
 [observability.md](observability.md). Do not expose operations ports through the
@@ -207,7 +233,8 @@ Capture required audit/recovery evidence, disable traffic, drain workloads, and
 uninstall only the Helm release's namespaced objects. Confirm the controller has
 reconciled one-shot runner Pods and bootstrap Secrets first. The existing PVC,
 external database, external Iggy, OIDC/MCP gateways, operator Secrets, runner
-catalog inputs, and published registry artifacts are never cleanup targets.
+catalog inputs, gateway tailstate claims, external Headscale, and published
+registry artifacts are never cleanup targets.
 
 For failures during an upgrade, follow
 [the Kubernetes rollback runbook](kubernetes-rollback.md). For backups and

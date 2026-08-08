@@ -87,6 +87,12 @@ criteria = "safe-to-deploy"
 version = "0.1.3"
 notes = "Reviewed complete checksum-matched source. It is a minimal no_std platform re-export with no build script, unsafe code, or ambient I/O and is absent from FileBelt's Linux deployment targets."
 
+[[audits.md4]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Reviewed complete checksum-matched source with default features disabled. It forbids unsafe code and has no build script or ambient I/O; fixed-size block parsing and wrapping arithmetic preserve memory safety. MD4 is cryptographically broken and is used only to derive the protocol-required NTLM verifier from a bounded UTF-16LE credential, never as a FileBelt integrity, signature, capability, or password-storage primitive."
+
 [[audits.opentelemetry]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"

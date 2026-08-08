@@ -69,6 +69,7 @@ export const En = {
   markdownSelection: (Start: number, End: number): string => `Selected source range: ${Start}–${End}`,
   manager: "Manager",
   mcp: "MCP servers",
+  mounts: "Mounted access",
   markRead: "Mark all read",
   modified: "Modified",
   moreActions: "More actions",

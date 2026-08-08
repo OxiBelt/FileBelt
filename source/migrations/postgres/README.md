@@ -21,5 +21,7 @@ that is a member only of `filebelt_maintenance`.
 
 `000001_phase2_core.sql` is the Phase 2 baseline; later migrations add MCP,
 Markdown collaboration, and mount-protocol state without rewriting released
-files. PostgreSQL metadata and policy state are authoritative; migrations never
-infer state from the payload volume or an event stream.
+files. The Phase 6 mount vault envelope is completed by
+`000005_phase6_mount_vault.sql` before any mount runtime is enabled. PostgreSQL
+metadata and policy state are authoritative; migrations never infer state from
+the payload volume or an event stream.

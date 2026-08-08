@@ -22,7 +22,10 @@ apache_manifest_roots = [
 ]
 adapter_root = "adapters"
 # Adding an adapter manifest requires an explicit, license-reviewed registration.
-registered_adapter_manifests = []
+registered_adapter_manifests = [
+  "adapters/ftp-ftps/Cargo.toml",
+  "adapters/smb/Cargo.toml",
+]
 
 [[graph_profiles]]
 label = "integrated development composition"
@@ -133,6 +136,30 @@ filebelt-events-protocol = []
 filebelt-mcp-policy = []
 filebelt-runtime = []
 filebelt-storage-protocol = []
+
+[[graph_profiles]]
+label = "GPL SMB bridge adapter"
+package = "filebelt-smb-bridge"
+manifest = "adapters/smb/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-smb-bridge = []
+filebelt-vfs-protocol = []
+
+[[graph_profiles]]
+label = "GPL FTP and FTPS gateway adapter"
+package = "filebelt-ftp-ftps-gateway"
+manifest = "adapters/ftp-ftps/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-ftp-ftps-gateway = []
+filebelt-vfs-protocol = []
 
 [[graph_profiles]]
 label = "shared service runtime"
@@ -261,6 +288,7 @@ filebelt-mcp-policy = []
 filebelt-mcp-protocol = []
 filebelt-mcp-vault = []
 filebelt-runtime = []
+filebelt-secret-vault = []
 
 [[graph_profiles]]
 label = "MCP policy"
@@ -330,6 +358,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-mcp-vault = []
+filebelt-secret-vault = []
 
 [[graph_profiles]]
 label = "MCP runner"
@@ -394,6 +423,78 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-vfs-protocol = []
+
+[[graph_profiles]]
+label = "secret vault"
+package = "filebelt-secret-vault"
+manifest = "source/crates/filebelt-secret-vault/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "smol",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-secret-vault = []
+
+[[graph_profiles]]
+label = "VFS service"
+package = "filebelt-vfs"
+manifest = "source/apps/filebelt-vfs/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-authz = []
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-mcp-policy = []
+filebelt-runtime = []
+filebelt-secret-vault = []
+filebelt-storage-protocol = []
+filebelt-vfs = []
+filebelt-vfs-protocol = []
+
+[[graph_profiles]]
+label = "Headscale mount-device synchronizer"
+package = "filebelt-headscale-sync"
+manifest = "source/apps/filebelt-headscale-sync/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-headscale-sync = []
+filebelt-mcp-policy = []
+filebelt-runtime = []
 
 [[graph_profiles]]
 label = "control-plane API"
@@ -496,13 +597,16 @@ packages = [
   "filebelt-document-protocol",
   "filebelt-domain",
   "filebelt-events-protocol",
+  "filebelt-headscale-sync",
   "filebelt-mcp-broker",
   "filebelt-mcp-policy",
   "filebelt-media-controller",
   "filebelt-runtime",
+  "filebelt-secret-vault",
   "filebelt-storage",
   "filebelt-storage-protocol",
   "filebelt-vfs-protocol",
+  "filebelt-vfs",
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
   "filebeltctl",
@@ -604,6 +708,24 @@ public_modules = []
 wildcard_reexports = []
 
 [[public_surfaces]]
+package = "filebelt-smb-bridge"
+crate_root = "adapters/smb/bridge/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-ftp-ftps-gateway"
+crate_root = "adapters/ftp-ftps/src/lib.rs"
+public_modules = ["read_only", "vfs_contract"]
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-ftp-ftps-gateway"
+crate_root = "adapters/ftp-ftps/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
 package = "filebelt-api"
 crate_root = "source/apps/filebelt-api/src/main.rs"
 public_modules = []
@@ -666,7 +788,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["collaboration", "mcp"]
+public_modules = ["collaboration", "mcp", "mount"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -744,6 +866,24 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-vfs-protocol"
 crate_root = "source/crates/filebelt-vfs-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = ["generated::*"]
+
+[[public_surfaces]]
+package = "filebelt-secret-vault"
+crate_root = "source/crates/filebelt-secret-vault/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-vfs"
+crate_root = "source/apps/filebelt-vfs/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-headscale-sync"
+crate_root = "source/apps/filebelt-headscale-sync/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

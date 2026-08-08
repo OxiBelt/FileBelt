@@ -31,6 +31,8 @@ RUST_IMAGE_LICENSES = {
     "filebelt-controller": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-mcp-runner": "Apache-2.0 AND MIT",
     "filebelt-tools": "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0",
+    "filebelt-vfs": "Apache-2.0 AND MIT",
+    "filebelt-headscale-sync": "Apache-2.0 AND MIT",
 }
 WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD"
 OXIBELT_IMAGE = (
@@ -58,6 +60,8 @@ BINARIES = {
     "filebelt-controller": "/usr/local/bin/filebelt-controller",
     "filebelt-mcp-runner": "/usr/local/bin/filebelt-mcp-runner",
     "filebelt-tools": "/usr/local/bin/filebeltctl",
+    "filebelt-vfs": "/usr/local/bin/filebelt-vfs",
+    "filebelt-headscale-sync": "/usr/local/bin/filebelt-headscale-sync",
 }
 
 

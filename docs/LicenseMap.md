@@ -28,7 +28,7 @@ licenses and notices of its linked runtime and copied upstream contents.
 
 | Artifact/input | Composition rule | Boundary and evidence |
 | --- | --- | --- |
-| `filebelt-api` and `filebelt-worker-io` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; ship exact upstream notices and inspect native linkage |
+| `filebelt-api`, `filebelt-worker-io`, `filebelt-collaboration`, `filebelt-vfs`, and `filebelt-headscale-sync` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; ship exact upstream notices and inspect native linkage |
 | `filebelt-worker-maintenance` and `filebelt-tools` | `Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0` | Adds the exact Iggy client and its unmodified MPL helper; ship its license and corresponding-source pointer with SBOM evidence |
 | `filebelt-media-controller` and `filebelt-mcp-runner` | `Apache-2.0 AND MIT` | Apache FileBelt source plus the Rust/musl runtime; ship exact notices and inspect native linkage |
 | `filebelt-mcp-broker` and `filebelt-controller` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; the controller also contains the reviewed Sigstore verifier graph |
@@ -38,6 +38,8 @@ licenses and notices of its linked runtime and copied upstream contents.
 | Apache Iggy 0.8.0 helper and client | Upstream Apache-2.0 evidence | Optional external event process and reviewed generic client; never authoritative and never republished as a FileBelt image |
 | OIDC test provider | Exact upstream composition recorded by the Docker plan | External integration fixture only; not a FileBelt release image |
 | Rustls/OTLP/Prometheus runtime support | Apache-2.0 and compatible MIT/ISC dependencies recorded in `Cargo.lock` | Shared only through the Apache-2.0 `filebelt-runtime` crate; exact graph, notice, SBOM, vulnerability, and Cargo Vet admission are required before promotion |
+| `filebelt-smb-gateway` | `GPL-3.0-or-later` final image | Separate adapter workspace plus exact Samba `4.24.4` source/patch/build context. The scaffold pins the official archive SHA-256 and ships notices/source-offer requirements, but no image may publish until the complete corresponding source and working reviewed bridge are packaged. |
+| `filebelt-ftp-ftps-gateway` | `GPL-3.0-or-later` final image | Separate adapter workspace with exact `libunftp 0.23.0` lock and notice evidence. Its Docker recipe is deliberately blocked until digest-pinned build/runtime bases, the complete buildable source context, SBOM, and corresponding-source offer are reviewed. |
 
 `filebelt-mcp-broker` uses the exact reviewed MCP model/runtime graph and
 `filebelt-controller` uses the exact offline Sigstore verification graph. Those

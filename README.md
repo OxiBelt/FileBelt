@@ -13,7 +13,10 @@ immutable file versions, UUID-addressed whole/chunk payload storage,
 capability-limited I/O workers, sharing and revocation, durable jobs/outbox,
 optional Apache Iggy notifications, a per-principal MCP broker with explicit
 capability and data approval, and an accessible React web drive behind
-OxiBelt. Reviewed local MCP servers may run only through the separately
+OxiBelt. The Apache core also contains an opt-in read-only VFS, mount policy
+API/UI, and Headscale device synchronizer; its separately licensed SMB and
+explicit-FTPS gateway delivery remains disabled pending adapter image and SMB
+bridge qualification. Reviewed local MCP servers may run only through the separately
 opted-in Kubernetes controller and one-shot runner boundary.
 
 Docker remains the development/integration topology. Production uses the
@@ -27,7 +30,7 @@ The [living engineering specifications](docs/README.md),
 [supply-chain policy](docs/SupplyChain.md), and
 [runtime and deployment contract](docs/RuntimeAndDeployment.md) describe the
 current build, runtime, and release boundary. Pull-request validation remains
-read-only; authorized signed SemVer tags may promote the eight active images
+read-only; authorized signed SemVer tags may promote the eleven active Apache images
 and Helm chart with attestations.
 
 ## Repository regions
@@ -90,6 +93,10 @@ Additional supply-chain checks are described in
   an allowlisting mTLS egress gateway. Curated stdio servers run in one-shot,
   digest-pinned Kubernetes Pods with no service-account token or direct
   Internet path.
+- Mount policies, credentials, devices, sessions, handles, and locks are
+  PostgreSQL-authoritative and enforce the same Virtual ACL. VFS reads use a
+  distinct generation-3, maximum-15-second `fbcap2` capability at the I/O
+  worker; VFS, Headscale sync, and protocol adapters never mount payloads.
 - OxiBelt terminates public TLS and serves/proxies the SPA, REST API, uploads,
   and Range downloads. Kubernetes backends require native mTLS and
   NetworkPolicy isolation.

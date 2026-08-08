@@ -33,6 +33,15 @@ app.kubernetes.io/component: {{ .component }}
 {{- $configuration = replace "[collaboration]\nenabled = false" "[collaboration]\nenabled = true" $configuration -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $configuration -}}
 {{- end -}}
+{{- if .Values.mounts.enabled -}}
+{{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
+{{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
+{{- $configuration = replace "[mounts]\nenabled = false" "[mounts]\nenabled = true" $configuration -}}
+{{- $configuration = replace "[mounts.headscale]\nenabled = false" "[mounts.headscale]\nenabled = true" $configuration -}}
+{{- $configuration = replace "api_url = \"https://headscale.example.invalid/\"" (printf "api_url = %q" .Values.mounts.headscale.apiUrl) $configuration -}}
+{{- $configuration = replace "oidc_issuer = \"https://issuer.example.invalid/\"" (printf "oidc_issuer = %q" .Values.mounts.headscale.oidcIssuer) $configuration -}}
+{{- $configuration = replace "sync_seconds = 15" (printf "sync_seconds = %v" .Values.mounts.headscale.syncSeconds) $configuration -}}
+{{- end -}}
 {{- $configuration -}}
 {{- end -}}
 
@@ -51,8 +60,8 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "filebelt.validate" -}}
 {{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
-{{- if not (hasPrefix "version = 4" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 4" -}}
+{{- if not (hasPrefix "version = 5" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 5" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -83,7 +92,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "collaboration.enabled requires an exact backend_tls.io section" -}}
 {{- end -}}
 {{- $ioTls := first (regexSplit "(?m)^\\[" (last $ioSections) 2) -}}
-{{- if or (not (contains "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
+{{- $collaborationIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" -}}
+{{- if .Values.mounts.enabled -}}
+{{- $collaborationIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" -}}
+{{- end -}}
+{{- if or (not (contains $collaborationIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact web, enabled MCP, and collaboration SPIFFE identities" -}}
 {{- end -}}
 {{- range $required := list "capability_public_key_file = \"/run/secrets/capability-public-keyset\"" "collaboration_ws = \"0.0.0.0:8085\"" "collaboration_webtransport = \"0.0.0.0:8086\"" "capability_key_generation = 2" "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/collaboration-io-client-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/collaboration-io-client-tls/tls.key\"" "server_ca_file = \"/run/secrets/collaboration-io-client-tls/server-ca.crt\"" -}}
@@ -119,7 +132,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "mcp.enabled requires an exact backend_tls.io section" -}}
 {{- end -}}
 {{- $ioTls := first (regexSplit "(?m)^\\[" (last $ioSections) 2) -}}
-{{- if or (not (contains "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
+{{- $mcpIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" -}}
+{{- if .Values.mounts.enabled -}}
+{{- $mcpIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" -}}
+{{- end -}}
+{{- if or (not (contains $mcpIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact FileBelt web and MCP broker SPIFFE identities" -}}
 {{- end -}}
 {{- range $required := list "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/mcp-backend-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/mcp-backend-tls/tls.key\"" "server_ca_file = \"/run/secrets/mcp-backend-tls/server-ca.crt\"" -}}
@@ -171,6 +188,24 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if .Values.mounts.enabled -}}
+{{- if not .Values.mounts.tailnet.kernelNetworking -}}
+{{- fail "mounts.enabled requires tailnet.kernelNetworking=true for direct SMB/FTPS reachability" -}}
+{{- end -}}
+{{- if or (eq (len .Values.networkPolicy.headscale.to) 0) (eq (len .Values.networkPolicy.mountIngress.from) 0) -}}
+{{- fail "mounts.enabled requires exact Headscale egress and mount ingress peer allowlists" -}}
+{{- end -}}
+{{- range $required := list "[mounts]" "enabled = true" "database_url_file = \"/run/secrets/mount-database-url\"" "vault_keyring_file = \"/run/secrets/mount-vault-keyring.json\"" "capability_private_key_file = \"/run/secrets/mount-capability-private-key\"" "capability_key_generation = 3" "io_url = \"https://filebelt-worker-io:8081/\"" "io_client_certificate_chain_file = \"/run/secrets/vfs-io-client-tls/tls.crt\"" "management_url = \"https://filebelt-vfs-management:8088/\"" "[backend_tls.vfs]" "[backend_tls.vfs_management]" -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
+{{- fail (printf "mounts.enabled requires configuration.filebelt setting %s" $required) -}}
+{{- end -}}
+{{- end -}}
+{{- range $workload := list .Values.mounts.smb .Values.mounts.ftpFtps -}}
+{{- if eq $workload.tailstateClaim "" -}}
+{{- fail "mounts.enabled requires an operator-provided RWO tailstate claim for every workload" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $networkJson := toJson .Values.networkPolicy -}}
 {{- if regexMatch "\\\"cidr\\\":\\\"[^\\\"]+/0\\\"" $networkJson -}}
 {{- fail "networkPolicy must not permit an unrestricted Internet CIDR" -}}
@@ -218,6 +253,20 @@ readOnlyRootFilesystem: true
 runAsNonRoot: true
 runAsUser: {{ .Values.global.runAsUser }}
 runAsGroup: {{ .Values.global.runAsGroup }}
+{{- end -}}
+
+{{- define "filebelt.tailscaledSecurityContext" -}}
+# Kernel-mode tailscaled needs only NET_ADMIN and the projected /dev/net/tun
+# character device; it deliberately remains non-privileged and rootfs read-only.
+allowPrivilegeEscalation: false
+capabilities:
+  drop: ["ALL"]
+  add: ["NET_ADMIN"]
+privileged: false
+readOnlyRootFilesystem: true
+runAsNonRoot: false
+runAsUser: 0
+runAsGroup: 0
 {{- end -}}
 
 {{- define "filebelt.filebeltConfigVolume" -}}

@@ -19,6 +19,9 @@
   active rooms and retains their UUID CRDT objects and PostgreSQL manifest
   evidence through the 30-day dirty-state retention period; Iggy and an
   in-memory replica never substitute for that evidence.
+- Mount policy/vault schemas are forward-only. Keep gateways disabled, retain
+  the generation-3 public key and every referenced mount KEK, and never use
+  tailstate or adapter caches to reconstruct PostgreSQL state.
 
 ## Failure before workload rollout
 
@@ -35,6 +38,9 @@ logs, chart revision, SQLx ledger, and exact administrator SQL checksum.
 - An MCP grant/vault verification failure leaves broker and runners disabled.
   Repair only with a new forward migration or the reviewed narrow grants; never
   grant the API access to `filebelt_mcp_vault`.
+- A VFS/Headscale grant or mount-vault verification failure leaves
+  `mounts.enabled=false`. Do not grant adapters database/vault access or give
+  VFS a payload mount to bypass the failure.
 
 Existing compatible workloads may continue using the expanded schema. Remove
 only the opt-in Job in the next Helm revision after evidence is retained.
@@ -84,12 +90,24 @@ invocations to reach a terminal state, then set `mcp.enabled=false`. Restore the
 recorded previous API/web images and configuration together so the public
 contract and SPA do not diverge. A binary expecting configuration version 2
 must receive its recorded version-2 ConfigMap; current binaries require version
-4. The expanded PostgreSQL schema and vault ciphertext remain in place.
+5. The expanded PostgreSQL schema and vault ciphertext remain in place.
 
 Never roll a catalog entry back by moving a digest or weakening signature
 policy. Select a previously reviewed immutable catalog/root/bundle ConfigMap and
 digest-pinned image, or leave runners disabled. Preserve old certificate and
 KEK generations through the rollback verification window.
+
+## Mount preview rollback
+
+The supported rollback is to keep `mounts.enabled=false`. If a test deployment
+rendered the preview, stop listener admission, advance both gateway epochs,
+revoke active credentials as required, close sessions/handles/locks in
+PostgreSQL, and scale gateway, VFS, and Headscale-sync workloads to zero before
+rolling API or I/O. Retain both gateway RWO tailstate claims for incident
+evidence; do not attach them to another gateway identity. The additive
+`filebelt_mount` and `filebelt_mount_vault` schemas, mount KEKs, and
+generation-3 verification key remain in place until no retained recovery
+evidence references them.
 
 ## Incompatible schema or inconsistent state
 

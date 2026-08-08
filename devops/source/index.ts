@@ -34,6 +34,14 @@ export {
 } from "./image-plan.js";
 
 export {
+  AdapterImagePlan,
+  AdapterImagePlanSchemaVersion,
+  AdapterImageRoles,
+  type AdapterImageEvidence,
+  type AdapterImageRole,
+} from "./adapter-image-plan.js";
+
+export {
   EvaluateVulnerabilityPolicy,
   SerializeVulnerabilityPolicy,
   ValidateVulnerabilityFindings,

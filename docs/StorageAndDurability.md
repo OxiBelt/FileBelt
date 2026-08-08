@@ -39,14 +39,23 @@ those rooms, manifests, and provenance evidence. CRDT bytes use separately UUID-
 capabilities; Iggy may notify a replica but cannot establish room state,
 durability, authorization, sequence, or acknowledgement.
 
+Migrations `000004_phase6_mounts.sql` and
+`000005_phase6_mount_vault.sql` add read-only mount policy, credential,
+gateway, session, handle, share-mode, byte-range-lock, Headscale-device,
+authentication-throttle, and encrypted verifier-envelope state. PostgreSQL is
+authoritative for every mount fence and lock. Neither a Headscale response,
+gateway cache, adapter process, nor tailstate volume can reconstruct or replace
+that state.
+
 Logical identifiers and physical storage locators are independently generated
 UUIDv4 values. Public UUID strings use canonical lowercase form. Composite
 keys and foreign keys carry tenant and drive boundaries. A transactional
 closure table represents the strict namespace tree; live sibling comparison
 keys are unique, and moves use deterministic lock ordering and cycle checks.
 
-Pre-created group roles separate migration, API, I/O worker, maintenance,
-audit export, and recovery privileges. Deployment-specific logins inherit
+Pre-created group roles separate migration, API, I/O worker, maintenance, VFS,
+Headscale synchronization, audit export, and recovery privileges.
+Deployment-specific logins inherit
 exactly one group role. Grants provide defense in depth but do not replace the
 Virtual ACL evaluator:
 
@@ -55,6 +64,10 @@ Virtual ACL evaluator:
 - the I/O worker sees only operation, payload, replay, and generation
   projections;
 - the maintenance worker leases and reconciles only its owned durable state;
+- the VFS can evaluate mount policy and create fenced sessions, handles, and
+  locks but cannot resolve physical payload paths or mount the payload claim;
+- the Headscale synchronization role can replace only its validated device
+  observation projection and cannot issue credentials or sessions;
 - the MCP broker revalidates narrow principal and policy projections and owns
   the MCP vault rows, but cannot read browser sessions, OIDC identity, ACL rows,
   user records, or payload locators; and
@@ -140,6 +153,47 @@ idempotency key and create authority in one PostgreSQL transaction. Concurrent
 matching retries replay the exact stored status/body; key reuse with a distinct
 canonical request fingerprint fails closed, and a failed authority insert rolls
 back the key reservation.
+
+## Mount state, verifier vault, and recovery
+
+`filebelt_mount` owns the policy and runtime state used by both protocol
+adapters. Policy replacement, credential revocation, device revocation,
+gateway epoch change, and session close update dependent fences in the same
+transaction. Handle admission locks the exact session, credential, policy,
+device, gateway, drive, namespace, membership, and ACL generations before an
+operation. Share modes and byte-range locks are database rows scoped to that
+handle/session and are removed on close or session expiry; adapter memory is
+never lock authority.
+
+Authentication failures are keyed by a domain-separated digest of username
+and source address, not raw values, and use a PostgreSQL time window. A
+successful authentication clears the corresponding bucket. This rate limit is
+defense in depth: verifier comparison, current credential/policy/device fences,
+and mTLS gateway identity remain mandatory even when no throttle row exists.
+
+`filebelt_mount_vault` stores only envelope-encrypted protocol verifiers. It
+reuses the strict `filebelt.mcp-keyring.v1` keyring parser and AES-256-GCM
+envelope implementation, but uses a distinct operator Secret and AAD context
+binding tenant, credential, owner principal, protocol namespace, verifier kind,
+and credential generation. FTPS stores a random pepper plus HMAC-SHA256 digest;
+SMB stores an NTLM verifier for the future Samba authentication bridge. The
+plaintext random password exists only during create response construction and
+is zeroized after use. Deleting or replacing authority makes the old envelope
+unusable even before later physical cleanup.
+
+The Headscale synchronizer treats one successful API response as a full
+snapshot. It validates the entire bounded response, rejects duplicate node IDs
+and malformed expiry, ignores tagged/service nodes, resolves each exact OIDC
+issuer/subject to an active principal, then atomically upserts the complete
+observation set and revokes missing devices. A failed or partial response makes
+no database change.
+
+Mount reads do not copy or stage payloads. A VFS handle pins one immutable file
+version, then a maximum-15-second `fbcap2` admits an exact byte range at the I/O
+worker. The worker revalidates the authoritative handle/generation/version
+projection and reads the existing UUID-addressed payload. No mount writer is
+implemented, so mount access creates no new version, reservation, staging
+object, or copy-on-write durable state in this release.
 
 ## Versions, trash, and quota
 
@@ -367,9 +421,14 @@ ciphertext, nonce, issuer, or secret kind. The checkpoint remains bounded to 1
 MiB. Restore verification fails when a collaboration inventory or retention
 deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
 or payload manifest differs. Operators must restore the capability verification
-keyset that contains both API and collaboration public keys before enabling I/O
-or collaboration, and must restore vault KEK generations before enabling the
-broker or any MCP authentication flow.
+keyset that contains API, collaboration, and mount public keys before enabling
+I/O, collaboration, or mount reads, and must restore MCP and mount vault KEK
+generations before enabling the broker or any MCP or mount authentication flow.
+Mount policy, credential, device, gateway, session, handle, and lock rows are
+part of the same quiesced PostgreSQL recovery boundary. After restore, keep
+mount gateways disabled, advance every gateway epoch, expire restored sessions,
+handles, and locks, run Headscale synchronization, and only then admit new
+credentials and sessions.
 
 FileBelt does not currently promise online backup, PITR, high availability, or
 numeric RPO/RTO. The detailed procedures are

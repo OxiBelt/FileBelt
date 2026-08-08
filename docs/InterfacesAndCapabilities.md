@@ -19,7 +19,8 @@ collaboration summaries and first-frame grants, exact Markdown import intents,
 per-principal MCP
 registrations, capability review, approvals, invocation, version-pinned data
 grants, and tenant-administrator MCP templates, service identities, service
-grants, and global blocks. General tenant administration, preferences, and
+grants, global blocks, and per-principal mount policies, credentials, devices,
+and sessions. General tenant administration, preferences, and
 audit/privacy mutation endpoints are not in the current public contract. Group
 and anonymous-link share values are reserved but unavailable.
 
@@ -102,6 +103,49 @@ short-lived, path-scoped `Secure` and `HttpOnly` capability cookie. Non-browser
 clients use `Authorization: fbcap1 <base64url-envelope>`. An admitted long
 stream rechecks the authoritative generation projection within 60 seconds and
 stops on mismatch or database uncertainty.
+
+## Mount protocol and `fbcap2` contracts
+
+The Apache core exposes a deterministic Protobuf boundary at
+`protocol/vfs/v1/filebelt_vfs.proto`. Copyleft SMB and explicit-FTPS adapters
+connect to that VFS process over TLS 1.3 mutual authentication. A gateway first
+sends `Hello` with its fixed protocol identity and zero local epoch; the VFS
+returns the authoritative PostgreSQL gateway epoch. Subsequent authentication
+and filesystem requests bind tenant, gateway, epoch, request ID, and the opaque
+session issued by the VFS. Responses echo the request ID and use stable,
+existence-hiding errors. Adapter structs, Samba ABI types, FTP-server types,
+host paths, and payload locators never cross this boundary.
+
+The current operation surface is `Authenticate`, `List`, `Stat`, `Open`,
+`Read`, `Close`, shared `Lock`, and `Unlock`. It is intentionally read-only:
+create, write, truncate, rename, delete, exclusive locks, and write-enabled
+policies or credentials are rejected as unsupported. FTPS passes the ephemeral
+raw `PASS` exchange only inside the mTLS request so the core can verify its
+peppered HMAC. FileBelt-owned adapter serialization buffers and VFS request
+buffers are zeroized after use; the FTP framework retains its command-owned
+string only for the bounded authentication-call lifetime. The SMB wire reserves
+a channel-binding field, but the adapter remains fail-closed until a reviewed
+Samba authentication/session IPC bridge can populate it.
+
+For a content read, the VFS revalidates the open handle and signs a distinct
+`fbcap2` envelope with mount key generation 3. The deterministic
+`filebelt.mount.capability.v2` claims bind the I/O audience, read operation,
+tenant, principal, mount session, credential, drive, node, immutable version,
+byte range, gateway epoch, all relevant authorization generations, nonce,
+fence, and a maximum 15-second lifetime. The I/O worker atomically consumes
+each nonce, accepts `fbcap2` only on `GET /io/v1/mount-reads/{handle_id}`,
+revalidates the handle and immutable version in PostgreSQL, and streams the
+exact range. The VFS, Headscale sync, API, and adapters never receive the
+payload mount.
+
+The public OpenAPI surface is `GET /api/v1/mounts`, `PUT
+/api/v1/mounts/policies/{protocol}`, `POST /api/v1/mounts/credentials`, and
+`DELETE /api/v1/mounts/credentials/{credential_id}`. Policy and credential
+mutations use the ordinary CSRF/origin/fetch-site rules; credential create and
+revoke additionally require recent OIDC authentication, and credential
+lifetimes are capped at seven days. A plaintext credential appears only in the
+create response and is absent from every later list, activity, log, audit, and
+error contract.
 
 ## Markdown and collaboration contracts
 
@@ -269,7 +313,10 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 4; older versions are rejected. `mcp.enabled`
+The current format is version 5; older versions are rejected. API `fbcap1`,
+collaboration `fbcap1`, and mount `fbcap2` signing keys use distinct private
+keys and generations 1, 2, and 3 respectively; the I/O verification keyset
+contains all currently admitted public generations. `mcp.enabled`
 defaults to false, and `mcp.runners.enabled` is a separate Kubernetes-only
 opt-in that requires broker/controller mTLS, a digest-pinned runner image, and
 the verified catalog inputs.

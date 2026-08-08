@@ -25,6 +25,8 @@ export const ImageRoles = [
   "filebelt-controller",
   "filebelt-mcp-runner",
   "filebelt-tools",
+  "filebelt-vfs",
+  "filebelt-headscale-sync",
   "filebelt-web",
 ] as const;
 
@@ -292,6 +294,18 @@ const RoleDefinitions: readonly RoleDefinition[] = [
   ),
   RustRole("filebelt-mcp-runner", "filebelt-mcp-runner"),
   RustRole("filebelt-tools", "filebeltctl", RustIggyImageLicense, IggyRuntimeComponents),
+  RustRole(
+    "filebelt-vfs",
+    "filebelt-vfs",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
+  RustRole(
+    "filebelt-headscale-sync",
+    "filebelt-headscale-sync",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
   {
     Role: "filebelt-web",
     Dockerfile: "ui/web/Dockerfile",
@@ -323,6 +337,8 @@ const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-controller": "FileBelt MCP runner controller",
   "filebelt-mcp-runner": "FileBelt trusted MCP stdio runner relay",
   "filebelt-tools": "FileBelt command-line tools",
+  "filebelt-vfs": "FileBelt VFS service",
+  "filebelt-headscale-sync": "FileBelt Headscale synchronization service",
   "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };
 

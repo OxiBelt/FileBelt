@@ -33,6 +33,8 @@ active_roles=(
   filebelt-controller
   filebelt-mcp-runner
   filebelt-tools
+  filebelt-vfs
+  filebelt-headscale-sync
   filebelt-web
 )
 loaded_refs=()
@@ -78,7 +80,7 @@ jq -e '
   and .source.ref == ("refs/tags/" + .version)
   and (.source.revision | test("^[0-9a-f]{40}$"))
   and .runtime == {uid:10001,gid:10001}
-  and (.images | length) == 10
+  and (.images | length) == 12
   and ([.images[].role] | sort) == ([
     "filebelt-api",
     "filebelt-mcp-broker",
@@ -87,6 +89,8 @@ jq -e '
     "filebelt-controller",
     "filebelt-mcp-runner",
     "filebelt-tools",
+    "filebelt-vfs",
+    "filebelt-headscale-sync",
     "filebelt-web",
     "filebelt-worker-io",
     "filebelt-worker-maintenance"

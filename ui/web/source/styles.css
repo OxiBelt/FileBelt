@@ -702,6 +702,105 @@ select:focus-visible,
   max-width: 1240px;
 }
 
+.fb-mount-page {
+  display: grid;
+  gap: 24px;
+}
+
+.fb-mount-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fb-mount-section,
+.fb-mount-secret,
+.fb-mount-reauth {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  border-radius: 14px;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.fb-mount-secret {
+  border-color: var(--fb-warning);
+}
+
+.fb-mount-reauth {
+  border-color: var(--fb-accent);
+  justify-items: start;
+}
+
+.fb-mount-reauth p,
+.fb-mount-section h2,
+.fb-mount-section-heading h2,
+.fb-mount-section-heading p,
+.fb-mount-secret p {
+  margin: 0;
+}
+
+.fb-mount-section-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.fb-mount-section-heading > div:first-of-type {
+  flex: 1;
+}
+
+.fb-mount-drives {
+  border: 1px solid var(--fb-border-subtle);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.fb-mount-drives legend {
+  color: var(--fb-text-secondary);
+  font-weight: 650;
+  padding: 0 4px;
+}
+
+.fb-mount-create-form {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fb-mount-create-form label,
+.fb-mount-secret > label {
+  display: grid;
+  gap: 7px;
+}
+
+.fb-mount-create-form select {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-strong);
+  border-radius: 4px;
+  color: var(--fb-text-primary);
+  min-height: var(--fb-control-size);
+  padding: 0 10px;
+}
+
+.fb-mount-create-form p {
+  margin: 0;
+}
+
+.fb-mount-copy {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .fb-mcp-layout {
   display: grid;
   gap: 18px;
@@ -976,6 +1075,11 @@ select:focus-visible,
     grid-template-columns: 1fr;
   }
 
+  .fb-mount-grid,
+  .fb-mount-create-form {
+    grid-template-columns: 1fr;
+  }
+
   .fb-mcp-inline-form {
     grid-template-columns: 1fr;
   }
@@ -1012,6 +1116,11 @@ select:focus-visible,
   .fb-mcp-capability,
   .fb-mcp-detail-heading,
   .fb-mcp-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fb-mount-section-heading {
     align-items: stretch;
     flex-direction: column;
   }

@@ -12,6 +12,7 @@ export type RouteId =
   | "sessions"
   | "privacy"
   | "mcp"
+  | "mounts"
   | "markdown";
 
 export type EntryKind = "file" | "folder";

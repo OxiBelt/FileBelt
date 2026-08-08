@@ -50,6 +50,10 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: collaboration}
         {{- end }}
+        {{- if and $root.Values.mounts.enabled (eq $component "io") }}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+        {{- end }}
       ports: [{port: {{ $component }}, protocol: TCP}]
 ---
 {{- end }}
@@ -137,6 +141,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: mcp-broker}
       ports: [{port: mcp, protocol: TCP}]
+    {{- end }}
+    {{- if $root.Values.mounts.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+      ports: [{port: management, protocol: TCP}]
     {{- end }}
     {{- end }}
     {{- if and (eq $component "maintenance") $root.Values.networkPolicy.iggy.enabled }}
@@ -362,4 +372,93 @@ spec:
 {{ toYaml .Values.networkPolicy.postgres.to | indent 8 }}
       ports: [{port: {{ .Values.networkPolicy.postgres.port }}, protocol: TCP}]
   {{- end }}
+{{- end }}
+{{- if .Values.mounts.enabled }}
+{{- $root := . -}}
+{{- range $component := list "vfs" "headscale-sync" "smb-gateway" "ftp-ftps-gateway" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $component }}-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $component) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+{{ toYaml $root.Values.networkPolicy.dns.to | indent 8 }}
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+{{- if ne $component "vfs" }}
+    - to:
+{{ toYaml $root.Values.networkPolicy.headscale.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.headscale.port }}, protocol: TCP}]
+{{- end }}
+{{- if or (eq $component "vfs") (eq $component "headscale-sync") }}
+    - to:
+{{ toYaml $root.Values.networkPolicy.postgres.to | indent 8 }}
+      ports: [{port: {{ $root.Values.networkPolicy.postgres.port }}, protocol: TCP}]
+{{- end }}
+{{- if eq $component "vfs" }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: io}
+      ports: [{port: io, protocol: TCP}]
+{{- end }}
+{{- if or (eq $component "smb-gateway") (eq $component "ftp-ftps-gateway") }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+      ports: [{port: vfs, protocol: TCP}]
+{{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" $root }}-vfs-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" "vfs") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: smb-gateway}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: ftp-ftps-gateway}
+      ports: [{port: vfs, protocol: TCP}]
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: api}
+      ports: [{port: management, protocol: TCP}]
+{{- range $gateway := list "smb-gateway" "ftp-ftps-gateway" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" $root }}-{{ $gateway }}-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" $root "component" $gateway) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: {{ $gateway }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{ toYaml $root.Values.networkPolicy.mountIngress.from | indent 8 }}
+      ports:
+        {{- if eq $gateway "smb-gateway" }}
+        - {port: smb, protocol: TCP}
+        {{- else }}
+        - {port: ftps, protocol: TCP}
+        {{- range $index, $_ := $root.Values.mounts.ftpFtps.passivePorts }}
+        - {port: {{ printf "passive-%d" $index }}, protocol: TCP}
+        {{- end }}
+        {{- end }}
+{{- end }}
 {{- end }}

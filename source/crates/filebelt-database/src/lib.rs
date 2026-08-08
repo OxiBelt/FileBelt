@@ -6,6 +6,7 @@
 
 pub mod collaboration;
 pub mod mcp;
+pub mod mount;
 
 use filebelt_domain::Action;
 use filebelt_events_protocol::EventEnvelope;

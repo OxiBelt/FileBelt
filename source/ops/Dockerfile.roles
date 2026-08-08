@@ -107,6 +107,8 @@ RUN case "${TARGETARCH}" in \
       filebelt-mcp-broker) package=filebelt-mcp-broker; binary=filebelt-mcp-broker ;; \
       filebelt-controller) package=filebelt-controller; binary=filebelt-controller ;; \
       filebelt-mcp-runner) package=filebelt-mcp-runner; binary=filebelt-mcp-runner ;; \
+      filebelt-vfs) package=filebelt-vfs; binary=filebelt-vfs ;; \
+      filebelt-headscale-sync) package=filebelt-headscale-sync; binary=filebelt-headscale-sync ;; \
       filebelt-tools) package=filebeltctl; binary=filebeltctl ;; \
       *) echo "unsupported Rust FILEBELT_ROLE=${FILEBELT_ROLE}" >&2; exit 1 ;; \
     esac && \
@@ -143,7 +145,7 @@ RUN install -d -m 0755 \
     install -m 0644 source/ops/runtime/musl-COPYRIGHT \
       /out/rootfs/usr/share/licenses/FileBelt/notices/musl-COPYRIGHT && \
     case "${FILEBELT_ROLE}" in \
-      filebelt-api|filebelt-worker-io|filebelt-worker-maintenance|filebelt-collaboration|filebelt-mcp-broker|filebelt-controller|filebelt-tools) \
+      filebelt-api|filebelt-worker-io|filebelt-worker-maintenance|filebelt-collaboration|filebelt-mcp-broker|filebelt-controller|filebelt-vfs|filebelt-headscale-sync|filebelt-tools) \
         webpki_license=$(find /usr/local/cargo/registry/src -path '*/webpki-roots-1.0.9/LICENSE' -type f); \
         test "$(printf '%s\n' "${webpki_license}" | wc -l)" -eq 1; \
         install -m 0644 "${webpki_license}" \
@@ -348,6 +350,52 @@ LABEL org.opencontainers.image.title="filebelt-mcp-runner" \
       io.filebelt.build.kind="${FILEBELT_BUILD_KIND}"
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/filebelt-mcp-runner"]
+
+FROM runtime-files AS filebelt-vfs
+ARG FILEBELT_BUILD_VERSION
+ARG FILEBELT_BUILD_REVISION
+ARG FILEBELT_BUILD_SOURCE_REF
+ARG FILEBELT_BUILD_DIRTY
+ARG FILEBELT_BUILD_KIND
+ARG FILEBELT_CREATED
+COPY --from=role-builder --chmod=0755 /out/filebelt /usr/local/bin/filebelt-vfs
+LABEL org.opencontainers.image.title="filebelt-vfs" \
+      org.opencontainers.image.description="FileBelt VFS service" \
+      org.opencontainers.image.source="https://github.com/OxiBelt/FileBelt" \
+      org.opencontainers.image.url="https://github.com/OxiBelt/FileBelt" \
+      org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
+      org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
+      org.opencontainers.image.created="${FILEBELT_CREATED}" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND CDLA-Permissive-2.0" \
+      io.filebelt.image.role="filebelt-vfs" \
+      io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
+      io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
+      io.filebelt.build.kind="${FILEBELT_BUILD_KIND}"
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/filebelt-vfs"]
+
+FROM runtime-files AS filebelt-headscale-sync
+ARG FILEBELT_BUILD_VERSION
+ARG FILEBELT_BUILD_REVISION
+ARG FILEBELT_BUILD_SOURCE_REF
+ARG FILEBELT_BUILD_DIRTY
+ARG FILEBELT_BUILD_KIND
+ARG FILEBELT_CREATED
+COPY --from=role-builder --chmod=0755 /out/filebelt /usr/local/bin/filebelt-headscale-sync
+LABEL org.opencontainers.image.title="filebelt-headscale-sync" \
+      org.opencontainers.image.description="FileBelt Headscale synchronization service" \
+      org.opencontainers.image.source="https://github.com/OxiBelt/FileBelt" \
+      org.opencontainers.image.url="https://github.com/OxiBelt/FileBelt" \
+      org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
+      org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
+      org.opencontainers.image.created="${FILEBELT_CREATED}" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT AND CDLA-Permissive-2.0" \
+      io.filebelt.image.role="filebelt-headscale-sync" \
+      io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
+      io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
+      io.filebelt.build.kind="${FILEBELT_BUILD_KIND}"
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/filebelt-headscale-sync"]
 
 FROM runtime-files AS filebelt-tools
 ARG FILEBELT_BUILD_VERSION

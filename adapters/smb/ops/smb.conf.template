@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[global]
+  server min protocol = SMB3_11
+  server max protocol = SMB3_11
+  server signing = required
+  smb encrypt = required
+  map to guest = Never
+  disable netbios = yes
+  server role = standalone server
+  load printers = no
+  printing = bsd
+  vfs objects = filebelt
+
+[FileBelt]
+  # This path is a module bootstrap requirement only. It must never contain
+  # user-controlled names or become a fallback backing store.
+  path = /var/empty/filebelt
+  read only = no
+  browseable = yes
+  guest ok = no

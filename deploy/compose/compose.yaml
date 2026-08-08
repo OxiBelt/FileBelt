@@ -137,6 +137,8 @@ services:
       - maintenance-database-password
       - mcp-database-password
       - collaboration-database-password
+      - vfs-database-password
+      - headscale-sync-database-password
     configs:
       - source: postgres-database-role-script
         target: /opt/filebelt/bootstrap-database-roles.sh
@@ -492,6 +494,10 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-password
   collaboration-database-password:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-database-password
+  vfs-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/vfs-database-password
+  headscale-sync-database-password:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/headscale-sync-database-password
   api-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-database-url
   io-database-url:
@@ -502,6 +508,10 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-database-url
   collaboration-database-url:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-database-url
+  vfs-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/vfs-database-url
+  headscale-sync-database-url:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/headscale-sync-database-url
   mcp-vault-keyring:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-vault-keyring.json
   oidc-client-secret:
@@ -510,6 +520,8 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-private-key
   collaboration-capability-private-key:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-capability-private-key
+  mount-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mount-capability-private-key
   capability-public-keyset:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-public-keyset
   digest-key:

@@ -31,6 +31,7 @@ use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
     CollaborationObjectRecord,
 };
+use filebelt_database::mount::MountReadCapabilityFence;
 use filebelt_database::{Database, DatabaseError, UploadRecord};
 use filebelt_runtime::{
     MtlsListener, OperationsState, certificate_not_after_unix_seconds, init_telemetry,
@@ -38,7 +39,8 @@ use filebelt_runtime::{
 };
 use filebelt_storage::{DownloadSegment, StorageError, StorageLayout};
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, VerificationKey, unix_time_now, verify_capability,
+    CapabilityClaims, CapabilityOperation, MountCapabilityClaims, MountCapabilityOperation,
+    VerificationKey, unix_time_now, verify_capability, verify_mount_capability,
 };
 use futures_util::StreamExt as _;
 use serde::Serialize;
@@ -86,6 +88,12 @@ struct AuthorizedCapability {
     principal_id: Uuid,
     resource_id: Uuid,
     capability_id: Uuid,
+}
+
+#[derive(Debug)]
+struct AuthorizedMountRead {
+    claims: MountCapabilityClaims,
+    fence: MountReadCapabilityFence,
 }
 
 #[derive(Debug)]
@@ -250,6 +258,7 @@ async fn serve(config: Config) -> Result<(), String> {
         .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
         .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
         .route("/io/v1/downloads/{grant_id}", get(download).head(download))
+        .route("/io/v1/mount-reads/{handle_id}", get(mount_download))
         .route(
             "/io/v1/collaboration/{object_id}",
             put(write_collaboration_object)
@@ -724,6 +733,90 @@ async fn download(
     builder.body(body).map_err(|_| AppError::Internal)
 }
 
+async fn mount_download(
+    State(state): State<AppState>,
+    Path(handle_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let handle_id =
+        Uuid::parse_str(&handle_id).map_err(|_| AppError::BadRequest("invalid_handle_id"))?;
+    let authorized = authorize_mount_read(&state, &headers)?;
+    if authorized.fence.handle_id != handle_id
+        || parse_required_uuid(&authorized.claims.grant_id)? != handle_id
+    {
+        return Err(AppError::Forbidden);
+    }
+    consume_mount_nonce(&state, &authorized).await?;
+    state
+        .database
+        .admit_mount_read_capability(&authorized.fence)
+        .await?;
+    let payload = state
+        .database
+        .payload_for_node(
+            authorized.fence.tenant_id,
+            authorized.fence.node_id,
+            Some(authorized.fence.version_id),
+        )
+        .await?;
+    if payload.state != "referenced"
+        || payload.backend_id != state.backend_id
+        || payload.drive_id != authorized.fence.drive_id
+    {
+        return Err(AppError::Conflict("payload_not_referenced"));
+    }
+    let size = u64::try_from(payload.size_bytes).map_err(|_| AppError::Internal)?;
+    let start = authorized.claims.range_start;
+    if size == 0 || start >= size {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CONTENT_LENGTH, "0")
+            .header("cache-control", "no-store")
+            .header("x-content-type-options", "nosniff")
+            .body(Body::empty())
+            .map_err(|_| AppError::Internal);
+    }
+    let end = authorized.claims.range_end.min(size - 1);
+    let upload = state
+        .database
+        .upload_for_payload(authorized.fence.tenant_id, payload.payload_id)
+        .await?;
+    let parts = state
+        .database
+        .upload_parts(authorized.fence.tenant_id, upload.upload_id)
+        .await?;
+    let storage = state.storage.clone();
+    let payload_for_storage = payload.clone();
+    let upload_for_storage = upload.clone();
+    let segments = tokio::task::spawn_blocking(move || {
+        storage.verified_download_segments(
+            &upload_for_storage,
+            &payload_for_storage,
+            &parts,
+            start,
+            end,
+        )
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    // Recheck after resolving physical payload metadata so generation changes
+    // during admission fail before the first response byte is emitted.
+    state
+        .database
+        .admit_mount_read_capability(&authorized.fence)
+        .await?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, (end - start + 1).to_string())
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff")
+        .body(Body::from_stream(mount_download_stream(segments)))
+        .map_err(|_| AppError::Internal)
+}
+
 async fn write_collaboration_object(
     State(state): State<AppState>,
     Path(object_id): Path<String>,
@@ -1024,6 +1117,109 @@ fn download_stream(
     )
 }
 
+fn mount_download_stream(
+    segments: Vec<DownloadSegment>,
+) -> impl futures_util::Stream<Item = Result<Bytes, io::Error>> {
+    struct StreamState {
+        segments: VecDeque<DownloadSegment>,
+        current: Option<(tokio::fs::File, u64)>,
+        finished: bool,
+    }
+    futures_util::stream::unfold(
+        StreamState {
+            segments: segments.into(),
+            current: None,
+            finished: false,
+        },
+        |mut state| async move {
+            if state.finished {
+                return None;
+            }
+            if state.current.is_none() {
+                let segment = state.segments.pop_front()?;
+                match tokio::fs::File::open(&segment.path).await {
+                    Ok(mut file) => {
+                        if let Err(error) = file.seek(io::SeekFrom::Start(segment.offset)).await {
+                            state.finished = true;
+                            return Some((Err(error), state));
+                        }
+                        state.current = Some((file, segment.length));
+                    }
+                    Err(error) => {
+                        state.finished = true;
+                        return Some((Err(error), state));
+                    }
+                }
+            }
+            let (file, remaining) = state.current.as_mut().expect("current segment is set");
+            let read_length =
+                usize::try_from((*remaining).min(64 * 1024)).expect("bounded read length");
+            let mut buffer = vec![0_u8; read_length];
+            match file.read(&mut buffer).await {
+                Ok(0) => {
+                    state.finished = true;
+                    Some((
+                        Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "short stored payload",
+                        )),
+                        state,
+                    ))
+                }
+                Ok(read) => {
+                    buffer.truncate(read);
+                    *remaining -= read as u64;
+                    if *remaining == 0 {
+                        state.current = None;
+                    }
+                    Some((Ok(Bytes::from(buffer)), state))
+                }
+                Err(error) => {
+                    state.finished = true;
+                    Some((Err(error), state))
+                }
+            }
+        },
+    )
+}
+
+fn authorize_mount_read(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AuthorizedMountRead, AppError> {
+    let wire = mount_capability_wire(headers).ok_or(AppError::Unauthorized)?;
+    let now = unix_time_now().map_err(|_| AppError::Unauthorized)?;
+    let claims = verify_mount_capability(
+        &wire,
+        &state.keys,
+        CAPABILITY_AUDIENCE,
+        MountCapabilityOperation::Read,
+        now,
+    )
+    .map_err(|_| AppError::Unauthorized)?;
+    let fence = MountReadCapabilityFence {
+        tenant_id: parse_required_uuid(&claims.tenant_id)?,
+        principal_id: parse_required_uuid(&claims.principal_id)?,
+        mount_session_id: parse_required_uuid(&claims.mount_session_id)?,
+        credential_id: parse_required_uuid(&claims.credential_id)?,
+        handle_id: parse_required_uuid(&claims.grant_id)?,
+        drive_id: parse_required_uuid(&claims.drive_id)?,
+        node_id: parse_required_uuid(&claims.resource_id)?,
+        version_id: parse_required_uuid(&claims.version_id)?,
+        credential_generation: mount_generation(claims.credential_generation)?,
+        authorization_generation: mount_generation(claims.authorization_generation)?,
+        membership_generation: mount_generation(claims.membership_generation)?,
+        drive_acl_generation: mount_generation(claims.drive_acl_generation)?,
+        namespace_generation: mount_generation(claims.namespace_generation)?,
+        resource_acl_generation: mount_generation(claims.resource_acl_generation)?,
+        gateway_epoch: mount_generation(claims.gateway_epoch)?,
+    };
+    if fence.tenant_id != state.tenant_id {
+        return Err(AppError::Forbidden);
+    }
+    Ok(AuthorizedMountRead { claims, fence })
+}
+
 async fn authorize(
     state: &AppState,
     headers: &HeaderMap,
@@ -1049,6 +1245,25 @@ async fn authorize(
         resource_id,
         capability_id,
     })
+}
+
+fn mount_capability_wire(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    if value.starts_with("fbcap2.") {
+        return Some(value.to_owned());
+    }
+    let (scheme, credential) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("fbcap2").then(|| {
+        if credential.starts_with("fbcap2.") {
+            credential.to_owned()
+        } else {
+            format!("fbcap2.{credential}")
+        }
+    })
+}
+
+fn mount_generation(value: u64) -> Result<i64, AppError> {
+    i64::try_from(value).map_err(|_| AppError::Unauthorized)
 }
 
 fn capability_wire(headers: &HeaderMap) -> Option<String> {
@@ -1137,14 +1352,12 @@ async fn consume_nonce(
     authorized: &AuthorizedCapability,
     operation: &str,
 ) -> Result<(), AppError> {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"filebelt-capability-nonce-v1\0");
-    hasher.update(&authorized.claims.nonce);
+    let digest = nonce_digest(b"filebelt-capability-nonce-v1\0", &authorized.claims.nonce);
     state
         .database
         .consume_capability_nonce(
             authorized.tenant_id,
-            hasher.finalize().as_bytes(),
+            &digest,
             operation,
             authorized.claims.expires_at_unix_seconds,
         )
@@ -1153,6 +1366,36 @@ async fn consume_nonce(
             DatabaseError::Conflict => AppError::Conflict("capability_replayed"),
             _ => AppError::Unavailable,
         })
+}
+
+async fn consume_mount_nonce(
+    state: &AppState,
+    authorized: &AuthorizedMountRead,
+) -> Result<(), AppError> {
+    let digest = nonce_digest(
+        b"filebelt-mount-capability-nonce-v2\0",
+        &authorized.claims.nonce,
+    );
+    state
+        .database
+        .consume_capability_nonce(
+            authorized.fence.tenant_id,
+            &digest,
+            "mount_read",
+            authorized.claims.expires_at_unix_seconds,
+        )
+        .await
+        .map_err(|error| match error {
+            DatabaseError::Conflict => AppError::Conflict("capability_replayed"),
+            _ => AppError::Unavailable,
+        })
+}
+
+fn nonce_digest(domain: &[u8], nonce: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(domain);
+    hasher.update(nonce);
+    *hasher.finalize().as_bytes()
 }
 
 async fn check_generations(
@@ -1508,6 +1751,15 @@ mod tests {
             HeaderValue::from_static("unrelated=x; filebelt_capability=fbcap1.cookie"),
         );
         assert_eq!(capability_wire(&headers).as_deref(), Some("fbcap1.cookie"));
+    }
+
+    #[test]
+    fn mount_nonce_consumption_is_domain_separated() {
+        let nonce = [7_u8; 32];
+        assert_ne!(
+            nonce_digest(b"filebelt-capability-nonce-v1\0", &nonce),
+            nonce_digest(b"filebelt-mount-capability-nonce-v2\0", &nonce)
+        );
     }
 
     #[test]

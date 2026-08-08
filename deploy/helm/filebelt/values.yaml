@@ -47,6 +47,30 @@ images:
     repository: oxibelt/filebelt-mcp-runner
     registryMirror: ""
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-vfs:
+    repository: oxibelt/filebelt-vfs
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-headscale-sync:
+    repository: oxibelt/filebelt-headscale-sync
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-smb-gateway:
+    repository: oxibelt/filebelt-smb-gateway
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    license: GPL-3.0-or-later
+    source: https://github.com/OxiBelt/FileBelt/tree/main/adapters/smb
+  filebelt-ftp-ftps-gateway:
+    repository: oxibelt/filebelt-ftp-ftps-gateway
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    license: GPL-3.0-or-later
+    source: https://github.com/OxiBelt/FileBelt/tree/main/adapters/ftp-ftps
+  tailscaled:
+    repository: tailscale/tailscale
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 deployment:
   quiesced: false
@@ -57,7 +81,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 4
+    version = 5
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -101,6 +125,8 @@ configuration:
     mcp_runner_relay = "0.0.0.0:8084"
     collaboration_ws = "0.0.0.0:8085"
     collaboration_webtransport = "0.0.0.0:8086"
+    vfs = "0.0.0.0:8087"
+    vfs_management = "0.0.0.0:8088"
     operations = "0.0.0.0:9090"
     allow_container_wildcard = true
 
@@ -122,6 +148,18 @@ configuration:
     client_ca_file = "/run/secrets/collaboration-server-tls/client-ca.crt"
     allowed_client_uri_sans = ["spiffe://filebelt/web/collaboration"]
 
+    [backend_tls.vfs]
+    certificate_chain_file = "/run/secrets/vfs-server-tls/tls.crt"
+    private_key_file = "/run/secrets/vfs-server-tls/tls.key"
+    client_ca_file = "/run/secrets/vfs-server-tls/client-ca.crt"
+    allowed_client_uri_sans = ["spiffe://filebelt/smb-gateway/vfs", "spiffe://filebelt/ftp-ftps-gateway/vfs"]
+
+    [backend_tls.vfs_management]
+    certificate_chain_file = "/run/secrets/vfs-management-server-tls/tls.crt"
+    private_key_file = "/run/secrets/vfs-management-server-tls/tls.key"
+    client_ca_file = "/run/secrets/vfs-management-server-tls/client-ca.crt"
+    allowed_client_uri_sans = ["spiffe://filebelt/api/vfs-management"]
+
     [collaboration]
     enabled = false
     database_url_file = "/run/secrets/collaboration-database-url"
@@ -132,6 +170,30 @@ configuration:
     client_private_key_file = "/run/secrets/collaboration-io-client-tls/tls.key"
     server_ca_file = "/run/secrets/collaboration-io-client-tls/server-ca.crt"
     webtransport_enabled = false
+
+    [mounts]
+    enabled = false
+    database_url_file = "/run/secrets/mount-database-url"
+    vault_keyring_file = "/run/secrets/mount-vault-keyring.json"
+    vault_key_generation = 1
+    capability_private_key_file = "/run/secrets/mount-capability-private-key"
+    capability_key_generation = 3
+    io_url = "https://filebelt-worker-io:8081/"
+    io_client_certificate_chain_file = "/run/secrets/vfs-io-client-tls/tls.crt"
+    io_client_private_key_file = "/run/secrets/vfs-io-client-tls/tls.key"
+    io_server_ca_file = "/run/secrets/vfs-io-client-tls/server-ca.crt"
+    management_url = "https://filebelt-vfs-management:8088/"
+    management_client_certificate_chain_file = "/run/secrets/vfs-management-client-tls/tls.crt"
+    management_client_private_key_file = "/run/secrets/vfs-management-client-tls/tls.key"
+    management_server_ca_file = "/run/secrets/vfs-management-client-tls/server-ca.crt"
+
+    [mounts.headscale]
+    enabled = false
+    api_url = "https://headscale.example.invalid/"
+    api_token_file = "/run/secrets/headscale-api-token"
+    server_ca_file = "/run/secrets/headscale-server-ca/ca.crt"
+    oidc_issuer = "https://issuer.example.invalid/"
+    sync_seconds = 15
 
     [telemetry]
     log_format = "json"
@@ -544,6 +606,7 @@ secrets:
   ioClientTls: {name: filebelt-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   collaborationDatabase: {name: filebelt-collaboration-database, key: database-url, generation: "1"}
   collaborationCapabilityPrivateKey: {name: filebelt-collaboration-capability-private, key: private-key, generation: "1"}
+  mountCapabilityPrivateKey: {name: filebelt-mount-capability-private, key: private-key, generation: "1"}
   collaborationServerTls: {name: filebelt-collaboration-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   collaborationIoClientTls: {name: filebelt-collaboration-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   collaborationEdgeClientTls: {name: filebelt-collaboration-edge-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
@@ -557,6 +620,15 @@ secrets:
   controllerClientTls: {name: filebelt-controller-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   runnerBrokerClientTls: {name: filebelt-runner-broker-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: ca.crt, generation: "1"}
   runnerGatewayClientTls: {name: filebelt-runner-gateway-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: ca.crt, generation: "1"}
+  vfsDatabase: {name: filebelt-vfs-database, key: database-url, generation: "1"}
+  headscaleSyncDatabase: {name: filebelt-headscale-sync-database, key: database-url, generation: "1"}
+  mountVaultKeyring: {name: filebelt-mount-vault-keyring, key: keyring.json, generation: "1"}
+  vfsServerTls: {name: filebelt-vfs-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  vfsManagementServerTls: {name: filebelt-vfs-management-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  vfsManagementClientTls: {name: filebelt-vfs-management-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  vfsIoClientTls: {name: filebelt-vfs-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  headscaleApiToken: {name: filebelt-headscale-api-token, key: token, generation: "1"}
+  headscaleServerCa: {name: filebelt-headscale-server-ca, key: ca.crt, generation: "1"}
 
 mcp:
   enabled: false
@@ -575,6 +647,42 @@ mcp:
 
 collaboration:
   enabled: false
+
+# Mount delivery is opt-in. FileBelt never creates gateway tailstate storage:
+# each protocol gateway receives a distinct, operator-provisioned RWO claim.
+mounts:
+  enabled: false
+  # Direct SMB/FTPS tailnet listeners require the node TUN device and NET_ADMIN;
+  # userspace mode is intentionally unavailable because no proxy is configured.
+  tailnet:
+    kernelNetworking: true
+  headscale:
+    address: https://headscale.example.invalid:443
+    apiUrl: https://headscale.example.invalid/
+    oidcIssuer: https://issuer.example.invalid/
+    syncSeconds: 15
+    authKeySecret: {name: filebelt-tailnet-auth, key: authkey, generation: "1"}
+  vfs:
+    replicas: 2
+    resources:
+      requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
+  headscaleSync:
+    replicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
+  smb:
+    tailstateClaim: filebelt-smb-tailstate
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+  ftpFtps:
+    tailstateClaim: filebelt-ftp-ftps-tailstate
+    passivePorts: [30000, 30001]
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
 
 networkPolicy:
   publicIngress:
@@ -629,6 +737,11 @@ networkPolicy:
     enabled: false
     port: 4318
     to: []
+  headscale:
+    port: 443
+    to: []
+  mountIngress:
+    from: []
 
 monitoring:
   serviceMonitor:

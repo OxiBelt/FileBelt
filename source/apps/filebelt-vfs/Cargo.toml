@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "filebelt-vfs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+aws-lc-rs.workspace = true
+axum.workspace = true
+base64.workspace = true
+blake3.workspace = true
+clap.workspace = true
+filebelt-authz.workspace = true
+filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
+filebelt-database.workspace = true
+filebelt-deployment-diagnostics.workspace = true
+filebelt-domain.workspace = true
+filebelt-runtime.workspace = true
+filebelt-secret-vault.workspace = true
+filebelt-storage-protocol.workspace = true
+filebelt-vfs-protocol = { version = "=0.1.0", path = "../../crates/filebelt-vfs-protocol" }
+getrandom.workspace = true
+jiff.workspace = true
+md4.workspace = true
+prost.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

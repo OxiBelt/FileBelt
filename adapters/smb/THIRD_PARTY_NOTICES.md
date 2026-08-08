@@ -2,4 +2,7 @@
 
 # SMB Adapter Third-Party Notices
 
-No adapter implementation or third-party component is present in Phase 0.
+The adapter scaffold contains original GPL-3.0-or-later FileBelt source only.
+It does not vendor or redistribute Samba. A release that includes Samba 4.24.4
+must replace this file with the exact upstream and dependency notices, source
+archive checksum, patches, base-image notices, and corresponding-source URL.

@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains ten Apache-region images on
+The current build matrix contains twelve Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -54,9 +54,22 @@ The current build matrix contains ten Apache-region images on
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
 | `filebelt-mcp-runner` | Active and publishable. Supplies the trusted relay/shim injected into one-shot curated server Pods; it receives no FileBelt database, payload, session, or vault credential. |
+| `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs generation-3 `fbcap2` reads to I/O. It has no payload mount. |
+| `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
 
-Reserved adapter roles are `filebelt-smb-gateway`,
-`filebelt-ftp-ftps-gateway`, `filebelt-onlyoffice-adapter`, future
+Copyleft adapter roles `filebelt-smb-gateway` and
+`filebelt-ftp-ftps-gateway` remain outside the Apache image plan and release
+workflow. Their Helm entries record the expected repository, SPDX expression,
+and corresponding-source location, but the all-zero digest is not a published
+artifact. The FTPS source has an opt-in read-only VFS bridge; its release image
+and end-to-end certificate fixture are not yet qualified. The SMB source
+registers exact Samba ABI callbacks but deliberately returns `ENOSYS` until a
+reviewed authentication/session IPC bridge replaces every local-filesystem
+fallback. Therefore the combined mount chart topology is a disabled preview,
+not a production-ready listener, and operators must not enable it from this
+revision.
+
+Other reserved adapter roles are `filebelt-onlyoffice-adapter`, future
 `filebelt-nfs-gateway`, and `filebelt-transcoder`. Each has an independently
 truthful platform and license contract. Transcode implementation remains
 prohibited until its exact FFmpeg composition has been reviewed and the
@@ -85,6 +98,8 @@ their lifetime.
 | MCP broker request API | 8082 | API only, mTLS in Kubernetes |
 | Runner controller | 8083 | MCP broker only, mTLS |
 | MCP runner relay | 8084 | one-shot runner relay only, mTLS |
+| VFS gateway protocol | 8087 | SMB/FTPS adapter identities only, mTLS; disabled by default |
+| VFS credential management | 8088 | API identity only, mTLS; disabled by default |
 | Native operations | 9090 | kubelet/monitoring only |
 | Runner local egress proxy | 7777 | loopback within the one-shot Pod only |
 
@@ -140,7 +155,7 @@ Build and pull-request jobs are read-only and cannot publish packages, create
 releases, or mint attestations. The tag-only release workflow verifies an
 authorized signed SemVer tag, consumes already validated archives without
 rebuilding, promotes API, I/O, maintenance, collaboration, MCP broker,
-controller, runner, tools, and web manifests to GHCR, publishes the versioned Helm chart at
+controller, runner, tools, VFS, Headscale-sync, and web manifests to GHCR, publishes the versioned Helm chart at
 `oci://ghcr.io/oxibelt/charts/filebelt`, attaches GitHub artifact attestations,
 reads every digest back, and creates a checksummed immutable GitHub Release.
 Publication permission exists only in the promotion job. Published versions
@@ -161,12 +176,20 @@ UDP route. `mcp.enabled=true` additionally creates the
 broker Deployment and Services. The separate `mcp.runners.enabled=true`
 opt-in creates the core controller Deployment, a narrow Role/RoleBinding and
 runner ServiceAccount in the pre-created runner namespace, and permits one-shot
-runner Pods there. The tools image runs
-explicit bounded administrative Jobs. FileBelt deploys no StatefulSet or HPA.
+runner Pods there. `mounts.enabled=true` renders VFS and Headscale-sync
+Deployments plus one SMB and one explicit-FTPS gateway StatefulSet with
+separate operator-provided RWO tailstate claims. This preview is rejected
+unless kernel tailnet networking and exact Headscale/mount peers are configured;
+it is not production-admissible until both copyleft adapter release images and
+their protocol acceptance evidence exist. The tools image runs explicit
+bounded administrative Jobs. FileBelt deploys no HPA.
 
 PostgreSQL 18, one OIDC issuer and its in-cluster CONNECT egress gateway,
 optional Iggy, the MCP HTTPS egress gateway, public L4 exposure, certificate
 issuance, monitoring, and OTLP collection are external operator dependencies.
+Mount preview additionally depends on external Headscale `0.29.3`, its API
+token/CA, gateway tailnet auth, node `/dev/net/tun`, and distinct RWO tailstate
+claims.
 The chart creates none of those services and creates no Secret or persistent
 volume. The MCP gateway authenticates broker/runner clients and enforces the
 configured target/trust profile; no FileBelt Pod receives general Internet
@@ -178,9 +201,10 @@ ownership, and no-follow probe. Only I/O, maintenance, and explicit storage or
 recovery Jobs mount the claim; API and web never do. FileBelt never changes or
 deletes the claim.
 
-Production chart values select all nine deployable workload images by
+Production chart values select all eleven deployable Apache workload images by
 lowercase `sha256:` digest: API, I/O, maintenance, tools, web, collaboration,
-broker, controller, and runner. Registry mirrors may replace only the registry authority; they do not
+broker, controller, runner, VFS, and Headscale sync. Registry mirrors may
+replace only the registry authority; they do not
 change repository, role, digest, authorization, or license semantics. A
 catalog server image is separately pinned by digest and admitted only after its
 offline Sigstore bundle, expected identity/issuer, license, source, command,
@@ -191,7 +215,7 @@ v1 proof-and-promise whose authenticated integrated time is inside all three
 windows. Root and bundle rotation is an atomic operator change; overlapping or
 unbounded authority projections fail closed.
 
-Web, API, I/O, and collaboration default to two replicas and have `minAvailable: 1`
+Web, API, I/O, collaboration, and enabled VFS default to two replicas and have `minAvailable: 1`
 PodDisruptionBudgets. An enabled broker and controller also default to two
 replicas with `minAvailable: 1`; the controller stays in the core namespace but
 elects one 15-second Lease holder and receives Pod/Secret/Lease authority only
@@ -213,6 +237,12 @@ egress-default-deny. NetworkPolicy permits only:
 - OxiBelt to the API, I/O, and collaboration backends;
 - role-specific PostgreSQL and optional Iggy paths;
 - collaboration to PostgreSQL and the I/O capability endpoint only;
+- VFS to its PostgreSQL role and the I/O mount-read endpoint only, and I/O
+  ingress from the exact VFS identity only when mount preview is enabled;
+- Headscale sync to its PostgreSQL role and the exact external Headscale peer;
+- tailnet ingress to the two gateway listeners and gateway-application egress
+  to VFS only; their `tailscaled` sidecars additionally need configured DNS and
+  the exact external Headscale peer;
 - configured DNS, monitoring, and OTLP peers;
 - API access to the operator-managed OIDC CONNECT gateway;
 - broker access to PostgreSQL, API/I/O, the controller when enabled, and the
@@ -225,7 +255,7 @@ egress-default-deny. NetworkPolicy permits only:
 Catch-all IPv4 or IPv6 egress is rejected. Calico and Cilium acceptance tests
 qualify the portable NetworkPolicy graph.
 
-Backend API, I/O, and collaboration traffic uses TLS 1.3 mutual authentication. OxiBelt has a
+Backend API, I/O, collaboration, VFS, and VFS-management traffic uses TLS 1.3 mutual authentication. OxiBelt has a
 distinct client certificate for each upstream. FileBelt validates the operator
 CA, client-authentication purpose, and exact configured URI SAN; one retiring
 identity may overlap during rotation. OxiBelt validates each service DNS SAN.
@@ -239,7 +269,7 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 4; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 5; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
 Prometheus metrics. Enabled collaboration additionally requires the
 collaboration database URL/TLS identity, the combined API-generation-1 and
@@ -259,8 +289,14 @@ one-shot signed I/O capability and never mounts payload storage. Runners require
 Kubernetes mode, controller mTLS, namespace, catalog,
 offline trusted root and bundles, digest-pinned runner image, and positive
 principal/tenant limits. The configured runner namespace must differ from the
-core release namespace and be reserved for that release. Development mode may
-use plaintext Compose backends
+core release namespace and be reserved for that release. Enabled mount preview
+additionally requires VFS and Headscale database URLs, the distinct
+generation-3 mount signing key, a combined public verification keyset, a
+distinct mount-vault keyring, API/VFS/I/O mTLS projections, external Headscale
+URL/token/CA and exact OIDC issuer, and kernel tailnet networking for the
+gateways. VFS and Headscale sync do not run tailscaled and receive no TUN
+device; only gateway sidecars receive `NET_ADMIN`, `/dev/net/tun`, and separate
+tailstate claims. Development mode may use plaintext Compose backends
 but never enables the Kubernetes runner controller. Configuration is
 restart-only and stored in content-addressed immutable ConfigMaps. Existing
 Secret content is projected by named key; an explicit generation change
@@ -295,9 +331,21 @@ stop new grants, drain connections, fence rooms, and preserve dirty manifests
 for review; never
 acknowledge an update from an event or in-memory replica state.
 
+Phase 6 mount rollout remains gated. Apply migrations `000004` and `000005`
+and reviewed VFS/Headscale grants first, provision generation-3 signing and
+mount-vault secrets, render the chart with `mounts.enabled=false`, and verify
+that API/I/O have no new payload or database authority. Do not enable the
+preview until separately reviewed GPL image builds, corresponding-source
+offers, Samba authentication/session IPC, explicit-FTPS listener integration,
+two-user Virtual ACL/revocation tests, tailnet device fencing, and live
+Calico/Cilium policy tests all pass. Rollback disables gateway admission first,
+advances gateway epochs, closes sessions/handles/locks, then scales VFS and
+Headscale sync to zero. Keep the additive schemas, KEKs, and generation-3
+public key while retained state or recovery evidence references them.
+
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate
-format-3 configuration, and take a coordinated checkpoint. Enable the broker
+the current format-5 configuration, and take a coordinated checkpoint. Enable the broker
 without runners, test one personal registration, discovery, explicit approval,
 version-pinned attachment, revocation, and cross-user denial, then admit normal
 MCP traffic. Enable the controller and runner only in a later revision after

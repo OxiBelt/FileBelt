@@ -159,6 +159,9 @@ spec:
         {{- if .Values.mcp.enabled }}
         checksum/mcp-client-tls: {{ .Values.secrets.apiMcpClientTls.generation | sha256sum | quote }}
         {{- end }}
+        {{- if .Values.mounts.enabled }}
+        checksum/vfs-management-client-tls: {{ .Values.secrets.vfsManagementClientTls.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-api
       automountServiceAccountToken: false
@@ -206,6 +209,9 @@ spec:
             {{- if .Values.mcp.enabled }}
             - {name: mcp-client-tls, mountPath: /run/secrets/mcp-broker-client-tls, readOnly: true}
             {{- end }}
+            {{- if .Values.mounts.enabled }}
+            - {name: vfs-management-client-tls, mountPath: /run/secrets/vfs-management-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
@@ -238,6 +244,16 @@ spec:
               - {key: {{ .Values.secrets.apiMcpClientTls.certificateKey }}, path: tls.crt}
               - {key: {{ .Values.secrets.apiMcpClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.apiMcpClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
+        {{- if .Values.mounts.enabled }}
+        - name: vfs-management-client-tls
+          secret:
+            secretName: {{ .Values.secrets.vfsManagementClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.vfsManagementClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.vfsManagementClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.vfsManagementClientTls.caKey }}, path: server-ca.crt}
         {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---

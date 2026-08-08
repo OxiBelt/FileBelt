@@ -803,6 +803,74 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/mounts": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns the authenticated principal's mount policies, redacted credentials, Headscale devices, recent sessions, and currently accessible drives. */
+        readonly get: operations["getMountOverview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/credentials": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected. */
+        readonly post: operations["createMountCredential"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/credentials/{credential_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Revokes an owned mount credential and all sessions fenced by it after recent OIDC authentication. */
+        readonly delete: operations["revokeMountCredential"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/policies/{protocol}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** @description Replaces one read-only protocol policy and revokes credentials and sessions issued under its previous generation. Write-enabled policies are reserved for a future release and are rejected. */
+        readonly put: operations["putMountPolicy"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/session": {
         readonly parameters: {
             readonly query?: never;
@@ -1231,6 +1299,15 @@ export interface components {
             readonly expected_parent_generation: number;
             readonly name: string;
         };
+        readonly CreatedMountCredential: {
+            readonly credential_id: components["schemas"]["UuidV4"];
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly password: string;
+            /** @enum {string} */
+            readonly protocol: "smb" | "ftps";
+            readonly username: string;
+        };
         readonly CreateMarkdownImportIntent: {
             readonly source_version_id: components["schemas"]["UuidV4"];
             /** @constant */
@@ -1259,6 +1336,16 @@ export interface components {
             /** @enum {string} */
             readonly transport: "streamable_http" | "stdio_catalog";
             readonly trust_profile: string;
+        };
+        readonly CreateMountCredential: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly bound_device_id: components["schemas"]["UuidV4"] | null;
+            /** Format: date-time */
+            readonly expires_at: string;
+            /** @enum {string} */
+            readonly protocol: "smb" | "ftps";
+            /** @constant */
+            readonly read_only: true;
         };
         readonly CreateShare: {
             /** @enum {string} */
@@ -1618,6 +1705,81 @@ export interface components {
         };
         /** @description A normalized media type. Values exposed on Node or FileVersion are trusted server-derived metadata; request values are declarations only. */
         readonly MediaType: string;
+        readonly MountCredential: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            /** Format: int64 */
+            readonly authorization_generation: number;
+            readonly bound_device_id: components["schemas"]["UuidV4"] | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: int64 */
+            readonly credential_generation: number;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly last_used_at: string | null;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly protocol: "smb" | "ftps";
+            readonly read_only: boolean;
+            readonly revoked_at: string | null;
+            readonly username: string;
+            /** @enum {string} */
+            readonly verifier_kind: "ntlm_verifier" | "hmac_sha256";
+        };
+        readonly MountDevice: {
+            /** @constant */
+            readonly capability_version: "headscale-0.29.3";
+            readonly display_name: string;
+            readonly headscale_node_id: string;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly node_tags: readonly string[];
+            /** Format: date-time */
+            readonly observed_at: string;
+            /** Format: int64 */
+            readonly ownership_generation: number;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            readonly revoked_at: string | null;
+            readonly tailnet_addresses: readonly string[];
+        };
+        readonly MountOverview: {
+            readonly credentials: readonly components["schemas"]["MountCredential"][];
+            readonly devices: readonly components["schemas"]["MountDevice"][];
+            readonly drives: readonly components["schemas"]["Drive"][];
+            readonly policies: readonly components["schemas"]["MountPolicy"][];
+            readonly sessions: readonly components["schemas"]["MountSession"][];
+        };
+        readonly MountPolicy: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            /** Format: int64 */
+            readonly authorization_generation: number;
+            readonly enabled: boolean;
+            /** @enum {string} */
+            readonly protocol: "smb" | "ftps";
+            readonly read_only: boolean;
+            /** Format: int64 */
+            readonly revision: number;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        readonly MountSession: {
+            /** Format: date-time */
+            readonly absolute_expires_at: string;
+            readonly close_reason: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly gateway_id: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** Format: date-time */
+            readonly idle_expires_at: string;
+            /** Format: date-time */
+            readonly last_activity_at: string;
+            /** @enum {string} */
+            readonly protocol: "smb" | "ftps";
+            readonly source_address: string;
+            /** @enum {string} */
+            readonly state: "active" | "draining" | "closed" | "revoked";
+        };
         readonly NamespaceMutation: {
             /** Format: int64 */
             readonly expected_namespace_generation: number;
@@ -1666,6 +1828,12 @@ export interface components {
             /** @enum {string} */
             readonly kind: "bearer" | "api_key";
             readonly secret: string;
+        };
+        readonly PutMountPolicy: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly enabled: boolean;
+            /** @constant */
+            readonly read_only: true;
         };
         readonly ReplaceAcl: {
             readonly entries: readonly components["schemas"]["AclEntryMutation"][];
@@ -1848,6 +2016,8 @@ export interface components {
         readonly InvocationId: components["schemas"]["UuidV4"];
         readonly Limit: number;
         readonly McpGrantId: components["schemas"]["UuidV4"];
+        readonly MountCredentialId: components["schemas"]["UuidV4"];
+        readonly MountProtocol: "smb" | "ftps";
         readonly NodeId: components["schemas"]["UuidV4"];
         readonly Origin: string;
         readonly ParentId: components["schemas"]["UuidV4"];
@@ -3789,6 +3959,112 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["McpRegistration"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getMountOverview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current mount configuration and activity. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MountOverview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMountCredential: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateMountCredential"];
+            };
+        };
+        readonly responses: {
+            /** @description One-time credential material. The password is never returned by subsequent reads. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CreatedMountCredential"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeMountCredential: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly credential_id: components["parameters"]["MountCredentialId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Credential and its active sessions revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly putMountPolicy: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly protocol: components["parameters"]["MountProtocol"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PutMountPolicy"];
+            };
+        };
+        readonly responses: {
+            /** @description Replaced policy. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MountPolicy"];
                 };
             };
             readonly default: components["responses"]["Problem"];

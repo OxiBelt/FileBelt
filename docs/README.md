@@ -12,14 +12,14 @@ the same change.
 
 - [Namespace and authorization](NamespaceAndAuthorization.md) defines tenant,
   identity, session, logical namespace, Virtual ACL, sharing, retention, and
-  Markdown collaboration, MCP principal, approval, data-grant, and revocation
-  behavior.
+  Markdown collaboration, MCP principal, approval, data-grant, mount policy,
+  credential/device fencing, and revocation behavior.
 - [Interfaces and capabilities](InterfacesAndCapabilities.md) defines the HTTP,
   OpenAPI, Protobuf, edge, storage-worker, collaboration, MCP-broker, and
-  runner authorization boundaries.
+  VFS/gateway/runner authorization boundaries.
 - [Storage and durability](StorageAndDurability.md) defines PostgreSQL,
-  migrations, payload state, collaboration manifests, MCP policy/vault state, jobs, Iggy,
-  reconciliation, and recovery.
+  migrations, payload state, collaboration manifests, MCP/mount vault state,
+  jobs, Iggy, reconciliation, and recovery.
 - [Runtime and deployment](RuntimeAndDeployment.md) defines process and image
   roles, supported platforms, Kubernetes collaboration and one-shot runner topology,
   transport/egress security, observability, and release promotion.

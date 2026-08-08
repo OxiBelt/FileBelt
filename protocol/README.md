@@ -7,7 +7,10 @@ Protocol-neutral Protobuf `proto3` schemas live under
 schemas define browser/worker `fbcap1` capabilities, mount/worker `fbcap2`
 capabilities, notification envelopes, and collaboration frames. The two
 capability envelopes use distinct signing domains and prefixes so neither can
-be admitted at the other's boundary. The public HTTP
+be admitted at the other's boundary. `protocol/vfs/v1/` additionally defines
+the generic read-only, request-correlated mTLS boundary used by separately
+licensed SMB and explicit-FTPS adapter processes; it carries FileBelt IDs and
+opaque sessions, never adapter implementation or host-path types. The public HTTP
 contract lives at `protocol/http/v1/openapi.yaml`. See
 [Interfaces and Capabilities](../docs/InterfacesAndCapabilities.md) for the
 transport, trust, compatibility, and key-rotation contract.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 4
+version = 5
 public_origin = "https://filebelt.localhost:8443/"
 
 [deployment]
@@ -56,6 +56,13 @@ capability_private_key_file = "/run/secrets/collaboration-capability-private-key
 capability_key_generation = 2
 io_url = "http://filebelt-worker-io:8081/"
 webtransport_enabled = false
+
+[mounts]
+enabled = false
+capability_private_key_file = "/run/secrets/mount-capability-private-key"
+capability_key_generation = 3
+# The development VFS-to-I/O path is plain HTTP inside the isolated Compose network.
+io_url = "http://filebelt-worker-io:8081/"
 
 [limits]
 whole_threshold_bytes = 33554432

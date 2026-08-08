@@ -37,6 +37,7 @@ pub(crate) struct AppState {
     pub(crate) capability_signer: Arc<Ed25519KeyPair>,
     pub(crate) public_origin: String,
     pub(crate) mcp: Option<Arc<crate::mcp::McpApiState>>,
+    pub(crate) mounts: Option<Arc<crate::mounts::MountApiState>>,
     digest_key: [u8; 32],
 }
 
@@ -96,6 +97,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         .map_err(|_| anyhow!("digest key must contain exactly 32 bytes"))?;
     let public_origin = config.public_origin.origin().ascii_serialization();
     let mcp = crate::mcp::initialize(&config)?;
+    let mounts = crate::mounts::initialize(&config)?;
     let listener = config.listeners.api;
     let state = AppState {
         config: config.clone(),
@@ -107,6 +109,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         capability_signer,
         public_origin,
         mcp,
+        mounts,
         digest_key,
     };
     tokio::spawn(refresh_oidc(state.clone()));
@@ -236,6 +239,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
             Router::new()
                 .merge(crate::auth::router())
                 .merge(crate::mcp::router())
+                .merge(crate::mounts::router())
                 .merge(crate::resources::router()),
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))
@@ -476,6 +480,7 @@ mod tests {
             iggy: None,
             mcp: filebelt_control_protocol::McpConfig::default(),
             collaboration: filebelt_control_protocol::CollaborationConfig::default(),
+            mounts: filebelt_control_protocol::MountConfig::default(),
         };
         validate_public_key(&config, &signer).unwrap();
     }

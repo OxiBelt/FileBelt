@@ -3,26 +3,34 @@
 -- default privileges: newly added objects remain inaccessible until this
 -- reviewed allowlist and the verifier are updated.
 
-REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration FROM PUBLIC;
-REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration
+REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
+  filebelt_mount, filebelt_mount_vault FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-       filebelt_collaboration;
-REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration
+       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
+REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-       filebelt_collaboration;
+       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
 
 GRANT USAGE ON SCHEMA public
   TO filebelt_api, filebelt_io, filebelt_maintenance,
      filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-     filebelt_collaboration;
+     filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
 GRANT USAGE ON SCHEMA filebelt_mcp
   TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
 GRANT USAGE ON SCHEMA filebelt_collaboration
   TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
      filebelt_collaboration;
+GRANT USAGE ON SCHEMA filebelt_mount
+  TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
+     filebelt_vfs, filebelt_headscale_sync;
+GRANT USAGE ON SCHEMA filebelt_mount_vault
+  TO filebelt_maintenance, filebelt_recovery, filebelt_vfs;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or
@@ -234,6 +242,70 @@ GRANT SELECT (tenant_id, invocation_id, principal_id, lease_expires_at, released
 GRANT SELECT (tenant_id, id, object_kind, object_id, revocation_generation, deleted_at)
   ON filebelt_mcp.deletion_tombstones TO filebelt_recovery;
 
+-- Mount control-plane reads never expose encrypted verifiers to the API.
+GRANT SELECT, INSERT, UPDATE ON
+  filebelt_mount.policies, filebelt_mount.credentials,
+  filebelt_mount.session_receipts, filebelt_mount.deletion_tombstones
+  TO filebelt_api;
+GRANT SELECT ON filebelt_mount.headscale_devices, filebelt_mount.sessions
+  TO filebelt_api;
+
+-- The VFS is the only runtime role that can combine credential verification,
+-- authoritative mount state, namespace/ACL projections, and scoped I/O
+-- delegation. It still receives no payload filesystem mount.
+GRANT SELECT (id,slug) ON tenants TO filebelt_vfs;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals TO filebelt_vfs;
+GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_vfs;
+GRANT SELECT ON groups, group_memberships, drives, nodes, node_ancestry,
+  acl_entries, file_versions, authorization_generations TO filebelt_vfs;
+GRANT SELECT, INSERT ON audit_events, outbox_events, capability_nonces TO filebelt_vfs;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  filebelt_mount.policies, filebelt_mount.credentials,
+  filebelt_mount.gateway_epochs, filebelt_mount.sessions,
+  filebelt_mount.session_receipts, filebelt_mount.handles,
+  filebelt_mount.byte_locks, filebelt_mount.leases,
+  filebelt_mount.write_sessions, filebelt_mount.write_chunks,
+  filebelt_mount.passive_allocations,
+  filebelt_mount.authentication_throttles,
+  filebelt_mount.deletion_tombstones TO filebelt_vfs;
+GRANT SELECT ON filebelt_mount.headscale_devices TO filebelt_vfs;
+GRANT SELECT, INSERT, UPDATE, DELETE ON filebelt_mount_vault.secret_envelopes
+  TO filebelt_vfs;
+
+-- Headscale synchronization can project external node ownership but cannot
+-- read credentials, sessions, ACL rows, payload metadata, or vault content.
+GRANT SELECT (id,slug) ON tenants TO filebelt_headscale_sync;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals
+  TO filebelt_headscale_sync;
+GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_headscale_sync;
+GRANT SELECT (tenant_id,user_id,issuer,subject,disabled_at) ON external_identities
+  TO filebelt_headscale_sync;
+GRANT SELECT, INSERT, UPDATE ON filebelt_mount.headscale_devices
+  TO filebelt_headscale_sync;
+
+-- The I/O worker handles UUID-scoped mount staging only after fbcap2
+-- admission. Lock and policy decisions remain in VFS/PostgreSQL.
+GRANT SELECT, UPDATE ON filebelt_mount.write_sessions,
+  filebelt_mount.write_chunks TO filebelt_io;
+
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_mount.sessions, filebelt_mount.session_receipts,
+  filebelt_mount.handles, filebelt_mount.byte_locks,
+  filebelt_mount.leases, filebelt_mount.write_sessions,
+  filebelt_mount.write_chunks, filebelt_mount.passive_allocations,
+  filebelt_mount.authentication_throttles TO filebelt_maintenance;
+GRANT SELECT, DELETE ON filebelt_mount_vault.secret_envelopes
+  TO filebelt_maintenance;
+
+GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
+  filebelt_mount.headscale_devices, filebelt_mount.gateway_epochs,
+  filebelt_mount.sessions, filebelt_mount.handles,
+  filebelt_mount.byte_locks, filebelt_mount.leases,
+  filebelt_mount.write_sessions, filebelt_mount.write_chunks,
+  filebelt_mount.deletion_tombstones TO filebelt_recovery;
+GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
+  ON filebelt_mount_vault.secret_envelopes TO filebelt_recovery;
+
 REVOKE ALL ON FUNCTION filebelt_mcp.require_principal_kind() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mcp.require_service_principal() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mcp.invalidate_registration_policy() FROM PUBLIC;
@@ -252,3 +324,5 @@ REVOKE ALL ON FUNCTION filebelt_mcp.replace_registration_configuration_and_erase
 GRANT EXECUTE ON FUNCTION filebelt_mcp.replace_registration_configuration_and_erase(
   uuid,uuid,uuid,bigint,text,text,text,text,text,jsonb
 ) TO filebelt_mcp_broker;
+REVOKE ALL ON FUNCTION filebelt_mount.erase_revoked_credential_secret() FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.advance_authorization_generation() FROM PUBLIC;

@@ -19,12 +19,16 @@ const ROLES: &[&str] = &[
     "filebelt_recovery",
     "filebelt_mcp_broker",
     "filebelt_collaboration",
+    "filebelt_vfs",
+    "filebelt_headscale_sync",
 ];
 const SCHEMAS: &[&str] = &[
     "public",
     "filebelt_mcp",
     "filebelt_mcp_vault",
     "filebelt_collaboration",
+    "filebelt_mount",
+    "filebelt_mount_vault",
 ];
 const TABLE_PRIVILEGES: &[&str] = &[
     "SELECT",
@@ -200,6 +204,19 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
                 | "filebelt_recovery"
                 | "filebelt_collaboration"
         ),
+        "filebelt_mount" => matches!(
+            role,
+            "filebelt_api"
+                | "filebelt_io"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_vfs"
+                | "filebelt_headscale_sync"
+        ),
+        "filebelt_mount_vault" => matches!(
+            role,
+            "filebelt_maintenance" | "filebelt_recovery" | "filebelt_vfs"
+        ),
         _ => false,
     }
 }
@@ -322,6 +339,16 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
                 || (table == "oauth_attempt_secrets"
                     && matches!(privilege, "SELECT" | "INSERT" | "DELETE")));
     }
+    if schema == "filebelt_mount" {
+        return expected_mount_table_privilege(role, table, privilege);
+    }
+    if schema == "filebelt_mount_vault" {
+        return match role {
+            "filebelt_vfs" => matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE"),
+            "filebelt_maintenance" => matches!(privilege, "SELECT" | "DELETE"),
+            _ => false,
+        };
+    }
     if schema != "public" {
         return false;
     }
@@ -359,6 +386,92 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
         }
         "filebelt_audit_exporter" | "filebelt_recovery" | "filebelt_mcp_broker" => false,
         "filebelt_collaboration" => table == "authorization_generations" && privilege == "SELECT",
+        "filebelt_vfs" => {
+            matches!(
+                table,
+                "groups"
+                    | "group_memberships"
+                    | "drives"
+                    | "nodes"
+                    | "node_ancestry"
+                    | "acl_entries"
+                    | "file_versions"
+                    | "authorization_generations"
+            ) && privilege == "SELECT"
+                || matches!(
+                    table,
+                    "audit_events" | "outbox_events" | "capability_nonces"
+                ) && matches!(privilege, "SELECT" | "INSERT")
+        }
+        "filebelt_headscale_sync" => false,
+        _ => false,
+    }
+}
+
+fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> bool {
+    const VFS_MUTABLE: &[&str] = &[
+        "policies",
+        "credentials",
+        "gateway_epochs",
+        "sessions",
+        "session_receipts",
+        "handles",
+        "byte_locks",
+        "leases",
+        "write_sessions",
+        "write_chunks",
+        "passive_allocations",
+        "authentication_throttles",
+        "deletion_tombstones",
+    ];
+    const MAINTENANCE: &[&str] = &[
+        "sessions",
+        "session_receipts",
+        "handles",
+        "byte_locks",
+        "leases",
+        "write_sessions",
+        "write_chunks",
+        "passive_allocations",
+        "authentication_throttles",
+    ];
+    const RECOVERY: &[&str] = &[
+        "policies",
+        "credentials",
+        "headscale_devices",
+        "gateway_epochs",
+        "sessions",
+        "handles",
+        "byte_locks",
+        "leases",
+        "write_sessions",
+        "write_chunks",
+        "deletion_tombstones",
+    ];
+    match role {
+        "filebelt_api" => {
+            matches!(
+                table,
+                "policies" | "credentials" | "session_receipts" | "deletion_tombstones"
+            ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+                || matches!(table, "headscale_devices" | "sessions") && privilege == "SELECT"
+        }
+        "filebelt_vfs" => {
+            VFS_MUTABLE.contains(&table)
+                && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
+                || table == "headscale_devices" && privilege == "SELECT"
+        }
+        "filebelt_headscale_sync" => {
+            table == "headscale_devices" && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+        }
+        "filebelt_io" => {
+            matches!(table, "write_sessions" | "write_chunks")
+                && matches!(privilege, "SELECT" | "UPDATE")
+        }
+        "filebelt_maintenance" => {
+            MAINTENANCE.contains(&table) && matches!(privilege, "SELECT" | "UPDATE" | "DELETE")
+        }
+        "filebelt_recovery" => RECOVERY.contains(&table) && privilege == "SELECT",
         _ => false,
     }
 }
@@ -501,6 +614,15 @@ fn expected_column_privilege(
     column: &str,
     privilege: &str,
 ) -> bool {
+    if schema == "filebelt_mount_vault" {
+        return role == "filebelt_recovery"
+            && table == "secret_envelopes"
+            && privilege == "SELECT"
+            && matches!(
+                column,
+                "tenant_id" | "credential_id" | "kek_generation" | "secret_kind" | "created_at"
+            );
+    }
     if schema == "filebelt_mcp_vault" {
         return role == "filebelt_recovery"
             && privilege == "SELECT"
@@ -721,6 +843,34 @@ fn expected_column_privilege(
                     _ => false,
                 }
         }
+        "filebelt_vfs" => {
+            privilege == "SELECT"
+                && match table {
+                    "tenants" => matches!(column, "id" | "slug"),
+                    "principals" => matches!(
+                        column,
+                        "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                    ),
+                    "users" => matches!(column, "tenant_id" | "id" | "principal_id" | "status"),
+                    _ => false,
+                }
+        }
+        "filebelt_headscale_sync" => {
+            privilege == "SELECT"
+                && match table {
+                    "tenants" => matches!(column, "id" | "slug"),
+                    "principals" => matches!(
+                        column,
+                        "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                    ),
+                    "users" => matches!(column, "tenant_id" | "id" | "principal_id" | "status"),
+                    "external_identities" => matches!(
+                        column,
+                        "tenant_id" | "user_id" | "issuer" | "subject" | "disabled_at"
+                    ),
+                    _ => false,
+                }
+        }
         _ => false,
     }
 }
@@ -933,6 +1083,8 @@ mod tests {
             "filebelt_recovery",
             "filebelt_mcp_broker",
             "filebelt_collaboration",
+            "filebelt_vfs",
+            "filebelt_headscale_sync",
         ] {
             assert!(roles.contains(&format!("CREATE ROLE {role} NOLOGIN")));
             assert!(grants.contains(role));
@@ -946,16 +1098,48 @@ mod tests {
         let roles = include_str!("../../../migrations/postgres/roles.sql");
         let phase4 = include_str!("../../../migrations/postgres/000002_phase4_mcp.sql");
         let phase5 = include_str!("../../../migrations/postgres/000003_phase5_markdown.sql");
+        let phase6 = include_str!("../../../migrations/postgres/000004_phase6_mounts.sql");
 
         for schema in [
             "filebelt_mcp",
             "filebelt_mcp_vault",
             "filebelt_collaboration",
+            "filebelt_mount",
+            "filebelt_mount_vault",
         ] {
             assert!(roles.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
             assert!(!phase4.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
             assert!(!phase5.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
+            assert!(!phase6.contains(&format!("CREATE SCHEMA IF NOT EXISTS {schema}")));
         }
+    }
+
+    #[test]
+    fn mount_roles_preserve_the_vault_and_adapter_boundaries() {
+        assert!(expected_table_privilege(
+            "filebelt_vfs",
+            "filebelt_mount_vault",
+            "secret_envelopes",
+            "DELETE"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_api",
+            "filebelt_mount_vault",
+            "secret_envelopes",
+            "SELECT"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_headscale_sync",
+            "filebelt_mount",
+            "credentials",
+            "SELECT"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_headscale_sync",
+            "filebelt_mount",
+            "headscale_devices",
+            "UPDATE"
+        ));
     }
 
     #[tokio::test]

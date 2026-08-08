@@ -16,13 +16,18 @@ use uuid::Uuid;
 
 /// Maximum admission lifetime for a freshly issued data-plane capability.
 pub const MAX_CAPABILITY_LIFETIME_SECONDS: i64 = 60;
+pub const MAX_MOUNT_CAPABILITY_LIFETIME_SECONDS: i64 = 15;
 const CAPABILITY_SIGNATURE_DOMAIN: &[u8] = b"filebelt.storage.capability.v1\0";
+const MOUNT_CAPABILITY_SIGNATURE_DOMAIN: &[u8] = b"filebelt.storage.mount-capability.v2\0";
 
 mod generated {
     include!("../../../../protocol/generated/rust/filebelt/storage/v1/filebelt.storage.v1.rs");
 }
 
-pub use generated::{CapabilityClaims, CapabilityOperation, SignedCapability};
+pub use generated::{
+    CapabilityClaims, CapabilityOperation, MountCapabilityClaims, MountCapabilityOperation,
+    SignedCapability, SignedMountCapability,
+};
 
 /// Public verification key indexed by rotation generation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,6 +101,79 @@ impl CapabilityClaims {
     }
 }
 
+impl MountCapabilityClaims {
+    pub fn validate_at(
+        &self,
+        expected_audience: &str,
+        expected_operation: MountCapabilityOperation,
+        now_unix_seconds: i64,
+    ) -> Result<(), CapabilityError> {
+        for identifier in [
+            &self.capability_id,
+            &self.tenant_id,
+            &self.principal_id,
+            &self.mount_session_id,
+            &self.credential_id,
+            &self.drive_id,
+            &self.resource_id,
+            &self.grant_id,
+        ] {
+            Uuid::parse_str(identifier).map_err(|_| CapabilityError::InvalidClaims)?;
+        }
+        for identifier in [&self.version_id, &self.write_session_id] {
+            if !identifier.is_empty() {
+                Uuid::parse_str(identifier).map_err(|_| CapabilityError::InvalidClaims)?;
+            }
+        }
+        if self.audience != expected_audience {
+            return Err(CapabilityError::WrongAudience);
+        }
+        if self.operation != expected_operation as i32 {
+            return Err(CapabilityError::WrongOperation);
+        }
+        if self.expires_at_unix_seconds < self.issued_at_unix_seconds
+            || self.expires_at_unix_seconds - self.issued_at_unix_seconds
+                > MAX_MOUNT_CAPABILITY_LIFETIME_SECONDS
+        {
+            return Err(CapabilityError::LifetimeTooLong);
+        }
+        if now_unix_seconds < self.issued_at_unix_seconds
+            || now_unix_seconds >= self.expires_at_unix_seconds
+        {
+            return Err(CapabilityError::Expired);
+        }
+        if !(16..=64).contains(&self.nonce.len())
+            || self.range_end < self.range_start
+            || self.credential_generation == 0
+            || self.authorization_generation == 0
+            || self.membership_generation == 0
+            || self.drive_acl_generation == 0
+            || self.namespace_generation == 0
+            || self.resource_acl_generation == 0
+            || self.gateway_epoch == 0
+            || self.fencing_token == 0
+        {
+            return Err(CapabilityError::InvalidClaims);
+        }
+        match expected_operation {
+            MountCapabilityOperation::Read if self.version_id.is_empty() => {
+                Err(CapabilityError::InvalidClaims)
+            }
+            MountCapabilityOperation::Write
+            | MountCapabilityOperation::Flush
+            | MountCapabilityOperation::Finalize
+            | MountCapabilityOperation::Abort
+            | MountCapabilityOperation::DeleteStaging
+                if self.write_session_id.is_empty() =>
+            {
+                Err(CapabilityError::InvalidClaims)
+            }
+            MountCapabilityOperation::Unspecified => Err(CapabilityError::InvalidClaims),
+            _ => Ok(()),
+        }
+    }
+}
+
 pub fn sign_capability(
     claims: &CapabilityClaims,
     generation: u32,
@@ -135,6 +213,50 @@ pub fn verify_capability(
         .verify(&signing_input, &signed.signature)
         .map_err(|_| CapabilityError::InvalidSignature)?;
     let claims = CapabilityClaims::decode(signed.claims.as_slice())
+        .map_err(|_| CapabilityError::InvalidClaims)?;
+    claims.validate_at(expected_audience, expected_operation, now_unix_seconds)?;
+    Ok(claims)
+}
+
+pub fn sign_mount_capability(
+    claims: &MountCapabilityClaims,
+    generation: u32,
+    key_pair: &Ed25519KeyPair,
+) -> String {
+    let claims_bytes = claims.encode_to_vec();
+    let signing_input = [MOUNT_CAPABILITY_SIGNATURE_DOMAIN, claims_bytes.as_slice()].concat();
+    let signed = SignedMountCapability {
+        key_generation: generation,
+        signature: key_pair.sign(&signing_input).as_ref().to_vec(),
+        claims: claims_bytes,
+    };
+    format!("fbcap2.{}", URL_SAFE_NO_PAD.encode(signed.encode_to_vec()))
+}
+
+pub fn verify_mount_capability(
+    wire: &str,
+    keys: &[VerificationKey],
+    expected_audience: &str,
+    expected_operation: MountCapabilityOperation,
+    now_unix_seconds: i64,
+) -> Result<MountCapabilityClaims, CapabilityError> {
+    let encoded = wire
+        .strip_prefix("fbcap2.")
+        .ok_or(CapabilityError::InvalidEncoding)?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| CapabilityError::InvalidEncoding)?;
+    let signed = SignedMountCapability::decode(bytes.as_slice())
+        .map_err(|_| CapabilityError::InvalidEncoding)?;
+    let key = keys
+        .iter()
+        .find(|key| key.generation == signed.key_generation)
+        .ok_or(CapabilityError::UnknownKey)?;
+    let signing_input = [MOUNT_CAPABILITY_SIGNATURE_DOMAIN, signed.claims.as_slice()].concat();
+    UnparsedPublicKey::new(&ED25519, &key.public_key)
+        .verify(&signing_input, &signed.signature)
+        .map_err(|_| CapabilityError::InvalidSignature)?;
+    let claims = MountCapabilityClaims::decode(signed.claims.as_slice())
         .map_err(|_| CapabilityError::InvalidClaims)?;
     claims.validate_at(expected_audience, expected_operation, now_unix_seconds)?;
     Ok(claims)
@@ -230,6 +352,36 @@ mod tests {
         }
     }
 
+    fn mount_claims() -> MountCapabilityClaims {
+        MountCapabilityClaims {
+            capability_id: Uuid::new_v4().to_string(),
+            audience: "filebelt-worker-io".into(),
+            operation: MountCapabilityOperation::Write as i32,
+            tenant_id: Uuid::new_v4().to_string(),
+            principal_id: Uuid::new_v4().to_string(),
+            mount_session_id: Uuid::new_v4().to_string(),
+            credential_id: Uuid::new_v4().to_string(),
+            drive_id: Uuid::new_v4().to_string(),
+            resource_id: Uuid::new_v4().to_string(),
+            version_id: String::new(),
+            write_session_id: Uuid::new_v4().to_string(),
+            range_start: 0,
+            range_end: 4095,
+            credential_generation: 2,
+            authorization_generation: 3,
+            membership_generation: 4,
+            drive_acl_generation: 5,
+            namespace_generation: 6,
+            resource_acl_generation: 7,
+            gateway_epoch: 8,
+            fencing_token: 9,
+            nonce: vec![11; 32],
+            issued_at_unix_seconds: 100,
+            expires_at_unix_seconds: 115,
+            grant_id: Uuid::new_v4().to_string(),
+        }
+    }
+
     #[test]
     fn round_trip_and_reject_wrong_audience() {
         let pair = Ed25519KeyPair::generate().expect("generate key");
@@ -282,6 +434,57 @@ mod tests {
                 120,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn fbcap2_is_distinct_and_binds_mount_generations() {
+        let pair = Ed25519KeyPair::generate().expect("generate key");
+        let mut claims = mount_claims();
+        let wire = sign_mount_capability(&claims, 3, &pair);
+        let keys = [public_key(&pair, 3)];
+        assert!(wire.starts_with("fbcap2."));
+        assert!(
+            verify_mount_capability(
+                &wire,
+                &keys,
+                "filebelt-worker-io",
+                MountCapabilityOperation::Write,
+                110,
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_capability(
+                &wire,
+                &keys,
+                "filebelt-worker-io",
+                CapabilityOperation::UploadPart,
+                110,
+            )
+            .is_err()
+        );
+
+        claims.authorization_generation = 0;
+        assert_eq!(
+            claims.validate_at("filebelt-worker-io", MountCapabilityOperation::Write, 110,),
+            Err(CapabilityError::InvalidClaims)
+        );
+    }
+
+    #[test]
+    fn fbcap2_lifetime_and_operation_context_fail_closed() {
+        let mut claims = mount_claims();
+        claims.expires_at_unix_seconds = 116;
+        assert_eq!(
+            claims.validate_at("filebelt-worker-io", MountCapabilityOperation::Write, 110,),
+            Err(CapabilityError::LifetimeTooLong)
+        );
+        claims.expires_at_unix_seconds = 115;
+        claims.write_session_id.clear();
+        assert_eq!(
+            claims.validate_at("filebelt-worker-io", MountCapabilityOperation::Write, 110,),
+            Err(CapabilityError::InvalidClaims)
         );
     }
 

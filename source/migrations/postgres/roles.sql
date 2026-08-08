@@ -28,6 +28,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_collaboration') THEN
     CREATE ROLE filebelt_collaboration NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_vfs') THEN
+    CREATE ROLE filebelt_vfs NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_headscale_sync') THEN
+    CREATE ROLE filebelt_headscale_sync NOLOGIN;
+  END IF;
 END
 $$;
 
@@ -35,5 +41,9 @@ GRANT USAGE, CREATE ON SCHEMA public TO filebelt_migrator;
 CREATE SCHEMA IF NOT EXISTS filebelt_mcp;
 CREATE SCHEMA IF NOT EXISTS filebelt_mcp_vault;
 CREATE SCHEMA IF NOT EXISTS filebelt_collaboration;
-REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration FROM PUBLIC;
-GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration TO filebelt_migrator;
+CREATE SCHEMA IF NOT EXISTS filebelt_mount;
+CREATE SCHEMA IF NOT EXISTS filebelt_mount_vault;
+REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
+  filebelt_mount, filebelt_mount_vault FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
+  filebelt_mount, filebelt_mount_vault TO filebelt_migrator;

@@ -19,5 +19,7 @@ Use the read-only, column-scoped `filebelt_audit_exporter` group for
 Scrub orchestration writes durable maintenance jobs and therefore uses a login
 that is a member only of `filebelt_maintenance`.
 
-`000001_phase2_core.sql` is the Phase 2 baseline. PostgreSQL metadata and policy
-state are authoritative; migrations never infer state from the payload volume.
+`000001_phase2_core.sql` is the Phase 2 baseline; later migrations add MCP,
+Markdown collaboration, and mount-protocol state without rewriting released
+files. PostgreSQL metadata and policy state are authoritative; migrations never
+infer state from the payload volume or an event stream.

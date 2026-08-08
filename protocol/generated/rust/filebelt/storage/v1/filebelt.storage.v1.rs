@@ -61,6 +61,71 @@ pub struct SignedCapability {
     #[prost(bytes="vec", tag="3")]
     pub signature: ::prost::alloc::vec::Vec<u8>,
 }
+/// Mount capabilities are intentionally a distinct fbcap2 envelope. They bind
+/// an adapter operation to one mount session, credential generation, Virtual
+/// ACL projection, gateway epoch, and optional immutable version/write session.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct MountCapabilityClaims {
+    #[prost(string, tag="1")]
+    pub capability_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub audience: ::prost::alloc::string::String,
+    #[prost(enumeration="MountCapabilityOperation", tag="3")]
+    pub operation: i32,
+    #[prost(string, tag="4")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub principal_id: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub mount_session_id: ::prost::alloc::string::String,
+    #[prost(string, tag="7")]
+    pub credential_id: ::prost::alloc::string::String,
+    #[prost(string, tag="8")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="9")]
+    pub resource_id: ::prost::alloc::string::String,
+    #[prost(string, tag="10")]
+    pub version_id: ::prost::alloc::string::String,
+    #[prost(string, tag="11")]
+    pub write_session_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="12")]
+    pub range_start: u64,
+    #[prost(uint64, tag="13")]
+    pub range_end: u64,
+    #[prost(uint64, tag="14")]
+    pub credential_generation: u64,
+    #[prost(uint64, tag="15")]
+    pub authorization_generation: u64,
+    #[prost(uint64, tag="16")]
+    pub membership_generation: u64,
+    #[prost(uint64, tag="17")]
+    pub drive_acl_generation: u64,
+    #[prost(uint64, tag="18")]
+    pub namespace_generation: u64,
+    #[prost(uint64, tag="19")]
+    pub resource_acl_generation: u64,
+    #[prost(uint64, tag="20")]
+    pub gateway_epoch: u64,
+    #[prost(uint64, tag="21")]
+    pub fencing_token: u64,
+    #[prost(bytes="vec", tag="22")]
+    pub nonce: ::prost::alloc::vec::Vec<u8>,
+    #[prost(int64, tag="23")]
+    pub issued_at_unix_seconds: i64,
+    #[prost(int64, tag="24")]
+    pub expires_at_unix_seconds: i64,
+    #[prost(string, tag="25")]
+    pub grant_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SignedMountCapability {
+    #[prost(uint32, tag="1")]
+    pub key_generation: u32,
+    #[prost(bytes="vec", tag="2")]
+    pub claims: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="3")]
+    pub signature: ::prost::alloc::vec::Vec<u8>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum CapabilityOperation {
@@ -104,6 +169,47 @@ impl CapabilityOperation {
             "CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT" => Some(Self::WriteCollaborationObject),
             "CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT" => Some(Self::FinalizeCollaborationObject),
             "CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT" => Some(Self::ReadCollaborationObject),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum MountCapabilityOperation {
+    Unspecified = 0,
+    Read = 1,
+    Write = 2,
+    Flush = 3,
+    Finalize = 4,
+    Abort = 5,
+    DeleteStaging = 6,
+}
+impl MountCapabilityOperation {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "MOUNT_CAPABILITY_OPERATION_UNSPECIFIED",
+            Self::Read => "MOUNT_CAPABILITY_OPERATION_READ",
+            Self::Write => "MOUNT_CAPABILITY_OPERATION_WRITE",
+            Self::Flush => "MOUNT_CAPABILITY_OPERATION_FLUSH",
+            Self::Finalize => "MOUNT_CAPABILITY_OPERATION_FINALIZE",
+            Self::Abort => "MOUNT_CAPABILITY_OPERATION_ABORT",
+            Self::DeleteStaging => "MOUNT_CAPABILITY_OPERATION_DELETE_STAGING",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "MOUNT_CAPABILITY_OPERATION_UNSPECIFIED" => Some(Self::Unspecified),
+            "MOUNT_CAPABILITY_OPERATION_READ" => Some(Self::Read),
+            "MOUNT_CAPABILITY_OPERATION_WRITE" => Some(Self::Write),
+            "MOUNT_CAPABILITY_OPERATION_FLUSH" => Some(Self::Flush),
+            "MOUNT_CAPABILITY_OPERATION_FINALIZE" => Some(Self::Finalize),
+            "MOUNT_CAPABILITY_OPERATION_ABORT" => Some(Self::Abort),
+            "MOUNT_CAPABILITY_OPERATION_DELETE_STAGING" => Some(Self::DeleteStaging),
             _ => None,
         }
     }

@@ -46,3 +46,50 @@ message SignedCapability {
   bytes claims = 2;
   bytes signature = 3;
 }
+
+// Mount capabilities are intentionally a distinct fbcap2 envelope. They bind
+// an adapter operation to one mount session, credential generation, Virtual
+// ACL projection, gateway epoch, and optional immutable version/write session.
+message MountCapabilityClaims {
+  string capability_id = 1;
+  string audience = 2;
+  MountCapabilityOperation operation = 3;
+  string tenant_id = 4;
+  string principal_id = 5;
+  string mount_session_id = 6;
+  string credential_id = 7;
+  string drive_id = 8;
+  string resource_id = 9;
+  string version_id = 10;
+  string write_session_id = 11;
+  uint64 range_start = 12;
+  uint64 range_end = 13;
+  uint64 credential_generation = 14;
+  uint64 authorization_generation = 15;
+  uint64 membership_generation = 16;
+  uint64 drive_acl_generation = 17;
+  uint64 namespace_generation = 18;
+  uint64 resource_acl_generation = 19;
+  uint64 gateway_epoch = 20;
+  uint64 fencing_token = 21;
+  bytes nonce = 22;
+  int64 issued_at_unix_seconds = 23;
+  int64 expires_at_unix_seconds = 24;
+  string grant_id = 25;
+}
+
+enum MountCapabilityOperation {
+  MOUNT_CAPABILITY_OPERATION_UNSPECIFIED = 0;
+  MOUNT_CAPABILITY_OPERATION_READ = 1;
+  MOUNT_CAPABILITY_OPERATION_WRITE = 2;
+  MOUNT_CAPABILITY_OPERATION_FLUSH = 3;
+  MOUNT_CAPABILITY_OPERATION_FINALIZE = 4;
+  MOUNT_CAPABILITY_OPERATION_ABORT = 5;
+  MOUNT_CAPABILITY_OPERATION_DELETE_STAGING = 6;
+}
+
+message SignedMountCapability {
+  uint32 key_generation = 1;
+  bytes claims = 2;
+  bytes signature = 3;
+}

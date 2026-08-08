@@ -16,6 +16,10 @@ use filebelt_database::{PayloadRecord, UploadPartRecord, UploadRecord};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod cow;
+
+pub use cow::{CowChunkDigest, CowManifest, CowWriteResult};
+
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 

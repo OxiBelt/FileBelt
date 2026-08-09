@@ -55,6 +55,10 @@ images:
     repository: oxibelt/filebelt-headscale-sync
     registryMirror: ""
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-document:
+    repository: oxibelt/filebelt-document
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-smb-gateway:
     repository: oxibelt/filebelt-smb-gateway
     registryMirror: ""
@@ -127,6 +131,8 @@ configuration:
     collaboration_webtransport = "0.0.0.0:8086"
     vfs = "0.0.0.0:8087"
     vfs_management = "0.0.0.0:8088"
+    document = "0.0.0.0:8089"
+    document_adapter = "0.0.0.0:8090"
     operations = "0.0.0.0:9090"
     allow_container_wildcard = true
 
@@ -170,6 +176,9 @@ configuration:
     client_private_key_file = "/run/secrets/collaboration-io-client-tls/tls.key"
     server_ca_file = "/run/secrets/collaboration-io-client-tls/server-ca.crt"
     webtransport_enabled = false
+
+    [documents]
+    enabled = false
 
     [mounts]
     enabled = false
@@ -348,6 +357,34 @@ configuration:
     mode = "disabled"
     {{ end }}
 
+    {{ if .Values.documents.enabled }}
+    [[upstreams]]
+    name = "filebelt-onlyoffice-adapter"
+    origin = {{ .Values.documents.adapterOrigin | quote }}
+    max_http_version = "h1"
+    connect_timeout_ms = 3000
+    request_timeout_ms = 75000
+    first_byte_timeout_ms = 75000
+    read_timeout_ms = 75000
+    send_timeout_ms = 75000
+    idle_timeout_ms = 75000
+    pool_max_idle_per_host = 32
+    preserve_host = true
+    websocket = false
+    webrtc = false
+    webtransport = false
+    [upstreams.tls]
+    server_name = {{ .Values.documents.adapterServerName | quote }}
+    trust = "exclusive"
+    trusted_ca_certs = ["/run/secrets/onlyoffice-edge-client-tls/server-ca.crt"]
+    # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
+    trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
+    client_certificate = "/run/secrets/onlyoffice-edge-client-tls/tls.crt"
+    client_private_key = "/run/secrets/onlyoffice-edge-client-tls/tls.key"
+    [upstreams.tls.ech]
+    mode = "disabled"
+    {{ end }}
+
     [[upstreams]]
     name = "filebelt-io"
     origin = "https://filebelt-worker-io:8081"
@@ -422,6 +459,31 @@ configuration:
     [[routes.actions.response_headers.set]]
     name = "Pragma"
     value = "no-cache"
+    {{ end }}
+
+    {{ if .Values.documents.enabled }}
+    [[routes]]
+    name = "filebelt-onlyoffice"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/onlyoffice"
+    upstream = "filebelt-onlyoffice-adapter"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 1048576
+    [routes.actions.request_headers]
+    remove = ["x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+    [[routes.actions.response_headers.set]]
+    name = "Cache-Control"
+    value = "no-store"
+    [[routes.actions.response_headers.set]]
+    name = "Content-Security-Policy"
+    value = {{ printf "default-src 'none'; base-uri 'none'; connect-src 'self' %s; font-src 'self' data: %s; form-action 'none'; frame-src %s; frame-ancestors 'none'; img-src 'self' data: blob: %s; media-src 'none'; object-src 'none'; script-src 'self' %s; style-src 'self' 'unsafe-inline'" .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin | quote }}
     {{ end }}
 
     [[routes]]
@@ -574,6 +636,12 @@ workloads:
     resources:
       requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
       limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+  document:
+    replicas: 2
+    terminationGracePeriodSeconds: 90
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
   operation:
     resources:
       database:
@@ -629,6 +697,12 @@ secrets:
   vfsIoClientTls: {name: filebelt-vfs-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   headscaleApiToken: {name: filebelt-headscale-api-token, key: token, generation: "1"}
   headscaleServerCa: {name: filebelt-headscale-server-ca, key: ca.crt, generation: "1"}
+  documentDatabase: {name: filebelt-document-database, key: database-url, generation: "1"}
+  documentCapabilityPrivateKey: {name: filebelt-document-capability-private, key: private-key, generation: "1"}
+  documentApiServerTls: {name: filebelt-document-api-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  documentAdapterServerTls: {name: filebelt-document-adapter-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  apiDocumentClientTls: {name: filebelt-api-document-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  onlyofficeEdgeClientTls: {name: filebelt-onlyoffice-edge-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
 
 mcp:
   enabled: false
@@ -647,6 +721,17 @@ mcp:
 
 collaboration:
   enabled: false
+
+# The Apache coordinator and separate AGPL adapter are opt-in and disabled by
+# default. Install the adapter chart in the named integration namespace first.
+documents:
+  enabled: false
+  integrationNamespace: filebelt-integrations
+  adapterOrigin: https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089
+  adapterServerName: filebelt-onlyoffice-adapter.filebelt-integrations.svc
+  adapterPort: 8089
+  launchAction: https://filebelt.example.invalid/onlyoffice/launch
+  providerOrigin: https://documentserver.example.invalid
 
 # Mount delivery is opt-in. FileBelt never creates gateway tailstate storage:
 # each protocol gateway receives a distinct, operator-provisioned RWO claim.

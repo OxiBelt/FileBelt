@@ -8,6 +8,7 @@ members = [
   "source/apps/filebelt-worker-io",
   "source/apps/filebelt-worker-maintenance",
   "source/apps/filebelt-media-controller",
+  "source/apps/filebelt-document",
   "source/apps/filebelt-mcp-broker",
   "source/apps/filebelt-mcp-runner",
   "source/apps/filebelt-controller",
@@ -66,6 +67,7 @@ filebelt-collaboration-protocol = { version = "=0.1.0", path = "source/crates/fi
 filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-database" }
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }
 filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
+filebelt-document-protocol = { version = "=0.1.0", path = "source/crates/filebelt-document-protocol" }
 filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-events-protocol" }
 filebelt-mcp-policy = { version = "=0.1.0", path = "source/crates/filebelt-mcp-policy" }
 filebelt-mcp-protocol = { version = "=0.1.0", path = "source/crates/filebelt-mcp-protocol" }

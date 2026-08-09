@@ -61,7 +61,7 @@ jobs:
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
-      - name: Build and validate all twelve Apache role contracts
+      - name: Build and validate all thirteen Apache role contracts
         run: >-
           tests/scripts/run-image-matrix.sh
           --plan artifacts/phase3/image-plan.json
@@ -304,13 +304,14 @@ jobs:
             tools:filebelt-tools \
             vfs:filebelt-vfs \
             headscale_sync:filebelt-headscale-sync \
+            document:filebelt-document \
             web:filebelt-web; do
             key=${item%%:*}
             role=${item#*:}
             digest=$(jq -er --arg role "$role" '.subjects[] | select(.role == $role) | .digest' artifacts/release/image-subjects.json)
             echo "$key=$digest" >> "$GITHUB_OUTPUT"
           done
-      - name: Publish and read back Helm chart
+      - name: Publish and read back Helm charts
         id: chart
         env:
           VERSION: ${{ steps.plan.outputs.version }}
@@ -326,6 +327,16 @@ jobs:
           helm pull oci://ghcr.io/oxibelt/charts/filebelt --version "$VERSION" --destination artifacts/release/readback
           cmp "artifacts/release/filebelt-${VERSION}.tgz" "artifacts/release/readback/filebelt-${VERSION}.tgz"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          if helm show chart oci://ghcr.io/oxibelt/charts/filebelt-onlyoffice --version "$VERSION" >/dev/null 2>&1; then
+            echo "refusing to replace existing ONLYOFFICE Helm release ${VERSION}" >&2
+            exit 1
+          fi
+          output=$(helm push "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz" oci://ghcr.io/oxibelt/charts)
+          onlyoffice_digest=$(awk '$1 == "Digest:" { print $2 }' <<<"$output")
+          test "${onlyoffice_digest#sha256:}" != "$onlyoffice_digest"
+          helm pull oci://ghcr.io/oxibelt/charts/filebelt-onlyoffice --version "$VERSION" --destination artifacts/release/readback
+          cmp "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz" "artifacts/release/readback/filebelt-onlyoffice-${VERSION}.tgz"
+          echo "onlyoffice_digest=$onlyoffice_digest" >> "$GITHUB_OUTPUT"
       - name: Complete release checksums
         run: |
           cd artifacts/release
@@ -372,6 +383,12 @@ jobs:
           subject-name: ghcr.io/oxibelt/filebelt-headscale-sync
           subject-digest: ${{ steps.subjects.outputs.headscale_sync }}
           push-to-registry: false
+      - name: Attest document provider image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-document
+          subject-digest: ${{ steps.subjects.outputs.document }}
+          push-to-registry: false
       - name: Attest web image index
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
@@ -384,6 +401,12 @@ jobs:
           subject-name: ghcr.io/oxibelt/charts/filebelt
           subject-digest: ${{ steps.chart.outputs.digest }}
           push-to-registry: false
+      - name: Attest ONLYOFFICE Helm OCI subject
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/oxibelt/charts/filebelt-onlyoffice
+          subject-digest: ${{ steps.chart.outputs.onlyoffice_digest }}
+          push-to-registry: false
       - name: Create immutable GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -391,6 +414,7 @@ jobs:
         run: >-
           gh release create "$VERSION"
           "artifacts/release/filebelt-${VERSION}.tgz"
+          "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz"
           "artifacts/release/filebelt-postgresql-admin-${VERSION}.tar.gz"
           "artifacts/release/SHA256SUMS"
           "artifacts/release/image-subjects.json"

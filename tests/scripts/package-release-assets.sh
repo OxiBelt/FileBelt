@@ -28,21 +28,48 @@ node_version=$(jq -er '.version' "${repo_root}/package.json")
 cargo_version=$(python3 -c \
   'import pathlib,sys,tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["workspace"]["package"]["version"])' \
   "${repo_root}/Cargo.toml")
+onlyoffice_adapter_version=$(python3 -c \
+  'import pathlib,sys,tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["package"]["version"])' \
+  "${repo_root}/adapters/onlyoffice/Cargo.toml")
 chart_version=$(awk '$1 == "version:" { print $2; exit }' "${repo_root}/deploy/helm/filebelt/Chart.yaml")
 app_version=$(awk '$1 == "appVersion:" { gsub(/\"/, "", $2); print $2; exit }' "${repo_root}/deploy/helm/filebelt/Chart.yaml")
+onlyoffice_chart_version=$(awk '$1 == "version:" { print $2; exit }' "${repo_root}/deploy/helm/filebelt-onlyoffice/Chart.yaml")
+onlyoffice_app_version=$(awk '$1 == "appVersion:" { gsub(/\"/, "", $2); print $2; exit }' "${repo_root}/deploy/helm/filebelt-onlyoffice/Chart.yaml")
 version=${cargo_version}
-[[ "${node_version}" == "${version}" && "${chart_version}" == "${version}" && "${app_version}" == "${version}" ]] || {
-  echo "Cargo, Node, chart version, and chart appVersion must match" >&2
+[[ "${node_version}" == "${version}" && "${onlyoffice_adapter_version}" == "${version}" && "${chart_version}" == "${version}" && "${app_version}" == "${version}" && "${onlyoffice_chart_version}" == "${version}" && "${onlyoffice_app_version}" == "${version}" ]] || {
+  echo "core, adapter, and chart versions must use coordinated SemVer" >&2
   exit 1
 }
 [[ "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$ ]] || {
   echo "release version is not valid SemVer: ${version}" >&2
   exit 1
 }
+onlyoffice_source="https://github.com/OxiBelt/FileBelt/tree/${version}"
+grep -F -- "correspondingSource: ${onlyoffice_source}" \
+  "${repo_root}/deploy/helm/filebelt-onlyoffice/values.yaml" >/dev/null || {
+  echo "ONLYOFFICE corresponding-source URL must match release version ${version}" >&2
+  exit 1
+}
+grep -F -- "\"const\": \"${onlyoffice_source}\"" \
+  "${repo_root}/deploy/helm/filebelt-onlyoffice/values.schema.json" >/dev/null || {
+  echo "ONLYOFFICE corresponding-source schema must match release version ${version}" >&2
+  exit 1
+}
+grep -F -- "filebelt.dev/corresponding-source: ${onlyoffice_source}" \
+  "${repo_root}/deploy/helm/filebelt-onlyoffice/Chart.yaml" >/dev/null || {
+  echo "ONLYOFFICE chart source annotation must match release version ${version}" >&2
+  exit 1
+}
+grep -F -- "correspondingSource: \"${onlyoffice_source}\"" \
+  "${repo_root}/devops/source/adapter-image-plan.ts" >/dev/null || {
+  echo "ONLYOFFICE image-plan source must match release version ${version}" >&2
+  exit 1
+}
 
 mkdir -p "${output_dir}"
 for artifact in \
   "filebelt-${version}.tgz" \
+  "filebelt-onlyoffice-${version}.tgz" \
   "filebelt-postgresql-admin-${version}.tar.gz" \
   SHA256SUMS; do
   [[ ! -e "${output_dir}/${artifact}" ]] || {
@@ -55,11 +82,19 @@ temporary=$(mktemp -d)
 cleanup() { rm -rf -- "${temporary}"; }
 trap cleanup EXIT
 cp -R "${repo_root}/deploy/helm/filebelt" "${temporary}/filebelt"
+cp -R "${repo_root}/deploy/helm/filebelt-onlyoffice" "${temporary}/filebelt-onlyoffice"
 cp "${repo_root}/LICENSE" "${temporary}/filebelt/LICENSE"
 helm lint --strict "${temporary}/filebelt" \
   --kube-version 1.36.0 \
   -f "${repo_root}/tests/kubernetes/values-ci.yaml"
 helm package "${temporary}/filebelt" \
+  --destination "${output_dir}" \
+  --version "${version}" \
+  --app-version "${version}" >/dev/null
+helm lint --strict "${temporary}/filebelt-onlyoffice" \
+  --kube-version 1.36.0 \
+  --namespace filebelt-integrations
+helm package "${temporary}/filebelt-onlyoffice" \
   --destination "${output_dir}" \
   --version "${version}" \
   --app-version "${version}" >/dev/null
@@ -79,6 +114,6 @@ gzip -n "${output_dir}/filebelt-postgresql-admin-${version}.tar"
 
 (
   cd "${output_dir}"
-  sha256sum "filebelt-${version}.tgz" \
+  sha256sum "filebelt-${version}.tgz" "filebelt-onlyoffice-${version}.tgz" \
     "filebelt-postgresql-admin-${version}.tar.gz" >SHA256SUMS
 )

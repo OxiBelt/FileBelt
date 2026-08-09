@@ -67,4 +67,48 @@ export default tseslint.config(
       "@typescript-eslint/naming-convention": "off",
     },
   },
+  {
+    files: ["adapters/onlyoffice/ui/launcher.js"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        HTMLButtonElement: "readonly",
+        HTMLElement: "readonly",
+        HTMLScriptElement: "readonly",
+        window: "readonly",
+      },
+    },
+  },
+  {
+    files: ["adapters/onlyoffice/ui/launcher.ts"],
+    rules: {
+      "@typescript-eslint/naming-convention": [
+        "error",
+        {
+          selector: "typeProperty",
+          filter: {
+            regex: "^(apiJsUrl|editorConfig)$",
+            match: true,
+          },
+          format: null,
+        },
+        {
+          selector: ["function", "variable"],
+          filter: {
+            regex: "^use[A-Z][A-Za-z0-9]*$",
+            match: true,
+          },
+          format: null,
+        },
+        {
+          selector: ["variableLike", "parameterProperty", "classProperty", "typeProperty"],
+          format: ["PascalCase"],
+        },
+        {
+          selector: "typeLike",
+          format: ["PascalCase"],
+        },
+      ],
+    },
+  },
 );

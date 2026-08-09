@@ -24,6 +24,7 @@ adapter_root = "adapters"
 # Adding an adapter manifest requires an explicit, license-reviewed registration.
 registered_adapter_manifests = [
   "adapters/ftp-ftps/Cargo.toml",
+  "adapters/onlyoffice/Cargo.toml",
   "adapters/smb/Cargo.toml",
 ]
 
@@ -162,6 +163,18 @@ filebelt-ftp-ftps-gateway = []
 filebelt-vfs-protocol = []
 
 [[graph_profiles]]
+label = "AGPL ONLYOFFICE process-boundary adapter"
+package = "filebelt-onlyoffice-adapter"
+manifest = "adapters/onlyoffice/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-onlyoffice-adapter = []
+filebelt-document-protocol = []
+
+[[graph_profiles]]
 label = "shared service runtime"
 package = "filebelt-runtime"
 manifest = "source/crates/filebelt-runtime/Cargo.toml"
@@ -214,6 +227,27 @@ forbidden_package_prefixes = []
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
 filebelt-deployment-diagnostics = []
+
+[[graph_profiles]]
+label = "document coordinator"
+package = "filebelt-document"
+manifest = "source/apps/filebelt-document/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-document = []
+filebelt-document-protocol = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-mcp-policy = []
+filebelt-runtime = []
+filebelt-storage-protocol = []
 
 [[graph_profiles]]
 label = "document protocol"
@@ -512,6 +546,7 @@ filebelt-collaboration-protocol = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
+filebelt-document-protocol = []
 filebelt-domain = []
 filebelt-events-protocol = []
 filebelt-mcp-policy = []
@@ -594,6 +629,7 @@ packages = [
   "filebelt-controller",
   "filebelt-database",
   "filebelt-deployment-diagnostics",
+  "filebelt-document",
   "filebelt-document-protocol",
   "filebelt-domain",
   "filebelt-events-protocol",
@@ -648,6 +684,7 @@ forbidden_paths = [
   "filebelt_api",
   "filebelt_authz",
   "filebelt_controller",
+  "filebelt_document",
   "filebelt_mcp_broker",
   "filebelt_media_controller",
   "filebelt_worker_io",
@@ -695,6 +732,24 @@ forbidden_paths = [
   "std::fs",
 ]
 
+[[source_boundaries]]
+label = "ONLYOFFICE adapter remains outside core and adapter implementations"
+packages = ["filebelt-onlyoffice-adapter"]
+forbidden_paths = [
+  "filebelt_api",
+  "filebelt_authz",
+  "filebelt_control_protocol",
+  "filebelt_database",
+  "filebelt_document",
+  "filebelt_ftp_ftps_gateway",
+  "filebelt_smb_bridge",
+  "filebelt_runtime",
+  "filebelt_storage",
+  "filebelt_vfs",
+  "filebelt_worker_io",
+  "filebelt_worker_maintenance",
+]
+
 [[public_surfaces]]
 package = "filebelt"
 crate_root = "source/src/lib.rs"
@@ -722,6 +777,18 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-ftp-ftps-gateway"
 crate_root = "adapters/ftp-ftps/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-onlyoffice-adapter"
+crate_root = "adapters/onlyoffice/src/lib.rs"
+public_modules = ["config", "routes", "runtime", "tls"]
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-onlyoffice-adapter"
+crate_root = "adapters/onlyoffice/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 
@@ -788,12 +855,18 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["collaboration", "mcp", "mount"]
+public_modules = ["collaboration", "document", "mcp", "mount"]
 wildcard_reexports = []
 
 [[public_surfaces]]
 package = "filebelt-deployment-diagnostics"
 crate_root = "source/crates/filebelt-deployment-diagnostics/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-document"
+crate_root = "source/apps/filebelt-document/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

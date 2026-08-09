@@ -23,6 +23,7 @@ ROLES = (
     "filebelt-tools",
     "filebelt-vfs",
     "filebelt-headscale-sync",
+    "filebelt-document",
     "filebelt-web",
 )
 

@@ -42,6 +42,8 @@ pub struct Config {
     #[serde(default)]
     pub collaboration: CollaborationConfig,
     #[serde(default)]
+    pub documents: DocumentConfig,
+    #[serde(default)]
     pub mounts: MountConfig,
 }
 
@@ -110,6 +112,10 @@ pub struct BackendTlsConfig {
     pub controller: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub collaboration: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub document: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub document_adapter: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub vfs: Option<BackendServerTlsConfig>,
     #[serde(default)]
@@ -216,6 +222,10 @@ pub struct ListenerConfig {
     pub vfs: SocketAddr,
     #[serde(default = "default_vfs_management_listener")]
     pub vfs_management: SocketAddr,
+    #[serde(default = "default_document_listener")]
+    pub document: SocketAddr,
+    #[serde(default = "default_document_adapter_listener")]
+    pub document_adapter: SocketAddr,
     /// Permit an unspecified bind address inside an explicitly isolated
     /// container network.
     #[serde(default)]
@@ -235,7 +245,67 @@ impl Default for ListenerConfig {
             collaboration_webtransport: default_collaboration_webtransport_listener(),
             vfs: default_vfs_listener(),
             vfs_management: default_vfs_management_listener(),
+            document: default_document_listener(),
+            document_adapter: default_document_adapter_listener(),
             allow_container_wildcard: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_document_provider_id")]
+    pub provider_id: String,
+    #[serde(default)]
+    pub database_url_file: Option<PathBuf>,
+    #[serde(default)]
+    pub url: Option<Url>,
+    /// Fixed public form action for submitting a one-use provider handoff.
+    /// It is operator configuration, never browser or API request input.
+    #[serde(default)]
+    pub launch_action: Option<Url>,
+    /// Exact external document-provider HTTPS origin disclosed before launch.
+    /// It is non-secret operator configuration, never browser or API request input.
+    #[serde(default)]
+    pub provider_origin: Option<Url>,
+    #[serde(default)]
+    pub client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub capability_private_key_file: Option<PathBuf>,
+    #[serde(default = "default_document_capability_key_generation")]
+    pub capability_key_generation: u32,
+    #[serde(default = "default_document_max_active_tabs")]
+    pub max_active_tabs: u32,
+    #[serde(default = "default_document_max_bytes")]
+    pub max_document_bytes: u64,
+    #[serde(default = "default_document_generation_recheck_seconds")]
+    pub generation_recheck_seconds: u64,
+}
+
+impl Default for DocumentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider_id: default_document_provider_id(),
+            database_url_file: None,
+            url: None,
+            launch_action: None,
+            provider_origin: None,
+            client_certificate_chain_file: None,
+            client_private_key_file: None,
+            server_ca_file: None,
+            capability_private_key_file: None,
+            capability_key_generation: default_document_capability_key_generation(),
+            max_active_tabs: default_document_max_active_tabs(),
+            max_document_bytes: default_document_max_bytes(),
+            generation_recheck_seconds: default_document_generation_recheck_seconds(),
         }
     }
 }
@@ -817,6 +887,9 @@ impl Config {
                         .collaboration_webtransport
                         .ip()
                         .is_unspecified())
+                || (self.documents.enabled && self.listeners.document.ip().is_unspecified())
+                || (self.documents.enabled
+                    && self.listeners.document_adapter.ip().is_unspecified())
                 || (self.mounts.enabled && self.listeners.vfs.ip().is_unspecified())
                 || (self.mounts.enabled && self.listeners.vfs_management.ip().is_unspecified()))
         {
@@ -840,6 +913,47 @@ impl Config {
             }
             if let Some(collaboration) = &tls.collaboration {
                 validate_backend_tls(collaboration)?;
+            }
+            if let Some(document) = &tls.document {
+                validate_backend_tls(document)?;
+                for (role, other) in [
+                    ("API", Some(&tls.api)),
+                    ("I/O", Some(&tls.io)),
+                    ("MCP broker", tls.mcp_broker.as_ref()),
+                    ("controller", tls.controller.as_ref()),
+                    ("collaboration", tls.collaboration.as_ref()),
+                    ("VFS", tls.vfs.as_ref()),
+                    ("VFS management", tls.vfs_management.as_ref()),
+                ] {
+                    if other
+                        .is_some_and(|other| backend_tls_identity_policies_overlap(document, other))
+                    {
+                        return Err(invalid(&format!(
+                            "document and {role} backend TLS client identities and trust domains must not overlap"
+                        )));
+                    }
+                }
+            }
+            if let Some(document_adapter) = &tls.document_adapter {
+                validate_backend_tls(document_adapter)?;
+                for (role, other) in [
+                    ("API", Some(&tls.api)),
+                    ("I/O", Some(&tls.io)),
+                    ("MCP broker", tls.mcp_broker.as_ref()),
+                    ("controller", tls.controller.as_ref()),
+                    ("collaboration", tls.collaboration.as_ref()),
+                    ("document API", tls.document.as_ref()),
+                    ("VFS", tls.vfs.as_ref()),
+                    ("VFS management", tls.vfs_management.as_ref()),
+                ] {
+                    if other.is_some_and(|other| {
+                        backend_tls_identity_policies_overlap(document_adapter, other)
+                    }) {
+                        return Err(invalid(&format!(
+                            "document adapter and {role} backend TLS client identities and trust domains must not overlap"
+                        )));
+                    }
+                }
             }
             if let Some(vfs) = &tls.vfs {
                 validate_backend_tls(vfs)?;
@@ -938,7 +1052,133 @@ impl Config {
         }
         self.validate_mcp()?;
         self.validate_collaboration()?;
+        self.validate_documents()?;
         self.validate_mounts()?;
+        Ok(())
+    }
+
+    fn validate_documents(&self) -> Result<(), ConfigError> {
+        let documents = &self.documents;
+        validate_document_limits(documents)?;
+        if !documents.enabled {
+            if documents.database_url_file.is_some()
+                || documents.url.is_some()
+                || documents.launch_action.is_some()
+                || documents.provider_origin.is_some()
+                || documents.client_certificate_chain_file.is_some()
+                || documents.client_private_key_file.is_some()
+                || documents.server_ca_file.is_some()
+                || documents.capability_private_key_file.is_some()
+                || documents.capability_key_generation
+                    != default_document_capability_key_generation()
+                || self
+                    .backend_tls
+                    .as_ref()
+                    .is_some_and(|tls| tls.document.is_some() || tls.document_adapter.is_some())
+            {
+                return Err(invalid(
+                    "disabled documents must not configure database, service, capability, or TLS authority",
+                ));
+            }
+            return Ok(());
+        }
+
+        if documents.provider_id.is_empty()
+            || documents.provider_id.len() > 128
+            || !documents.provider_id.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+            })
+            || [
+                documents.database_url_file.as_ref(),
+                documents.capability_private_key_file.as_ref(),
+            ]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "enabled documents require a provider ID and absolute database and capability-key paths",
+            ));
+        }
+        if documents.capability_key_generation != default_document_capability_key_generation()
+            || documents.capability_key_generation == self.keys.current_generation
+            || (self.collaboration.enabled
+                && documents.capability_key_generation
+                    == self.collaboration.capability_key_generation)
+            || (self.mounts.enabled
+                && documents.capability_key_generation == self.mounts.capability_key_generation)
+        {
+            return Err(invalid(
+                "document capability key generation must be 4 and distinct from API, collaboration, and mount generations",
+            ));
+        }
+        validate_internal_service_url(
+            documents.url.as_ref(),
+            self.deployment.mode,
+            "document service",
+        )?;
+        validate_document_launch_action(documents.launch_action.as_ref(), &self.public_origin)?;
+        validate_document_provider_origin(documents.provider_origin.as_ref())?;
+        if self.listeners.document == self.listeners.api
+            || self.listeners.document == self.listeners.io
+            || self.listeners.document == self.listeners.operations
+            || self.listeners.document == self.listeners.mcp_broker
+            || self.listeners.document == self.listeners.mcp_runner_relay
+            || self.listeners.document == self.listeners.controller
+            || self.listeners.document == self.listeners.collaboration_ws
+            || self.listeners.document == self.listeners.collaboration_webtransport
+            || self.listeners.document == self.listeners.vfs
+            || self.listeners.document == self.listeners.vfs_management
+            || self.listeners.document == self.listeners.document_adapter
+            || self.listeners.document_adapter == self.listeners.api
+            || self.listeners.document_adapter == self.listeners.io
+            || self.listeners.document_adapter == self.listeners.operations
+            || self.listeners.document_adapter == self.listeners.mcp_broker
+            || self.listeners.document_adapter == self.listeners.mcp_runner_relay
+            || self.listeners.document_adapter == self.listeners.controller
+            || self.listeners.document_adapter == self.listeners.collaboration_ws
+            || self.listeners.document_adapter == self.listeners.collaboration_webtransport
+            || self.listeners.document_adapter == self.listeners.vfs
+            || self.listeners.document_adapter == self.listeners.vfs_management
+        {
+            return Err(invalid(
+                "document API and adapter listeners must be distinct from every other listener",
+            ));
+        }
+        if self.deployment.mode == DeploymentMode::Kubernetes {
+            if [
+                documents.client_certificate_chain_file.as_ref(),
+                documents.client_private_key_file.as_ref(),
+                documents.server_ca_file.as_ref(),
+            ]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+            {
+                return Err(invalid(
+                    "Kubernetes documents require absolute API-to-document TLS paths",
+                ));
+            }
+            if self
+                .backend_tls
+                .as_ref()
+                .is_none_or(|tls| tls.document.is_none() || tls.document_adapter.is_none())
+            {
+                return Err(invalid(
+                    "Kubernetes documents require distinct API and adapter backend mTLS configurations",
+                ));
+            }
+        } else if [
+            documents.client_certificate_chain_file.as_ref(),
+            documents.client_private_key_file.as_ref(),
+            documents.server_ca_file.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|path| !path.is_absolute())
+        {
+            return Err(invalid(
+                "document TLS paths must be absolute when configured",
+            ));
+        }
         Ok(())
     }
 
@@ -1557,6 +1797,94 @@ fn validate_collaboration_limits(limits: &CollaborationLimitConfig) -> Result<()
     Ok(())
 }
 
+fn validate_document_limits(documents: &DocumentConfig) -> Result<(), ConfigError> {
+    if !(1..=20).contains(&documents.max_active_tabs)
+        || !(1..=104_857_600).contains(&documents.max_document_bytes)
+        || documents.generation_recheck_seconds != 60
+    {
+        return Err(invalid(
+            "document limits exceed the accepted tab, byte, or generation-recheck caps",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_document_launch_action(
+    url: Option<&Url>,
+    public_origin: &Url,
+) -> Result<(), ConfigError> {
+    let url = url.ok_or_else(|| {
+        invalid("enabled documents require an exact public HTTPS launch action URL")
+    })?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || url.username() != ""
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.path().is_empty()
+        || url.origin() != public_origin.origin()
+    {
+        return Err(invalid(
+            "document launch action must be an exact same-origin public HTTPS URL without credentials, query, or fragment",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_document_provider_origin(url: Option<&Url>) -> Result<(), ConfigError> {
+    let url =
+        url.ok_or_else(|| invalid("enabled documents require an exact provider HTTPS origin"))?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || url.username() != ""
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid(
+            "document provider origin must be an exact HTTPS origin without credentials, path, query, or fragment",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_internal_service_url(
+    url: Option<&Url>,
+    mode: DeploymentMode,
+    service: &str,
+) -> Result<(), ConfigError> {
+    let url = url.ok_or_else(|| {
+        invalid(&format!(
+            "enabled documents require an internal {service} URL"
+        ))
+    })?;
+    let loopback_http = url
+        .host_str()
+        .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+        .is_some_and(|address| address.is_loopback());
+    let expected_scheme = if mode == DeploymentMode::Kubernetes {
+        "https"
+    } else if url.scheme() == "http" && loopback_http {
+        "http"
+    } else {
+        "https"
+    };
+    if url.scheme() != expected_scheme
+        || url.host_str().is_none()
+        || url.port().is_none()
+        || url.path() != "/"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid(&format!("internal {service} URL is invalid")));
+    }
+    Ok(())
+}
+
 fn validate_policy_name(name: &str, kind: &str) -> Result<(), ConfigError> {
     if name.is_empty()
         || name.len() > 63
@@ -1664,6 +1992,13 @@ fn default_vfs_listener() -> SocketAddr {
 fn default_vfs_management_listener() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8088))
 }
+fn default_document_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8089))
+}
+
+fn default_document_adapter_listener() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8090))
+}
 const fn default_headscale_sync_seconds() -> u64 {
     15
 }
@@ -1675,6 +2010,21 @@ const fn default_collaboration_capability_key_generation() -> u32 {
 }
 const fn default_mount_capability_key_generation() -> u32 {
     3
+}
+fn default_document_provider_id() -> String {
+    "onlyoffice-community-9-4".into()
+}
+const fn default_document_capability_key_generation() -> u32 {
+    4
+}
+const fn default_document_max_active_tabs() -> u32 {
+    20
+}
+const fn default_document_max_bytes() -> u64 {
+    104_857_600
+}
+const fn default_document_generation_recheck_seconds() -> u64 {
+    60
 }
 const fn default_collaboration_update_bytes() -> u64 {
     262_144
@@ -1860,6 +2210,7 @@ mod tests {
             iggy: None,
             mcp: McpConfig::default(),
             collaboration: CollaborationConfig::default(),
+            documents: DocumentConfig::default(),
             mounts: MountConfig::default(),
         }
     }
@@ -1924,6 +2275,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            document: None,
+            document_adapter: None,
             vfs: None,
             vfs_management: None,
         });
@@ -1965,6 +2318,169 @@ mod tests {
         assert!(candidate.validate().is_err());
     }
     #[test]
+    fn document_defaults_are_disabled_and_bounded() {
+        let documents = DocumentConfig::default();
+        assert!(!documents.enabled);
+        assert_eq!(documents.provider_id, "onlyoffice-community-9-4");
+        assert_eq!(documents.capability_key_generation, 4);
+        assert_eq!(documents.max_active_tabs, 20);
+        assert_eq!(documents.max_document_bytes, 104_857_600);
+        assert_eq!(documents.generation_recheck_seconds, 60);
+        assert_eq!(documents.provider_origin, None);
+    }
+    #[test]
+    fn disabled_documents_reject_authority_configuration() {
+        let mut candidate = config();
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/").unwrap());
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
+    fn enabled_documents_validate_with_development_loopback() {
+        let mut candidate = config();
+        candidate.documents.enabled = true;
+        candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
+        candidate.documents.capability_private_key_file =
+            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.url = Some(Url::parse("http://127.0.0.1:8089/").unwrap());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/").unwrap());
+        candidate.validate().unwrap();
+    }
+    #[test]
+    fn documents_reject_non_loopback_development_http_and_limit_changes() {
+        let mut candidate = config();
+        candidate.documents.enabled = true;
+        candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
+        candidate.documents.capability_private_key_file =
+            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.url = Some(Url::parse("http://document:8089/").unwrap());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/").unwrap());
+        assert!(candidate.validate().is_err());
+
+        candidate.documents.url = Some(Url::parse("http://127.0.0.1:8089/").unwrap());
+        candidate.documents.launch_action =
+            Some(Url::parse("http://files.example.test/integrations/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+        candidate.documents.provider_origin = None;
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("http://documentserver.example.test/").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/editor").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/?tenant=example").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/#consent").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://operator@documentserver.example.test/").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/").unwrap());
+        candidate.documents.max_active_tabs = 21;
+        assert!(candidate.validate().is_err());
+        candidate.documents.max_active_tabs = 20;
+        candidate.documents.max_document_bytes = 104_857_601;
+        assert!(candidate.validate().is_err());
+        candidate.documents.max_document_bytes = 104_857_600;
+        candidate.documents.generation_recheck_seconds = 59;
+        assert!(candidate.validate().is_err());
+        candidate.documents.generation_recheck_seconds = 60;
+        candidate.documents.capability_key_generation = 5;
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
+    fn kubernetes_documents_require_distinct_mtls_listeners() {
+        let mut candidate = config();
+        candidate.deployment.mode = DeploymentMode::Kubernetes;
+        candidate.oidc.egress_proxy_url = Some(Url::parse("http://oidc-egress:3128/").unwrap());
+        candidate.telemetry.log_format = LogFormat::Json;
+        candidate.telemetry.prometheus_enabled = true;
+        candidate.documents.enabled = true;
+        candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
+        candidate.documents.capability_private_key_file =
+            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.url = Some(Url::parse("https://document:8089/").unwrap());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test/").unwrap());
+        candidate.documents.client_certificate_chain_file =
+            Some("/run/secrets/api-document.crt".into());
+        candidate.documents.client_private_key_file = Some("/run/secrets/api-document.key".into());
+        candidate.documents.server_ca_file = Some("/run/secrets/document-ca.crt".into());
+        candidate.backend_tls = Some(BackendTlsConfig {
+            api: BackendServerTlsConfig {
+                certificate_chain_file: "/run/secrets/api.crt".into(),
+                private_key_file: "/run/secrets/api.key".into(),
+                client_ca_file: "/run/secrets/api-ca.crt".into(),
+                allowed_client_uri_sans: vec!["spiffe://filebelt.test/web-api".into()],
+                allowed_client_trust_domains: Vec::new(),
+            },
+            io: BackendServerTlsConfig {
+                certificate_chain_file: "/run/secrets/io.crt".into(),
+                private_key_file: "/run/secrets/io.key".into(),
+                client_ca_file: "/run/secrets/io-ca.crt".into(),
+                allowed_client_uri_sans: vec!["spiffe://filebelt.test/web-io".into()],
+                allowed_client_trust_domains: Vec::new(),
+            },
+            mcp_broker: None,
+            controller: None,
+            collaboration: None,
+            document: Some(BackendServerTlsConfig {
+                certificate_chain_file: "/run/secrets/document.crt".into(),
+                private_key_file: "/run/secrets/document.key".into(),
+                client_ca_file: "/run/secrets/document-client-ca.crt".into(),
+                allowed_client_uri_sans: vec!["spiffe://filebelt.test/api-document".into()],
+                allowed_client_trust_domains: Vec::new(),
+            }),
+            document_adapter: Some(BackendServerTlsConfig {
+                certificate_chain_file: "/run/secrets/document-adapter.crt".into(),
+                private_key_file: "/run/secrets/document-adapter.key".into(),
+                client_ca_file: "/run/secrets/document-adapter-client-ca.crt".into(),
+                allowed_client_uri_sans: vec!["spiffe://filebelt.test/onlyoffice-document".into()],
+                allowed_client_trust_domains: Vec::new(),
+            }),
+            vfs: None,
+            vfs_management: None,
+        });
+        candidate.validate().unwrap();
+
+        candidate.listeners.document = candidate.listeners.io;
+        assert!(candidate.validate().is_err());
+        candidate.listeners.document = default_document_listener();
+        candidate
+            .backend_tls
+            .as_mut()
+            .unwrap()
+            .document
+            .as_mut()
+            .unwrap()
+            .allowed_client_uri_sans = vec!["spiffe://filebelt.test/web-api".into()];
+        assert!(candidate.validate().is_err());
+        candidate
+            .backend_tls
+            .as_mut()
+            .unwrap()
+            .document
+            .as_mut()
+            .unwrap()
+            .allowed_client_uri_sans = vec!["spiffe://filebelt.test/api-document".into()];
+        candidate.listeners.document_adapter = candidate.listeners.document;
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
     fn headscale_sync_requires_exact_https_issuer() {
         let mut candidate = config();
         candidate.mounts.enabled = true;
@@ -2003,6 +2519,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            document: None,
+            document_adapter: None,
             vfs: None,
             vfs_management: None,
         });
@@ -2030,6 +2548,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            document: None,
+            document_adapter: None,
             vfs: None,
             vfs_management: None,
         });
@@ -2049,6 +2569,8 @@ mod tests {
             mcp_broker: None,
             controller: None,
             collaboration: None,
+            document: None,
+            document_adapter: None,
             vfs: None,
             vfs_management: None,
         });

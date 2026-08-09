@@ -13,6 +13,7 @@ use filebelt_runtime::{init_telemetry, install_crypto_provider};
 
 mod app;
 mod auth;
+mod documents;
 mod error;
 mod mcp;
 mod mounts;

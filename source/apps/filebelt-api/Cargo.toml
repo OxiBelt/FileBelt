@@ -22,11 +22,13 @@ filebelt-collaboration-protocol.workspace = true
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-domain.workspace = true
+filebelt-document-protocol = { version = "=0.1.0", path = "../../crates/filebelt-document-protocol" }
 filebelt-mcp-policy.workspace = true
 filebelt-mcp-protocol.workspace = true
 filebelt-runtime.workspace = true
 filebelt-storage-protocol.workspace = true
 getrandom.workspace = true
+jiff.workspace = true
 openidconnect.workspace = true
 prost.workspace = true
 reqwest.workspace = true

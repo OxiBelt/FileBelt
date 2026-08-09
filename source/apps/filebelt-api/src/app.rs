@@ -37,6 +37,7 @@ pub(crate) struct AppState {
     pub(crate) capability_signer: Arc<Ed25519KeyPair>,
     pub(crate) public_origin: String,
     pub(crate) mcp: Option<Arc<crate::mcp::McpApiState>>,
+    pub(crate) documents: Option<Arc<crate::documents::DocumentApiState>>,
     pub(crate) mounts: Option<Arc<crate::mounts::MountApiState>>,
     digest_key: [u8; 32],
 }
@@ -97,6 +98,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         .map_err(|_| anyhow!("digest key must contain exactly 32 bytes"))?;
     let public_origin = config.public_origin.origin().ascii_serialization();
     let mcp = crate::mcp::initialize(&config)?;
+    let documents = crate::documents::initialize(&config)?;
     let mounts = crate::mounts::initialize(&config)?;
     let listener = config.listeners.api;
     let state = AppState {
@@ -109,6 +111,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         capability_signer,
         public_origin,
         mcp,
+        documents,
         mounts,
         digest_key,
     };
@@ -239,6 +242,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
             Router::new()
                 .merge(crate::auth::router())
                 .merge(crate::mcp::router())
+                .merge(crate::documents::router())
                 .merge(crate::mounts::router())
                 .merge(crate::resources::router()),
         )
@@ -392,8 +396,9 @@ mod tests {
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
     use base64::Engine as _;
     use filebelt_control_protocol::{
-        Config, DatabaseConfig, DeploymentConfig, DeploymentMode, ExternalSubject, KeyConfig,
-        LimitConfig, ListenerConfig, OidcConfig, StorageConfig, TelemetryConfig, TenantConfig,
+        Config, DatabaseConfig, DeploymentConfig, DeploymentMode, DocumentConfig, ExternalSubject,
+        KeyConfig, LimitConfig, ListenerConfig, OidcConfig, StorageConfig, TelemetryConfig,
+        TenantConfig,
     };
     use openidconnect::AuthType;
     use openidconnect::core::CoreClientAuthMethod;
@@ -480,6 +485,7 @@ mod tests {
             iggy: None,
             mcp: filebelt_control_protocol::McpConfig::default(),
             collaboration: filebelt_control_protocol::CollaborationConfig::default(),
+            documents: DocumentConfig::default(),
             mounts: filebelt_control_protocol::MountConfig::default(),
         };
         validate_public_key(&config, &signer).unwrap();

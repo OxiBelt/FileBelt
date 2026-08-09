@@ -54,6 +54,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
         {{- end }}
+        {{- if and $root.Values.documents.enabled (eq $component "io") }}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $root.Values.documents.integrationNamespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/component: onlyoffice-adapter}
+        {{- end }}
       ports: [{port: {{ $component }}, protocol: TCP}]
 ---
 {{- end }}
@@ -69,7 +75,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: [web, api, io, maintenance{{ if .Values.collaboration.enabled }}, collaboration{{ end }}{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}]
+        values: [web, api, io, maintenance{{ if .Values.collaboration.enabled }}, collaboration{{ end }}{{ if .Values.documents.enabled }}, document{{ end }}{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}]
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -105,6 +111,14 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
       ports: [{port: collaboration-ws, protocol: TCP}]
+    {{- end }}
+    {{- if .Values.documents.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.documents.integrationNamespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/component: onlyoffice-adapter}
+      ports: [{port: {{ .Values.documents.adapterPort }}, protocol: TCP}]
     {{- end }}
     {{- if .Values.networkPolicy.otlp.enabled }}
     - to:
@@ -147,6 +161,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
       ports: [{port: management, protocol: TCP}]
+    {{- end }}
+    {{- if $root.Values.documents.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: document}
+      ports: [{port: document-api, protocol: TCP}]
     {{- end }}
     {{- end }}
     {{- if and (eq $component "maintenance") $root.Values.networkPolicy.iggy.enabled }}

@@ -12,6 +12,7 @@ export const AdapterImagePlanSchemaVersion = 1 as const;
 export const AdapterImageRoles = [
   "filebelt-smb-gateway",
   "filebelt-ftp-ftps-gateway",
+  "filebelt-onlyoffice-adapter",
 ] as const;
 
 export type AdapterImageRole = (typeof AdapterImageRoles)[number];
@@ -20,8 +21,12 @@ export type AdapterImageRole = (typeof AdapterImageRoles)[number];
 export interface AdapterImageEvidence {
   readonly role: AdapterImageRole;
   readonly repository: `ghcr.io/oxibelt/${AdapterImageRole}`;
-  readonly license: "GPL-3.0-or-later";
-  readonly correspondingSource: `https://github.com/OxiBelt/FileBelt/tree/main/adapters/${string}`;
+  readonly license: "AGPL-3.0-only" | "GPL-3.0-or-later";
+  readonly correspondingSource: `https://github.com/OxiBelt/FileBelt/tree/${string}`;
+  /** Present only when an adapter has an approved release-platform contract. */
+  readonly publishPlatforms?: readonly ["linux/amd64", "linux/arm64"];
+  /** RISC-V never joins the published adapter manifest without separate review. */
+  readonly riscv64Policy?: "compile-and-probe-only";
 }
 /* eslint-enable @typescript-eslint/naming-convention */
 
@@ -37,5 +42,13 @@ export const AdapterImagePlan: readonly AdapterImageEvidence[] = [
     repository: "ghcr.io/oxibelt/filebelt-ftp-ftps-gateway",
     license: "GPL-3.0-or-later",
     correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/ftp-ftps",
+  },
+  {
+    role: "filebelt-onlyoffice-adapter",
+    repository: "ghcr.io/oxibelt/filebelt-onlyoffice-adapter",
+    license: "AGPL-3.0-only",
+    correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/0.1.0",
+    publishPlatforms: ["linux/amd64", "linux/arm64"],
+    riscv64Policy: "compile-and-probe-only",
   },
 ] as const;

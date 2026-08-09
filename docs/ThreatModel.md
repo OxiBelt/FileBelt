@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 6 Kubernetes, Mount, MCP, and Markdown Collaboration Threat Model
+# Phase 7 Kubernetes, Document, Mount, MCP, and Markdown Threat Model
 
-- Date: 2026-08-08
+- Date: 2026-08-09
 - Owner: `@PiQuark6046`
 - Scope: repository and image supply chain, OIDC and browser sessions, tenant
   administration, namespace and Virtual ACL, REST and authenticated sharing,
@@ -11,11 +11,14 @@
   collaboration rooms, MCP registrations and vault,
   remote MCP mediation, one-shot curated runners, read-only mount VFS,
   Headscale device synchronization, GPL SMB/explicit-FTPS process boundaries,
+  provider-neutral external document sessions, generation-4 document I/O
+  capabilities, the separately licensed AGPL ONLYOFFICE adapter and launcher,
+  provider callback/JWT processing, output-fetch egress isolation,
   Kubernetes 1.34-1.36,
   NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
 - Excluded: managed-cluster/provider internals, online backup, HA/PITR and
-  numeric production RPO/RTO, the separately governed ONLYOFFICE serving
-  adapter, media, application encryption, mount writes, and any
+  numeric production RPO/RTO, operator-supplied ONLYOFFICE DocumentServer and
+  its database/cluster internals, paid ONLYOFFICE editions, media, application encryption, mount writes, and any
   collaboration codec other than Yjs/Yrs `yjs-v1`
 
 ## Assets and security objectives
@@ -64,6 +67,14 @@
 - Raw mount passwords are one-time or ephemeral, verifier ciphertext is bound
   to a distinct mount-vault context, and the mount signing key cannot mint API
   or collaboration authority. VFS and adapters have no payload mount.
+- External document sessions cannot turn a provider callback or browser launch
+  into ambient FileBelt authority. Input reads, revision writes, finalization,
+  and commits remain exact, short-lived, generation-qualified, fenced, and
+  PostgreSQL-backed; a concurrent head can only create a retained conflict.
+- The AGPL adapter and DocumentServer receive no payload mount, browser session,
+  general database credential, or unrestricted egress. Provider-specific code,
+  JWTs, callback status mapping, editor assets, branding, and network source
+  access remain outside the Apache process and bundle.
 
 ## Trust boundaries and data flow
 
@@ -88,6 +99,12 @@ Headscale API ──TLS/token──> Headscale sync ──atomic device snapshot
 tailnet client ──SMB/explicit FTPS──> GPL gateway ──mTLS/VFS v1──> VFS
                                                                   ├──> PostgreSQL
                                                                   └──fbcap2/mTLS──> I/O worker ──> RWX payload root
+
+browser ──session+CSRF──> API ──mTLS/document v1──> document coordinator
+       └──one-use form POST──> OxiBelt ──mTLS──> AGPL adapter ──provider JWT/config──> DocumentServer
+                                                      ├──mTLS/document v1─────────> coordinator
+                                                      ├──generation-4 fbcap1/mTLS─> I/O worker ──> RWX payload root
+                                                      └──mTLS/exact target────────> output egress gateway ──> DocumentServer
 ```
 
 OxiBelt terminates public TLS. Kubernetes API and I/O backends require TLS 1.3
@@ -122,6 +139,21 @@ Only gateway sidecars receive `NET_ADMIN`, `/dev/net/tun`, and protocol-local
 RWO tailstate. The mount topology is disabled because the Samba IPC and both
 adapter release images lack production acceptance evidence.
 
+The Apache document coordinator owns provider-neutral session, participant,
+revision, and reconciliation state through its narrow PostgreSQL role. It has
+the generation-4 signing key and no payload mount or Internet egress. The AGPL
+adapter owns ONLYOFFICE configuration, status mapping, callback JWT validation,
+and launcher/source surfaces; OxiBelt reaches it with a dedicated exact mTLS
+identity, it can reach Core and capability-limited I/O only with its own exact
+mTLS identities, and it fetches provider output only through the exact-target
+egress gateway.
+DocumentServer is hostile with respect to FileBelt identity and storage. A
+valid provider JWT authenticates a bounded callback but does not authorize a
+FileBelt commit; Core rechecks the initiating API session and Virtual ACL in
+the expected-head transaction. The feature and all routes are disabled by
+default, so Apache FileBelt remains usable when every external component is
+absent.
+
 The production namespace is one trusted FileBelt deployment and tenant.
 Adjacent Pods and compromised public clients are hostile. The Kubernetes
 control plane, cluster and node administrators, CNI, CSI/storage provider,
@@ -144,6 +176,13 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Compromised VFS or gateway reads arbitrary payload paths | No payload mount; VFS can issue read-only `fbcap2` only for an admitted handle; I/O resolves UUID locator through narrow immutable-version state; gateway receives only bytes and generic IDs | Container mount, DB grant, arbitrary-ID, write-operation, and direct-worker denial tests |
 | Adapter falls back to local filesystem or crosses the license boundary | Apache core imports only generic schema; separate GPL workspaces/processes/images/notices/source offers; Samba callbacks return `ENOSYS` until reviewed IPC exists; adapters disabled by default | Cargo boundary, dependency graph, ABI callback, local-fallback, REUSE, notice, source-offer, and image-plan tests |
 | Tailnet sidecar or state expands core Pod authority | Tailscaled exists only beside gateways, kernel networking is explicit, non-privileged sidecar has only `NET_ADMIN` and one `/dev/net/tun`, separate RWO state, no ServiceAccount token, default-deny peers | Rendered securityContext/device/mount/RBAC and NetworkPolicy tests |
+| Provider callback is forged, replayed, reordered, or used for another document | Exact opaque route binding, HS256 algorithm/claim/context validation with separate current and bounded-retiring secret, canonical event digest persisted before acknowledgement, monotonic state/fence checks, and idempotent Core outcome lookup | Bad-algorithm/signature/claim/key, cross-document, duplicate, out-of-order, response-loss, and restart tests |
+| Provider output URL performs SSRF, DNS rebinding, redirect escape, or oversized download | Exact configured HTTPS origin and provider identity; no userinfo/fragment; direct adapter Internet denied; mTLS egress gateway revalidates DNS/IP and TLS target, refuses redirects, and streams under header/time/100 MiB limits | Private/link-local/metadata, IPv4/IPv6, rebinding, redirect, slow/large, CA/SNI, and NetworkPolicy denial tests |
+| Callback overwrites a newer Web, Markdown, mount, or document version | Core locks current authorization/session generations, revision fence, and expected node head in one PostgreSQL transaction; mismatch creates a seven-day retained conflict and never updates the head | Two-writer head race, ACL/session revoke, conflict-copy authorization, retry, and no-overwrite tests |
+| Adapter or DocumentServer reads arbitrary FileBelt content | No browser cookie, payload mount, API signing key, or general DB credential; one-use launch; generation-4 exact-version/range capability; I/O resolves only the signed immutable version and rechecks generations | Cross-tenant/node/version/range, expired/replayed grant, arbitrary-ID, mount, database-grant, and direct-worker tests |
+| Malicious editor script escapes into the Apache SPA, misstates the external provider, or leaks a launch grant | Separate AGPL top-level launcher, fixed operator launch action, Core-issued display-only exact provider HTTPS origin, memory-only one-use form value, host-only Secure/HttpOnly/SameSite=Lax correlation cookie, exact CSP/script and message origins, no FileBelt token in query/referrer/storage | CSP, consent-origin, clickjacking, form-action, postMessage schema/origin, referrer, Web Storage, and cross-tab tests |
+| Community edition limits or license/source obligations are hidden or bypassed | Fixed provider `9.4.0`, 20 active-participant admission under PostgreSQL lock, no clustering claim, retained branding, public exact source/about endpoints, immutable source URL/build instructions/notices, truthful distinct OCI labels | Capacity race, source-link HTTP, branding, REUSE, notice, SBOM/source-map, image-label, and release-gate tests |
+| Document save is acknowledged but lost or duplicated across adapter/Core/I/O crash | Durable event/revision/reconciliation rows precede acknowledgement; UUID allocation and quota reserve are transactional; I/O fsync and digest precede staged state; reconciliation reads terminal committed/no-op/conflict result and never creates a second version | Kill points at callback, allocation, byte write, finalize, commit, and response; duplicate revision and Iggy-down tests |
 | MCP OAuth callback is mixed up, replayed, or used for another server | Ten-minute one-shot server-held attempt bound to user, session, registration, credential generation, issuer, exact callback and local return path; every credential/config change erases pending attempts; PKCE/state and resource/audience binding; no token passthrough | MCP OAuth fixture, generation change, mix-up, expiry, replay, and audience tests |
 | MCP credential is exposed to the API, browser, logs, or another registration | Separate vault schema and broker role; AES-256-GCM envelope with context-bound AAD and KEK generation; write-only UI; configuration PATCH is broker-mediated cryptographic erasure through one narrow definer function | Database privilege, direct-config denial, vault context-swap, browser-storage, redaction, and deletion tests |
 | Remote endpoint performs SSRF, DNS rebinding, or trust-profile escape | Broker has no direct Internet path; mTLS gateway receives exact target origin/profile and enforces host, CIDR, port, CA, redirect, and resolved-address policy on every connection | Gateway redirect/rebinding/private-address and NetworkPolicy denial tests |
@@ -255,6 +294,14 @@ this revision: the SMB gateway has no reviewed Samba authentication/session IPC
 path, neither adapter has qualified release-image evidence, and the FTPS bridge
 has no live VFS/certificate end-to-end result. These are explicit delivery
 gates, not risks accepted by enabling the current preview.
+The ONLYOFFICE topology is likewise disabled by default. Its provider is an
+operator-supplied AGPL network service with its own parser/rendering attack
+surface, availability, database, branding, source-delivery, and 20-connection
+Community limit. Exact-target egress, process separation, capability fencing,
+and expected-head commits reduce FileBelt impact but cannot make provider
+content or the provider process trustworthy. Operators must not enable the
+route until the adapter source/SBOM/provenance, real or contract-faithful
+browser/callback tests, and live NetworkPolicy/mTLS denial evidence pass.
 Dependency scans, attestations, and signed source mappings reduce known
 supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so

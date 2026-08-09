@@ -10,6 +10,7 @@ export type RouteId =
   | "versions"
   | "shares"
   | "sessions"
+  | "documents"
   | "privacy"
   | "mcp"
   | "mounts"
@@ -20,6 +21,8 @@ export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";
 export type MarkdownEligibility = "editable" | "ineligible" | "viewable";
 
 export interface FileEntry {
+  /** Available only from the generated node projection; never treated as authorization. */
+  DriveId?: string;
   HeadVersionId: string | null;
   Id: string;
   Kind: EntryKind;

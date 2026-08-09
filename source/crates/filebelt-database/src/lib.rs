@@ -5,6 +5,7 @@
 #![deny(unsafe_code)]
 
 pub mod collaboration;
+pub mod document;
 pub mod mcp;
 pub mod mount;
 
@@ -2751,7 +2752,12 @@ async fn lock_collaboration_authorization_fence(
 }
 
 fn share_preset_actions(preset: &str) -> Result<&'static [&'static str], DatabaseError> {
-    const VIEWER: &[&str] = &["READ_METADATA", "LIST_CHILDREN", "READ_CONTENT"];
+    const VIEWER: &[&str] = &[
+        "READ_METADATA",
+        "LIST_CHILDREN",
+        "READ_CONTENT",
+        "USE_EXTERNAL_EDITOR",
+    ];
     const CONTRIBUTOR: &[&str] = &[
         "READ_METADATA",
         "LIST_CHILDREN",
@@ -2759,6 +2765,14 @@ fn share_preset_actions(preset: &str) -> Result<&'static [&'static str], Databas
         "CREATE_CHILD",
         "WRITE_CONTENT",
         "CREATE_VERSION",
+        "RENAME",
+        "MOVE",
+        "DELETE",
+        "RESTORE",
+        "SET_ATTRIBUTES",
+        "USE_EXTERNAL_EDITOR",
+        "COMMENT",
+        "REVIEW",
     ];
     const MANAGER: &[&str] = &[
         "READ_METADATA",
@@ -2774,6 +2788,9 @@ fn share_preset_actions(preset: &str) -> Result<&'static [&'static str], Databas
         "SET_ATTRIBUTES",
         "SHARE",
         "MANAGE_ACL",
+        "USE_EXTERNAL_EDITOR",
+        "COMMENT",
+        "REVIEW",
     ];
     match preset {
         "viewer" => Ok(VIEWER),

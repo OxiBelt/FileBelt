@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+
+global:
+  registry: ghcr.io
+  registryMirror: ""
+  runAsUser: 10001
+  runAsGroup: 10001
+
+# The chart never creates this namespace. Install it with --namespace equal to
+# this value after the operator has created and labeled the namespace.
+integrationNamespace: filebelt-integrations
+coreNamespace: filebelt-core
+
+image:
+  repository: oxibelt/filebelt-onlyoffice-adapter
+  registryMirror: ""
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  license: AGPL-3.0-only
+  correspondingSource: https://github.com/OxiBelt/FileBelt/tree/0.1.0
+
+providerConfig:
+  existingConfigMap: filebelt-onlyoffice-provider-config
+  key: provider.toml
+  file: /etc/filebelt-onlyoffice/provider/provider.toml
+  generation: "1"
+
+# These are references to pre-created, narrow-purpose Secret keys. The chart
+# emits no Secret and never accepts a FileBelt database credential or payload
+# volume. Rotation creates a new Secret generation and rolls the workload.
+secrets:
+  browserJwt: {name: filebelt-onlyoffice-browser-jwt, key: current, generation: "1"}
+  # Set retiringKey only during the bounded verifier-key overlap.
+  outboxJwt: {name: filebelt-onlyoffice-outbox-jwt, currentKey: current, retiringKey: "", generation: "1"}
+  serverTls: {name: filebelt-onlyoffice-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  coreClientTls: {name: filebelt-onlyoffice-core-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  ioClientTls: {name: filebelt-onlyoffice-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  egressClientTls: {name: filebelt-onlyoffice-egress-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+
+workload:
+  replicas: 2
+  terminationGracePeriodSeconds: 90
+  resources:
+    requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 256Mi}
+    limits: {cpu: "1", memory: 1Gi, ephemeral-storage: 512Mi}
+
+service:
+  port: 8089
+
+networkPolicy:
+  oxibeltIngress:
+    from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: oxibelt-system}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: oxibelt}}
+  dns:
+    to:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+        podSelector: {matchLabels: {k8s-app: kube-dns}}
+  core:
+    port: 8090
+    to:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-core}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/component: document}}
+  io:
+    port: 8081
+    to:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-core}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/component: worker-io}}
+  egressGateway:
+    port: 8443
+    to:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-egress}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice-egress}}
+  otlp:
+    enabled: false
+    port: 4318
+    to: []

@@ -129,8 +129,8 @@ struct DriveResponse {
     reserved_bytes: i64,
 }
 
-#[derive(Debug, Serialize)]
-struct NodeResponse {
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct NodeResponse {
     id: Uuid,
     drive_id: Uuid,
     parent_id: Option<Uuid>,
@@ -295,7 +295,7 @@ struct DownloadGrantResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct VersionResponse {
+pub(crate) struct VersionResponse {
     id: Uuid,
     node_id: Uuid,
     ordinal: i64,
@@ -309,7 +309,7 @@ struct VersionResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct VersionProvenanceResponse {
+pub(crate) struct VersionProvenanceResponse {
     origin: String,
     source_version_id: Option<Uuid>,
     creator_display_name: String,
@@ -2457,6 +2457,7 @@ fn share_preset_delegated_actions(preset: SharePreset) -> &'static [Action] {
         Action::ReadMetadata,
         Action::ListChildren,
         Action::ReadContent,
+        Action::UseExternalEditor,
     ];
     const CONTRIBUTOR: &[Action] = &[
         Action::ReadMetadata,
@@ -2470,6 +2471,9 @@ fn share_preset_delegated_actions(preset: SharePreset) -> &'static [Action] {
         Action::Delete,
         Action::Restore,
         Action::SetAttributes,
+        Action::UseExternalEditor,
+        Action::Comment,
+        Action::Review,
     ];
     const MANAGER: &[Action] = &[
         Action::ReadMetadata,
@@ -2483,7 +2487,11 @@ fn share_preset_delegated_actions(preset: SharePreset) -> &'static [Action] {
         Action::Delete,
         Action::Restore,
         Action::SetAttributes,
+        Action::Share,
         Action::ManageAcl,
+        Action::UseExternalEditor,
+        Action::Comment,
+        Action::Review,
     ];
     match preset {
         SharePreset::Viewer => VIEWER,
@@ -3147,13 +3155,18 @@ mod tests {
             &[
                 Action::ReadMetadata,
                 Action::ListChildren,
-                Action::ReadContent
+                Action::ReadContent,
+                Action::UseExternalEditor,
             ]
         );
         let contributor = share_preset_delegated_actions(SharePreset::Contributor);
         assert!(contributor.contains(&Action::CreateVersion));
         assert!(contributor.contains(&Action::Restore));
+        assert!(contributor.contains(&Action::UseExternalEditor));
+        assert!(contributor.contains(&Action::Comment));
+        assert!(contributor.contains(&Action::Review));
         let manager = share_preset_delegated_actions(SharePreset::Manager);
+        assert!(manager.contains(&Action::Share));
         assert!(manager.contains(&Action::ManageAcl));
         assert!(!manager.contains(&Action::ManageDrive));
     }

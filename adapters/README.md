@@ -6,11 +6,12 @@ Adapters are optional public integrations, not paid features. Each adapter is
 a separate license, build, process, image, and source-distribution region. The
 root Apache workspaces must never absorb adapter implementation code.
 
-The adapter directories are currently reserved and contain no implementation.
 Adapters remain outside the root Cargo and pnpm workspaces and may consume only
 Apache protocol schemas or clients through a documented, replaceable process
-boundary. No adapter may import another adapter's implementation or become the
-only usable path for an Apache core capability.
+boundary. The SMB and FTP/FTPS regions are guarded previews, while ONLYOFFICE
+contains a non-publishable implementation scaffold whose image inputs and
+release evidence remain gated. No adapter may import another adapter's
+implementation or become the only usable path for an Apache core capability.
 
 Before adding source, a dependency or build manifest, generated output, a
 Dockerfile, or an image, complete the same-pull-request design and license

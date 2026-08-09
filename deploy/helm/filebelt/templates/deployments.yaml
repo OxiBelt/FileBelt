@@ -30,6 +30,9 @@ spec:
         {{- if .Values.collaboration.enabled }}
         checksum/collaboration-edge-client-tls: {{ .Values.secrets.collaborationEdgeClientTls.generation | sha256sum | quote }}
         {{- end }}
+        {{- if .Values.documents.enabled }}
+        checksum/onlyoffice-edge-client-tls: {{ .Values.secrets.onlyofficeEdgeClientTls.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-web
       automountServiceAccountToken: false
@@ -90,6 +93,9 @@ spec:
             {{- if .Values.collaboration.enabled }}
             - {name: collaboration-edge-client-tls, mountPath: /run/secrets/collaboration-edge-client-tls, readOnly: true}
             {{- end }}
+            {{- if .Values.documents.enabled }}
+            - {name: onlyoffice-edge-client-tls, mountPath: /run/secrets/onlyoffice-edge-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: oxibelt-config
@@ -130,6 +136,16 @@ spec:
               - {key: {{ .Values.secrets.collaborationEdgeClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.collaborationEdgeClientTls.caKey }}, path: server-ca.crt}
         {{- end }}
+        {{- if .Values.documents.enabled }}
+        - name: onlyoffice-edge-client-tls
+          secret:
+            secretName: {{ .Values.secrets.onlyofficeEdgeClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.onlyofficeEdgeClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.onlyofficeEdgeClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.onlyofficeEdgeClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---
 {{- $quiescedReplicas = ternary 0 .Values.workloads.api.replicas .Values.deployment.quiesced }}
@@ -161,6 +177,9 @@ spec:
         {{- end }}
         {{- if .Values.mounts.enabled }}
         checksum/vfs-management-client-tls: {{ .Values.secrets.vfsManagementClientTls.generation | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.documents.enabled }}
+        checksum/document-client-tls: {{ .Values.secrets.apiDocumentClientTls.generation | sha256sum | quote }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-api
@@ -212,6 +231,9 @@ spec:
             {{- if .Values.mounts.enabled }}
             - {name: vfs-management-client-tls, mountPath: /run/secrets/vfs-management-client-tls, readOnly: true}
             {{- end }}
+            {{- if .Values.documents.enabled }}
+            - {name: document-api-client-tls, mountPath: /run/secrets/document-api-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
@@ -254,6 +276,16 @@ spec:
               - {key: {{ .Values.secrets.vfsManagementClientTls.certificateKey }}, path: tls.crt}
               - {key: {{ .Values.secrets.vfsManagementClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.vfsManagementClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
+        {{- if .Values.documents.enabled }}
+        - name: document-api-client-tls
+          secret:
+            secretName: {{ .Values.secrets.apiDocumentClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.apiDocumentClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.apiDocumentClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.apiDocumentClientTls.caKey }}, path: server-ca.crt}
         {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---

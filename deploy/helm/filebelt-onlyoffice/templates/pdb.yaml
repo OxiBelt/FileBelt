@@ -1,0 +1,11 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt-onlyoffice.name" . }}
+  labels:
+{{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}

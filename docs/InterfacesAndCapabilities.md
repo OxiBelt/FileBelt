@@ -206,6 +206,85 @@ that transfers a dedicated `MessageChannel` port to the opaque child. All AST
 and link messages use that port, are bounded and typed, and the child
 recursively validates the complete AST before rendering it.
 
+## Provider-neutral document contracts
+
+The Apache control plane exposes provider-neutral document sessions in the
+committed OpenAPI contract. An authenticated user may create a session for one
+exact current DOCX, XLSX, or PPTX version, list and revoke their own sessions,
+and inspect conflict state. A fixed drive owner or `MANAGE_ACL` principal may
+list or force-close all sessions for a node. Creation and own-session detail
+return session metadata and the exact non-secret operator-configured external
+provider HTTPS origin for pre-launch consent; they return no launch value. A
+separate non-idempotent handoff request, issued only after that consent,
+returns one no-store, one-use launch value that is submitted by same-origin
+form POST; neither the launch value nor a FileBelt browser credential appears
+in a URL, idempotency record, browser store, or provider JavaScript state.
+
+The generic `filebelt.document.v1` Protobuf contract is the replaceable process
+boundary between API, the Apache document coordinator, and provider adapters.
+It carries FileBelt UUIDs, stable modes/states/errors, exact generations,
+opaque one-use launch values, revision digests, and typed commit outcomes. It
+does not carry ONLYOFFICE status numbers, editor configuration objects,
+callback URLs, browser-library types, PostgreSQL rows, or payload locators.
+The coordinator accepts this contract on two private TLS 1.3 mutual-TLS
+listeners. Port 8089 admits only API create/query/revoke/close/copy/handoff
+commands; port 8090 admits only adapter launch redemption, source refresh,
+callback receipt, revision allocation, and commit commands. Independent
+certificate and client-identity allowlists prevent either peer from invoking
+the other peer's commands.
+
+Document byte access extends `fbcap1` with three operations whose signing key
+generation is 4: exact immutable document-version read, one whole-payload
+revision write, and revision finalization. Claims bind tenant, initiating
+principal and API session, document session/participant, node, immutable base
+version or allocated revision and payload, all authorization generations,
+session fence, byte range/maximum size, nonce, and a lifetime no longer than 60
+seconds. The document coordinator has no payload mount; the I/O worker resolves
+UUID locators only after capability admission and rechecks authorization at
+most every 60 seconds. A provider and its adapter never receive a general
+upload/download capability or database credential.
+
+The first provider mapping is isolated under `adapters/onlyoffice/` and pins
+ONLYOFFICE Docs Community `9.4.0`. It accepts only the documented callback
+statuses `1`, `2`, `3`, `4`, `6`, and `7`; force-save types map `0` to command,
+`1` to explicit user save, `2` to timer checkpoint, and `3` to form submission.
+Provider callbacks require an exact route/session binding and HS256 JWT with a
+separate current provider-outbox verification secret; browser configuration is
+signed with an independent secret. A retiring outbox secret may overlap for at
+most 30 minutes. Status `1` carries one authenticated connect or disconnect
+activity. Disconnect and close-without-changes callbacks leave a bounded
+100-second reconnect window, after which maintenance closes the participant
+and an otherwise-empty session. Only statuses `2` and `6` fetch provider
+output. The adapter sends a canonical digest of document key, status, activity,
+force-save type, provider event identity, revision, and validated output
+identity to the durable Core callback-receipt command before initiating any
+output fetch. Duplicate receipt returns the same revision. After the exact
+length is known, allocation retry returns the same payload; write, finalize,
+and commit use that revision's scoped capabilities and durable outcome, so
+duplicate, reordered, restart, and response-loss delivery cannot create a
+second version.
+
+An output URL is hostile input even after a valid provider JWT. It must use
+HTTPS at the single configured DocumentServer origin, contain no userinfo or
+fragment, survive strict DNS/IP policy, and be fetched only through the
+operator's mTLS egress gateway with redirects disabled, bounded headers and
+timeouts, and a 100 MiB streaming ceiling. DOCX, XLSX, and PPTX are the only
+admitted input/output media types. Timer force-saves are retained as one
+superseding 24-hour checkpoint; user/form/final saves enter durable
+reconciliation and expected-head commit. A conflict is terminal and
+user-visible, with produced bytes retained for seven days; it is never an
+implicit overwrite.
+
+The Apache web shell owns only provider-neutral consent, session activity,
+conflict, and source-link surfaces. It opens a separate AGPL launcher route;
+ONLYOFFICE `api.js` is loaded at runtime from the configured DocumentServer and
+is not copied into the Apache bundle. The launch tab uses no Web Storage,
+validates any cross-origin messages against the exact provider origin and
+schema, and cannot call generic FileBelt APIs with a provider credential.
+`GET /onlyoffice/source` and `/onlyoffice/about` remain accessible to network
+users and report the adapter version, revision, license, immutable
+corresponding-source URL, build instructions, provider version, and notices.
+
 ## MCP mediation contracts
 
 The public MCP workflow is intent-first. `POST /api/v1/mcp/invocation-intents`

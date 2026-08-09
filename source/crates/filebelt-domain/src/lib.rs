@@ -173,6 +173,8 @@ pub enum Action {
     ManageDrive,
     Transcode,
     UseExternalEditor,
+    Comment,
+    Review,
     UseMcp,
     Mount,
     Export,
@@ -180,7 +182,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in stable policy ordering.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::ReadMetadata,
         Self::ListChildren,
         Self::ReadContent,
@@ -197,6 +199,8 @@ impl Action {
         Self::ManageDrive,
         Self::Transcode,
         Self::UseExternalEditor,
+        Self::Comment,
+        Self::Review,
         Self::UseMcp,
         Self::Mount,
         Self::Export,
@@ -222,6 +226,8 @@ impl Action {
             Self::ManageDrive => "MANAGE_DRIVE",
             Self::Transcode => "TRANSCODE",
             Self::UseExternalEditor => "USE_EXTERNAL_EDITOR",
+            Self::Comment => "COMMENT",
+            Self::Review => "REVIEW",
             Self::UseMcp => "USE_MCP",
             Self::Mount => "MOUNT",
             Self::Export => "EXPORT",
@@ -955,5 +961,16 @@ mod tests {
                 "duplicate action name {name}"
             );
         }
+    }
+
+    #[test]
+    fn document_actions_are_stably_serialized() {
+        assert_eq!(Action::UseExternalEditor.as_str(), "USE_EXTERNAL_EDITOR");
+        assert_eq!(Action::Comment.as_str(), "COMMENT");
+        assert_eq!(Action::Review.as_str(), "REVIEW");
+        assert_eq!(
+            &Action::ALL[15..18],
+            &[Action::UseExternalEditor, Action::Comment, Action::Review]
+        );
     }
 }

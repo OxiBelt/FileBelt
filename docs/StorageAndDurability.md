@@ -47,6 +47,13 @@ authoritative for every mount fence and lock. Neither a Headscale response,
 gateway cache, adapter process, nor tailstate volume can reconstruct or replace
 that state.
 
+Migration `000006_phase7_documents.sql` adds provider-neutral external-document
+sessions, participants, one-use launch-grant digests, staged revisions,
+contributors, reconciliation leases, bounded event metadata, and an idempotent
+preset-expansion marker. PostgreSQL is authoritative for callback idempotency,
+expected-head conflicts, and commit outcomes; provider callbacks, adapter
+memory, and Iggy delivery cannot reconstruct or replace that state.
+
 Logical identifiers and physical storage locators are independently generated
 UUIDv4 values. Public UUID strings use canonical lowercase form. Composite
 keys and foreign keys carry tenant and drive boundaries. A transactional
@@ -276,6 +283,64 @@ reservation. A committed payload remains charged until its final reference is
 purged and physical deletion succeeds. The defaults are 1 TiB for a private
 drive and 10 TiB for a shared drive; tenant-admin overrides remain bounded by
 operator configuration.
+
+## Document-session durability and reconciliation
+
+Forward migration `000006_phase7_documents.sql` adds the provider-neutral
+`filebelt_document` schema and the `document_session` principal kind. Sessions
+bind provider, node, exact base and expected-head versions, a monotonically
+increasing fence, 24-hour absolute expiry, and 100-second reconnect window.
+Participants bind one initiating principal and API session to a mode and the
+four authorization generations. One-use launch values are stored only as
+32-byte BLAKE3 digests and expire within 60 seconds.
+
+Each provider save event has one immutable canonical digest and one revision
+row. The row moves through `received`, `staging`, `staged`, `committing`, and a
+terminal `checkpoint`, `committed`, `no_op`, `conflict`, `rejected`, or
+`failed` result. Payload allocation and drive reservation are transactional.
+The I/O worker writes only the allocated whole-payload UUID, recomputes BLAKE3,
+fsyncs bytes and directory metadata, and records finalization before the
+document service can queue a commit. A response lost at any boundary is
+recovered by reading the row, never by allocating another revision.
+
+Non-checkpoint staged revisions create one PostgreSQL reconciliation job. A
+worker leases it with PostgreSQL time, an attempt bound, and a fencing token.
+It re-locks the participant API session, all four authorization generations,
+document session, revision, and current node head in the same transaction that
+either inserts one immutable `external_document` file version or records the
+terminal conflict. If the finalized bytes match the current head's BLAKE3 and
+length, the operation is an idempotent no-op. A successful commit changes the
+payload from finalized to referenced, transfers reservation to physical usage,
+advances the node head, records contributors and audit/outbox rows, and freezes
+other document sessions and an active Markdown room for the old head.
+
+A current-head mismatch never overwrites or merges. The revision and staged
+payload move to `conflict` and are retained for seven days for the explicit
+conflict-copy workflow. At most one timer checkpoint per session is retained
+for 24 hours; a newer checkpoint makes the older one reclaimable. Expired
+checkpoint/conflict outputs become payload deletion intent and release their
+drive reservation only while still unreferenced; committed and conflict-copy
+payloads remain referenced and are never retention-deleted. Session events are
+purged after 30 days, launch grants after consumption or expiry, and API
+create-operation receipts after their fixed 24-hour replay window. Normal
+audit retention remains unchanged. Maintenance performs each transition in
+bounded locked batches.
+
+The migration also expands built-in ACL presets with `COMMENT` and `REVIEW`.
+It replaces row-level ACL capability invalidation with statement-level
+transition-table triggers so a multi-action preset expansion advances each
+affected drive/resource generation once. The data migration is idempotently
+recorded in `filebelt_document.data_migrations`; no existing content, version,
+or ACL row is deleted or rewritten.
+
+Backups include document sessions, participants, revision/contributor state,
+reconciliation jobs, retained output deadlines, payload references, and
+capability key generation 4. Restore leaves document admission disabled,
+expires all restored active sessions and launch grants, advances their fences,
+reconciles staged/committing rows against immutable versions, verifies every
+referenced payload digest, and only then permits new sessions. Rolling back the
+application keeps migration 000006 and its additive data. An older binary may
+run only with document admission disabled; the migration is never reversed.
 
 ## Payload layout and write durability
 

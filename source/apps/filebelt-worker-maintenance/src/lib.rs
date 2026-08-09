@@ -60,6 +60,16 @@ pub struct ReconcileReport {
     pub collaboration_epochs_expired: u64,
     pub collaboration_payload_deletions_enqueued: u64,
     pub collaboration_objects_abandoned: u64,
+    pub document_received_revisions_abandoned: u64,
+    pub document_staging_revisions_abandoned: u64,
+    pub document_terminal_revisions_released: u64,
+    pub document_payload_deletions_enqueued: u64,
+    pub document_launch_grants_purged: u64,
+    pub document_session_events_purged: u64,
+    pub document_operation_receipts_purged: u64,
+    pub document_staging_locators_removed: u64,
+    pub document_disconnected_participants_closed: u64,
+    pub document_draining_sessions_expired: u64,
 }
 
 #[derive(Debug, Error)]
@@ -131,6 +141,15 @@ impl Maintenance {
             .database
             .collaboration_retention_sweep(self.tenant_id, RECONCILE_BATCH_SIZE)
             .await?;
+        let document_retention = self
+            .database
+            .document_revision_retention_sweep(self.tenant_id, RECONCILE_BATCH_SIZE)
+            .await?;
+        let document_reconnect = self
+            .database
+            .document_reconnect_sweep(self.tenant_id, RECONCILE_BATCH_SIZE)
+            .await?;
+        let document_staging_locators_removed = self.cleanup_document_finalized_staging().await?;
         Ok(ReconcileReport {
             reopened_finalizations,
             expired_uploads,
@@ -147,6 +166,16 @@ impl Maintenance {
             collaboration_payload_deletions_enqueued: collaboration_retention
                 .payload_deletions_enqueued,
             collaboration_objects_abandoned: collaboration_retention.objects_abandoned,
+            document_received_revisions_abandoned: document_retention.received_abandoned,
+            document_staging_revisions_abandoned: document_retention.staging_abandoned,
+            document_terminal_revisions_released: document_retention.terminal_revisions_released,
+            document_payload_deletions_enqueued: document_retention.payload_deletions_enqueued,
+            document_launch_grants_purged: document_retention.launch_grants_purged,
+            document_session_events_purged: document_retention.session_events_purged,
+            document_operation_receipts_purged: document_retention.operation_receipts_purged,
+            document_staging_locators_removed,
+            document_disconnected_participants_closed: document_reconnect.participants_closed,
+            document_draining_sessions_expired: document_reconnect.sessions_expired,
         })
     }
 
@@ -277,6 +306,10 @@ impl Maintenance {
                 .execute(self.database.pool())
                 .await?;
         }
+        let document_payload = self
+            .database
+            .document_payload_deletion_pending(job.tenant_id, payload_id)
+            .await?;
         let storage = self.storage.clone();
         let payload_for_delete = payload.clone();
         let upload = match self
@@ -294,6 +327,12 @@ impl Maintenance {
                 })
                 .await
                 .map_err(|_| StorageError::Join)??;
+                if document_payload {
+                    self.database
+                        .complete_document_payload_deletion(job.tenant_id, payload_id)
+                        .await?;
+                    return Ok(JobDisposition::Complete("document_payload_deleted"));
+                }
                 self.database
                     .complete_collaboration_payload_deletion(job.tenant_id, payload_id)
                     .await?;
@@ -434,7 +473,7 @@ impl Maintenance {
 
     async fn enqueue_finalized_orphans(&self) -> Result<u64, MaintenanceError> {
         let mut transaction = self.database.pool().begin().await?;
-        let rows = sqlx::query("UPDATE payload_objects SET state='delete_intent',deletion_intent_at=clock_timestamp() WHERE (tenant_id,id) IN (SELECT tenant_id,id FROM payload_objects WHERE tenant_id=$2 AND backend_id=$3 AND state='finalized' AND finalized_at<=clock_timestamp()-make_interval(secs=>$1) ORDER BY finalized_at FOR UPDATE SKIP LOCKED LIMIT 100) RETURNING tenant_id,id")
+        let rows = sqlx::query("UPDATE payload_objects SET state='delete_intent',deletion_intent_at=clock_timestamp() WHERE (tenant_id,id) IN (SELECT p.tenant_id,p.id FROM payload_objects p WHERE p.tenant_id=$2 AND p.backend_id=$3 AND p.state='finalized' AND p.finalized_at<=clock_timestamp()-make_interval(secs=>$1) AND NOT EXISTS (SELECT 1 FROM filebelt_document.revisions r WHERE r.tenant_id=p.tenant_id AND r.payload_id=p.id) ORDER BY p.finalized_at FOR UPDATE SKIP LOCKED LIMIT 100) RETURNING tenant_id,id")
             .bind(self.orphan_grace_seconds)
             .bind(self.tenant_id)
             .bind(self.backend_id)
@@ -545,6 +584,26 @@ impl Maintenance {
             self.database
                 .mark_upload_staging_cleaned(self.tenant_id, upload_id)
                 .await?;
+            cleaned += 1;
+        }
+        Ok(cleaned)
+    }
+
+    async fn cleanup_document_finalized_staging(&self) -> Result<u64, MaintenanceError> {
+        let locators = self
+            .database
+            .document_finalized_staging_locators(
+                self.tenant_id,
+                self.backend_id,
+                RECONCILE_BATCH_SIZE,
+            )
+            .await?;
+        let mut cleaned = 0_u64;
+        for locator in locators {
+            let storage = self.storage.clone();
+            tokio::task::spawn_blocking(move || storage.remove_staging_locator(locator))
+                .await
+                .map_err(|_| StorageError::Join)??;
             cleaned += 1;
         }
         Ok(cleaned)
@@ -754,6 +813,55 @@ mod tests {
         assert!(deletion.contains("storage.delete_payload(&payload_for_delete)?"));
         assert!(deletion.contains("storage.remove_staging_locator(payload_for_delete.locator)"));
         assert!(deletion.contains("complete_collaboration_payload_deletion"));
+    }
+
+    #[test]
+    fn document_revision_reconciliation_preserves_final_bytes_and_cleans_links() {
+        let source = include_str!("lib.rs");
+        let reconcile = source
+            .split_once("pub async fn reconcile")
+            .expect("reconcile exists")
+            .1
+            .split_once("pub async fn run_one_job")
+            .expect("job loop follows reconcile")
+            .0;
+        assert!(reconcile.contains("document_revision_retention_sweep"));
+        assert!(reconcile.contains("cleanup_document_finalized_staging"));
+        assert!(reconcile.contains("document_operation_receipts_purged"));
+        assert!(reconcile.contains("document_terminal_revisions_released"));
+
+        let orphan = source
+            .split_once("async fn enqueue_finalized_orphans")
+            .expect("orphan sweep exists")
+            .1
+            .split_once("async fn enqueue_scrub_jobs")
+            .expect("scrub sweep follows orphan sweep")
+            .0;
+        assert!(orphan.contains("NOT EXISTS (SELECT 1 FROM filebelt_document.revisions"));
+
+        let cleanup = source
+            .split_once("async fn cleanup_document_finalized_staging")
+            .expect("document staging cleanup exists")
+            .1
+            .split_once("}\n}")
+            .expect("maintenance implementation closes")
+            .0;
+        assert!(cleanup.contains("document_finalized_staging_locators"));
+        assert!(cleanup.contains("storage.remove_staging_locator(locator)"));
+    }
+
+    #[test]
+    fn document_payload_jobs_use_the_document_terminal_transition() {
+        let source = include_str!("lib.rs");
+        let deletion = source
+            .split_once("async fn delete_payload")
+            .expect("payload deletion exists")
+            .1
+            .split_once("async fn scrub_payload")
+            .expect("scrubbing follows deletion")
+            .0;
+        assert!(deletion.contains("document_payload_deletion_pending"));
+        assert!(deletion.contains("complete_document_payload_deletion"));
     }
 
     #[test]

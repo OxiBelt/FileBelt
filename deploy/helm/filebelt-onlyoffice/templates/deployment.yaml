@@ -1,0 +1,90 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filebelt-onlyoffice.name" . }}
+  labels:
+{{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.workload.replicas }}
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  revisionHistoryLimit: 5
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt-onlyoffice.labels" . | indent 8 }}
+      annotations:
+        checksum/provider-config: {{ printf "%s:%s:%s" .Values.providerConfig.existingConfigMap .Values.providerConfig.key .Values.providerConfig.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s" .Values.secrets.browserJwt.generation .Values.secrets.outboxJwt.generation .Values.secrets.serverTls.generation .Values.secrets.coreClientTls.generation .Values.secrets.ioClientTls.generation .Values.secrets.egressClientTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt-onlyoffice.name" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workload.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt-onlyoffice.podSecurityContext" . | indent 8 }}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}}}
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}
+      containers:
+        - name: onlyoffice-adapter
+          image: {{ include "filebelt-onlyoffice.image" . }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", {{ .Values.providerConfig.file | quote }}]
+          ports:
+            - {name: https, containerPort: {{ .Values.service.port }}, protocol: TCP}
+            # This low-information listener is deliberately absent from the
+            # Service because kubelet probes cannot present OxiBelt's mTLS ID.
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          securityContext:
+{{ include "filebelt-onlyoffice.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.workload.resources | indent 12 }}
+          startupProbe: {httpGet: {path: /health/live, port: operations, scheme: HTTP}, failureThreshold: 30, periodSeconds: 2, timeoutSeconds: 1}
+          livenessProbe: {httpGet: {path: /health/live, port: operations, scheme: HTTP}, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 1, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations, scheme: HTTP}, initialDelaySeconds: 2, periodSeconds: 5, timeoutSeconds: 1, failureThreshold: 3}
+          volumeMounts:
+            - {name: provider-config, mountPath: /etc/filebelt-onlyoffice/provider, readOnly: true}
+            - {name: browser-jwt, mountPath: /run/secrets/browser-jwt, readOnly: true}
+            - {name: outbox-jwt, mountPath: /run/secrets/outbox-jwt, readOnly: true}
+            - {name: server-tls, mountPath: /run/secrets/server-tls, readOnly: true}
+            - {name: core-client-tls, mountPath: /run/secrets/core-client-tls, readOnly: true}
+            - {name: io-client-tls, mountPath: /run/secrets/io-client-tls, readOnly: true}
+            - {name: egress-client-tls, mountPath: /run/secrets/egress-client-tls, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: provider-config
+          configMap: {name: {{ .Values.providerConfig.existingConfigMap }}, defaultMode: 0444, items: [{key: {{ .Values.providerConfig.key }}, path: provider.toml}]}
+        - name: browser-jwt
+          secret: {secretName: {{ .Values.secrets.browserJwt.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.browserJwt.key }}, path: current}]}
+        - name: outbox-jwt
+          secret:
+            secretName: {{ .Values.secrets.outboxJwt.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.outboxJwt.currentKey }}, path: current}
+              {{- if .Values.secrets.outboxJwt.retiringKey }}
+              - {key: {{ .Values.secrets.outboxJwt.retiringKey }}, path: retiring}
+              {{- end }}
+        - name: server-tls
+          secret: {secretName: {{ .Values.secrets.serverTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.serverTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.serverTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.serverTls.caKey }}, path: client-ca.crt}]}
+        - name: core-client-tls
+          secret: {secretName: {{ .Values.secrets.coreClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.coreClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.coreClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.coreClientTls.caKey }}, path: server-ca.crt}]}
+        - name: io-client-tls
+          secret: {secretName: {{ .Values.secrets.ioClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.ioClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.ioClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.ioClientTls.caKey }}, path: server-ca.crt}]}
+        - name: egress-client-tls
+          secret: {secretName: {{ .Values.secrets.egressClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.egressClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.egressClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.egressClientTls.caKey }}, path: server-ca.crt}]}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 256Mi}

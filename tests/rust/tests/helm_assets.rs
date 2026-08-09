@@ -6,7 +6,7 @@ use std::fs;
 use filebelt_repository_tests::repository_root;
 
 #[test]
-fn phase6_chart_has_the_production_assets_and_exact_role_contract() {
+fn production_chart_has_the_role_and_disabled_document_contract() {
     let root = repository_root();
     let chart = root.join("deploy/helm/filebelt");
     let metadata = fs::read_to_string(chart.join("Chart.yaml")).expect("chart metadata");
@@ -38,6 +38,7 @@ fn phase6_chart_has_the_production_assets_and_exact_role_contract() {
             "collaboration-deployment.yaml",
             "configmaps.yaml",
             "deployments.yaml",
+            "documents.yaml",
             "monitoring.yaml",
             "mcp-deployments.yaml",
             "mcp-rbac.yaml",
@@ -66,6 +67,7 @@ fn phase6_chart_has_the_production_assets_and_exact_role_contract() {
         "filebelt-mcp-runner",
         "filebelt-vfs",
         "filebelt-headscale-sync",
+        "filebelt-document",
         "filebelt-smb-gateway",
         "filebelt-ftp-ftps-gateway",
         "tailscaled",
@@ -106,7 +108,106 @@ fn phase6_chart_has_the_production_assets_and_exact_role_contract() {
     );
     assert!(values.contains("    namespace: filebelt-mcp-runners"));
     assert_eq!(
+        schema["properties"]["documents"]["properties"]["enabled"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        schema["properties"]["documents"]["properties"]["providerOrigin"]["pattern"],
+        "^https://[^/?#@]+$"
+    );
+    assert_eq!(
         schema["properties"]["mounts"]["properties"]["enabled"]["type"],
         "boolean"
     );
+}
+
+#[test]
+fn onlyoffice_chart_is_an_isolated_agpl_adapter_delivery_contract() {
+    let root = repository_root();
+    let chart = root.join("deploy/helm/filebelt-onlyoffice");
+    let metadata = fs::read_to_string(chart.join("Chart.yaml")).expect("chart metadata");
+    let schema_source =
+        fs::read_to_string(chart.join("values.schema.json")).expect("values schema");
+    let schema: serde_json::Value =
+        serde_json::from_str(&schema_source).expect("valid schema JSON");
+    let values = fs::read_to_string(chart.join("values.yaml")).expect("values");
+    let templates = fs::read_dir(chart.join("templates"))
+        .expect("templates")
+        .map(|entry| {
+            entry
+                .expect("template entry")
+                .file_name()
+                .into_string()
+                .expect("UTF-8 template name")
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert!(metadata.contains("name: filebelt-onlyoffice"));
+    assert!(metadata.contains("artifacthub.io/license: AGPL-3.0-only"));
+    assert!(metadata.contains("adapters/onlyoffice"));
+    assert_eq!(
+        schema["definitions"]["adapterImage"]["properties"]["repository"]["const"],
+        "oxibelt/filebelt-onlyoffice-adapter"
+    );
+    assert_eq!(
+        schema["definitions"]["adapterImage"]["properties"]["license"]["const"],
+        "AGPL-3.0-only"
+    );
+    assert_eq!(
+        schema["definitions"]["adapterImage"]["properties"]["correspondingSource"]["const"],
+        "https://github.com/OxiBelt/FileBelt/tree/0.1.0"
+    );
+    assert_eq!(
+        schema["definitions"]["workload"]["properties"]["replicas"]["const"],
+        2
+    );
+    assert_eq!(
+        schema["properties"]["providerConfig"]["properties"]["file"]["const"],
+        "/etc/filebelt-onlyoffice/provider/provider.toml"
+    );
+    assert!(values.contains("coreNamespace: filebelt-core"));
+    assert!(values.contains("integrationNamespace: filebelt-integrations"));
+    assert_eq!(
+        templates,
+        [
+            "_helpers.tpl",
+            "deployment.yaml",
+            "networkpolicies.yaml",
+            "pdb.yaml",
+            "service.yaml",
+            "serviceaccount.yaml",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    );
+
+    let rendered = templates
+        .iter()
+        .map(|name| fs::read_to_string(chart.join("templates").join(name)).expect("template"))
+        .collect::<String>();
+    let contract = format!("{values}\n{rendered}");
+    for required in [
+        "automountServiceAccountToken: false",
+        "readOnlyRootFilesystem: true",
+        "runAsUser: {{ .Values.global.runAsUser }}",
+        "browser-jwt",
+        "outbox-jwt",
+        "core-client-tls",
+        "io-client-tls",
+        "egress-client-tls",
+        "filebelt-onlyoffice-egress",
+        "kind: PodDisruptionBudget",
+    ] {
+        assert!(contract.contains(required), "missing {required}");
+    }
+    for forbidden in [
+        "kind: Namespace",
+        "kind: Secret",
+        "persistentVolumeClaim",
+        "name: payloads",
+        "adapter-database",
+    ] {
+        assert!(!contract.contains(forbidden), "forbidden {forbidden}");
+    }
 }

@@ -4,22 +4,25 @@
 -- reviewed allowlist and the verifier are updated.
 
 REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault FROM PUBLIC;
+  filebelt_mount, filebelt_mount_vault, filebelt_document FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
-  filebelt_collaboration, filebelt_mount, filebelt_mount_vault
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
+       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
+       filebelt_document;
 REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
-  filebelt_collaboration, filebelt_mount, filebelt_mount_vault
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
+       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
+       filebelt_document;
 
 GRANT USAGE ON SCHEMA public
   TO filebelt_api, filebelt_io, filebelt_maintenance,
      filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
-     filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync;
+     filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
+     filebelt_document;
 GRANT USAGE ON SCHEMA filebelt_mcp
   TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
@@ -31,6 +34,8 @@ GRANT USAGE ON SCHEMA filebelt_mount
      filebelt_vfs, filebelt_headscale_sync;
 GRANT USAGE ON SCHEMA filebelt_mount_vault
   TO filebelt_maintenance, filebelt_recovery, filebelt_vfs;
+GRANT USAGE ON SCHEMA filebelt_document
+  TO filebelt_document, filebelt_io, filebelt_maintenance, filebelt_recovery;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or
@@ -50,6 +55,7 @@ GRANT DELETE ON authorization_generations, acl_entries, oidc_login_attempts TO f
 GRANT SELECT (id, slug) ON tenants TO filebelt_io, filebelt_maintenance;
 GRANT SELECT, UPDATE ON payload_objects, upload_sessions, upload_parts TO filebelt_io;
 GRANT SELECT ON storage_backends TO filebelt_io;
+GRANT SELECT (tenant_id,node_id,id,payload_id,size_bytes) ON file_versions TO filebelt_io;
 GRANT UPDATE (capacity_total_bytes, capacity_free_bytes, capacity_checked_at, storage_ready)
   ON storage_backends TO filebelt_io;
 GRANT SELECT, INSERT ON capability_nonces TO filebelt_io;
@@ -272,6 +278,53 @@ GRANT SELECT ON filebelt_mount.headscale_devices TO filebelt_vfs;
 GRANT SELECT, INSERT, UPDATE, DELETE ON filebelt_mount_vault.secret_envelopes
   TO filebelt_vfs;
 
+-- The document core revalidates common policy, stages UUID-addressed payloads,
+-- and commits immutable versions. It cannot read identity emails, browser
+-- cookies or adapter-owned callback/JWT state and receives no payload mount.
+GRANT SELECT (id,slug) ON tenants TO filebelt_document;
+GRANT SELECT ON principals TO filebelt_document;
+GRANT SELECT (tenant_id,id,principal_id,status,display_name) ON users TO filebelt_document;
+GRANT SELECT (tenant_id,id,user_id,principal_id,idle_expires_at,absolute_expires_at,revoked_at)
+  ON api_sessions TO filebelt_document;
+GRANT SELECT ON groups, group_memberships, drives, nodes, node_ancestry,
+  acl_entries, file_versions, authorization_generations TO filebelt_document;
+GRANT UPDATE (head_version_id,acl_generation,updated_at) ON nodes TO filebelt_document;
+GRANT UPDATE (acl_generation,reserved_bytes,used_physical_bytes) ON drives TO filebelt_document;
+GRANT SELECT, INSERT, UPDATE ON payload_objects TO filebelt_document;
+GRANT INSERT ON file_versions, audit_events, outbox_events, jobs TO filebelt_document;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  filebelt_document.sessions, filebelt_document.participants,
+  filebelt_document.launch_grants, filebelt_document.revisions,
+  filebelt_document.revision_contributors,
+  filebelt_document.reconciliation_jobs, filebelt_document.session_events,
+  filebelt_document.operation_receipts
+  TO filebelt_document;
+GRANT SELECT ON filebelt_document.data_migrations TO filebelt_document;
+GRANT EXECUTE ON FUNCTION filebelt_document.create_session_principal(uuid,uuid)
+  TO filebelt_document;
+
+GRANT SELECT, UPDATE ON filebelt_document.revisions TO filebelt_io;
+GRANT INSERT ON filebelt_document.reconciliation_jobs TO filebelt_io;
+GRANT SELECT (tenant_id,id,session_principal_id,drive_id,node_id,base_version_id,
+  expected_head_version_id,provider_id,state,fencing_token,created_at,absolute_expires_at,
+  reconnect_until,close_reason) ON filebelt_document.sessions TO filebelt_io;
+GRANT SELECT (tenant_id,id,document_session_id,user_principal_id,api_session_id,mode,state,
+  last_activity_at,disconnected_until,membership_generation,drive_acl_generation,
+  namespace_generation,resource_acl_generation) ON filebelt_document.participants TO filebelt_io;
+GRANT SELECT, UPDATE ON filebelt_document.sessions, filebelt_document.participants TO filebelt_maintenance;
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_document.launch_grants, filebelt_document.revisions,
+  filebelt_document.revision_contributors,
+  filebelt_document.reconciliation_jobs, filebelt_document.session_events,
+  filebelt_document.operation_receipts
+  TO filebelt_maintenance;
+GRANT SELECT ON filebelt_document.sessions TO filebelt_maintenance;
+GRANT SELECT ON
+  filebelt_document.sessions, filebelt_document.participants,
+  filebelt_document.revisions, filebelt_document.revision_contributors,
+  filebelt_document.reconciliation_jobs
+  TO filebelt_recovery;
+
 -- Headscale synchronization can project external node ownership but cannot
 -- read credentials, sessions, ACL rows, payload metadata, or vault content.
 GRANT SELECT (id,slug) ON tenants TO filebelt_headscale_sync;
@@ -316,6 +369,9 @@ REVOKE ALL ON FUNCTION filebelt_mcp.invalidate_registration_policy() FROM PUBLIC
 REVOKE ALL ON FUNCTION filebelt_mcp.invalidate_service_policy() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mcp.invalidate_template_policy() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.invalidate_acl_capability_projection() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.invalidate_inserted_acl_capability_projection() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.invalidate_deleted_acl_capability_projection() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.invalidate_updated_acl_capability_projection() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.invalidate_membership_capability_projection() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.invalidate_drive_capability_projection() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.invalidate_node_capability_projection() FROM PUBLIC;

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: filebelt-onlyoffice
+description: Isolated AGPL delivery contract for the FileBelt ONLYOFFICE adapter
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.34.0-0 <1.37.0-0"
+home: https://github.com/OxiBelt/FileBelt
+sources:
+  - https://github.com/OxiBelt/FileBelt/tree/0.1.0/adapters/onlyoffice
+annotations:
+  artifacthub.io/license: AGPL-3.0-only
+  filebelt.dev/adapter-role: filebelt-onlyoffice-adapter
+  filebelt.dev/corresponding-source: https://github.com/OxiBelt/FileBelt/tree/0.1.0

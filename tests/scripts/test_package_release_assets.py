@@ -33,14 +33,17 @@ if [[ "$1" == lint ]]; then exit 0; fi
 if [[ "$1" == package ]]; then
   destination=
   version=
+  chart=
   while (( $# > 0 )); do
     case "$1" in
       --destination) destination=$2; shift 2 ;;
       --version) version=$2; shift 2 ;;
-      *) shift ;;
+      --app-version) shift 2 ;;
+      --*) shift ;;
+      *) chart=${1##*/}; shift ;;
     esac
   done
-  printf 'chart %s\n' "$version" >"$destination/filebelt-$version.tgz"
+  printf 'chart %s\n' "$version" >"$destination/$chart-$version.tgz"
   exit 0
 fi
 exit 1
@@ -68,9 +71,11 @@ exit 1
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         chart = self.output / f"filebelt-{self.version}.tgz"
+        onlyoffice_chart = self.output / f"filebelt-onlyoffice-{self.version}.tgz"
         admin = self.output / f"filebelt-postgresql-admin-{self.version}.tar.gz"
         checksums = self.output / "SHA256SUMS"
         self.assertTrue(chart.is_file())
+        self.assertTrue(onlyoffice_chart.is_file())
         self.assertTrue(admin.is_file())
         with tarfile.open(admin, "r:gz") as archive:
             names = {
@@ -80,7 +85,7 @@ exit 1
         self.assertTrue({"LICENSE", "README.md", "roles.sql", "grants.sql"} <= names)
         expected = {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in (chart, admin)
+            for path in (chart, onlyoffice_chart, admin)
         }
         observed = {
             line.split("  ", 1)[1]: line.split("  ", 1)[0]

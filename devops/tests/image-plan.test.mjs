@@ -46,7 +46,7 @@ function buildSource(overrides = {}) {
   };
 }
 
-test("build plan contains the twelve fixed roles and immutable runtime contract", () => {
+test("build plan contains the thirteen fixed roles and immutable runtime contract", () => {
   const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
 
   assert.equal(plan.schemaVersion, 1);
@@ -66,6 +66,7 @@ test("build plan contains the twelve fixed roles and immutable runtime contract"
       "filebelt-worker-io": RustCdlaImageLicense,
       "filebelt-worker-maintenance": RustIggyImageLicense,
       "filebelt-media-controller": RustImageLicense,
+      "filebelt-document": RustCdlaImageLicense,
       "filebelt-collaboration": RustCdlaImageLicense,
       "filebelt-mcp-broker": RustCdlaImageLicense,
       "filebelt-controller": RustCdlaImageLicense,
@@ -193,9 +194,20 @@ test("copyleft adapter evidence remains outside the Apache core image plan", () 
   );
   for (const image of AdapterImagePlan) {
     assert.equal(image.repository, `ghcr.io/oxibelt/${image.role}`);
-    assert.equal(image.license, "GPL-3.0-or-later");
-    assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/main\/adapters\//);
+    assert.ok(["AGPL-3.0-only", "GPL-3.0-or-later"].includes(image.license));
+    assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/(?:main|[0-9]+\.[0-9]+\.[0-9]+)(?:\/adapters\/[^/]+)?$/);
   }
+  assert.deepEqual(
+    AdapterImagePlan.find(({ role }) => role === "filebelt-onlyoffice-adapter"),
+    {
+      role: "filebelt-onlyoffice-adapter",
+      repository: "ghcr.io/oxibelt/filebelt-onlyoffice-adapter",
+      license: "AGPL-3.0-only",
+      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/0.1.0",
+      publishPlatforms: ["linux/amd64", "linux/arm64"],
+      riscv64Policy: "compile-and-probe-only",
+    },
+  );
 });
 
 test("archive validator license contract matches the immutable Rust image plan", () => {

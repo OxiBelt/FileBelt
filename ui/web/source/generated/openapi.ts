@@ -186,6 +186,75 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/document-sessions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists only document sessions owned by the authenticated principal. The list is provider-neutral and exposes no provider or browser connection information. */
+        readonly get: operations["listOwnDocumentSessions"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/document-sessions/{document_session_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns a provider-neutral summary and participants for one session owned by the authenticated principal. */
+        readonly get: operations["getOwnDocumentSession"];
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Revokes one session owned by the authenticated principal. It does not delete a file version. */
+        readonly delete: operations["revokeOwnDocumentSession"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/document-sessions/{document_session_id}/conflict-copy": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Creates a separately named sibling from an active session's conflicted content. It requires ownership of the session, a conflict state, and CREATE_CHILD on the target parent; it never replaces the current head. */
+        readonly post: operations["createDocumentSessionConflictCopy"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/document-sessions/{document_session_id}/handoff": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Issues an authenticated owner's fresh, one-use document-session launch handoff. The response is provider-neutral and must remain in memory; clients must not persist it, place it in a URL, or substitute a session identifier for the one-use grant. This deliberately does not support idempotent replay because a grant is secret material. */
+        readonly post: operations["redeemDocumentSessionLaunch"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/drives": {
         readonly parameters: {
             readonly query?: never;
@@ -298,6 +367,41 @@ export interface paths {
         /** @description Issues one opaque, one-use, first-Protobuf-frame grant valid for at most 60 seconds. Neither the grant nor a session credential appears in an endpoint URL. */
         readonly post: operations["createCollaborationGrant"];
         readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists sessions for this file only after fixed drive-owner authority or MANAGE_ACL authorization. This route exposes provider-neutral session and participant projections only. */
+        readonly get: operations["listDocumentSessionsForNode"];
+        readonly put?: never;
+        /** @description Creates a provider-neutral session for one exact immutable base version. All modes require READ_CONTENT and USE_EXTERNAL_EDITOR. COMMENT, REVIEW, and EDIT additionally require WRITE_CONTENT and CREATE_VERSION; COMMENT and REVIEW also require their matching stable Virtual ACL action. */
+        readonly post: operations["createDocumentSession"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions/{document_session_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Force-closes one session for this file after fixed drive-owner authority or MANAGE_ACL authorization. It does not delete a file version or grant content authority to the actor. */
+        readonly delete: operations["forceCloseDocumentSession"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -1074,7 +1178,7 @@ export interface components {
         };
         readonly AclEntry: {
             /** @enum {string} */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "USE_MCP" | "MOUNT" | "EXPORT";
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT";
             readonly display_name: string;
             /** @enum {string} */
             readonly effect: "allow" | "deny";
@@ -1089,7 +1193,7 @@ export interface components {
         };
         readonly AclEntryMutation: {
             /** @enum {string} */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "USE_MCP" | "MOUNT" | "EXPORT";
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT";
             /** @enum {string} */
             readonly effect: "allow" | "deny";
             /** @enum {string} */
@@ -1308,6 +1412,20 @@ export interface components {
             readonly protocol: "smb" | "ftps";
             readonly username: string;
         };
+        readonly CreateDocumentSession: {
+            readonly base_version_id: components["schemas"]["UuidV4"];
+            /**
+             * @description View requires READ_CONTENT and USE_EXTERNAL_EDITOR. Comment, review, and edit are mutating modes and also require WRITE_CONTENT and CREATE_VERSION; comment and review require COMMENT and REVIEW respectively.
+             * @enum {string}
+             */
+            readonly mode: "view" | "comment" | "review" | "edit";
+        };
+        readonly CreateDocumentSessionConflictCopy: {
+            /** Format: int64 */
+            readonly expected_parent_generation: number;
+            readonly target_name: string;
+            readonly target_parent_id: components["schemas"]["UuidV4"];
+        };
         readonly CreateMarkdownImportIntent: {
             readonly source_version_id: components["schemas"]["UuidV4"];
             /** @constant */
@@ -1372,6 +1490,73 @@ export interface components {
             readonly principal_id: components["schemas"]["UuidV4"];
             /** Format: email */
             readonly verified_email: string;
+        };
+        readonly DocumentSessionConflictCopy: {
+            readonly node: components["schemas"]["Node"];
+            readonly version: components["schemas"]["FileVersion"];
+        };
+        readonly DocumentSessionDetail: {
+            readonly participants: readonly components["schemas"]["DocumentSessionParticipant"][];
+            /**
+             * Format: uri
+             * @description Exact non-secret operator-configured external document-provider HTTPS origin disclosed before a fresh handoff. It is never request-controlled.
+             */
+            readonly provider_origin: string;
+            readonly session: components["schemas"]["DocumentSessionSummary"];
+        };
+        readonly DocumentSessionLaunchHandoff: {
+            /**
+             * Format: uri
+             * @description The fixed operator-configured integration form action. It is valid only with the corresponding one-use grant and is never selected by a provider or request.
+             */
+            readonly action: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+            /** @description An opaque, one-use launch grant. Clients must keep it in memory and submit it by POST only. */
+            readonly grant: string;
+            readonly session_id: components["schemas"]["UuidV4"];
+        };
+        readonly DocumentSessionPage: {
+            readonly items: readonly components["schemas"]["DocumentSessionSummary"][];
+            readonly next_cursor: string | null;
+        };
+        readonly DocumentSessionParticipant: {
+            readonly active: boolean;
+            readonly display_name: string;
+            /** Format: date-time */
+            readonly joined_at: string;
+            /** Format: date-time */
+            readonly last_activity_at: string;
+            /** @enum {string} */
+            readonly mode: "view" | "comment" | "review" | "edit";
+            readonly principal_id: components["schemas"]["UuidV4"];
+        };
+        readonly DocumentSessionProblem: {
+            /** @description Stable dotted FileBelt reason code. Provider-specific error details are never exposed here. */
+            readonly code: string;
+            readonly status: number;
+            readonly title: string;
+            /** Format: uri */
+            readonly type: string;
+        };
+        readonly DocumentSessionSummary: {
+            readonly base_version_id: components["schemas"]["UuidV4"];
+            readonly closed_at: string | null;
+            readonly conflict_head_version_id: components["schemas"]["UuidV4"] | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** Format: date-time */
+            readonly last_activity_at: string;
+            /** @enum {string} */
+            readonly mode: "view" | "comment" | "review" | "edit";
+            readonly node_id: components["schemas"]["UuidV4"];
+            readonly participant_count: number;
+            /** @enum {string} */
+            readonly state: "active" | "conflicted" | "revoked" | "closed" | "expired";
         };
         readonly DownloadGrant: {
             readonly authorization: string;
@@ -1933,7 +2118,7 @@ export interface components {
             readonly creator_display_name: string;
             readonly mcp_assisted: boolean;
             /** @enum {string} */
-            readonly origin: "upload" | "markdown_save" | "collaboration_checkpoint" | "import" | "restore";
+            readonly origin: "upload" | "markdown_save" | "collaboration_checkpoint" | "import" | "restore" | "external_document";
             readonly source_version_id: components["schemas"]["UuidV4"] | null;
         };
     };
@@ -1946,6 +2131,15 @@ export interface components {
             };
             content: {
                 readonly "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description Stable provider-neutral document-session problem response. */
+        readonly DocumentSessionProblem: {
+            headers: {
+                readonly [name: string]: unknown;
+            };
+            content: {
+                readonly "application/problem+json": components["schemas"]["DocumentSessionProblem"];
             };
         };
         /** @description Complete signed range, which may be the complete payload. */
@@ -2005,6 +2199,7 @@ export interface components {
         readonly BlockRuleId: components["schemas"]["UuidV4"];
         readonly Csrf: string;
         readonly Cursor: string;
+        readonly DocumentSessionId: components["schemas"]["UuidV4"];
         readonly DriveId: components["schemas"]["UuidV4"];
         readonly FetchSite: "same-origin";
         /** @description Must equal the signed `grant_id` capability claim. */
@@ -2582,6 +2777,138 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly listOwnDocumentSessions: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The authenticated principal's document sessions. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionPage"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly getOwnDocumentSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly document_session_id: components["parameters"]["DocumentSessionId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current session summary and participant projection. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionDetail"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly revokeOwnDocumentSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly document_session_id: components["parameters"]["DocumentSessionId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The owned session is revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly createDocumentSessionConflictCopy: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly document_session_id: components["parameters"]["DocumentSessionId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateDocumentSessionConflictCopy"];
+            };
+        };
+        readonly responses: {
+            /** @description A new conflict-copy node and immutable version; the source head is unchanged. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionConflictCopy"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly redeemDocumentSessionLaunch: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly document_session_id: components["parameters"]["DocumentSessionId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description One-use provider-neutral launch handoff. The opaque grant is not a FileBelt session credential. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionLaunchHandoff"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
     readonly listDrives: {
         readonly parameters: {
             readonly query?: {
@@ -2835,6 +3162,94 @@ export interface operations {
                 };
             };
             readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listDocumentSessionsForNode: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description File-wide document-session activity available to the owner or MANAGE_ACL principal. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionPage"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly createDocumentSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateDocumentSession"];
+            };
+        };
+        readonly responses: {
+            /** @description Session created against the exact base version. Provider admission remains a separate replaceable process boundary. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DocumentSessionDetail"];
+                };
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
+        };
+    };
+    readonly forceCloseDocumentSession: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly document_session_id: components["parameters"]["DocumentSessionId"];
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description The targeted file session is force-closed. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["DocumentSessionProblem"];
         };
     };
     readonly createDownloadGrant: {

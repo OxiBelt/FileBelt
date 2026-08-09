@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains twelve Apache-region images on
+The current build matrix contains thirteen Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -50,6 +50,7 @@ The current build matrix contains twelve Apache-region images on
 | `filebelt-tools` | Active and publishable. Runs bounded, explicit configuration, migration, bootstrap, key, audit, job, storage, and recovery commands with command-specific credentials and mounts. |
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
 | `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
+| `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs generation-4 exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
@@ -69,9 +70,18 @@ fallback. Therefore the combined mount chart topology is a disabled preview,
 not a production-ready listener, and operators must not enable it from this
 revision.
 
-Other reserved adapter roles are `filebelt-onlyoffice-adapter`, future
-`filebelt-nfs-gateway`, and `filebelt-transcoder`. Each has an independently
-truthful platform and license contract. Transcode implementation remains
+The separately released `filebelt-onlyoffice-adapter` is an
+`AGPL-3.0-only` external-integration role. It remains disabled until the
+operator supplies an exact ONLYOFFICE Docs Community `9.4.0` instance, callback
+secrets, provider configuration, TLS identities, and an exact egress-gateway
+target. Adapter image publication remains disabled until complete amd64 and
+arm64 source/SBOM/provenance evidence is admitted; RISC-V is compile/probe
+evidence because the upstream provider has no qualified RISC-V runtime. The
+separately versioned deployment chart does not create or redistribute
+DocumentServer, a database, a Secret, a Namespace, or a volume.
+
+Other reserved adapter roles are future `filebelt-nfs-gateway` and
+`filebelt-transcoder`. Each has an independently truthful platform and license contract. Transcode implementation remains
 prohibited until its exact FFmpeg composition has been reviewed and the
 license map, supply-chain evidence, and runtime contract are updated together.
 
@@ -100,6 +110,9 @@ their lifetime.
 | MCP runner relay | 8084 | one-shot runner relay only, mTLS |
 | VFS gateway protocol | 8087 | SMB/FTPS adapter identities only, mTLS; disabled by default |
 | VFS credential management | 8088 | API identity only, mTLS; disabled by default |
+| Document API control | 8089 | API identity only, mTLS; disabled by default |
+| Document adapter control | 8090 | Approved document-adapter identity only, mTLS; disabled by default |
+| ONLYOFFICE adapter | 8089 | OxiBelt mTLS identity only in the integration namespace; separately deployed |
 | Native operations | 9090 | kubelet/monitoring only |
 | Runner local egress proxy | 7777 | loopback within the one-shot Pod only |
 
@@ -154,10 +167,15 @@ such as compression, tar order, and BuildKit bookkeeping.
 Build and pull-request jobs are read-only and cannot publish packages, create
 releases, or mint attestations. The tag-only release workflow verifies an
 authorized signed SemVer tag, consumes already validated archives without
-rebuilding, promotes API, I/O, maintenance, collaboration, MCP broker,
-controller, runner, tools, VFS, Headscale-sync, and web manifests to GHCR, publishes the versioned Helm chart at
+rebuilding, promotes API, I/O, maintenance, collaboration, document, MCP broker,
+controller, runner, tools, VFS, Headscale-sync, and web manifests to GHCR,
+publishes the versioned Helm chart at
 `oci://ghcr.io/oxibelt/charts/filebelt`, attaches GitHub artifact attestations,
 reads every digest back, and creates a checksummed immutable GitHub Release.
+It also publishes and attests the Apache-authored, disabled-by-default
+`oci://ghcr.io/oxibelt/charts/filebelt-onlyoffice` deployment chart. That chart
+contains no adapter binary or provider asset and its sentinel image digest must
+be replaced with independently admitted adapter-image evidence before use.
 Publication permission exists only in the promotion job. Published versions
 are never moved or automatically deleted for rollback.
 
@@ -184,6 +202,18 @@ it is not production-admissible until both copyleft adapter release images and
 their protocol acceptance evidence exist. The tools image runs explicit
 bounded administrative Jobs. FileBelt deploys no HPA.
 
+`documents.enabled=true` additionally renders the Apache document coordinator
+Deployment and Service only after migration 000006, grants verification, the
+generation-4 capability key, API/document/I/O mTLS projections, an exact
+operator-configured same-origin launch action, and an exact external provider
+HTTPS origin are present. The base chart never renders a
+provider adapter or DocumentServer. The separately installed
+`filebelt-onlyoffice` chart targets a pre-created integration namespace and
+renders only the AGPL adapter, its Service/PDB, and default-deny policies. The
+operator supplies the DocumentServer workload and provider database according
+to its own edition/license contract; neither receives a FileBelt payload mount
+or general FileBelt PostgreSQL credential.
+
 PostgreSQL 18, one OIDC issuer and its in-cluster CONNECT egress gateway,
 optional Iggy, the MCP HTTPS egress gateway, public L4 exposure, certificate
 issuance, monitoring, and OTLP collection are external operator dependencies.
@@ -201,9 +231,9 @@ ownership, and no-follow probe. Only I/O, maintenance, and explicit storage or
 recovery Jobs mount the claim; API and web never do. FileBelt never changes or
 deletes the claim.
 
-Production chart values select all eleven deployable Apache workload images by
+Production chart values select all twelve deployable Apache workload images by
 lowercase `sha256:` digest: API, I/O, maintenance, tools, web, collaboration,
-broker, controller, runner, VFS, and Headscale sync. Registry mirrors may
+broker, controller, runner, VFS, Headscale sync, and document coordinator. Registry mirrors may
 replace only the registry authority; they do not
 change repository, role, digest, authorization, or license semantics. A
 catalog server image is separately pinned by digest and admitted only after its
@@ -215,7 +245,7 @@ v1 proof-and-promise whose authenticated integrated time is inside all three
 windows. Root and bundle rotation is an atomic operator change; overlapping or
 unbounded authority projections fail closed.
 
-Web, API, I/O, collaboration, and enabled VFS default to two replicas and have `minAvailable: 1`
+Web, API, I/O, collaboration, and enabled VFS and document roles default to two replicas and have `minAvailable: 1`
 PodDisruptionBudgets. An enabled broker and controller also default to two
 replicas with `minAvailable: 1`; the controller stays in the core namespace but
 elects one 15-second Lease holder and receives Pod/Secret/Lease authority only
@@ -237,6 +267,9 @@ egress-default-deny. NetworkPolicy permits only:
 - OxiBelt to the API, I/O, and collaboration backends;
 - role-specific PostgreSQL and optional Iggy paths;
 - collaboration to PostgreSQL and the I/O capability endpoint only;
+- document coordinator to its PostgreSQL role only; API may reach its 8089
+  mTLS listener and the approved integration-namespace adapter may reach only
+  its separate 8090 listener;
 - VFS to its PostgreSQL role and the I/O mount-read endpoint only, and I/O
   ingress from the exact VFS identity only when mount preview is enabled;
 - Headscale sync to its PostgreSQL role and the exact external Headscale peer;
@@ -255,10 +288,23 @@ egress-default-deny. NetworkPolicy permits only:
 Catch-all IPv4 or IPv6 egress is rejected. Calico and Cilium acceptance tests
 qualify the portable NetworkPolicy graph.
 
-Backend API, I/O, collaboration, VFS, and VFS-management traffic uses TLS 1.3 mutual authentication. OxiBelt has a
-distinct client certificate for each upstream. FileBelt validates the operator
-CA, client-authentication purpose, and exact configured URI SAN; one retiring
-identity may overlap during rotation. OxiBelt validates each service DNS SAN.
+The integration namespace has its own ingress/egress default deny. OxiBelt may
+reach only the adapter listener; DocumentServer reaches launch input and
+callback paths through OxiBelt rather than receiving direct Pod ingress.
+Adapter egress is limited to DNS, the Apache document adapter listener, the
+capability-limited I/O listener, the single mTLS provider-output egress gateway,
+and optional OTLP. It has no direct Internet/default-route egress and no path
+to the FileBelt payload volume or any PostgreSQL role. The gateway allowlists one
+DocumentServer origin and rejects redirects, private/link-local/metadata
+destinations after every DNS resolution, oversized response metadata, and
+responses above 100 MiB.
+
+Backend API, I/O, collaboration, document, adapter, VFS, and VFS-management
+traffic uses TLS 1.3 mutual authentication. OxiBelt has a distinct client
+certificate for each upstream, including the ONLYOFFICE adapter. FileBelt and
+the adapter validate the operator CA, client-authentication purpose, and exact
+configured URI SAN; one retiring identity may overlap during rotation.
+OxiBelt validates each service DNS SAN.
 Health and metrics use a separate low-information internal listener because
 kubelet does not present a client certificate.
 
@@ -280,8 +326,16 @@ a day-23 warning threshold. `webtransport_enabled` remains false in the typed
 runtime configuration and is not an operator-facing deployment option. Enabled
 collaboration filters join-grant verification to API generation 1; the
 generation-2 collaboration key remains storage-capability-only even though both
-public keys share the restored verification keyset. Enabled
-MCP additionally requires the broker database URL,
+public keys share the restored verification keyset. Enabled document
+integration additionally requires the document database URL, fixed provider ID,
+same-origin launch action, and external provider HTTPS origin, API-to-document
+and adapter-to-document client identities,
+adapter-to-I/O client identity, generation-4 capability signing key, a combined
+I/O verification keyset, 20-participant admission limit, 100 MiB
+document limit, and a recheck interval no greater than 60 seconds. The document
+role accepts no provider callback JSON and the API receives neither the
+generation-4 private key nor document-role database credential. Enabled MCP
+additionally requires the broker database URL,
 vault keyring, broker URL/TLS, gateway URL/TLS, the internal I/O URL and
 broker-to-I/O client TLS, and at least one named trust profile. The I/O server
 allowlist admits the broker's exact attachment identity; the broker uses a
@@ -342,6 +396,28 @@ Calico/Cilium policy tests all pass. Rollback disables gateway admission first,
 advances gateway epochs, closes sessions/handles/locks, then scales VFS and
 Headscale sync to zero. Keep the additive schemas, KEKs, and generation-3
 public key while retained state or recovery evidence references them.
+
+Phase 7 document rollout is also staged and disabled by default. First apply
+migration `000006`, expand built-in ACL presets under the statement-scoped
+generation trigger, apply reviewed grants, add generation-4 public verification
+material to I/O, and run grant/schema plus recovery-checkpoint verification
+while `documents.enabled=false`. Then deploy the Apache document coordinator,
+test exact-version range read, revision finalize/fsync, duplicate callback,
+lost-response reconciliation, ACL/session revocation, and concurrent-head
+conflict without an adapter. Only after those pass may an operator install the
+separate adapter chart with an admitted AGPL adapter-image digest and exact
+source link, provider `9.4.0`, outbox/browser secret generations, mTLS
+identities, and egress target. Enable the OxiBelt route last and verify a real
+or contract-faithful DOCX/XLSX/PPTX edit for two users.
+
+Rollback removes the OxiBelt adapter route and stops new launches first, then
+drains the adapter and fences active document sessions before scaling the
+document coordinator to zero. Preserve finalized checkpoints/conflicts and
+continue maintenance/recovery with the previous compatible core images. Do not
+drop `filebelt_document`, reverse migration 000006, remove capability generation
+4 while an unexpired claim or recovery record references it, or relabel the
+AGPL image as Apache. FileBelt remains fully usable through ordinary Web,
+Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate

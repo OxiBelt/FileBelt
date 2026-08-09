@@ -56,6 +56,8 @@ import type { McpSettingsClient } from "@filebelt/mcp-settings";
 import { PrivacyView, SessionsView, SharesView, UploadsView, VersionsView } from "./ActivityViews.js";
 import { AuthenticationRequiredError } from "./client.js";
 import type { FileBeltClient } from "./client.js";
+import type { DocumentSessionClient } from "./document-http-client.js";
+import { IsOfficeDocumentCandidate } from "./document-eligibility.js";
 import { FileTable } from "./FileTable.js";
 import type { FileEntry, RouteId, WorkspaceSnapshot } from "./model.js";
 import type { MountSettingsClient } from "./mount-http-client.js";
@@ -66,6 +68,9 @@ const AdminPanel = lazy(() => import("@filebelt/admin"));
 const McpSettings = lazy(() => import("@filebelt/mcp-settings"));
 const MountSettings = lazy(async () => ({ default: (await import("./MountSettings.js")).MountSettings }));
 const MarkdownFileView = lazy(async () => ({ default: (await import("./MarkdownFileView.js")).MarkdownFileView }));
+const LoadDocumentSessions = () => import("./DocumentSessions.js");
+const DocumentSessions = lazy(async () => ({ default: (await LoadDocumentSessions()).OwnDocumentSessions }));
+const DocumentLaunchDialog = lazy(async () => ({ default: (await LoadDocumentSessions()).DocumentLaunchDialog }));
 const PreferencesKey = "filebelt.appearance.v1";
 
 interface Preferences {
@@ -105,6 +110,7 @@ const RoutePaths: Record<RouteId, string> = {
   mcp: "/settings/mcp",
   mounts: "/settings/mounts",
   markdown: "/markdown",
+  documents: "/documents",
 };
 
 function RouteFromPath(Pathname: string): RouteId | "admin" {
@@ -183,6 +189,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
     mcp: En.mcp,
     mounts: En.mounts,
     markdown: En.markdown,
+    documents: En.documentSessions,
     privacy: En.privacy,
     recent: En.recent,
     sessions: En.sessions,
@@ -198,6 +205,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
 
 interface AppProps {
   Client: FileBeltClient;
+  DocumentClient?: DocumentSessionClient;
   McpClient?: McpSettingsClient;
   MountClient?: MountSettingsClient;
 }
@@ -216,7 +224,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
-export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
+export function App({ Client, DocumentClient, McpClient, MountClient }: AppProps): ReactNode {
   const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
@@ -228,6 +236,7 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
   const [Announcement, SetAnnouncement] = useState("");
   const [ActionEntryId, SetActionEntryId] = useState<string | null>(null);
   const [NavigationOpen, SetNavigationOpen] = useState(false);
+  const [DocumentEntry, SetDocumentEntry] = useState<FileEntry | null>(null);
   const FileInput = useRef<HTMLInputElement>(null);
 
   const HandleFailure = useCallback((Cause: unknown): void => {
@@ -338,6 +347,7 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
   };
 
   const ChangePreference = (Patch: Partial<Preferences>): void => SetPreferences((Current) => ({ ...Current, ...Patch }));
+  const PreloadDocuments = (): void => { void LoadDocumentSessions(); };
 
   const Navigation: ReadonlyArray<{ Icon: typeof Files; Id: RouteId | "admin"; Label: string }> = [
     { Icon: Files, Id: "drive", Label: En.myDrive },
@@ -352,6 +362,7 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
     { Icon: Bell, Id: "privacy", Label: En.privacy },
     { Icon: ServerCog, Id: "mcp", Label: En.mcp },
     { Icon: Network, Id: "mounts", Label: En.mounts },
+    ...(DocumentClient === undefined ? [] : [{ Icon: FilePenLine, Id: "documents" as const, Label: En.documentSessions }]),
     ...(Snapshot?.CurrentUser.IsTenantAdmin === true ? [{ Icon: Settings2, Id: "admin" as const, Label: En.admin }] : []),
   ];
 
@@ -406,6 +417,8 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
               {Route === "versions" ? <VersionsView File={PrimarySelection} onRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)} Strings={En} Versions={Snapshot.Versions} /> : null}
               {Route === "shares" ? <SharesView File={PrimarySelection} onCreate={(Input) => Mutate(() => Client.createShare(Input), En.shareCreated)} onRevoke={(Id) => Mutate(() => Client.revokeShare(Id), En.shareRevoked)} Shares={Snapshot.Shares} Strings={En} /> : null}
               {Route === "sessions" ? <SessionsView onRevoke={(Id) => Mutate(() => Client.revokeSession(Id), En.sessionRevoked)} Sessions={Snapshot.Sessions} Strings={En} /> : null}
+              {Route === "documents" && DocumentClient !== undefined ? <Suspense fallback={<Spinner label={En.documentSessions} />}><DocumentSessions Client={DocumentClient} OnWorkspaceChanged={Refresh} /></Suspense> : null}
+              {Route === "documents" && DocumentClient === undefined ? <div className="fb-error" role="alert">{En.documentEditorUnavailable}</div> : null}
               {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
               {Route === "mcp" && McpClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><McpSettings Client={McpClient} IsTenantAdmin={Snapshot.CurrentUser.IsTenantAdmin} /></Suspense> : null}
               {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
@@ -424,6 +437,7 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
                     <Button disabled={PrimarySelection === undefined} icon={<Link2 />} onClick={() => Navigate("shares")}>{En.shares}</Button>
                     <Button disabled={PrimarySelection === undefined || PrimarySelection.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => PrimarySelection === undefined ? undefined : OpenMarkdown(PrimarySelection.Id)}>{En.openMarkdown}</Button>
                     <Button disabled={PrimarySelection === undefined || !IsOfficeImportCandidate(PrimarySelection) || Busy} icon={<FileOutput />} onClick={() => PrimarySelection === undefined ? undefined : void ImportOfficeEntry(PrimarySelection)}>{En.importMarkdown}</Button>
+                    {DocumentClient === undefined ? null : <Button disabled={PrimarySelection === undefined || !IsOfficeDocumentCandidate(PrimarySelection) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => PrimarySelection === undefined ? undefined : SetDocumentEntry(PrimarySelection)}>{En.documentEditor}</Button>}
                   </div>
                   <div className="fb-content-split">
                     <FileTable dispatchSelection={DispatchSelection} Entries={Entries} onOpenActions={(Entry) => { DispatchSelection({ Id: Entry.Id, Type: "replace" }); SetActionEntryId(Entry.Id); }} onOpenEntry={(Entry) => OpenMarkdown(Entry.Id)} Selection={Selection} Strings={En} />
@@ -445,12 +459,14 @@ export function App({ Client, McpClient, MountClient }: AppProps): ReactNode {
               <Button appearance="subtle" disabled={ActionEntry.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => { SetActionEntryId(null); OpenMarkdown(ActionEntry.Id); }} role="menuitem">{En.openMarkdown}</Button>
               <Button appearance="subtle" disabled={ActionEntry.Kind !== "file"} icon={<Download />} onClick={() => { SetActionEntryId(null); void DownloadEntry(ActionEntry); }} role="menuitem">{En.download}</Button>
               <Button appearance="subtle" disabled={!IsOfficeImportCandidate(ActionEntry) || Busy} icon={<FileOutput />} onClick={() => { SetActionEntryId(null); void ImportOfficeEntry(ActionEntry); }} role="menuitem">{En.importMarkdown}</Button>
+              {DocumentClient === undefined ? null : <Button appearance="subtle" disabled={!IsOfficeDocumentCandidate(ActionEntry) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => { SetActionEntryId(null); SetDocumentEntry(ActionEntry); }} role="menuitem">{En.documentEditor}</Button>}
               <Button appearance="subtle" icon={<Link2 />} onClick={() => { SetActionEntryId(null); Navigate("shares"); }} role="menuitem">{En.shares}</Button>
               <Button appearance="subtle" icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />} onClick={() => { SetActionEntryId(null); void Mutate(() => ActionEntry.Trashed ? Client.restoreEntries([ActionEntry.Id]) : Client.trashEntries([ActionEntry.Id]), ActionEntry.Trashed ? En.itemsRestored : En.itemsTrashed); }} role="menuitem">{ActionEntry.Trashed ? En.restore : En.moveToTrash}</Button>
               <Button appearance="secondary" onClick={() => SetActionEntryId(null)} role="menuitem">{En.close}</Button>
             </div>
           </div>
         )}
+        {DocumentClient === undefined || DocumentEntry === null ? null : <Suspense fallback={null}><DocumentLaunchDialog Client={DocumentClient} Entry={DocumentEntry} OnClose={() => SetDocumentEntry(null)} OnCreated={() => SetAnnouncement(En.documentSessionCreated)} /></Suspense>}
       </div>
     </FileBeltProvider>
   );

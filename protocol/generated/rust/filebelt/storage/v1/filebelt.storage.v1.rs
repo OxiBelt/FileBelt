@@ -138,6 +138,15 @@ pub enum CapabilityOperation {
     WriteCollaborationObject = 6,
     FinalizeCollaborationObject = 7,
     ReadCollaborationObject = 8,
+    /// Read one immutable source version while an external document session is
+    /// active. The claims bind the exact version through payload_id and grant_id.
+    ReadDocumentVersion = 9,
+    /// Write one whole-object staging revision. The claims bind one revision
+    /// through grant_id and may not be reused for another revision.
+    WriteDocumentRevision = 10,
+    /// Finalize that same whole-object staging revision after its digest has been
+    /// verified by the I/O worker.
+    FinalizeDocumentRevision = 11,
 }
 impl CapabilityOperation {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -155,6 +164,9 @@ impl CapabilityOperation {
             Self::WriteCollaborationObject => "CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT",
             Self::FinalizeCollaborationObject => "CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT",
             Self::ReadCollaborationObject => "CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT",
+            Self::ReadDocumentVersion => "CAPABILITY_OPERATION_READ_DOCUMENT_VERSION",
+            Self::WriteDocumentRevision => "CAPABILITY_OPERATION_WRITE_DOCUMENT_REVISION",
+            Self::FinalizeDocumentRevision => "CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -169,6 +181,9 @@ impl CapabilityOperation {
             "CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT" => Some(Self::WriteCollaborationObject),
             "CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT" => Some(Self::FinalizeCollaborationObject),
             "CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT" => Some(Self::ReadCollaborationObject),
+            "CAPABILITY_OPERATION_READ_DOCUMENT_VERSION" => Some(Self::ReadDocumentVersion),
+            "CAPABILITY_OPERATION_WRITE_DOCUMENT_REVISION" => Some(Self::WriteDocumentRevision),
+            "CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION" => Some(Self::FinalizeDocumentRevision),
             _ => None,
         }
     }

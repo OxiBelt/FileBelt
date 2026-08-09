@@ -32,6 +32,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/apps/filebelt-mcp-broker",
     "source/apps/filebelt-mcp-runner",
     "source/apps/filebelt-controller",
+    "source/apps/filebelt-document",
     "source/apps/filebeltctl",
     "source/apps/filebelt-vfs",
     "source/apps/filebelt-headscale-sync",

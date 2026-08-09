@@ -23,6 +23,7 @@ ACTIVE_ROLES = (
     "filebelt-tools",
     "filebelt-vfs",
     "filebelt-headscale-sync",
+    "filebelt-document",
     "filebelt-web",
 )
 ARCHITECTURES = ("amd64", "arm64", "riscv64")

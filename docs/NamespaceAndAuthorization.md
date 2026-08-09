@@ -222,6 +222,47 @@ expected-head version or discard it. Offline state is local to a live tab only:
 the service does not persist, synchronize, or authorize an offline draft until
 the tab reconnects and passes current authorization.
 
+## External document-session authorization
+
+`document_session` is a non-human principal kind used only to fence an active
+external-editor session. It never owns a drive, authenticates at OxiBelt, or
+inherits the authority of a user. A session is shared for one provider, node,
+and exact immutable base version; each browser tab is represented by its own
+participant bound to the initiating user and API session.
+
+All modes require `READ_CONTENT` and `USE_EXTERNAL_EDITOR`. `comment`,
+`review`, and `edit` also require `WRITE_CONTENT` and `CREATE_VERSION`, while
+`comment` and `review` additionally require their matching stable `COMMENT`
+or `REVIEW` action. These actions participate in the ordinary deny-precedence,
+inheritance, delegation-attenuation, and generation rules. A preset expansion
+materializes the new action rows in one statement and advances each affected
+resource generation once.
+
+The document service records the membership, drive ACL, namespace, and
+resource ACL generations for every participant. Admission, each capability
+issue, and the final version transaction re-evaluate the initiating principal
+and API session against PostgreSQL. A disabled user, revoked API session,
+changed ACL or membership, deleted or quarantined node, expired session, or
+uncertain database result denies new byte access and commits within 60 seconds.
+One-use launch grants are opaque, stored only as keyed digests, expire after 60
+seconds, and cannot be exchanged by another principal or reused.
+
+The initial release admits authenticated users only. Anonymous links and
+guests are not document participants. Presence uses an opaque principal ID and
+display name; emails and provider account identifiers are not disclosed.
+Twenty active or reconnecting participants is the fixed provider-wide ceiling.
+An owner may revoke their own participant; a fixed drive owner or a principal
+with `MANAGE_ACL` may list or force-close all sessions for a node. Closing a
+session revokes future capabilities but never deletes an immutable version.
+
+Document saves use optimistic expected-head semantics. A provider revision may
+commit exactly one immutable version when the current node head still matches
+the session expectation. If another Web, Markdown, SMB, FTPS, or document path
+advanced the head, the session becomes conflicted and the produced bytes are
+retained for seven days. They never overwrite or merge the newer head. The
+owner may explicitly create a separately named sibling after independent
+`CREATE_CHILD` authorization, or discard the retained output.
+
 ## MCP principals, approvals, and data grants
 
 An MCP registration is owned by exactly one internal user or service principal

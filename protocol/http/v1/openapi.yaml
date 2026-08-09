@@ -155,6 +155,94 @@ paths:
           description: Owned session revoked.
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/document-sessions:
+    get:
+      operationId: listOwnDocumentSessions
+      description: Lists only document sessions owned by the authenticated principal. The list is provider-neutral and exposes no provider or browser connection information.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: The authenticated principal's document sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionPage"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+  /api/v1/document-sessions/{document_session_id}:
+    get:
+      operationId: getOwnDocumentSession
+      description: Returns a provider-neutral summary and participants for one session owned by the authenticated principal.
+      parameters:
+        - $ref: "#/components/parameters/DocumentSessionId"
+      responses:
+        "200":
+          description: Current session summary and participant projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionDetail"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+    delete:
+      operationId: revokeOwnDocumentSession
+      description: Revokes one session owned by the authenticated principal. It does not delete a file version.
+      parameters:
+        - $ref: "#/components/parameters/DocumentSessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: The owned session is revoked.
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+  /api/v1/document-sessions/{document_session_id}/conflict-copy:
+    post:
+      operationId: createDocumentSessionConflictCopy
+      description: Creates a separately named sibling from an active session's conflicted content. It requires ownership of the session, a conflict state, and CREATE_CHILD on the target parent; it never replaces the current head.
+      parameters:
+        - $ref: "#/components/parameters/DocumentSessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentSessionConflictCopy"
+      responses:
+        "201":
+          description: A new conflict-copy node and immutable version; the source head is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionConflictCopy"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+  /api/v1/document-sessions/{document_session_id}/handoff:
+    post:
+      operationId: redeemDocumentSessionLaunch
+      description: Issues an authenticated owner's fresh, one-use document-session launch handoff. The response is provider-neutral and must remain in memory; clients must not persist it, place it in a URL, or substitute a session identifier for the one-use grant. This deliberately does not support idempotent replay because a grant is secret material.
+      parameters:
+        - $ref: "#/components/parameters/DocumentSessionId"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "201":
+          description: One-use provider-neutral launch handoff. The opaque grant is not a FileBelt session credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionLaunchHandoff"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
   /api/v1/mounts:
     get:
       operationId: getMountOverview
@@ -295,6 +383,66 @@ paths:
                 $ref: "#/components/schemas/Node"
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions:
+    get:
+      operationId: listDocumentSessionsForNode
+      description: Lists sessions for this file only after fixed drive-owner authority or MANAGE_ACL authorization. This route exposes provider-neutral session and participant projections only.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: File-wide document-session activity available to the owner or MANAGE_ACL principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionPage"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+    post:
+      operationId: createDocumentSession
+      description: Creates a provider-neutral session for one exact immutable base version. All modes require READ_CONTENT and USE_EXTERNAL_EDITOR. COMMENT, REVIEW, and EDIT additionally require WRITE_CONTENT and CREATE_VERSION; COMMENT and REVIEW also require their matching stable Virtual ACL action.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentSession"
+      responses:
+        "201":
+          description: Session created against the exact base version. Provider admission remains a separate replaceable process boundary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSessionDetail"
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions/{document_session_id}:
+    delete:
+      operationId: forceCloseDocumentSession
+      description: Force-closes one session for this file after fixed drive-owner authority or MANAGE_ACL authorization. It does not delete a file version or grant content authority to the actor.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/DocumentSessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: The targeted file session is force-closed.
+        default:
+          $ref: "#/components/responses/DocumentSessionProblem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration:
     get:
       operationId: getCollaborationSummary
@@ -1799,6 +1947,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/UuidV4"
+    DocumentSessionId:
+      name: document_session_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
     MountProtocol:
       name: protocol
       in: path
@@ -1957,6 +2111,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    DocumentSessionProblem:
+      description: Stable provider-neutral document-session problem response.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/DocumentSessionProblem"
     CapabilityProblem:
       description: Capability is missing, malformed, expired, or invalid.
       headers:
@@ -2062,6 +2222,25 @@ components:
           maxLength: 128
           pattern: "^[a-z][a-z0-9]*(?:\\.[a-z0-9_-]+)+$"
           description: Stable dotted FileBelt reason code. MCP failures use the `mcp.*` namespace.
+    DocumentSessionProblem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          maxLength: 128
+          pattern: "^[a-z][a-z0-9]*(?:\\.[a-z0-9_-]+)+$"
+          description: Stable dotted FileBelt reason code. Provider-specific error details are never exposed here.
     Session:
       type: object
       additionalProperties: false
@@ -2504,6 +2683,152 @@ components:
           oneOf:
             - type: string
             - type: "null"
+    CreateDocumentSession:
+      type: object
+      additionalProperties: false
+      required: [base_version_id, mode]
+      properties:
+        base_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        mode:
+          type: string
+          enum: [view, comment, review, edit]
+          description: View requires READ_CONTENT and USE_EXTERNAL_EDITOR. Comment, review, and edit are mutating modes and also require WRITE_CONTENT and CREATE_VERSION; comment and review require COMMENT and REVIEW respectively.
+    DocumentSessionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, drive_id, node_id, base_version_id, mode, state, created_at, last_activity_at, expires_at, closed_at, conflict_head_version_id, participant_count]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+        base_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        mode:
+          type: string
+          enum: [view, comment, review, edit]
+        state:
+          type: string
+          enum: [active, conflicted, revoked, closed, expired]
+        created_at:
+          type: string
+          format: date-time
+        last_activity_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        closed_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        conflict_head_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        participant_count:
+          type: integer
+          minimum: 0
+    DocumentSessionParticipant:
+      type: object
+      additionalProperties: false
+      required: [principal_id, display_name, mode, active, joined_at, last_activity_at]
+      properties:
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        mode:
+          type: string
+          enum: [view, comment, review, edit]
+        active:
+          type: boolean
+        joined_at:
+          type: string
+          format: date-time
+        last_activity_at:
+          type: string
+          format: date-time
+    DocumentSessionDetail:
+      type: object
+      additionalProperties: false
+      required: [session, participants, provider_origin]
+      properties:
+        session:
+          $ref: "#/components/schemas/DocumentSessionSummary"
+        participants:
+          type: array
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/DocumentSessionParticipant"
+        provider_origin:
+          type: string
+          format: uri
+          description: Exact non-secret operator-configured external document-provider HTTPS origin disclosed before a fresh handoff. It is never request-controlled.
+    DocumentSessionPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSessionSummary"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    CreateDocumentSessionConflictCopy:
+      type: object
+      additionalProperties: false
+      required: [target_parent_id, target_name, expected_parent_generation]
+      properties:
+        target_parent_id:
+          $ref: "#/components/schemas/UuidV4"
+        target_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        expected_parent_generation:
+          type: integer
+          format: int64
+          minimum: 1
+    DocumentSessionConflictCopy:
+      type: object
+      additionalProperties: false
+      required: [node, version]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+        version:
+          $ref: "#/components/schemas/FileVersion"
+    DocumentSessionLaunchHandoff:
+      type: object
+      additionalProperties: false
+      required: [session_id, action, grant, expires_at]
+      properties:
+        session_id:
+          $ref: "#/components/schemas/UuidV4"
+        action:
+          type: string
+          format: uri
+          description: The fixed operator-configured integration form action. It is valid only with the corresponding one-use grant and is never selected by a provider or request.
+        grant:
+          type: string
+          minLength: 32
+          maxLength: 4096
+          writeOnly: true
+          description: An opaque, one-use launch grant. Clients must keep it in memory and submit it by POST only.
+        expires_at:
+          type: string
+          format: date-time
     CollaborationSummary:
       type: object
       additionalProperties: false
@@ -2658,7 +2983,7 @@ components:
       properties:
         origin:
           type: string
-          enum: [upload, markdown_save, collaboration_checkpoint, import, restore]
+          enum: [upload, markdown_save, collaboration_checkpoint, import, restore, external_document]
         source_version_id:
           oneOf:
             - $ref: "#/components/schemas/UuidV4"
@@ -2808,7 +3133,7 @@ components:
       properties:
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, USE_MCP, MOUNT, EXPORT]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT]
         effect:
           type: string
           enum: [allow, deny]
@@ -2824,7 +3149,7 @@ components:
           $ref: "#/components/schemas/AclPrincipalSelector"
         entries:
           type: array
-          maxItems: 19
+          maxItems: 21
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AclEntryMutation"
@@ -2847,7 +3172,7 @@ components:
             - type: "null"
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, USE_MCP, MOUNT, EXPORT]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT]
         effect:
           type: string
           enum: [allow, deny]
@@ -2864,8 +3189,8 @@ components:
       properties:
         supported_actions:
           type: array
-          minItems: 19
-          maxItems: 19
+          minItems: 21
+          maxItems: 21
           items:
             type: string
         entries:

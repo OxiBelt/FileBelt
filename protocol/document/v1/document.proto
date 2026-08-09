@@ -1,0 +1,361 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.document.v1;
+
+// Provider-neutral document-session state. All identifiers are FileBelt UUID
+// strings. This contract deliberately carries neither provider, browser, nor
+// database implementation types.
+message DocumentSession {
+  string session_id = 1;
+  string tenant_id = 2;
+  string drive_id = 3;
+  string node_id = 4;
+  string base_version_id = 5;
+  string principal_id = 6;
+  string api_session_id = 7;
+  DocumentSessionMode mode = 8;
+  DocumentSessionState state = 9;
+  uint64 session_epoch = 10;
+  uint64 resource_acl_generation = 11;
+  uint64 drive_acl_generation = 12;
+  uint64 membership_generation = 13;
+  uint64 namespace_generation = 14;
+  int64 created_at_unix_seconds = 15;
+  int64 last_activity_at_unix_seconds = 16;
+  int64 expires_at_unix_seconds = 17;
+  int64 closed_at_unix_seconds = 18;
+  // Present only when an external committed head conflicts with this session.
+  string conflict_head_version_id = 19;
+}
+
+// A provider-neutral participant projection. Session state does not expose a
+// provider account, browser connection, or persistence record.
+message DocumentParticipant {
+  string participant_id = 1;
+  string principal_id = 2;
+  DocumentSessionMode mode = 3;
+  int64 joined_at_unix_seconds = 4;
+  int64 last_activity_at_unix_seconds = 5;
+  bool active = 6;
+  string display_name = 7;
+}
+
+// Internal commands are request-correlated. The control plane resolves all
+// authorization before admitting a command and retains PostgreSQL authority.
+message StartDocumentSession {
+  string request_id = 1;
+  string session_id = 2;
+  string tenant_id = 3;
+  string actor_principal_id = 4;
+}
+
+message RevokeDocumentSession {
+  string request_id = 1;
+  string session_id = 2;
+  string principal_id = 3;
+}
+
+message ForceCloseDocumentSession {
+  string request_id = 1;
+  string session_id = 2;
+  string actor_principal_id = 3;
+}
+
+// The provider-neutral document-service command envelope. It is carried as a
+// deterministic Protobuf body over POST /internal/v1/document/execute on two
+// independently authenticated mTLS listeners. The API listener admits only
+// user/control-plane commands; the adapter listener admits only launch,
+// callback, revision, and source commands. Core rechecks authoritative
+// generations before durable state changes.
+message DocumentExecuteRequest {
+  string request_id = 1;
+  oneof command {
+    CreateDocumentSessionCommand create_session = 2;
+    ListDocumentSessionsCommand list_sessions = 3;
+    GetDocumentSessionCommand get_session = 4;
+    RevokeDocumentSessionCommand revoke_session = 5;
+    ForceCloseDocumentSessionCommand force_close_session = 6;
+    CreateDocumentConflictCopyCommand create_conflict_copy = 7;
+    RedeemDocumentLaunchCommand redeem_launch = 8;
+    BeginDocumentRevisionCommand begin_revision = 9;
+    CommitDocumentRevisionCommand commit_revision = 10;
+    IssueDocumentLaunchGrantCommand issue_launch_grant = 11;
+    ReceiveDocumentCallbackCommand receive_callback = 12;
+    RefreshDocumentSourceCommand refresh_source = 13;
+  }
+}
+
+message DocumentExecuteResponse {
+  string request_id = 1;
+  oneof result {
+    DocumentSessionDetail session = 2;
+    DocumentSessionPage sessions = 3;
+    DocumentLaunch launch = 4;
+    DocumentRevisionAdmission revision_admission = 5;
+    DocumentCommitOutcome commit = 6;
+    DocumentSessionError error = 7;
+    DocumentLaunchGrant launch_grant = 8;
+    DocumentConflictCopy conflict_copy = 9;
+    DocumentCallbackReceipt callback_receipt = 10;
+  }
+}
+
+message DocumentAuthorizationGenerations {
+  uint64 membership_generation = 1;
+  uint64 drive_acl_generation = 2;
+  uint64 namespace_generation = 3;
+  uint64 resource_acl_generation = 4;
+}
+
+message CreateDocumentSessionCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string api_session_id = 3;
+  string drive_id = 4;
+  string node_id = 5;
+  string base_version_id = 6;
+  string provider_id = 7;
+  DocumentSessionMode mode = 8;
+  DocumentAuthorizationGenerations generations = 9;
+  bytes operation_digest = 10;
+  bytes request_fingerprint = 11;
+}
+
+message ListDocumentSessionsCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string api_session_id = 3;
+  string drive_id = 4;
+  string node_id = 5;
+  uint32 limit = 6;
+  DocumentSessionPageAnchor anchor = 7;
+  // Required for a node-wide manager listing; unused for an own-session list.
+  DocumentAuthorizationGenerations generations = 8;
+}
+
+message GetDocumentSessionCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string document_session_id = 3;
+}
+
+message RevokeDocumentSessionCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string participant_id = 3;
+  string reason = 4;
+}
+
+message ForceCloseDocumentSessionCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string document_session_id = 3;
+  string reason = 4;
+  string api_session_id = 5;
+  string drive_id = 6;
+  string node_id = 7;
+  DocumentAuthorizationGenerations generations = 8;
+}
+
+message CreateDocumentConflictCopyCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string document_session_id = 3;
+  string display_name = 4;
+  string target_parent_id = 5;
+  uint64 expected_parent_namespace_generation = 6;
+  string api_session_id = 7;
+  DocumentAuthorizationGenerations generations = 8;
+  bytes operation_digest = 9;
+  bytes request_fingerprint = 10;
+}
+
+message RedeemDocumentLaunchCommand {
+  string tenant_id = 1;
+  bytes launch_token = 2;
+}
+
+message IssueDocumentLaunchGrantCommand {
+  string tenant_id = 1;
+  string actor_principal_id = 2;
+  string api_session_id = 3;
+  string document_session_id = 4;
+}
+
+// Raw bytes appear only in this mTLS response and are never persisted or
+// included in idempotency records. Redemption consumes their BLAKE3 digest.
+message DocumentLaunchGrant {
+  bytes launch_token = 1;
+  int64 expires_at_unix_seconds = 2;
+}
+
+message BeginDocumentRevisionCommand {
+  string tenant_id = 1;
+  string revision_id = 2;
+  uint64 reserved_bytes = 3;
+}
+
+message ReceiveDocumentCallbackCommand {
+  string tenant_id = 1;
+  string document_session_id = 2;
+  string participant_id = 3;
+  bytes provider_event_digest = 4;
+  DocumentCallbackKind callback_kind = 5;
+  DocumentRevisionKind revision_kind = 6;
+  DocumentParticipantActivity activity = 7;
+}
+
+message RefreshDocumentSourceCommand {
+  string tenant_id = 1;
+  string document_session_id = 2;
+  string participant_id = 3;
+}
+
+message CommitDocumentRevisionCommand {
+  string tenant_id = 1;
+  string revision_id = 2;
+}
+
+message DocumentSessionDetail {
+  DocumentSession session = 1;
+  repeated DocumentParticipant participants = 2;
+}
+
+message DocumentSessionPage {
+  repeated DocumentSessionDetail sessions = 1;
+  DocumentSessionPageAnchor next_anchor = 2;
+}
+
+// Cursor state is deliberately a provider-neutral ordering key. The API wraps
+// it in its opaque cursor format and reauthorizes every page request.
+message DocumentSessionPageAnchor {
+  int64 created_at_unix_microseconds = 1;
+  string session_id = 2;
+}
+
+// Contains only FileBelt identifiers and scoped opaque I/O capabilities; it
+// never exposes a storage locator, provider credential, or browser session.
+message DocumentLaunch {
+  DocumentSessionDetail detail = 1;
+  string source_read_capability = 2;
+  string display_name = 3;
+  string media_type = 4;
+  uint64 size_bytes = 5;
+  string base_version_id = 6;
+}
+
+message DocumentCallbackReceipt {
+  string revision_id = 1;
+  DocumentCallbackState state = 2;
+  string event_id = 3;
+}
+
+enum DocumentCallbackState {
+  DOCUMENT_CALLBACK_STATE_UNSPECIFIED = 0;
+  DOCUMENT_CALLBACK_STATE_RECEIVED = 1;
+  DOCUMENT_CALLBACK_STATE_STAGING = 2;
+  DOCUMENT_CALLBACK_STATE_STAGED = 3;
+  DOCUMENT_CALLBACK_STATE_COMMITTED = 4;
+  DOCUMENT_CALLBACK_STATE_NO_OP = 5;
+  DOCUMENT_CALLBACK_STATE_CONFLICT = 6;
+  DOCUMENT_CALLBACK_STATE_REJECTED = 7;
+  DOCUMENT_CALLBACK_STATE_FAILED = 8;
+  // A durable timer-save checkpoint. It is terminal for the provider callback
+  // but intentionally does not advance the FileBelt node head.
+  DOCUMENT_CALLBACK_STATE_CHECKPOINT = 9;
+}
+
+message DocumentRevisionAdmission {
+  string revision_id = 1;
+  string staged_write_capability = 2;
+  string finalize_capability = 3;
+}
+
+message DocumentCommitOutcome {
+  DocumentCommitState state = 1;
+  string version_id = 2;
+  int64 retained_until_unix_seconds = 3;
+}
+
+message DocumentConflictCopy {
+  string drive_id = 1;
+  string node_id = 2;
+  string version_id = 3;
+  string display_name = 4;
+  string media_type = 5;
+  uint64 size_bytes = 6;
+  bytes blake3 = 7;
+}
+
+enum DocumentRevisionKind {
+  DOCUMENT_REVISION_KIND_UNSPECIFIED = 0;
+  DOCUMENT_REVISION_KIND_CHECKPOINT = 1;
+  DOCUMENT_REVISION_KIND_USER_SAVE = 2;
+  DOCUMENT_REVISION_KIND_FINAL_SAVE = 3;
+}
+
+enum DocumentCallbackKind {
+  DOCUMENT_CALLBACK_KIND_UNSPECIFIED = 0;
+  DOCUMENT_CALLBACK_KIND_EDITING = 1;
+  DOCUMENT_CALLBACK_KIND_OUTPUT_REQUIRED = 2;
+  DOCUMENT_CALLBACK_KIND_CORRUPTED = 3;
+  DOCUMENT_CALLBACK_KIND_CLOSED_NO_CHANGES = 4;
+  DOCUMENT_CALLBACK_KIND_FORCE_SAVE_ERROR = 5;
+}
+
+enum DocumentParticipantActivity {
+  DOCUMENT_PARTICIPANT_ACTIVITY_UNSPECIFIED = 0;
+  DOCUMENT_PARTICIPANT_ACTIVITY_CONNECTED = 1;
+  DOCUMENT_PARTICIPANT_ACTIVITY_DISCONNECTED = 2;
+}
+
+enum DocumentCommitState {
+  DOCUMENT_COMMIT_STATE_UNSPECIFIED = 0;
+  DOCUMENT_COMMIT_STATE_COMMITTED = 1;
+  DOCUMENT_COMMIT_STATE_NO_OP = 2;
+  DOCUMENT_COMMIT_STATE_CONFLICT = 3;
+}
+
+// Stable, provider-neutral error detail for document-session control paths.
+message DocumentSessionError {
+  DocumentSessionErrorCode code = 1;
+  string message = 2;
+  uint64 retry_after_millis = 3;
+}
+
+enum DocumentSessionMode {
+  DOCUMENT_SESSION_MODE_UNSPECIFIED = 0;
+  DOCUMENT_SESSION_MODE_VIEW = 1;
+  DOCUMENT_SESSION_MODE_COMMENT = 2;
+  DOCUMENT_SESSION_MODE_REVIEW = 3;
+  DOCUMENT_SESSION_MODE_EDIT = 4;
+}
+
+enum DocumentSessionState {
+  DOCUMENT_SESSION_STATE_UNSPECIFIED = 0;
+  DOCUMENT_SESSION_STATE_ACTIVE = 1;
+  DOCUMENT_SESSION_STATE_CONFLICTED = 2;
+  DOCUMENT_SESSION_STATE_REVOKED = 3;
+  DOCUMENT_SESSION_STATE_CLOSED = 4;
+  DOCUMENT_SESSION_STATE_EXPIRED = 5;
+}
+
+enum DocumentSessionErrorCode {
+  DOCUMENT_SESSION_ERROR_CODE_UNSPECIFIED = 0;
+  DOCUMENT_SESSION_ERROR_CODE_AUTHENTICATION_REQUIRED = 1;
+  DOCUMENT_SESSION_ERROR_CODE_AUTHORIZATION_CHANGED = 2;
+  DOCUMENT_SESSION_ERROR_CODE_MODE_UNAUTHORIZED = 3;
+  DOCUMENT_SESSION_ERROR_CODE_WRITE_AUTHORIZATION_REQUIRED = 4;
+  DOCUMENT_SESSION_ERROR_CODE_VERSION_AUTHORIZATION_REQUIRED = 5;
+  DOCUMENT_SESSION_ERROR_CODE_SESSION_NOT_FOUND = 6;
+  DOCUMENT_SESSION_ERROR_CODE_SESSION_NOT_OWNER = 7;
+  DOCUMENT_SESSION_ERROR_CODE_SESSION_NOT_ACTIVE = 8;
+  DOCUMENT_SESSION_ERROR_CODE_BASE_VERSION_CONFLICT = 9;
+  DOCUMENT_SESSION_ERROR_CODE_CONFLICT_COPY_REQUIRED = 10;
+  DOCUMENT_SESSION_ERROR_CODE_CONFLICT_COPY_INVALID = 11;
+  DOCUMENT_SESSION_ERROR_CODE_PROTOCOL_VIOLATION = 12;
+  DOCUMENT_SESSION_ERROR_CODE_UNAVAILABLE = 13;
+  DOCUMENT_SESSION_ERROR_CODE_INTERNAL = 14;
+}

@@ -74,6 +74,8 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         .expect("check workflow");
     let dry_run = fs::read_to_string(root.join(".github/workflows/release-dry-run.yml"))
         .expect("release dry-run workflow");
+    let onlyoffice = fs::read_to_string(root.join(".github/workflows/onlyoffice-release.yml"))
+        .expect("ONLYOFFICE release scaffold workflow");
     for workflow in [&checks, &dry_run] {
         assert!(workflow.contains("permissions:\n  contents: read"));
         for forbidden in [
@@ -149,7 +151,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             "release promotion must carry {release_role}"
         );
         assert!(
-            dry_run.contains("Build all twelve Apache roles"),
+            dry_run.contains("Build all thirteen Apache roles"),
             "dry-run must build the complete Apache image plan"
         );
     }
@@ -186,11 +188,30 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-tools",
         "filebelt-vfs",
         "filebelt-headscale-sync",
+        "filebelt-document",
         "filebelt-web",
     ] {
         assert!(active_roles.contains(active));
     }
     assert!(!active_roles.contains("filebelt-media-controller"));
+    for required in [
+        "permissions:\n  contents: read",
+        "cargo check --locked --manifest-path adapters/onlyoffice/Cargo.toml --target riscv64gc-unknown-linux-musl",
+        "pnpm --filter @filebelt/devops test",
+        "check-onlyoffice-helm-chart.sh",
+        "riscv64Policy: \"compile-and-probe-only\"",
+    ] {
+        assert!(
+            onlyoffice.contains(required),
+            "ONLYOFFICE workflow is missing {required}"
+        );
+    }
+    for forbidden in ["packages: write", "docker push", "helm push"] {
+        assert!(
+            !onlyoffice.contains(forbidden),
+            "ONLYOFFICE workflow contains {forbidden}"
+        );
+    }
 }
 
 #[test]

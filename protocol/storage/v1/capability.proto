@@ -39,6 +39,15 @@ enum CapabilityOperation {
   CAPABILITY_OPERATION_WRITE_COLLABORATION_OBJECT = 6;
   CAPABILITY_OPERATION_FINALIZE_COLLABORATION_OBJECT = 7;
   CAPABILITY_OPERATION_READ_COLLABORATION_OBJECT = 8;
+  // Read one immutable source version while an external document session is
+  // active. The claims bind the exact version through payload_id and grant_id.
+  CAPABILITY_OPERATION_READ_DOCUMENT_VERSION = 9;
+  // Write one whole-object staging revision. The claims bind one revision
+  // through grant_id and may not be reused for another revision.
+  CAPABILITY_OPERATION_WRITE_DOCUMENT_REVISION = 10;
+  // Finalize that same whole-object staging revision after its digest has been
+  // verified by the I/O worker.
+  CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION = 11;
 }
 
 message SignedCapability {

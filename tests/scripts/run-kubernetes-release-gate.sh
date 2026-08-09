@@ -35,6 +35,7 @@ active_roles=(
   filebelt-tools
   filebelt-vfs
   filebelt-headscale-sync
+  filebelt-document
   filebelt-web
 )
 loaded_refs=()
@@ -80,11 +81,12 @@ jq -e '
   and .source.ref == ("refs/tags/" + .version)
   and (.source.revision | test("^[0-9a-f]{40}$"))
   and .runtime == {uid:10001,gid:10001}
-  and (.images | length) == 12
+  and (.images | length) == 13
   and ([.images[].role] | sort) == ([
     "filebelt-api",
     "filebelt-mcp-broker",
     "filebelt-media-controller",
+    "filebelt-document",
     "filebelt-collaboration",
     "filebelt-controller",
     "filebelt-mcp-runner",

@@ -4,11 +4,12 @@ use std::fs;
 
 use filebelt_repository_tests::repository_root;
 
-const ROLES: [&str; 12] = [
+const ROLES: [&str; 13] = [
     "filebelt-api",
     "filebelt-worker-io",
     "filebelt-worker-maintenance",
     "filebelt-media-controller",
+    "filebelt-document",
     "filebelt-collaboration",
     "filebelt-mcp-broker",
     "filebelt-controller",
@@ -181,6 +182,24 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
         "ENTRYPOINT [\"/usr/local/bin/oxibelt\", \"--config\", \"/etc/oxibelt/config/oxibelt.toml\"]"
     ));
     assert!(!web.contains("COPY adapters"));
+}
+
+#[test]
+fn onlyoffice_source_recipe_includes_its_protocol_build_inputs() {
+    let root = repository_root();
+    let dockerfile = fs::read_to_string(root.join("adapters/onlyoffice/Dockerfile"))
+        .expect("ONLYOFFICE adapter Dockerfile");
+    let dockerignore = fs::read_to_string(
+        root.join("adapters/onlyoffice/Dockerfile.dockerignore"),
+    )
+    .expect("ONLYOFFICE adapter Docker ignore file");
+    assert!(dockerfile.contains("WORKDIR /src\n"));
+    assert!(dockerfile.contains("COPY . ."));
+    assert!(dockerfile.contains(
+        "cargo build --locked --release --manifest-path adapters/onlyoffice/Cargo.toml"
+    ));
+    assert!(dockerignore.contains("!adapters/onlyoffice/**"));
+    assert!(!dockerignore.lines().any(|line| line == "source"));
 }
 
 #[test]

@@ -135,10 +135,15 @@ helm lint "${chart}" --strict --kube-version 1.36.0 \
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --values "${repo_root}/tests/kubernetes/values-ci.yaml" \
   >"${temporary}/render-ci-values.yaml"
+helm template phase7 "${chart}" --kube-version 1.36.0 \
+  --set documents.enabled=true \
+  >"${temporary}/render-documents.yaml"
 assert_rendered_toml "${default_manifest}" filebelt.toml
 assert_rendered_toml "${default_manifest}" oxibelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" oxibelt.toml
+assert_rendered_toml "${temporary}/render-documents.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/render-documents.yaml" oxibelt.toml
 assert_count "${default_manifest}" '^kind: Deployment$' 4
 assert_count "${default_manifest}" '^kind: Service$' 7
 assert_count "${default_manifest}" '^kind: ServiceAccount$' 5
@@ -160,6 +165,7 @@ assert_not_contains "${default_manifest}" 'kind: RoleBinding'
 assert_not_contains "${default_manifest}" 'kind: ClusterRole'
 assert_not_contains "${default_manifest}" 'kind: Ingress'
 assert_not_contains "${default_manifest}" 'filebelt-media-controller'
+assert_not_contains "${default_manifest}" 'filebelt-document'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-broker'
 assert_not_contains "${default_manifest}" 'filebelt-controller'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-runner'
@@ -190,6 +196,22 @@ assert_document_contains "${default_manifest}" Deployment filebelt-io 'cpu: 500m
 assert_document_contains "${default_manifest}" Deployment filebelt-io 'memory: 512Mi'
 assert_document_contains "${default_manifest}" Deployment filebelt-maintenance 'cpu: 250m'
 assert_document_contains "${default_manifest}" Deployment filebelt-maintenance 'memory: 256Mi'
+assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-document 'containerPort: 8089'
+assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-document 'containerPort: 8090'
+assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-document 'mountPath: /run/secrets/document-database-url'
+assert_document_not_contains "${temporary}/render-documents.yaml" Deployment filebelt-document 'claimName:'
+assert_document_contains "${temporary}/render-documents.yaml" Service filebelt-document 'targetPort: document-api'
+assert_document_contains "${temporary}/render-documents.yaml" Service filebelt-document 'targetPort: document-adapter'
+assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-document-ingress 'filebelt-onlyoffice'
+assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-io-ingress 'filebelt-onlyoffice'
+assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-web-egress 'filebelt-onlyoffice'
+assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /run/secrets/onlyoffice-edge-client-tls'
+assert_contains "${temporary}/render-documents.yaml" 'origin = "https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089"'
+assert_contains "${temporary}/render-documents.yaml" 'server_name = "filebelt-onlyoffice-adapter.filebelt-integrations.svc"'
+assert_contains "${temporary}/render-documents.yaml" 'launch_action = "https://filebelt.example.invalid/onlyoffice/launch"'
+assert_contains "${temporary}/render-documents.yaml" 'provider_origin = "https://documentserver.example.invalid"'
+assert_contains "${temporary}/render-documents.yaml" 'spiffe://filebelt/api/document'
+assert_contains "${temporary}/render-documents.yaml" 'spiffe://filebelt/onlyoffice-adapter/document'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-web 'claimName:'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'claimName:'
 assert_document_contains "${default_manifest}" Deployment filebelt-io 'claimName: filebelt-payloads'
@@ -507,4 +529,4 @@ expect_failure runner_namespace_is_core \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 
-echo "Helm Phase 6 chart contract passed"
+echo "Helm chart contract through Phase 7 passed"

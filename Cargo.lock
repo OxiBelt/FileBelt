@@ -1766,12 +1766,14 @@ dependencies = [
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",
+ "filebelt-document-protocol",
  "filebelt-domain",
  "filebelt-mcp-policy",
  "filebelt-mcp-protocol",
  "filebelt-runtime",
  "filebelt-storage-protocol",
  "getrandom 0.4.3",
+ "jiff",
  "openidconnect",
  "prost",
  "reqwest 0.12.28",
@@ -1908,8 +1910,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "filebelt-document"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "axum",
+ "blake3",
+ "bytes",
+ "clap",
+ "filebelt-control-protocol",
+ "filebelt-database",
+ "filebelt-deployment-diagnostics",
+ "filebelt-document-protocol",
+ "filebelt-runtime",
+ "filebelt-storage-protocol",
+ "getrandom 0.4.3",
+ "jiff",
+ "prost",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "filebelt-document-protocol"
 version = "0.1.0"
+dependencies = [
+ "prost",
+]
 
 [[package]]
 name = "filebelt-domain"
@@ -2168,6 +2198,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "serde",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

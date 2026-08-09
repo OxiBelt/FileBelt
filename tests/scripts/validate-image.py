@@ -26,6 +26,7 @@ RUST_IMAGE_LICENSES = {
         "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0"
     ),
     "filebelt-media-controller": "Apache-2.0 AND MIT",
+    "filebelt-document": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-collaboration": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-mcp-broker": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-controller": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
@@ -55,6 +56,7 @@ BINARIES = {
     "filebelt-worker-io": "/usr/local/bin/filebelt-worker-io",
     "filebelt-worker-maintenance": "/usr/local/bin/filebelt-worker-maintenance",
     "filebelt-media-controller": "/usr/local/bin/filebelt-media-controller",
+    "filebelt-document": "/usr/local/bin/filebelt-document",
     "filebelt-collaboration": "/usr/local/bin/filebelt-collaboration",
     "filebelt-mcp-broker": "/usr/local/bin/filebelt-mcp-broker",
     "filebelt-controller": "/usr/local/bin/filebelt-controller",

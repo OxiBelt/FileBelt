@@ -42,6 +42,21 @@ app.kubernetes.io/component: {{ .component }}
 {{- $configuration = replace "oidc_issuer = \"https://issuer.example.invalid/\"" (printf "oidc_issuer = %q" .Values.mounts.headscale.oidcIssuer) $configuration -}}
 {{- $configuration = replace "sync_seconds = 15" (printf "sync_seconds = %v" .Values.mounts.headscale.syncSeconds) $configuration -}}
 {{- end -}}
+{{- if .Values.documents.enabled -}}
+{{- $documentConfig := printf "[documents]\nenabled = true\nprovider_id = \"onlyoffice-community-9-4\"\ndatabase_url_file = \"/run/secrets/document-database-url\"\nurl = \"https://filebelt-document:8089/\"\nlaunch_action = %q\nprovider_origin = %q\nclient_certificate_chain_file = \"/run/secrets/document-api-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/document-api-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/document-api-client-tls/server-ca.crt\"\ncapability_private_key_file = \"/run/secrets/document-capability-private-key\"\ncapability_key_generation = 4\nmax_active_tabs = 20\nmax_document_bytes = 104857600\ngeneration_recheck_seconds = 60" .Values.documents.launchAction .Values.documents.providerOrigin -}}
+{{- $configuration = replace "[documents]\nenabled = false" $documentConfig $configuration -}}
+{{- $configuration = printf "%s\n\n[backend_tls.document]\ncertificate_chain_file = \"/run/secrets/document-api-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/document-api-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/document-api-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/api/document\"]\n\n[backend_tls.document_adapter]\ncertificate_chain_file = \"/run/secrets/document-adapter-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/document-adapter-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/document-adapter-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/onlyoffice-adapter/document\"]" $configuration -}}
+{{- range $current := list
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" -}}
+{{- if contains $current $configuration -}}
+{{- $withAdapter := replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $current -}}
+{{- $configuration = replace $current $withAdapter $configuration -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $configuration -}}
 {{- end -}}
 
@@ -96,12 +111,36 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.mounts.enabled -}}
 {{- $collaborationIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" -}}
 {{- end -}}
+{{- if .Values.documents.enabled -}}
+{{- $collaborationIoClientUris = replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $collaborationIoClientUris -}}
+{{- end -}}
 {{- if or (not (contains $collaborationIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact web, enabled MCP, and collaboration SPIFFE identities" -}}
 {{- end -}}
 {{- range $required := list "capability_public_key_file = \"/run/secrets/capability-public-keyset\"" "collaboration_ws = \"0.0.0.0:8085\"" "collaboration_webtransport = \"0.0.0.0:8086\"" "capability_key_generation = 2" "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/collaboration-io-client-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/collaboration-io-client-tls/tls.key\"" "server_ca_file = \"/run/secrets/collaboration-io-client-tls/server-ca.crt\"" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "collaboration.enabled requires configuration.filebelt setting %s" $required) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.documents.enabled -}}
+{{- if not (regexMatch "(?m)^\\[documents\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
+{{- fail "documents.enabled requires configuration.filebelt to enable document sessions" -}}
+{{- end -}}
+{{- range $section := list "document" "document_adapter" -}}
+{{- $sections := regexSplit (printf "(?m)^\\[backend_tls\\.%s\\]\\s*$" $section) $renderedFilebeltConfig 2 -}}
+{{- if ne (len $sections) 2 -}}
+{{- fail (printf "documents.enabled requires an exact backend_tls.%s section" $section) -}}
+{{- end -}}
+{{- $tls := first (regexSplit "(?m)^\\[" (last $sections) 2) -}}
+{{- $identity := ternary "spiffe://filebelt/api/document" "spiffe://filebelt/onlyoffice-adapter/document" (eq $section "document") -}}
+{{- if or (not (contains (printf "allowed_client_uri_sans = [%q]" $identity) $tls)) (contains "allowed_client_trust_domains" $tls) -}}
+{{- fail (printf "backend_tls.%s must permit only its exact document client SPIFFE identity" $section) -}}
+{{- end -}}
+{{- end -}}
+{{- range $required := list "document = \"0.0.0.0:8089\"" "document_adapter = \"0.0.0.0:8090\"" "url = \"https://filebelt-document:8089/\"" (printf "launch_action = %q" .Values.documents.launchAction) (printf "provider_origin = %q" .Values.documents.providerOrigin) "capability_key_generation = 4" "max_active_tabs = 20" "max_document_bytes = 104857600" "generation_recheck_seconds = 60" -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
+{{- fail (printf "documents.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -135,6 +174,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- $mcpIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" -}}
 {{- if .Values.mounts.enabled -}}
 {{- $mcpIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" -}}
+{{- end -}}
+{{- if .Values.documents.enabled -}}
+{{- $mcpIoClientUris = replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $mcpIoClientUris -}}
 {{- end -}}
 {{- if or (not (contains $mcpIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact FileBelt web and MCP broker SPIFFE identities" -}}

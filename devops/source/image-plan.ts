@@ -20,6 +20,7 @@ export const ImageRoles = [
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
   "filebelt-media-controller",
+  "filebelt-document",
   "filebelt-collaboration",
   "filebelt-mcp-broker",
   "filebelt-controller",
@@ -275,6 +276,12 @@ const RoleDefinitions: readonly RoleDefinition[] = [
   ),
   RustRole("filebelt-media-controller", "filebelt-media-controller"),
   RustRole(
+    "filebelt-document",
+    "filebelt-document",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
+  RustRole(
     "filebelt-collaboration",
     "filebelt-collaboration",
     RustCdlaImageLicense,
@@ -332,6 +339,7 @@ const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-worker-io": "FileBelt I/O worker",
   "filebelt-worker-maintenance": "FileBelt maintenance worker",
   "filebelt-media-controller": "FileBelt media controller",
+  "filebelt-document": "FileBelt provider-neutral document coordinator",
   "filebelt-collaboration": "FileBelt Markdown collaboration service",
   "filebelt-mcp-broker": "FileBelt MCP broker",
   "filebelt-controller": "FileBelt MCP runner controller",

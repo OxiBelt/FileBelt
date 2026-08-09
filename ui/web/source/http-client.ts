@@ -707,6 +707,7 @@ function DefaultBaseUrl(): string {
 
 function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntry {
   return {
+    DriveId: Node.drive_id,
     Id: Node.id,
     HeadVersionId: Node.head_version_id,
     Kind: Node.kind === "directory" ? "folder" : "file",

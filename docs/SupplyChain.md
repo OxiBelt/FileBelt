@@ -356,6 +356,46 @@ move version tags or automatically delete packages/attestations; a compromised
 artifact is withdrawn only through a separately reviewed administrator
 incident procedure and replaced by a new SemVer release.
 
+## Phase 7 document and ONLYOFFICE evidence
+
+Phase 7 adds the Apache `filebelt-document` role to the native image matrix.
+It follows the same amd64, arm64, and RISC-V build, ELF/native linkage, SBOM,
+Trivy, normalized rebuild, identity, notice, signature, and provenance policy
+as the other WebPKI-enabled Apache roles. Its runtime contract additionally
+proves that the image contains the provider-neutral service executable and
+generation-4 capability logic, exposes only the document listener, and has no
+adapter source, browser bundle, provider asset, payload mount, Internet path,
+or general API database credential.
+
+`adapters/onlyoffice/` is an independent `AGPL-3.0-only` workspace and image
+plan. Apache packages do not link or path-depend on it. Adapter evidence must
+include its own Cargo and pnpm locks, license/notices, exact OCI source and
+revision labels, immutable corresponding-source URL, build instructions,
+source/about HTTP response fixture, SBOM, vulnerability report, signature,
+provenance, and normalized amd64/arm64 rebuilds. RISC-V is explicitly
+compile-and-probe-only and is not included in the adapter manifest. The image
+contains no operator secret, provider database, DocumentServer binary,
+provider connector, `api.js`, or other provider asset.
+
+ONLYOFFICE Docs Community `9.4.0` is an operator-supplied external process, not
+a FileBelt build input or release subject. An operator records its exact image
+digest, upstream source, notices, branding, and vulnerability review outside
+the FileBelt adapter SBOM. FileBelt makes no cluster or paid-edition claim and
+enforces the documented 20 active-connection ceiling before provider launch.
+Changing provider version or edition, copying provider JavaScript, embedding a
+provider image in the chart, or changing the AGPL expression repeats the full
+license, source, dependency, browser, threat-model, and release review.
+
+The coordinated tag-only release publishes the Apache core chart, document
+image, and Apache-authored `filebelt-onlyoffice` deployment chart through the
+ordinary promotion workflow. The latter contains no adapter/provider binary
+and retains a sentinel adapter digest, so publishing it does not admit an
+adapter image. The separately licensed adapter workflow remains read-only
+until every adapter release input is digest pinned and its complete source
+bundle has passed readback. Once separately admitted, it may publish only
+immutable amd64/arm64 adapter manifests; it may not rebuild in the
+write-authorized job or publish DocumentServer.
+
 ## Changing the policy
 
 A dependency, toolchain, base image, feature, native linkage, license,

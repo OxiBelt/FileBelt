@@ -34,6 +34,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_headscale_sync') THEN
     CREATE ROLE filebelt_headscale_sync NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_document') THEN
+    CREATE ROLE filebelt_document NOLOGIN;
+  END IF;
 END
 $$;
 
@@ -43,7 +46,8 @@ CREATE SCHEMA IF NOT EXISTS filebelt_mcp_vault;
 CREATE SCHEMA IF NOT EXISTS filebelt_collaboration;
 CREATE SCHEMA IF NOT EXISTS filebelt_mount;
 CREATE SCHEMA IF NOT EXISTS filebelt_mount_vault;
+CREATE SCHEMA IF NOT EXISTS filebelt_document;
 REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault FROM PUBLIC;
+  filebelt_mount, filebelt_mount_vault, filebelt_document FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault TO filebelt_migrator;
+  filebelt_mount, filebelt_mount_vault, filebelt_document TO filebelt_migrator;

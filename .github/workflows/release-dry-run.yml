@@ -64,7 +64,7 @@ jobs:
           tests/scripts/prepare-image-plan.sh
           --channel "$FILEBELT_CHANNEL"
           --output artifacts/phase1/image-plan.json
-      - name: Build all twelve Apache roles
+      - name: Build all thirteen Apache roles
         run: >-
           tests/scripts/run-image-matrix.sh
           --plan artifacts/phase1/image-plan.json

@@ -425,6 +425,7 @@ const VIEWER_ACTIONS: &[Action] = &[
     Action::ReadMetadata,
     Action::ListChildren,
     Action::ReadContent,
+    Action::UseExternalEditor,
 ];
 
 const CONTRIBUTOR_ACTIONS: &[Action] = &[
@@ -439,6 +440,9 @@ const CONTRIBUTOR_ACTIONS: &[Action] = &[
     Action::Delete,
     Action::Restore,
     Action::SetAttributes,
+    Action::UseExternalEditor,
+    Action::Comment,
+    Action::Review,
 ];
 
 const MANAGER_ACTIONS: &[Action] = &[
@@ -455,6 +459,9 @@ const MANAGER_ACTIONS: &[Action] = &[
     Action::SetAttributes,
     Action::Share,
     Action::ManageAcl,
+    Action::UseExternalEditor,
+    Action::Comment,
+    Action::Review,
 ];
 
 impl PermissionPreset {
@@ -964,6 +971,10 @@ mod tests {
         assert!(manager.contains(&Action::ManageAcl));
         assert!(!manager.contains(&Action::ManageDrive));
         assert!(!manager.contains(&Action::UseMcp));
+        assert!(viewer.contains(&Action::UseExternalEditor));
+        assert!(contributor.contains(&Action::UseExternalEditor));
+        assert!(contributor.contains(&Action::Comment));
+        assert!(contributor.contains(&Action::Review));
     }
 
     #[test]

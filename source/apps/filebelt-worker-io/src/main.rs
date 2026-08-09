@@ -44,6 +44,7 @@ use filebelt_storage_protocol::{
 };
 use futures_util::StreamExt as _;
 use serde::Serialize;
+use sqlx::Row as _;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -136,6 +137,15 @@ struct FinalizeResult {
 #[derive(Serialize)]
 struct CollaborationObjectResult {
     object_id: Uuid,
+    payload_id: Uuid,
+    size_bytes: u64,
+    blake3: String,
+    state: &'static str,
+}
+
+#[derive(Serialize)]
+struct DocumentRevisionResult {
+    revision_id: Uuid,
     payload_id: Uuid,
     size_bytes: u64,
     blake3: String,
@@ -258,6 +268,18 @@ async fn serve(config: Config) -> Result<(), String> {
         .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
         .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
         .route("/io/v1/downloads/{grant_id}", get(download).head(download))
+        .route(
+            "/io/v1/documents/{session_id}/versions/{version_id}",
+            get(read_document_version).head(read_document_version),
+        )
+        .route(
+            "/io/v1/document-revisions/{revision_id}",
+            put(write_document_revision),
+        )
+        .route(
+            "/io/v1/document-revisions/{revision_id}/finalize",
+            post(finalize_document_revision),
+        )
         .route("/io/v1/mount-reads/{handle_id}", get(mount_download))
         .route(
             "/io/v1/collaboration/{object_id}",
@@ -815,6 +837,259 @@ async fn mount_download(
         .header("x-content-type-options", "nosniff")
         .body(Body::from_stream(mount_download_stream(segments)))
         .map_err(|_| AppError::Internal)
+}
+
+async fn read_document_version(
+    State(state): State<AppState>,
+    Path((session_id, version_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request: Request<Body>,
+) -> Result<Response, AppError> {
+    let session_id =
+        Uuid::parse_str(&session_id).map_err(|_| AppError::BadRequest("invalid_session_id"))?;
+    let version_id =
+        Uuid::parse_str(&version_id).map_err(|_| AppError::BadRequest("invalid_version_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::ReadDocumentVersion).await?;
+    let row = sqlx::query(
+        "SELECT s.drive_id,s.node_id,s.fencing_token,v.payload_id,v.size_bytes \
+         FROM filebelt_document.sessions s JOIN file_versions v ON v.tenant_id=s.tenant_id \
+           AND v.node_id=s.node_id AND v.id=$3 WHERE s.tenant_id=$1 AND s.id=$2 \
+           AND s.state IN ('active','draining') AND s.absolute_expires_at>clock_timestamp()",
+    )
+    .bind(authorized.tenant_id)
+    .bind(session_id)
+    .bind(version_id)
+    .fetch_optional(state.database.pool())
+    .await
+    .map_err(|_| AppError::Internal)?
+    .ok_or(AppError::NotFound("document_version_not_found"))?;
+    let payload_id: Uuid = row.get("payload_id");
+    let drive_id: Uuid = row.get("drive_id");
+    if parse_required_uuid(&authorized.claims.upload_id)? != session_id
+        || parse_required_uuid(&authorized.claims.grant_id)? != version_id
+        || parse_required_uuid(&authorized.claims.payload_id)? != payload_id
+        || authorized.resource_id != row.get::<Uuid, _>("node_id")
+        || i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?
+            != row.get::<i64, _>("fencing_token")
+    {
+        return Err(AppError::Forbidden);
+    }
+    check_generations(&state, &authorized, drive_id).await?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, payload_id)
+        .await?;
+    if !matches!(payload.state.as_str(), "finalized" | "referenced") {
+        return Err(AppError::Conflict("payload_not_finalized"));
+    }
+    let size = u64::try_from(payload.size_bytes).map_err(|_| AppError::Internal)?;
+    let (start, end, partial) = requested_range(headers.get(RANGE), size, &authorized.claims)?;
+    let storage = state.storage.clone();
+    let segments = tokio::task::spawn_blocking(move || {
+        storage.verified_whole_object_segment(&payload, start, end)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    check_generations(&state, &authorized, drive_id).await?;
+    let length = if size == 0 { 0 } else { end - start + 1 };
+    let mut builder = Response::builder()
+        .status(if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(ACCEPT_RANGES, "bytes")
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, length.to_string())
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff");
+    if partial {
+        builder = builder.header(CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
+    }
+    let body = if request.method() == Method::HEAD || size == 0 {
+        Body::empty()
+    } else {
+        Body::from_stream(download_stream(
+            state.database.clone(),
+            authorized,
+            drive_id,
+            segments,
+            state.generation_recheck,
+        ))
+    };
+    builder.body(body).map_err(|_| AppError::Internal)
+}
+
+async fn write_document_revision(
+    State(state): State<AppState>,
+    Path(revision_id): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<DocumentRevisionResult>, AppError> {
+    let revision_id =
+        Uuid::parse_str(&revision_id).map_err(|_| AppError::BadRequest("invalid_revision_id"))?;
+    let authorized =
+        authorize(&state, &headers, CapabilityOperation::WriteDocumentRevision).await?;
+    let context = state
+        .database
+        .document_revision_io_context(authorized.tenant_id, revision_id)
+        .await?;
+    validate_document_revision_capability(&authorized, revision_id, &context)?;
+    if context.revision.state != "staging" {
+        return Err(AppError::Conflict("document_revision_not_staging"));
+    }
+    let expected =
+        u64::try_from(context.revision.reserved_bytes).map_err(|_| AppError::Internal)?;
+    validate_exact_range(&authorized, expected)?;
+    if let Some(length) = headers.get(CONTENT_LENGTH) {
+        let length = length
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or(AppError::BadRequest("invalid_content_length"))?;
+        if length != expected {
+            return Err(AppError::Conflict("document_revision_size_mismatch"));
+        }
+    }
+    check_generations(&state, &authorized, context.session.drive_id).await?;
+    consume_nonce(&state, &authorized, "write_document_revision").await?;
+    let temporary = state
+        .storage
+        .staging_temporary_path(context.revision.id, authorized.capability_id)
+        .map_err(storage_error)?;
+    let (size, digest) = write_body(body, &temporary, expected).await?;
+    let storage = state.storage.clone();
+    let locator = context.revision.payload_id.ok_or(AppError::Internal)?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, locator)
+        .await?;
+    let publish_path = temporary.clone();
+    tokio::task::spawn_blocking(move || {
+        storage.publish_staging_part(&publish_path, payload.locator, size, &digest)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    Ok(Json(DocumentRevisionResult {
+        revision_id,
+        payload_id: payload.payload_id,
+        size_bytes: size,
+        blake3: hex_digest(&digest),
+        state: "staged",
+    }))
+}
+
+async fn finalize_document_revision(
+    State(state): State<AppState>,
+    Path(revision_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<DocumentRevisionResult>, AppError> {
+    let revision_id =
+        Uuid::parse_str(&revision_id).map_err(|_| AppError::BadRequest("invalid_revision_id"))?;
+    let authorized = authorize(
+        &state,
+        &headers,
+        CapabilityOperation::FinalizeDocumentRevision,
+    )
+    .await?;
+    let context = state
+        .database
+        .document_revision_io_context(authorized.tenant_id, revision_id)
+        .await?;
+    validate_document_revision_capability(&authorized, revision_id, &context)?;
+    if context.revision.state != "staging" {
+        return Err(AppError::Conflict("document_revision_not_staging"));
+    }
+    let expected =
+        u64::try_from(context.revision.reserved_bytes).map_err(|_| AppError::Internal)?;
+    validate_exact_range(&authorized, expected)?;
+    check_generations(&state, &authorized, context.session.drive_id).await?;
+    consume_nonce(&state, &authorized, "finalize_document_revision").await?;
+    let payload_id = context.revision.payload_id.ok_or(AppError::Internal)?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, payload_id)
+        .await?;
+    let storage = state.storage.clone();
+    let staged = tokio::task::spawn_blocking(move || {
+        storage.verify_staging_object(payload.locator, expected)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    let storage = state.storage.clone();
+    let payload_for_finalize = payload.clone();
+    let finalized = tokio::task::spawn_blocking(move || {
+        storage.finalize_whole_object(&payload_for_finalize, staged.size, &staged.digest)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    check_generations(&state, &authorized, context.session.drive_id).await?;
+    let revision = match state
+        .database
+        .finalize_document_revision(
+            authorized.tenant_id,
+            revision_id,
+            context.session.fencing_token,
+            i64::try_from(finalized.size).map_err(|_| AppError::Internal)?,
+            &finalized.digest,
+            context
+                .revision
+                .media_type
+                .as_deref()
+                .ok_or(AppError::BadRequest("document_media_type_missing"))?,
+        )
+        .await
+    {
+        Ok(revision) => revision,
+        Err(DatabaseError::StaleGeneration) => {
+            return Err(AppError::Forbidden);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let storage = state.storage.clone();
+    if let Err(error) =
+        tokio::task::spawn_blocking(move || storage.remove_staging_locator(payload.locator))
+            .await
+            .map_err(|_| StorageError::Join)
+            .and_then(|result| result)
+    {
+        warn!(%revision_id, %error, "document staging cleanup deferred");
+    }
+    Ok(Json(DocumentRevisionResult {
+        revision_id,
+        payload_id,
+        size_bytes: finalized.size,
+        blake3: hex_digest(&finalized.digest),
+        state: if revision.state == "checkpoint" {
+            "checkpoint"
+        } else {
+            "durable"
+        },
+    }))
+}
+
+fn validate_document_revision_capability(
+    authorized: &AuthorizedCapability,
+    revision_id: Uuid,
+    context: &filebelt_database::document::DocumentIoContext,
+) -> Result<(), AppError> {
+    let payload_id = context.revision.payload_id.ok_or(AppError::Forbidden)?;
+    if parse_required_uuid(&authorized.claims.grant_id)? != revision_id
+        || parse_required_uuid(&authorized.claims.upload_id)? != context.session.id
+        || parse_required_uuid(&authorized.claims.payload_id)? != payload_id
+        || authorized.resource_id != context.session.node_id
+        || authorized.principal_id != context.participant.user_principal_id
+        || authorized.session_id != context.participant.api_session_id
+        || i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?
+            != context.session.fencing_token
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
 }
 
 async fn write_collaboration_object(
@@ -1784,5 +2059,25 @@ mod tests {
         assert!(claim < detached && detached < filesystem);
         assert!(handler.contains("heartbeat_upload_finalization("));
         assert!(handler.contains("abort_upload_finalization("));
+    }
+
+    #[test]
+    fn document_finalize_removes_only_the_redundant_staging_link_after_db_success() {
+        let source = include_str!("main.rs");
+        let handler = source
+            .split_once("async fn finalize_document_revision")
+            .expect("document finalize handler exists")
+            .1
+            .split_once("fn validate_document_revision_capability")
+            .expect("capability validation follows document finalize")
+            .0;
+        let finalized = handler
+            .find(".finalize_document_revision(")
+            .expect("database finalization exists");
+        let cleanup = handler
+            .find("storage.remove_staging_locator(payload.locator)")
+            .expect("staging link cleanup exists");
+        assert!(finalized < cleanup);
+        assert!(handler.contains("document staging cleanup deferred"));
     }
 }

@@ -12,17 +12,18 @@ the same change.
 
 - [Namespace and authorization](NamespaceAndAuthorization.md) defines tenant,
   identity, session, logical namespace, Virtual ACL, sharing, retention, and
-  Markdown collaboration, MCP principal, approval, data-grant, mount policy,
-  credential/device fencing, and revocation behavior.
+  Markdown collaboration, external document sessions, MCP principal, approval,
+  data-grant, mount policy, credential/device fencing, and revocation behavior.
 - [Interfaces and capabilities](InterfacesAndCapabilities.md) defines the HTTP,
-  OpenAPI, Protobuf, edge, storage-worker, collaboration, MCP-broker, and
-  VFS/gateway/runner authorization boundaries.
+  OpenAPI, Protobuf, edge, storage-worker, collaboration, external-document,
+  MCP-broker, and VFS/gateway/runner authorization boundaries.
 - [Storage and durability](StorageAndDurability.md) defines PostgreSQL,
-  migrations, payload state, collaboration manifests, MCP/mount vault state,
-  jobs, Iggy, reconciliation, and recovery.
+  migrations, payload state, collaboration manifests, document revisions,
+  MCP/mount vault state, jobs, Iggy, reconciliation, and recovery.
 - [Runtime and deployment](RuntimeAndDeployment.md) defines process and image
-  roles, supported platforms, Kubernetes collaboration and one-shot runner topology,
-  transport/egress security, observability, and release promotion.
+  roles, supported platforms, Kubernetes collaboration, document integration,
+  and one-shot runner topology, transport/egress security, observability, and
+  release promotion.
 
 These documents state cross-component behavior. More specialized sources own
 their respective details:
@@ -37,7 +38,8 @@ their respective details:
   deterministic generation.
 - [UI documentation](../ui/README.md) defines browser security, accessibility,
   design, dependency, and test requirements.
-- [Kubernetes operations](operations/kubernetes.md) and the neighboring
+- [Kubernetes operations](operations/kubernetes.md),
+  [ONLYOFFICE integration operations](operations/onlyoffice.md), and the neighboring
   operations guides define deployment-specific procedures and rollback steps.
 
 ## Maintaining the specifications

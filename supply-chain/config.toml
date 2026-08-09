@@ -613,6 +613,22 @@ criteria = "safe-to-deploy"
 version = "0.4.15"
 criteria = "safe-to-deploy"
 
+[[exemptions.h3]]
+version = "0.0.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.h3-datagram]]
+version = "0.0.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.h3-quinn]]
+version = "0.0.10"
+criteria = "safe-to-deploy"
+
+[[exemptions.h3-webtransport]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.hashbrown]]
 version = "0.14.5"
 criteria = "safe-to-deploy"

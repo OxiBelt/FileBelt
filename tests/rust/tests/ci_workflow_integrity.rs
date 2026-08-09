@@ -4,6 +4,17 @@ use std::fs;
 
 use filebelt_repository_tests::repository_root;
 
+fn workflow_job<'a>(workflow: &'a str, job: &str, next_job: &str) -> &'a str {
+    let job_marker = format!("\n  {job}:\n");
+    let next_job_marker = format!("\n  {next_job}:\n");
+    let start = workflow.find(&job_marker).expect("workflow job");
+    let end = workflow[start..]
+        .find(&next_job_marker)
+        .map(|offset| start + offset)
+        .expect("job after workflow job");
+    &workflow[start..end]
+}
+
 #[test]
 fn bootstrap_workflow_is_least_privileged_and_complete() {
     let root = repository_root();
@@ -243,4 +254,39 @@ fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
     assert!(setup < activation);
     assert!(activation < install);
     assert!(install < generation);
+}
+
+#[test]
+fn phase3_workloads_bypass_transitive_skips_and_require_successful_bootstrap() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("check workflow");
+
+    for (job, next_job, expected_condition) in [
+        (
+            "phase3-kind-current",
+            "phase3-kind-supported",
+            "if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name == 'pull_request' }}",
+        ),
+        (
+            "phase3-kind-supported",
+            "phase3-network-calico",
+            "if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}",
+        ),
+        (
+            "phase3-network-calico",
+            "phase3-network-cilium",
+            "if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' }}",
+        ),
+        (
+            "phase3-network-cilium",
+            "phase3-gate",
+            "if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}",
+        ),
+    ] {
+        let job = workflow_job(&workflow, job, next_job);
+        assert!(job.contains(expected_condition));
+        assert!(job.contains("needs: bootstrap-gate"));
+        assert!(!job.contains("always()"));
+    }
 }

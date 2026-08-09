@@ -332,7 +332,7 @@ jobs:
 
   phase3-kind-current:
     name: Kubernetes v1.36.1 compatibility (PR)
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name == 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -366,7 +366,7 @@ jobs:
 
   phase3-kind-supported:
     name: Kubernetes ${{ matrix.kubernetes }} compatibility
-    if: github.event_name != 'pull_request'
+    if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -413,6 +413,7 @@ jobs:
 
   phase3-network-calico:
     name: Kubernetes NetworkPolicy (Calico)
+    if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' }}
     needs: bootstrap-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -449,7 +450,7 @@ jobs:
 
   phase3-network-cilium:
     name: Kubernetes NetworkPolicy (Cilium)
-    if: github.event_name != 'pull_request'
+    if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 45

@@ -48,6 +48,37 @@ precedence = "override"
 SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
+# Imported verbatim from vercel/components.build at
+# ba727450437385af662810329fa19896215f76d5. The upstream Apache-2.0
+# license and copyright notice are recorded at:
+# https://github.com/vercel/components.build/blob/ba727450437385af662810329fa19896215f76d5/LICENSE
+[[annotations]]
+path = [".agents/skills/building-components/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2023 Vercel, Inc."
+SPDX-License-Identifier = "Apache-2.0"
+
+# Imported verbatim from vercel-labs/agent-skills at
+# 7c180d9044c9ae2b442b567aad4e42a28dd5ed62. The upstream README declares
+# these skills MIT-licensed but supplies no copyright statement:
+# https://github.com/vercel-labs/agent-skills/blob/7c180d9044c9ae2b442b567aad4e42a28dd5ed62/README.md#license
+[[annotations]]
+path = [
+  ".agents/skills/vercel-composition-patterns/**",
+  ".agents/skills/vercel-react-best-practices/**",
+  ".agents/skills/vercel-react-native-skills/**",
+  ".agents/skills/web-design-guidelines/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "NOASSERTION"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["skills-lock.json"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
 [[annotations]]
 path = ["source/ops/runtime/musl-COPYRIGHT"]
 precedence = "override"

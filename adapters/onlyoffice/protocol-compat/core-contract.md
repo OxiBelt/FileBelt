@@ -8,6 +8,12 @@ over its existing mTLS identity; Apache packages have no dependency on this
 adapter. The generic Core-side protocol must provide the following durable
 interface atomically:
 
+The adapter configuration keeps `public_origin`, `launch_origin`, and
+`document_server_origin` as pairwise-distinct bare HTTPS hosts. Core-issued
+document input and callback URLs use `public_origin`; the browser submits the
+one-use handoff only to `launch_origin`. The launch host never serves input,
+callbacks, or source/about metadata.
+
 | Operation | Input | Required durable behavior |
 | --- | --- | --- |
 | `redeem_one_use_launch` | opaque launch ID | Bind a launch to its exact tenant, participant, document version, and authorization generations; consume the digest once. Core admits at most 20 active/reconnecting participant-tabs under its provider lock and permits only one consumed launch lifetime per participant. |

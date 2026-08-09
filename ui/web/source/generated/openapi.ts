@@ -1581,7 +1581,7 @@ export interface components {
         readonly DocumentSessionLaunchHandoff: {
             /**
              * Format: uri
-             * @description The fixed operator-configured integration form action. It is valid only with the corresponding one-use grant and is never selected by a provider or request.
+             * @description The fixed operator-configured isolated editor HTTPS form action. It is valid only with the corresponding one-use grant, is never selected by a provider or request, and must not share a hostname with FileBelt or the provider.
              */
             readonly action: string;
             /** Format: date-time */

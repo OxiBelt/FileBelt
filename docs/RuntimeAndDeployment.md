@@ -205,8 +205,12 @@ bounded administrative Jobs. FileBelt deploys no HPA.
 `documents.enabled=true` additionally renders the Apache document coordinator
 Deployment and Service only after migration 000006, grants verification, the
 generation-4 capability key, API/document/I/O mTLS projections, an exact
-operator-configured same-origin launch action, and an exact external provider
-HTTPS origin are present. The base chart never renders a
+operator-configured isolated editor launch action, and an exact external
+provider HTTPS origin are present. The editor action must be HTTPS at
+`/onlyoffice/launch` on a hostname distinct from both the FileBelt public host
+and provider host. The existing public TLS Secret must cover both FileBelt DNS
+names; OxiBelt serves them as separate virtual hosts with disjoint route sets.
+The base chart never renders a
 provider adapter or DocumentServer. The separately installed
 `filebelt-onlyoffice` chart targets a pre-created integration namespace and
 renders only the AGPL adapter, its Service/PDB, and default-deny policies. The
@@ -291,6 +295,12 @@ qualify the portable NetworkPolicy graph.
 The integration namespace has its own ingress/egress default deny. OxiBelt may
 reach only the adapter listener; DocumentServer reaches launch input and
 callback paths through OxiBelt rather than receiving direct Pod ingress.
+The FileBelt public OxiBelt host exposes adapter input, callback, source, and
+about paths, while the distinct editor host exposes only launch POST and the
+launcher asset GET. OxiBelt strips browser authority headers on both route
+sets, disables retries and caching, and preserves the external Host and Origin
+values for the adapter's independent enforcement. No editor-host API or API
+CORS route exists.
 Adapter egress is limited to DNS, the Apache document adapter listener, the
 capability-limited I/O listener, the single mTLS provider-output egress gateway,
 and optional OTLP. It has no direct Internet/default-route egress and no path
@@ -328,7 +338,7 @@ collaboration filters join-grant verification to API generation 1; the
 generation-2 collaboration key remains storage-capability-only even though both
 public keys share the restored verification keyset. Enabled document
 integration additionally requires the document database URL, fixed provider ID,
-same-origin launch action, and external provider HTTPS origin, API-to-document
+isolated editor launch action, and external provider HTTPS origin, API-to-document
 and adapter-to-document client identities,
 adapter-to-I/O client identity, generation-4 capability signing key, a combined
 I/O verification keyset, 20-participant admission limit, 100 MiB
@@ -451,8 +461,16 @@ lost-response reconciliation, ACL/session revocation, and concurrent-head
 conflict without an adapter. Only after those pass may an operator install the
 separate adapter chart with an admitted AGPL adapter-image digest and exact
 source link, provider `9.4.0`, outbox/browser secret generations, mTLS
-identities, and egress target. Enable the OxiBelt route last and verify a real
-or contract-faithful DOCX/XLSX/PPTX edit for two users.
+identities, and egress target. For a deployment that ever exposed the former
+public-origin launcher, stop document admission and old binaries before the
+cutover. Apply forward migration `000010` for every deployment, verify its
+receipt and audit counts, and require affected users to authenticate again.
+Provision the distinct editor DNS name and one
+FileBelt TLS certificate whose SANs cover both FileBelt hosts, then enable the
+two disjoint OxiBelt virtual hosts last. Before user traffic, verify a real
+digest-pinned ONLYOFFICE Community `9.4.0` DOCX/XLSX/PPTX flow for two users in
+Chromium and Firefox, including the exact CSP sandbox and download, print, and
+popup behavior. A contract-faithful fixture alone is insufficient.
 
 Rollback removes the OxiBelt adapter route and stops new launches first, then
 drains the adapter and fences active document sessions before scaling the
@@ -460,7 +478,11 @@ document coordinator to zero. Preserve finalized checkpoints/conflicts and
 continue maintenance/recovery with the previous compatible core images. Do not
 drop `filebelt_document`, reverse migration 000006, remove capability generation
 4 while an unexpired claim or recovery record references it, or relabel the
-AGPL image as Apache. FileBelt remains fully usable through ordinary Web,
+AGPL image as Apache. Migration 000010 is forward-only: never restore the old
+public-host launch route or a binary that can mint it while documents are
+enabled. If provider-script compromise is suspected, keep reauthentication
+blocked and rotate the FileBelt public origin under the incident procedure
+before admitting users. FileBelt remains fully usable through ordinary Web,
 Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed

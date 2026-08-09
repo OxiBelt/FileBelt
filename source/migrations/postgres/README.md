@@ -25,3 +25,10 @@ files. The Phase 6 mount vault envelope is completed by
 `000005_phase6_mount_vault.sql` before any mount runtime is enabled. PostgreSQL
 metadata and policy state are authoritative; migrations never infer state from
 the payload volume or an event stream.
+
+`000010_onlyoffice_origin_isolation.sql` is a forward-only security cutover.
+Apply it only while document admission and every old launch-capable binary are
+stopped. It preserves revisions and reconciliation state while revoking
+affected live browser sessions and fencing live document state; follow
+[`docs/operations/onlyoffice.md`](../../../docs/operations/onlyoffice.md) for
+rollout, verification, and rollback requirements.

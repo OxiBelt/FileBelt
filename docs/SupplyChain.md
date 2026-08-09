@@ -382,6 +382,12 @@ a FileBelt build input or release subject. An operator records its exact image
 digest, upstream source, notices, branding, and vulnerability review outside
 the FileBelt adapter SBOM. FileBelt makes no cluster or paid-edition claim and
 enforces the documented 20 active-connection ceiling before provider launch.
+Release acceptance must exercise a real digest-pinned `9.4.0` Community image,
+not only a contract-faithful fixture, in Chromium and Firefox through the
+isolated editor hostname. The evidence records the provider digest, platform,
+upstream source and notices, verifies the fixed launcher CSP sandbox, and covers
+DOCX, XLSX, PPTX, download, print, and popup behavior without adding that
+external image to a FileBelt chart, SBOM, or release subject.
 Changing provider version or edition, copying provider JavaScript, embedding a
 provider image in the chart, or changing the AGPL expression repeats the full
 license, source, dependency, browser, threat-model, and release review.

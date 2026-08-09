@@ -138,12 +138,19 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
 helm template phase7 "${chart}" --kube-version 1.36.0 \
   --set documents.enabled=true \
   >"${temporary}/render-documents.yaml"
+helm template phase7-editor-override "${chart}" --kube-version 1.36.0 \
+  --set documents.enabled=true \
+  --set-string documents.launchAction=https://editor.example.test/onlyoffice/launch \
+  --set-string documents.providerOrigin=https://provider.example.test \
+  >"${temporary}/render-documents-editor-override.yaml"
 assert_rendered_toml "${default_manifest}" filebelt.toml
 assert_rendered_toml "${default_manifest}" oxibelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" oxibelt.toml
 assert_rendered_toml "${temporary}/render-documents.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-documents.yaml" oxibelt.toml
+assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" oxibelt.toml
 assert_count "${default_manifest}" '^kind: Deployment$' 4
 assert_count "${default_manifest}" '^kind: Service$' 7
 assert_count "${default_manifest}" '^kind: ServiceAccount$' 5
@@ -208,10 +215,96 @@ assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy file
 assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /run/secrets/onlyoffice-edge-client-tls'
 assert_contains "${temporary}/render-documents.yaml" 'origin = "https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089"'
 assert_contains "${temporary}/render-documents.yaml" 'server_name = "filebelt-onlyoffice-adapter.filebelt-integrations.svc"'
-assert_contains "${temporary}/render-documents.yaml" 'launch_action = "https://filebelt.example.invalid/onlyoffice/launch"'
+assert_contains "${temporary}/render-documents.yaml" 'launch_action = "https://filebelt-editor.example.invalid/onlyoffice/launch"'
 assert_contains "${temporary}/render-documents.yaml" 'provider_origin = "https://documentserver.example.invalid"'
 assert_contains "${temporary}/render-documents.yaml" 'spiffe://filebelt/api/document'
 assert_contains "${temporary}/render-documents.yaml" 'spiffe://filebelt/onlyoffice-adapter/document'
+assert_contains "${temporary}/render-documents-editor-override.yaml" 'server_names = ["filebelt.example.invalid", "editor.example.test"]'
+assert_contains "${temporary}/render-documents-editor-override.yaml" 'hosts = ["editor.example.test"]'
+assert_contains "${temporary}/render-documents-editor-override.yaml" "form-action 'self' https://editor.example.test"
+python3 - "${temporary}/render-documents.yaml" <<'PY'
+import sys
+import tomllib
+
+
+def oxibelt_config(manifest_path: str) -> dict:
+    for document in open(manifest_path, encoding="utf-8").read().split("\n---\n"):
+        lines = document.splitlines()
+        if "kind: ConfigMap" not in lines or "  oxibelt.toml: |" not in lines:
+            continue
+        start = lines.index("  oxibelt.toml: |") + 1
+        rendered = []
+        for line in lines[start:]:
+            if line.startswith("    "):
+                rendered.append(line[4:])
+            elif not line:
+                rendered.append("")
+            else:
+                break
+        return tomllib.loads("\n".join(rendered))
+    raise AssertionError("missing rendered OxiBelt configuration")
+
+
+config = oxibelt_config(sys.argv[1])
+assert config["tls"]["server_names"] == [
+    "filebelt.example.invalid",
+    "filebelt-editor.example.invalid",
+]
+routes = {route["name"]: route for route in config["routes"]}
+identity_headers = {
+    "x-user", "x-group", "x-groups", "x-principal", "x-tenant",
+    "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user",
+    "x-auth-request-groups", "x-remote-user", "x-remote-groups",
+}
+editor_routes = {
+    "filebelt-onlyoffice-editor-launch": ("/onlyoffice/launch", "POST"),
+    "filebelt-onlyoffice-editor-launcher": ("/onlyoffice/launcher.js", "GET"),
+}
+provider_routes = {
+    "filebelt-onlyoffice-input": ("/onlyoffice/input/", "GET"),
+    "filebelt-onlyoffice-callback": ("/onlyoffice/callback/", "POST"),
+    "filebelt-onlyoffice-source": ("/onlyoffice/source", "GET"),
+    "filebelt-onlyoffice-about": ("/onlyoffice/about", "GET"),
+}
+assert "filebelt-onlyoffice" not in routes
+for name, (path, method) in editor_routes.items():
+    route = routes[name]
+    assert route["hosts"] == ["filebelt-editor.example.invalid"]
+    assert route["path_prefix"] == path
+    assert route["match"]["methods"] == [method]
+    removed = set(route["actions"]["request_headers"]["remove"])
+    assert {"authorization", "cookie", "x-filebelt-csrf"} | identity_headers <= removed
+    csp = next(
+        item["value"]
+        for item in route["actions"]["response_headers"]["set"]
+        if item["name"] == "Content-Security-Policy"
+    )
+    assert "frame-ancestors 'none'" in csp
+    assert next(part.strip() for part in csp.split(";") if part.strip().startswith("sandbox ")) == (
+        "sandbox allow-scripts allow-same-origin allow-forms allow-downloads allow-popups"
+    )
+    assert "filebelt.example.invalid" not in csp
+    assert "https://documentserver.example.invalid" in csp
+for name, (path, method) in provider_routes.items():
+    route = routes[name]
+    assert route["hosts"] == ["filebelt.example.invalid"]
+    assert route["path_prefix"] == path
+    assert route["match"]["methods"] == [method]
+    removed = set(route["actions"]["request_headers"]["remove"])
+    assert {"cookie", "x-filebelt-csrf"} | identity_headers <= removed
+    assert "authorization" not in removed
+assert not any(
+    route["hosts"] == ["filebelt.example.invalid"]
+    and route["path_prefix"] == "/onlyoffice/launch"
+    for route in config["routes"]
+)
+spa_csp = next(
+    item["value"]
+    for item in routes["filebelt-spa"]["actions"]["response_headers"]["set"]
+    if item["name"] == "Content-Security-Policy"
+)
+assert "form-action 'self' https://filebelt-editor.example.invalid" in spa_csp
+PY
 assert_document_not_contains "${default_manifest}" Deployment filebelt-web 'claimName:'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'claimName:'
 assert_document_contains "${default_manifest}" Deployment filebelt-io 'claimName: filebelt-payloads'
@@ -493,6 +586,22 @@ expect_failure widened_mcp_broker_trust_domain \
   --set networkPolicy.kubernetesApi.enabled=true \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp-trust-domain.toml"
+
+expect_failure documents_editor_public_host \
+  --set documents.enabled=true \
+  --set-string documents.launchAction=https://filebelt.example.invalid/onlyoffice/launch
+expect_failure documents_editor_provider_host \
+  --set documents.enabled=true \
+  --set-string documents.providerOrigin=https://filebelt-editor.example.invalid
+expect_failure documents_editor_port_alias \
+  --set documents.enabled=true \
+  --set-string documents.launchAction=https://filebelt.example.invalid:9443/onlyoffice/launch
+expect_failure documents_editor_trailing_dot \
+  --set documents.enabled=true \
+  --set-string documents.launchAction=https://filebelt-editor.example.invalid./onlyoffice/launch
+expect_failure documents_provider_trailing_dot \
+  --set documents.enabled=true \
+  --set-string documents.providerOrigin=https://documentserver.example.invalid.
 
 expect_failure old_kubernetes --kube-version 1.33.9
 expect_failure new_kubernetes --kube-version 1.37.0

@@ -19,13 +19,17 @@ pub enum Provider {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Origin(String);
+pub struct Origin {
+    value: String,
+    host: String,
+}
 
 impl Origin {
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         let parsed = Url::parse(value).map_err(|_| ConfigError::InvalidOrigin)?;
         if parsed.scheme() != "https"
             || parsed.host_str().is_none()
+            || parsed.host_str().is_some_and(|host| host.ends_with('.'))
             || parsed.port().is_some()
             || !parsed.username().is_empty()
             || parsed.password().is_some()
@@ -35,11 +39,18 @@ impl Origin {
         {
             return Err(ConfigError::InvalidOrigin);
         }
-        Ok(Self(value.trim_end_matches('/').to_owned()))
+        Ok(Self {
+            value: parsed.origin().ascii_serialization(),
+            host: parsed.host_str().unwrap_or_default().to_ascii_lowercase(),
+        })
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.value
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
     }
 
     /// Accept an absolute HTTPS URL only when its origin is exactly the
@@ -49,7 +60,7 @@ impl Origin {
         let Ok(url) = Url::parse(value) else {
             return false;
         };
-        url.origin().ascii_serialization() == self.0
+        url.origin().ascii_serialization() == self.value
             && url.username().is_empty()
             && url.password().is_none()
             && url.fragment().is_none()
@@ -77,6 +88,7 @@ pub struct AdapterConfig {
     pub provider: Provider,
     pub document_server_version: String,
     pub public_origin: Origin,
+    pub launch_origin: Origin,
     pub document_server_origin: Origin,
     pub document_server_api_js: String,
     /// Signs the browser initialization configuration. This key is not
@@ -107,6 +119,12 @@ impl AdapterConfig {
         );
         if self.document_server_api_js != expected_api {
             return Err(ConfigError::UnexpectedProviderApi);
+        }
+        if self.public_origin.host() == self.launch_origin.host()
+            || self.public_origin.host() == self.document_server_origin.host()
+            || self.launch_origin.host() == self.document_server_origin.host()
+        {
+            return Err(ConfigError::OriginsNotDistinct);
         }
         if self.tenant_id.is_empty()
             || !self
@@ -185,6 +203,7 @@ impl AdapterConfig {
             },
             document_server_version: wire.document_server_version,
             public_origin: Origin::parse(&wire.public_origin)?,
+            launch_origin: Origin::parse(&wire.launch_origin)?,
             document_server_origin: Origin::parse(&wire.document_server_origin)?,
             document_server_api_js: wire.document_server_api_js,
             browser_jwt_file: wire.browser_jwt_file.into(),
@@ -208,6 +227,7 @@ struct WireConfig {
     provider: String,
     document_server_version: String,
     public_origin: String,
+    launch_origin: String,
     document_server_origin: String,
     document_server_api_js: String,
     browser_jwt_file: String,
@@ -287,6 +307,7 @@ pub enum ConfigError {
     InvalidOrigin,
     UnsupportedProviderVersion,
     UnexpectedProviderApi,
+    OriginsNotDistinct,
     InvalidCallbackClaims,
     InvalidMtlsEndpoint,
     InvalidServerTls,
@@ -314,6 +335,7 @@ mod tests {
             provider: Provider::OnlyOfficeDocumentServer940,
             document_server_version: DOCUMENT_SERVER_VERSION.into(),
             public_origin: Origin::parse("https://files.example.test").unwrap(),
+            launch_origin: Origin::parse("https://launch.example.test").unwrap(),
             document_server_origin: Origin::parse("https://office.example.test").unwrap(),
             document_server_api_js:
                 "https://office.example.test/web-apps/apps/api/documents/api.js".into(),
@@ -356,6 +378,21 @@ mod tests {
         assert!(!origin.exact_url("https://office.example.test.evil.invalid/cache"));
         assert!(!origin.exact_url("https://office.example.test@evil.invalid/cache"));
         assert!(!origin.exact_url("https://office.example.test/cache#fragment"));
+    }
+
+    #[test]
+    fn requires_three_distinct_bare_https_hosts() {
+        let now = UNIX_EPOCH + Duration::from_secs(1000);
+        let mut checked = config();
+        checked.launch_origin = Origin::parse("https://files.example.test").unwrap();
+        assert_eq!(checked.validate(now), Err(ConfigError::OriginsNotDistinct));
+        checked.launch_origin = Origin::parse("https://launch.example.test").unwrap();
+        checked.document_server_origin = Origin::parse("https://launch.example.test").unwrap();
+        checked.document_server_api_js =
+            "https://launch.example.test/web-apps/apps/api/documents/api.js".into();
+        assert_eq!(checked.validate(now), Err(ConfigError::OriginsNotDistinct));
+        assert!(Origin::parse("https://launch.example.test:8443").is_err());
+        assert!(Origin::parse("https://launch.example.test.").is_err());
     }
 
     #[test]

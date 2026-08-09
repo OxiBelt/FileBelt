@@ -6,14 +6,27 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
 
-const ParentContentSecurityPolicy = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'";
+export function ParentContentSecurityPolicy(DocumentLaunchAction = process.env.FILEBELT_DOCUMENT_LAUNCH_ACTION): string {
+  const EditorOrigin = DocumentLaunchAction === undefined ? "" : ` ${DocumentLaunchOrigin(DocumentLaunchAction)}`;
+  return `default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'${EditorOrigin}; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'`;
+}
+
+function DocumentLaunchOrigin(Action: string): string {
+  const Url = new URL(Action);
+  if (Url.protocol !== "https:" || Url.hostname.endsWith(".") || Url.pathname !== "/onlyoffice/launch" || Url.username !== "" || Url.password !== "" || Url.port !== "" || Url.search !== "" || Url.hash !== "") {
+    throw new Error("FILEBELT_DOCUMENT_LAUNCH_ACTION must be an exact HTTPS /onlyoffice/launch URL");
+  }
+  return Url.origin;
+}
+
+const ParentCsp = ParentContentSecurityPolicy();
 const MarkdownPreviewContentSecurityPolicy = "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'self'; form-action 'none'; frame-src 'none'; frame-ancestors 'self'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types filebelt-markdown-generated";
 
 function SetBrowserSecurityHeaders(Request: IncomingMessage, Response: ServerResponse): void {
   const IsMarkdownPreview = Request.url?.startsWith("/markdown-preview/") ?? false;
   Response.setHeader(
     "Content-Security-Policy",
-    IsMarkdownPreview ? MarkdownPreviewContentSecurityPolicy : ParentContentSecurityPolicy,
+    IsMarkdownPreview ? MarkdownPreviewContentSecurityPolicy : ParentCsp,
   );
   Response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   Response.setHeader("Cross-Origin-Resource-Policy", IsMarkdownPreview ? "cross-origin" : "same-origin");

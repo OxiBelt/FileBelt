@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { IsOfficeDocumentCandidate } from "./DocumentSessions.js";
+import { IsIsolatedDocumentLaunchAction, IsOfficeDocumentCandidate } from "./DocumentSessions.js";
 import type { FileEntry } from "./model.js";
 
 const Office: FileEntry = {
@@ -42,9 +42,22 @@ describe("document session controls", () => {
     expect(AfterCreation).toContain("SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })");
     expect(AfterCreation).not.toContain("redeemLaunch(Detail.session.id)");
     expect(Source).not.toContain("useState<DocumentSessionLaunchHandoff");
+    expect(Source).toContain("IsIsolatedDocumentLaunchAction(Handoff.action, window.location.hostname)");
     expect(Source).toContain("Form.method = \"post\"");
+    expect(Source).toContain("Form.target = \"_self\"");
     expect(Source).toContain("Grant.name = \"launch_grant\"");
     expect(Source).not.toMatch(/(?:localStorage|sessionStorage|indexedDB)\s*[.(]|documents\/api\.js/);
+  });
+
+  it("accepts only an isolated HTTPS editor launch action", () => {
+    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/onlyoffice/launch", "files.example.test")).toBe(true);
+    expect(IsIsolatedDocumentLaunchAction("https://files.example.test/onlyoffice/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("https://files.example.test:8443/onlyoffice/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test:8443/onlyoffice/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test./onlyoffice/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("http://editor.example.test/onlyoffice/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/integrations/launch", "files.example.test")).toBe(false);
+    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/onlyoffice/launch?grant=leak", "files.example.test")).toBe(false);
   });
 
   it("surfaces detail failures, follows pagination, and refreshes conflict copies", async () => {

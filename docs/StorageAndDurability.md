@@ -333,6 +333,21 @@ affected drive/resource generation once. The data migration is idempotently
 recorded in `filebelt_document.data_migrations`; no existing content, version,
 or ACL row is deleted or rewritten.
 
+Forward migration `000010_onlyoffice_origin_isolation.sql` is a quiesced
+security cutover from the former public-origin editor shell. Before applying it,
+operators stop document admission and keep binaries that can mint the old
+launch action out of service. The migration revokes every still-live API
+session linked by any historical document participant, including a participant
+that was already closed; unrelated and already-expired API sessions are not
+changed. It consumes every outstanding launch grant, closes every active or
+disconnected participant, revokes every active or draining document session,
+and advances each affected session fence. Privacy-visible audit rows record
+API-session revocation and document-session closure, and one durable
+`onlyoffice_origin_isolation_v1` receipt records the number of closed document
+sessions. Existing revisions, staged payloads, reconciliation jobs, immutable
+versions, conflicts, and retention deadlines are deliberately preserved for
+normal recovery and maintenance.
+
 Backups include document sessions, participants, revision/contributor state,
 reconciliation jobs, retained output deadlines, payload references, and
 capability key generation 4. Restore leaves document admission disabled,
@@ -341,6 +356,10 @@ reconciles staged/committing rows against immutable versions, verifies every
 referenced payload digest, and only then permits new sessions. Rolling back the
 application keeps migration 000006 and its additive data. An older binary may
 run only with document admission disabled; the migration is never reversed.
+Migration 000010 is also forward-only. Rollback may disable the integration and
+restore a compatible core or adapter, but must never restore the public-origin
+launcher. Every user whose live session was revoked by the cutover must
+authenticate again after the isolated editor hostname is active.
 
 ## Phase 8 activation, NFS recovery, and media cache
 

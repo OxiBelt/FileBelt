@@ -909,6 +909,13 @@ impl Config {
             return Err(invalid("unsupported config version"));
         }
         if self.public_origin.scheme() != "https"
+            || self.public_origin.host_str().is_none()
+            || self
+                .public_origin
+                .host_str()
+                .is_some_and(|host| host.ends_with('.'))
+            || self.public_origin.username() != ""
+            || self.public_origin.password().is_some()
             || self.public_origin.path() != "/"
             || self.public_origin.query().is_some()
             || self.public_origin.fragment().is_some()
@@ -1221,8 +1228,12 @@ impl Config {
             self.deployment.mode,
             "document service",
         )?;
-        validate_document_launch_action(documents.launch_action.as_ref(), &self.public_origin)?;
-        validate_document_provider_origin(documents.provider_origin.as_ref())?;
+        validate_document_provider_origin(documents.provider_origin.as_ref(), &self.public_origin)?;
+        validate_document_launch_action(
+            documents.launch_action.as_ref(),
+            &self.public_origin,
+            documents.provider_origin.as_ref(),
+        )?;
         if self.listeners.document == self.listeners.api
             || self.listeners.document == self.listeners.io
             || self.listeners.document == self.listeners.operations
@@ -2065,36 +2076,47 @@ fn validate_document_limits(documents: &DocumentConfig) -> Result<(), ConfigErro
 fn validate_document_launch_action(
     url: Option<&Url>,
     public_origin: &Url,
+    provider_origin: Option<&Url>,
 ) -> Result<(), ConfigError> {
     let url = url.ok_or_else(|| {
-        invalid("enabled documents require an exact public HTTPS launch action URL")
+        invalid("enabled documents require an exact isolated HTTPS launch action URL")
     })?;
     if url.scheme() != "https"
         || url.host_str().is_none()
+        || url.host_str().is_some_and(|host| host.ends_with('.'))
         || url.username() != ""
         || url.password().is_some()
+        || url.port().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
-        || url.path().is_empty()
-        || url.origin() != public_origin.origin()
+        || url.path() != "/onlyoffice/launch"
+        || url.host_str() == public_origin.host_str()
+        || provider_origin
+            .is_some_and(|provider_origin| url.host_str() == provider_origin.host_str())
     {
         return Err(invalid(
-            "document launch action must be an exact same-origin public HTTPS URL without credentials, query, or fragment",
+            "document launch action must be an exact isolated HTTPS /onlyoffice/launch URL without credentials, query, or fragment",
         ));
     }
     Ok(())
 }
 
-fn validate_document_provider_origin(url: Option<&Url>) -> Result<(), ConfigError> {
+fn validate_document_provider_origin(
+    url: Option<&Url>,
+    public_origin: &Url,
+) -> Result<(), ConfigError> {
     let url =
         url.ok_or_else(|| invalid("enabled documents require an exact provider HTTPS origin"))?;
     if url.scheme() != "https"
         || url.host_str().is_none()
+        || url.host_str().is_some_and(|host| host.ends_with('.'))
         || url.username() != ""
         || url.password().is_some()
+        || url.port().is_some()
         || url.path() != "/"
         || url.query().is_some()
         || url.fragment().is_some()
+        || url.host_str() == public_origin.host_str()
     {
         return Err(invalid(
             "document provider origin must be an exact HTTPS origin without credentials, path, query, or fragment",
@@ -2723,13 +2745,13 @@ mod tests {
             Some("/run/secrets/document-capability.pk8".into());
         candidate.documents.url = Some(Url::parse("http://127.0.0.1:8089/").unwrap());
         candidate.documents.launch_action =
-            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+            Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
         candidate.documents.provider_origin =
             Some(Url::parse("https://documentserver.example.test/").unwrap());
         candidate.validate().unwrap();
     }
     #[test]
-    fn documents_reject_non_loopback_development_http_and_limit_changes() {
+    fn documents_reject_unisolated_launch_actions_and_limit_changes() {
         let mut candidate = config();
         candidate.documents.enabled = true;
         candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
@@ -2737,17 +2759,35 @@ mod tests {
             Some("/run/secrets/document-capability.pk8".into());
         candidate.documents.url = Some(Url::parse("http://document:8089/").unwrap());
         candidate.documents.launch_action =
-            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+            Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
         candidate.documents.provider_origin =
             Some(Url::parse("https://documentserver.example.test/").unwrap());
         assert!(candidate.validate().is_err());
 
         candidate.documents.url = Some(Url::parse("http://127.0.0.1:8089/").unwrap());
         candidate.documents.launch_action =
-            Some(Url::parse("http://files.example.test/integrations/launch").unwrap());
+            Some(Url::parse("http://editor.example.test/onlyoffice/launch").unwrap());
         assert!(candidate.validate().is_err());
         candidate.documents.launch_action =
-            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+            Some(Url::parse("https://editor.example.test/integrations/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://editor.example.test:8443/onlyoffice/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://editor.example.test./onlyoffice/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://files.example.test:8443/onlyoffice/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://documentserver.example.test:8443/onlyoffice/launch").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://editor.example.test/onlyoffice/launch?grant=leak").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.launch_action =
+            Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
         candidate.documents.provider_origin = None;
         assert!(candidate.validate().is_err());
         candidate.documents.provider_origin =
@@ -2764,6 +2804,18 @@ mod tests {
         assert!(candidate.validate().is_err());
         candidate.documents.provider_origin =
             Some(Url::parse("https://operator@documentserver.example.test/").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test:8443/").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://documentserver.example.test./").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://files.example.test:8443/").unwrap());
+        assert!(candidate.validate().is_err());
+        candidate.documents.provider_origin =
+            Some(Url::parse("https://files.example.test/").unwrap());
         assert!(candidate.validate().is_err());
         candidate.documents.provider_origin =
             Some(Url::parse("https://documentserver.example.test/").unwrap());
@@ -2792,7 +2844,7 @@ mod tests {
             Some("/run/secrets/document-capability.pk8".into());
         candidate.documents.url = Some(Url::parse("https://document:8089/").unwrap());
         candidate.documents.launch_action =
-            Some(Url::parse("https://files.example.test/integrations/launch").unwrap());
+            Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
         candidate.documents.provider_origin =
             Some(Url::parse("https://documentserver.example.test/").unwrap());
         candidate.documents.client_certificate_chain_file =

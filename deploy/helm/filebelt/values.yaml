@@ -268,7 +268,12 @@ configuration:
     [tls]
     cert_chain = "/run/secrets/public-tls/tls.crt"
     private_key = "/run/secrets/public-tls/tls.key"
+    {{ if .Values.documents.enabled }}
+    {{- $editorLaunch := urlParse .Values.documents.launchAction }}
+    server_names = ["filebelt.example.invalid", {{ $editorLaunch.host | quote }}]
+    {{ else }}
     server_names = ["filebelt.example.invalid"]
+    {{ end }}
     require_sni = true
     reject_unknown_sni = true
     min_version = "tls1.3"
@@ -513,28 +518,84 @@ configuration:
     {{ end }}
 
     {{ if .Values.documents.enabled }}
+    {{- $editorLaunch := urlParse .Values.documents.launchAction }}
     [[routes]]
-    name = "filebelt-onlyoffice"
-    hosts = ["filebelt.example.invalid"]
-    path_prefix = "/onlyoffice"
+    name = "filebelt-onlyoffice-editor-launch"
+    hosts = [{{ $editorLaunch.host | quote }}]
+    path_prefix = "/onlyoffice/launch"
     upstream = "filebelt-onlyoffice-adapter"
     compression = "off"
     security_headers = "default"
     generic_http_upgrade = false
     connect_tunneling = false
     grpc_web = false
+    [routes.match]
+    methods = ["POST"]
     [routes.retry]
     enabled = false
     [routes.limits]
     max_request_body_bytes = 1048576
     [routes.actions.request_headers]
-    remove = ["x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+    remove = ["authorization", "cookie", "x-filebelt-csrf", "x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
     [[routes.actions.response_headers.set]]
     name = "Cache-Control"
     value = "no-store"
     [[routes.actions.response_headers.set]]
     name = "Content-Security-Policy"
-    value = {{ printf "default-src 'none'; base-uri 'none'; connect-src 'self' %s; font-src 'self' data: %s; form-action 'none'; frame-src %s; frame-ancestors 'none'; img-src 'self' data: blob: %s; media-src 'none'; object-src 'none'; script-src 'self' %s; style-src 'self' 'unsafe-inline'" .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin | quote }}
+    value = {{ printf "default-src 'none'; base-uri 'none'; connect-src 'self' %s; font-src 'self' data: %s; form-action 'self' %s; frame-src %s; frame-ancestors 'none'; img-src 'self' data: blob: %s; media-src 'none'; object-src 'none'; script-src 'self' %s; style-src 'self' 'unsafe-inline'; sandbox allow-scripts allow-same-origin allow-forms allow-downloads allow-popups" .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin | quote }}
+
+    [[routes]]
+    name = "filebelt-onlyoffice-editor-launcher"
+    hosts = [{{ $editorLaunch.host | quote }}]
+    path_prefix = "/onlyoffice/launcher.js"
+    upstream = "filebelt-onlyoffice-adapter"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.match]
+    methods = ["GET"]
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 4096
+    [routes.actions.request_headers]
+    remove = ["authorization", "cookie", "x-filebelt-csrf", "x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+    [[routes.actions.response_headers.set]]
+    name = "Cache-Control"
+    value = "no-store"
+    [[routes.actions.response_headers.set]]
+    name = "Content-Security-Policy"
+    value = {{ printf "default-src 'none'; base-uri 'none'; connect-src 'self' %s; font-src 'self' data: %s; form-action 'self' %s; frame-src %s; frame-ancestors 'none'; img-src 'self' data: blob: %s; media-src 'none'; object-src 'none'; script-src 'self' %s; style-src 'self' 'unsafe-inline'; sandbox allow-scripts allow-same-origin allow-forms allow-downloads allow-popups" .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin .Values.documents.providerOrigin | quote }}
+
+    {{- range $publicRoute := list
+      (dict "name" "filebelt-onlyoffice-input" "path" "/onlyoffice/input/" "method" "GET" "limit" 4096)
+      (dict "name" "filebelt-onlyoffice-callback" "path" "/onlyoffice/callback/" "method" "POST" "limit" 1048576)
+      (dict "name" "filebelt-onlyoffice-source" "path" "/onlyoffice/source" "method" "GET" "limit" 4096)
+      (dict "name" "filebelt-onlyoffice-about" "path" "/onlyoffice/about" "method" "GET" "limit" 4096) }}
+    [[routes]]
+    name = {{ $publicRoute.name | quote }}
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = {{ $publicRoute.path | quote }}
+    upstream = "filebelt-onlyoffice-adapter"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.match]
+    methods = [{{ $publicRoute.method | quote }}]
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = {{ $publicRoute.limit }}
+    [routes.actions.request_headers]
+    remove = ["cookie", "x-filebelt-csrf", "x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+    [[routes.actions.response_headers.set]]
+    name = "Cache-Control"
+    value = "no-store"
+    {{- end }}
     {{ end }}
 
     [[routes]]
@@ -634,7 +695,7 @@ configuration:
 
     [[routes.actions.response_headers.set]]
     name = "Content-Security-Policy"
-    value = "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'"
+    value = {{ if .Values.documents.enabled }}{{ $editorLaunch := urlParse .Values.documents.launchAction }}{{ printf "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self' %s; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'" (printf "%s://%s" $editorLaunch.scheme $editorLaunch.host) | quote }}{{ else }}"default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'; trusted-types 'none'"{{ end }}
 
     [[routes.actions.response_headers.set]]
     name = "Cross-Origin-Opener-Policy"
@@ -783,7 +844,7 @@ documents:
   adapterOrigin: https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089
   adapterServerName: filebelt-onlyoffice-adapter.filebelt-integrations.svc
   adapterPort: 8089
-  launchAction: https://filebelt.example.invalid/onlyoffice/launch
+  launchAction: https://filebelt-editor.example.invalid/onlyoffice/launch
   providerOrigin: https://documentserver.example.invalid
 
 # Mount delivery is opt-in. FileBelt never creates gateway tailstate storage:

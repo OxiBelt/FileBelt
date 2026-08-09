@@ -75,6 +75,10 @@
   into ambient FileBelt authority. Input reads, revision writes, finalization,
   and commits remain exact, short-lived, generation-qualified, fenced, and
   PostgreSQL-backed; a concurrent head can only create a retained conflict.
+- Provider JavaScript executes only on a FileBelt-controlled editor hostname
+  distinct from the public and provider hostnames. The editor host exposes no
+  API route or API CORS authority, receives no public-host FileBelt cookie, and
+  is constrained by the fixed launcher CSP sandbox.
 - The AGPL adapter and DocumentServer receive no payload mount, browser session,
   general database credential, or unrestricted egress. Provider-specific code,
   JWTs, callback status mapping, editor assets, branding, and network source
@@ -123,11 +127,11 @@ tailnet client ──SMB/explicit FTPS──> GPL gateway ──mTLS/VFS v1─�
                                                                   ├──> PostgreSQL
                                                                   └──fbcap2/mTLS──> I/O worker ──> RWX payload root
 
-browser ──session+CSRF──> API ──mTLS/document v1──> document coordinator
-       └──one-use form POST──> OxiBelt ──mTLS──> AGPL adapter ──provider JWT/config──> DocumentServer
-                                                      ├──mTLS/document v1─────────> coordinator
-                                                      ├──generation-4 fbcap1/mTLS─> I/O worker ──> RWX payload root
-                                                      └──mTLS/exact target────────> output egress gateway ──> DocumentServer
+browser ──session+CSRF──> public OxiBelt ──mTLS/API──> API ──mTLS/document v1──> document coordinator
+       └──one-use top-level form POST──> editor OxiBelt ──mTLS──> AGPL adapter ──provider JWT/config──> DocumentServer
+                                                                   ├──mTLS/document v1─────────> coordinator
+                                                                   ├──generation-4 fbcap1/mTLS─> I/O worker ──> RWX payload root
+                                                                   └──mTLS/exact target────────> output egress gateway ──> DocumentServer
 ```
 
 OxiBelt terminates public TLS. Kubernetes API and I/O backends require TLS 1.3
@@ -177,6 +181,17 @@ the expected-head transaction. The feature and all routes are disabled by
 default, so Apache FileBelt remains usable when every external component is
 absent.
 
+The public and editor OxiBelt virtual hosts terminate under one
+FileBelt-controlled certificate with both DNS names, but their route sets are
+disjoint. The public host serves the SPA, API, adapter input/callback, and
+source/about routes; the editor host serves only the launch POST and launcher
+asset GET. The launch POST requires the exact public-origin `Origin`, and the
+adapter repeats exact host enforcement behind the edge. Host-only cookies do
+not cross the hostname boundary. This design assumes no known provider-script
+compromise at rollout. If compromise is suspected, operators block
+reauthentication and rotate the FileBelt public origin under the incident plan
+rather than treating the one-time cutover as sufficient containment.
+
 The production namespace is one trusted FileBelt deployment and tenant.
 Adjacent Pods and compromised public clients are hostile. The Kubernetes
 control plane, cluster and node administrators, CNI, CSI/storage provider,
@@ -203,7 +218,7 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Provider output URL performs SSRF, DNS rebinding, redirect escape, or oversized download | Exact configured HTTPS origin and provider identity; no userinfo/fragment; direct adapter Internet denied; mTLS egress gateway revalidates DNS/IP and TLS target, refuses redirects, and streams under header/time/100 MiB limits | Private/link-local/metadata, IPv4/IPv6, rebinding, redirect, slow/large, CA/SNI, and NetworkPolicy denial tests |
 | Callback overwrites a newer Web, Markdown, mount, or document version | Core locks current authorization/session generations, revision fence, and expected node head in one PostgreSQL transaction; mismatch creates a seven-day retained conflict and never updates the head | Two-writer head race, ACL/session revoke, conflict-copy authorization, retry, and no-overwrite tests |
 | Adapter or DocumentServer reads arbitrary FileBelt content | No browser cookie, payload mount, API signing key, or general DB credential; one-use launch; generation-4 exact-version/range capability; I/O resolves only the signed immutable version and rechecks generations | Cross-tenant/node/version/range, expired/replayed grant, arbitrary-ID, mount, database-grant, and direct-worker tests |
-| Malicious editor script escapes into the Apache SPA, misstates the external provider, or leaks a launch grant | Separate AGPL top-level launcher, fixed operator launch action, Core-issued display-only exact provider HTTPS origin, memory-only one-use form value, host-only Secure/HttpOnly/SameSite=Lax correlation cookie, exact CSP/script and message origins, no FileBelt token in query/referrer/storage | CSP, consent-origin, clickjacking, form-action, postMessage schema/origin, referrer, Web Storage, and cross-tab tests |
+| Malicious editor script escapes into the Apache SPA, uses a FileBelt browser session, misstates the external provider, or leaks a launch grant | Dedicated FileBelt-controlled editor hostname distinct from public/provider hosts; disjoint OxiBelt routes and repeated adapter host checks; exact public `Origin` on top-level POST; no API CORS or launcher cookie; Core-issued display-only provider origin; memory-only one-use form value; fixed script/connect sources and exact CSP sandbox; no FileBelt token in query/referrer/storage | Chromium/Firefox real-provider CSP and cookie isolation, hostile-script API denial, old-route 404, consent-origin, clickjacking, form-action, postMessage schema/origin, referrer, Web Storage, and cross-tab tests |
 | Community edition limits or license/source obligations are hidden or bypassed | Fixed provider `9.4.0`, 20 active-participant admission under PostgreSQL lock, no clustering claim, retained branding, public exact source/about endpoints, immutable source URL/build instructions/notices, truthful distinct OCI labels | Capacity race, source-link HTTP, branding, REUSE, notice, SBOM/source-map, image-label, and release-gate tests |
 | Document save is acknowledged but lost or duplicated across adapter/Core/I/O crash | Durable event/revision/reconciliation rows precede acknowledgement; UUID allocation and quota reserve are transactional; I/O fsync and digest precede staged state; reconciliation reads terminal committed/no-op/conflict result and never creates a second version | Kill points at callback, allocation, byte write, finalize, commit, and response; duplicate revision and Iggy-down tests |
 | MCP OAuth callback is mixed up, replayed, or used for another server | Ten-minute one-shot server-held attempt bound to user, session, registration, credential generation, issuer, exact callback and local return path; every credential/config change erases pending attempts; PKCE/state and resource/audience binding; no token passthrough | MCP OAuth fixture, generation change, mix-up, expiry, replay, and audience tests |
@@ -331,7 +346,8 @@ Community limit. Exact-target egress, process separation, capability fencing,
 and expected-head commits reduce FileBelt impact but cannot make provider
 content or the provider process trustworthy. Operators must not enable the
 route until the adapter source/SBOM/provenance, real or contract-faithful
-browser/callback tests, and live NetworkPolicy/mTLS denial evidence pass.
+callback fixtures, real digest-pinned `9.4.0` Chromium/Firefox acceptance, and
+live NetworkPolicy/mTLS denial evidence pass.
 Dependency scans, attestations, and signed source mappings reduce known
 supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so

@@ -113,7 +113,14 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
     );
     assert_eq!(
         schema["properties"]["documents"]["properties"]["providerOrigin"]["pattern"],
-        "^https://[^/?#@]+$"
+        "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$"
+    );
+    assert_eq!(
+        schema["properties"]["documents"]["properties"]["launchAction"]["pattern"],
+        "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?/onlyoffice/launch$"
+    );
+    assert!(
+        values.contains("launchAction: https://filebelt-editor.example.invalid/onlyoffice/launch")
     );
     assert_eq!(
         schema["properties"]["mounts"]["properties"]["enabled"]["type"],

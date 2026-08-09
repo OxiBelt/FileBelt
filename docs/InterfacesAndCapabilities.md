@@ -216,9 +216,14 @@ list or force-close all sessions for a node. Creation and own-session detail
 return session metadata and the exact non-secret operator-configured external
 provider HTTPS origin for pre-launch consent; they return no launch value. A
 separate non-idempotent handoff request, issued only after that consent,
-returns one no-store, one-use launch value that is submitted by same-origin
-form POST; neither the launch value nor a FileBelt browser credential appears
-in a URL, idempotency record, browser store, or provider JavaScript state.
+returns one no-store, one-use launch value that the SPA submits by a top-level
+form POST to the exact operator-configured editor action. That action is HTTPS,
+has the exact path `/onlyoffice/launch`, and uses a hostname distinct from both
+the FileBelt public hostname and the provider hostname; a different port on the
+same hostname is not isolation because cookies are not port-scoped. Neither the
+launch value nor a FileBelt browser credential appears in a URL, idempotency
+record, browser store, or provider JavaScript state. The editor hostname has no
+FileBelt API route or API CORS authority.
 
 The generic `filebelt.document.v1` Protobuf contract is the replaceable process
 boundary between API, the Apache document coordinator, and provider adapters.
@@ -276,11 +281,18 @@ user-visible, with produced bytes retained for seven days; it is never an
 implicit overwrite.
 
 The Apache web shell owns only provider-neutral consent, session activity,
-conflict, and source-link surfaces. It opens a separate AGPL launcher route;
+conflict, and source-link surfaces. It navigates by form POST to a separate
+FileBelt-controlled editor hostname where OxiBelt exposes only the AGPL launch
+POST and launcher asset GET routes. The adapter rejects a missing or non-exact
+public-origin `Origin` on launch and rejects every route on the wrong host.
 ONLYOFFICE `api.js` is loaded at runtime from the configured DocumentServer and
-is not copied into the Apache bundle. The launch tab uses no Web Storage,
-validates any cross-origin messages against the exact provider origin and
-schema, and cannot call generic FileBelt APIs with a provider credential.
+is not copied into the Apache bundle. The launcher response sets no cookie or
+CORS header, is `no-store` and `no-referrer`, denies framing, and uses a CSP
+with only the required provider sources plus exactly `sandbox allow-scripts
+allow-same-origin allow-forms allow-downloads allow-popups`. The launch page
+uses no Web Storage, validates any cross-origin messages against the exact
+provider origin and schema, and has no FileBelt public-origin browser
+credential with which to call generic APIs.
 `GET /onlyoffice/source` and `/onlyoffice/about` remain accessible to network
 users and report the adapter version, revision, license, immutable
 corresponding-source URL, build instructions, provider version, and notices.

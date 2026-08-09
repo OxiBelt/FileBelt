@@ -221,6 +221,7 @@ where
     })
 }
 
+#[derive(Clone)]
 struct ParsedRequest {
     method: String,
     path: String,
@@ -295,7 +296,12 @@ fn parse_request_head(
 
 fn route(service: &Service, limits: &RouteLimits, request: ParsedRequest) -> Response {
     let now = SystemTime::now();
-    if request.method == "GET" && request.path == "/onlyoffice/launcher.js" {
+    if !has_allowed_route_host(&request, &service.config) {
+        return Response::text(404, "not found\n");
+    }
+    let is_launcher = request.method == "GET" && request.path == "/onlyoffice/launcher.js";
+    let is_launch = request.method == "POST" && request.path == "/onlyoffice/launch";
+    if is_launcher {
         let mut response = Response::text(200, LAUNCHER_ASSET);
         response.headers.insert(
             "Content-Type".into(),
@@ -307,6 +313,9 @@ fn route(service: &Service, limits: &RouteLimits, request: ParsedRequest) -> Res
         response
             .headers
             .insert("X-Content-Type-Options".into(), "nosniff".into());
+        response
+            .headers
+            .insert("Referrer-Policy".into(), "no-referrer".into());
         return response;
     }
     if request.method == "POST" && request.path == "/onlyoffice/callback" {
@@ -346,7 +355,6 @@ fn route(service: &Service, limits: &RouteLimits, request: ParsedRequest) -> Res
         },
         None => None,
     };
-    let is_launch = request.method == "POST" && request.path == "/onlyoffice/launch";
     let _input_transfer =
         if request.method == "GET" && request.path.starts_with("/onlyoffice/input/") {
             match limits.input_transfers.try_acquire() {
@@ -378,6 +386,31 @@ fn route(service: &Service, limits: &RouteLimits, request: ParsedRequest) -> Res
     response
 }
 
+fn has_exact_host(
+    request: &ParsedRequest,
+    origin: &filebelt_onlyoffice_adapter::config::Origin,
+) -> bool {
+    request
+        .headers
+        .get("host")
+        .is_some_and(|host| host.eq_ignore_ascii_case(origin.host()))
+}
+
+fn has_allowed_route_host(request: &ParsedRequest, config: &AdapterConfig) -> bool {
+    let is_launcher = request.method == "GET" && request.path == "/onlyoffice/launcher.js";
+    let is_launch = request.method == "POST" && request.path == "/onlyoffice/launch";
+    if is_launcher || is_launch {
+        return has_exact_host(request, &config.launch_origin);
+    }
+    let is_public_route = matches!(
+        (request.method.as_str(), request.path.as_str()),
+        ("GET", "/onlyoffice/source") | ("GET", "/onlyoffice/about")
+    ) || (request.method == "GET"
+        && request.path.starts_with("/onlyoffice/input/"))
+        || (request.method == "POST" && request.path.starts_with("/onlyoffice/callback"));
+    is_public_route && has_exact_host(request, &config.public_origin)
+}
+
 fn launch_shell_response(config: &AdapterConfig, mut launch: Response) -> Response {
     let Ok(descriptor) = String::from_utf8(launch.body) else {
         return Response::text(503, "launch unavailable\n");
@@ -397,6 +430,7 @@ fn launch_shell_response(config: &AdapterConfig, mut launch: Response) -> Respon
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>FileBelt document editor</title></head><body><main><p id=\"onlyoffice-launch-state\" aria-live=\"polite\"></p><button id=\"onlyoffice-launch-button\" type=\"button\">Open editor</button><div id=\"onlyoffice-editor\"></div></main><script id=\"onlyoffice-launch-descriptor\" type=\"application/json\">{descriptor}</script><script type=\"module\" src=\"/onlyoffice/launcher.js\"></script></body></html>"
     );
     launch.body = body.into_bytes();
+    launch.headers.remove("Set-Cookie");
     launch
         .headers
         .insert("Content-Type".into(), "text/html; charset=utf-8".into());
@@ -411,11 +445,11 @@ fn launch_shell_response(config: &AdapterConfig, mut launch: Response) -> Respon
         .insert("X-Content-Type-Options".into(), "nosniff".into());
     launch
         .headers
-        .insert("X-Frame-Options".into(), "SAMEORIGIN".into());
+        .insert("X-Frame-Options".into(), "DENY".into());
     launch.headers.insert(
         "Content-Security-Policy".into(),
         format!(
-            "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; script-src 'self' {document_server}; connect-src 'self' {document_server}; frame-src {document_server}; img-src 'self' {document_server}; style-src 'self'; object-src 'none'"
+            "default-src 'none'; base-uri 'none'; connect-src {document_server}; form-action 'none'; frame-src {document_server}; frame-ancestors 'none'; img-src {document_server}; media-src 'none'; object-src 'none'; script-src 'self' {document_server}; style-src 'self'; sandbox allow-scripts allow-same-origin allow-forms allow-downloads allow-popups"
         ),
     );
     launch
@@ -779,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_shell_keeps_descriptor_inert_and_locks_csp_to_provider_origin() {
+    fn launch_shell_keeps_descriptor_inert_and_isolates_the_provider() {
         let mut launch = Response::text(
             200,
             r#"{"apiJsUrl":"https://office.example.test/web-apps/apps/api/documents/api.js","editorConfig":{"document":{"title":"</script><img>"}}}"#,
@@ -792,7 +826,84 @@ mod tests {
         assert!(body.contains("\\u003c/script\\u003e"));
         let csp = shell.headers.get("Content-Security-Policy").unwrap();
         assert!(csp.contains("script-src 'self' https://office.example.test"));
+        assert!(csp.contains("connect-src https://office.example.test"));
+        assert!(csp.contains("frame-src https://office.example.test"));
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert_eq!(
+            csp.split("; ")
+                .find(|directive| directive.starts_with("sandbox ")),
+            Some(
+                "sandbox allow-scripts allow-same-origin allow-forms allow-downloads allow-popups"
+            )
+        );
+        assert!(!csp.contains("https://files.example.test"));
         assert!(!csp.contains("unsafe-inline"));
+        assert_eq!(shell.headers.get("X-Frame-Options"), Some(&"DENY".into()));
+        assert_eq!(
+            shell.headers.get("Referrer-Policy"),
+            Some(&"no-referrer".into())
+        );
+        assert_eq!(shell.headers.get("Cache-Control"), Some(&"no-store".into()));
+        assert!(!shell.headers.contains_key("Set-Cookie"));
+        assert!(
+            shell
+                .headers
+                .keys()
+                .all(|name| !name.starts_with("Access-Control-"))
+        );
+    }
+
+    #[test]
+    fn routes_require_the_exact_launch_or_public_host() {
+        let config = config();
+        let request = ParsedRequest {
+            method: "POST".into(),
+            path: "/onlyoffice/launch".into(),
+            headers: BTreeMap::from([("host".into(), "launch.example.test".into())]),
+            body: Vec::new(),
+        };
+        assert!(has_allowed_route_host(&request, &config));
+        let public_request = ParsedRequest {
+            headers: BTreeMap::from([("host".into(), "FILES.EXAMPLE.TEST".into())]),
+            ..request
+        };
+        assert!(!has_allowed_route_host(&public_request, &config));
+        let source_request = ParsedRequest {
+            method: "GET".into(),
+            path: "/onlyoffice/source".into(),
+            ..public_request
+        };
+        assert!(has_allowed_route_host(&source_request, &config));
+        for (method, path) in [
+            ("GET", "/onlyoffice/input/session/participant"),
+            ("POST", "/onlyoffice/callback/session/participant"),
+        ] {
+            let public_endpoint = ParsedRequest {
+                method: method.into(),
+                path: path.into(),
+                ..source_request.clone()
+            };
+            assert!(has_allowed_route_host(&public_endpoint, &config));
+            let launch_endpoint = ParsedRequest {
+                headers: BTreeMap::from([("host".into(), "launch.example.test".into())]),
+                ..public_endpoint
+            };
+            assert!(!has_allowed_route_host(&launch_endpoint, &config));
+        }
+        let port_request = ParsedRequest {
+            headers: BTreeMap::from([("host".into(), "launch.example.test:443".into())]),
+            ..source_request
+        };
+        assert!(!has_allowed_route_host(&port_request, &config));
+        for host in ["files.example.test", "launch.example.test"] {
+            let health_request = ParsedRequest {
+                method: "GET".into(),
+                path: "/health/live".into(),
+                headers: BTreeMap::from([("host".into(), host.into())]),
+                body: Vec::new(),
+            };
+            assert!(!has_allowed_route_host(&health_request, &config));
+        }
     }
 
     fn config() -> AdapterConfig {
@@ -806,6 +917,7 @@ mod tests {
             provider: Provider::OnlyOfficeDocumentServer940,
             document_server_version: DOCUMENT_SERVER_VERSION.into(),
             public_origin: Origin::parse("https://files.example.test").unwrap(),
+            launch_origin: Origin::parse("https://launch.example.test").unwrap(),
             document_server_origin: Origin::parse("https://office.example.test").unwrap(),
             document_server_api_js:
                 "https://office.example.test/web-apps/apps/api/documents/api.js".into(),

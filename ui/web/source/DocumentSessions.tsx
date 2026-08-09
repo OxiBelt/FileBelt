@@ -86,9 +86,11 @@ export function DocumentLaunchDialog({ Client, Entry, OnClose, OnCreated }: Docu
 
 /** Posts a Core-issued one-use grant without putting it in a URL or browser storage. */
 export function SubmitDocumentLaunch(Handoff: DocumentSessionLaunchHandoff): void {
+  if (!IsIsolatedDocumentLaunchAction(Handoff.action, window.location.hostname)) throw new Error(En.offline);
   const Form = document.createElement("form");
   Form.action = Handoff.action;
   Form.method = "post";
+  Form.target = "_self";
   Form.noValidate = true;
   const Grant = document.createElement("input");
   Grant.name = "launch_grant";
@@ -98,6 +100,24 @@ export function SubmitDocumentLaunch(Handoff: DocumentSessionLaunchHandoff): voi
   document.body.append(Form);
   Form.submit();
   Form.remove();
+}
+
+/** Accept only the configured isolated HTTPS editor handoff route. */
+export function IsIsolatedDocumentLaunchAction(Action: string, PublicHostname: string): boolean {
+  try {
+    const Url = new URL(Action);
+    return Url.protocol === "https:"
+      && Url.hostname !== PublicHostname
+      && !Url.hostname.endsWith(".")
+      && Url.pathname === "/onlyoffice/launch"
+      && Url.username === ""
+      && Url.password === ""
+      && Url.port === ""
+      && Url.search === ""
+      && Url.hash === "";
+  } catch {
+    return false;
+  }
 }
 
 interface OwnDocumentSessionsProps {

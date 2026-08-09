@@ -133,6 +133,13 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.documents.enabled -}}
+{{- $editorLaunch := urlParse .Values.documents.launchAction -}}
+{{- $editorHost := first (splitList ":" $editorLaunch.host) -}}
+{{- $providerOrigin := urlParse .Values.documents.providerOrigin -}}
+{{- $providerHost := first (splitList ":" $providerOrigin.host) -}}
+{{- if or (eq $editorHost "filebelt.example.invalid") (eq $providerHost "filebelt.example.invalid") (eq $editorHost $providerHost) -}}
+{{- fail "documents.launchAction, the public FileBelt host, and documents.providerOrigin must use pairwise distinct hostnames" -}}
+{{- end -}}
 {{- if not (regexMatch "(?m)^\\[documents\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
 {{- fail "documents.enabled requires configuration.filebelt to enable document sessions" -}}
 {{- end -}}

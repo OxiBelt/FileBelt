@@ -23,10 +23,11 @@ adapter's one-use launch endpoint has redeemed a Core-issued launch ID.
   The verifier accepts only `HS256` with `typ: JWT`, rejects `none`, `kid`,
   malformed Base64, and algorithm confusion, and treats the signed ONLYOFFICE
   payload—not custom FileBelt claims—as authoritative.
-- `GET /onlyoffice/source` and `GET /onlyoffice/about` are public. Launch is a
-  one-use `POST`; its host-only cookie omits `Domain` and is `Secure`,
-  `HttpOnly`, and `SameSite=Lax` so the explicit top-level launch POST works
-  without granting a provider iframe ambient FileBelt authority.
+- `GET /onlyoffice/source`, `GET /onlyoffice/about`, inputs, and callbacks are
+  accepted only on `public_origin`. The one-use `POST /onlyoffice/launch` and
+  `GET /onlyoffice/launcher.js` are accepted only on a distinct
+  `launch_origin`, and launch requires the exact `public_origin` `Origin`
+  header. The adapter issues no launch-correlation cookie.
 - `GET /onlyoffice/input/{session}/{participant}` requires a provider JWT that
   binds the exact URL and a newly issued scoped Core read capability. It
   accepts a full download without `Range` and valid single ranges, hiding
@@ -78,8 +79,8 @@ are not subject to them. Chunked request bodies are unsupported and any
 
 The process receives only these role-specific strict-TOML inputs:
 
-- fixed public and Document Server HTTPS origins and the literal `9.4.0`
-  provider version;
+- fixed, pairwise-distinct public, launch, and Document Server bare HTTPS
+  origins and the literal `9.4.0` provider version;
 - a read-only browser signing secret and current outbox-verification secret,
   plus an optional read-only retiring outbox verifier with an expiry no more
   than 30 minutes ahead;
@@ -105,6 +106,7 @@ no editor, grant, callback, document, or source routes.
 provider = "onlyoffice_document_server_9_4_0"
 document_server_version = "9.4.0"
 public_origin = "https://files.example.invalid"
+launch_origin = "https://launch.files.example.invalid"
 document_server_origin = "https://office.example.invalid"
 document_server_api_js = "https://office.example.invalid/web-apps/apps/api/documents/api.js"
 tenant_id = "00000000-0000-4000-8000-000000000001"
@@ -161,10 +163,13 @@ tokens in the documented locations:
 }
 ```
 
-The browser uses `/onlyoffice/input/{session}/{participant}` and callbacks use
-`/onlyoffice/callback/{session}/{participant}`. Both values are UUIDs minted by
-Core during launch redemption; the outbox JWT must bind the exact input URL,
-and its signed callback payload must match the received callback fields.
+The browser submits the one-use launch form to `launch_origin`; that isolated
+top-level response loads `api.js` from the Document Server. The browser uses
+`public_origin/onlyoffice/input/{session}/{participant}` and callbacks use
+`public_origin/onlyoffice/callback/{session}/{participant}`. Both values are
+UUIDs minted by Core during launch redemption; the outbox JWT must bind the
+exact input URL, and its signed callback payload must match the received
+callback fields.
 
 ## Local checks
 

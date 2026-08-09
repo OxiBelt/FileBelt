@@ -2,7 +2,6 @@
 
 use crate::config::{AdapterConfig, JwtKeySet, MAX_ACTIVE_TABS, MAX_OUTPUT_BYTES};
 use serde_json::Value;
-use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -478,11 +477,7 @@ impl<C: CoreClient, J: ProviderJwtVerifier, F: EventFingerprintDeriver, E: Egres
     }
 
     fn launch(&self, request: Request, _now: SystemTime) -> Response {
-        if request
-            .origin
-            .as_deref()
-            .is_some_and(|origin| origin != self.config.public_origin.as_str())
-        {
+        if !has_exact_launch_origin(&request, &self.config) {
             return Response::text(403, "launch origin denied");
         }
         let Some(launch_id) = request.launch_id else {
@@ -491,18 +486,9 @@ impl<C: CoreClient, J: ProviderJwtVerifier, F: EventFingerprintDeriver, E: Egres
         match self.core.redeem_one_use_launch(&launch_id) {
             Ok(grant) if grant.active_tabs < MAX_ACTIVE_TABS => {
                 let mut response = Response::text(200, &grant.editor_config_json);
-                // Host-only: deliberately omit Domain. The cookie holds only a
-                // non-authoritative launch correlation, never a Core session.
                 response
                     .headers
                     .insert("Cache-Control".into(), "no-store".into());
-                response.headers.insert(
-                    "Set-Cookie".into(),
-                    format!(
-                        "filebelt_onlyoffice_launch={}; Path=/; Secure; HttpOnly; SameSite=Lax",
-                        opaque_launch_cookie(&grant.document_id)
-                    ),
-                );
                 response
             }
             Ok(_) => Response::text(429, "active tab limit reached"),
@@ -638,6 +624,10 @@ impl<C: CoreClient, J: ProviderJwtVerifier, F: EventFingerprintDeriver, E: Egres
     }
 }
 
+fn has_exact_launch_origin(request: &Request, config: &AdapterConfig) -> bool {
+    request.origin.as_deref() == Some(config.public_origin.as_str())
+}
+
 fn input_session_and_participant(path: &str) -> Option<(&str, &str)> {
     let value = path.strip_prefix("/onlyoffice/input/")?;
     let (session, participant) = value.split_once('/')?;
@@ -663,16 +653,6 @@ fn provider_input_url(payload: &Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn opaque_launch_cookie(document_id: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(b"filebelt.onlyoffice.launch-cookie.v1\0");
-    hasher.update(document_id.as_bytes());
-    hasher.finalize()[..16]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,6 +667,7 @@ mod tests {
             provider: Provider::OnlyOfficeDocumentServer940,
             document_server_version: DOCUMENT_SERVER_VERSION.into(),
             public_origin: Origin::parse("https://files.example.test").unwrap(),
+            launch_origin: Origin::parse("https://launch.example.test").unwrap(),
             document_server_origin: Origin::parse("https://office.example.test").unwrap(),
             document_server_api_js:
                 "https://office.example.test/web-apps/apps/api/documents/api.js".into(),
@@ -912,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn input_path_and_launch_cookie_are_not_prefix_or_identifier_leaks() {
+    fn input_path_is_not_a_prefix_or_identifier_leak() {
         assert_eq!(
             input_session_and_participant(
                 "/onlyoffice/input/550e8400-e29b-41d4-a716-446655440000/550e8400-e29b-41d4-a716-446655440001"
@@ -926,7 +907,28 @@ mod tests {
             input_session_and_participant("/onlyoffice/input/../session"),
             None
         );
-        assert_ne!(opaque_launch_cookie("session-1"), "session-1");
+    }
+
+    #[test]
+    fn launch_origin_must_be_the_exact_public_origin() {
+        let config = config();
+        let request = |origin: Option<&str>| Request {
+            method: "POST".into(),
+            path: "/onlyoffice/launch".into(),
+            origin: origin.map(ToOwned::to_owned),
+            provider_jwt: None,
+            range: None,
+            launch_id: Some("one-use-launch".into()),
+        };
+        assert!(has_exact_launch_origin(
+            &request(Some("https://files.example.test")),
+            &config
+        ));
+        assert!(!has_exact_launch_origin(&request(None), &config));
+        assert!(!has_exact_launch_origin(
+            &request(Some("https://launch.example.test")),
+            &config
+        ));
     }
 
     #[test]

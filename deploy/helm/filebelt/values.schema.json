@@ -204,8 +204,8 @@
         "adapterOrigin": {"type": "string", "pattern": "^https://[a-z0-9.-]+:[1-9][0-9]{0,4}$", "maxLength": 512},
         "adapterServerName": {"type": "string", "pattern": "^[a-z0-9.-]+$", "minLength": 1, "maxLength": 253},
         "adapterPort": {"type": "integer", "minimum": 1024, "maximum": 65535},
-        "launchAction": {"type": "string", "pattern": "^https://[^/?#]+/onlyoffice/launch$", "maxLength": 512},
-        "providerOrigin": {"type": "string", "pattern": "^https://[^/?#@]+$", "maxLength": 512}
+        "launchAction": {"type": "string", "pattern": "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?/onlyoffice/launch$", "maxLength": 512},
+        "providerOrigin": {"type": "string", "pattern": "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$", "maxLength": 512}
       }
     },
     "mounts": {

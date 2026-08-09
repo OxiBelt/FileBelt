@@ -867,6 +867,7 @@ mod tests {
             provider: Provider::OnlyOfficeDocumentServer940,
             document_server_version: DOCUMENT_SERVER_VERSION.into(),
             public_origin: Origin::parse("https://files.example.test").unwrap(),
+            launch_origin: Origin::parse("https://launch.example.test").unwrap(),
             document_server_origin: Origin::parse("https://office.example.test").unwrap(),
             document_server_api_js:
                 "https://office.example.test/web-apps/apps/api/documents/api.js".into(),

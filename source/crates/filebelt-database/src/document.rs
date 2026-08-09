@@ -2736,6 +2736,24 @@ mod tests {
     }
 
     #[test]
+    fn origin_isolation_cutover_revokes_only_linked_live_api_sessions() {
+        let migration =
+            include_str!("../../../migrations/postgres/000010_onlyoffice_origin_isolation.sql");
+        assert!(migration.contains("JOIN filebelt_document.participants"));
+        assert!(migration.contains("s.revoked_at IS NULL"));
+        assert!(migration.contains("s.idle_expires_at>statement_timestamp()"));
+        assert!(migration.contains("s.absolute_expires_at>statement_timestamp()"));
+        assert!(migration.contains("AND s.revoked_at IS NULL\n  RETURNING"));
+        assert!(migration.contains("SET state='closed',disconnected_until=NULL"));
+        assert!(migration.contains("SET state='revoked',fencing_token=fencing_token+1"));
+        assert!(migration.contains("SET consumed_at=clock_timestamp()"));
+        assert!(migration.contains("onlyoffice_origin_isolation_cutover"));
+        assert!(migration.contains("onlyoffice_origin_isolation_v1"));
+        assert!(!migration.contains("UPDATE filebelt_document.revisions"));
+        assert!(!migration.contains("UPDATE filebelt_document.reconciliation_jobs"));
+    }
+
+    #[test]
     fn commit_outcomes_are_explicit() {
         let committed = DocumentCommitResult::Committed {
             version_id: Uuid::nil(),

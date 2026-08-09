@@ -189,15 +189,15 @@ fn onlyoffice_source_recipe_includes_its_protocol_build_inputs() {
     let root = repository_root();
     let dockerfile = fs::read_to_string(root.join("adapters/onlyoffice/Dockerfile"))
         .expect("ONLYOFFICE adapter Dockerfile");
-    let dockerignore = fs::read_to_string(
-        root.join("adapters/onlyoffice/Dockerfile.dockerignore"),
-    )
-    .expect("ONLYOFFICE adapter Docker ignore file");
+    let dockerignore = fs::read_to_string(root.join("adapters/onlyoffice/Dockerfile.dockerignore"))
+        .expect("ONLYOFFICE adapter Docker ignore file");
     assert!(dockerfile.contains("WORKDIR /src\n"));
     assert!(dockerfile.contains("COPY . ."));
-    assert!(dockerfile.contains(
-        "cargo build --locked --release --manifest-path adapters/onlyoffice/Cargo.toml"
-    ));
+    assert!(
+        dockerfile.contains(
+            "cargo build --locked --release --manifest-path adapters/onlyoffice/Cargo.toml"
+        )
+    );
     assert!(dockerignore.contains("!adapters/onlyoffice/**"));
     assert!(!dockerignore.lines().any(|line| line == "source"));
 }

@@ -85,7 +85,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 5
+    version = 6
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -180,6 +180,9 @@ configuration:
     [documents]
     enabled = false
 
+    [media]
+    enabled = false
+
     [mounts]
     enabled = false
     database_url_file = "/run/secrets/mount-database-url"
@@ -203,6 +206,9 @@ configuration:
     server_ca_file = "/run/secrets/headscale-server-ca/ca.crt"
     oidc_issuer = "https://issuer.example.invalid/"
     sync_seconds = 15
+
+    [mounts.nfs]
+    enabled = false
 
     [telemetry]
     log_format = "json"
@@ -245,7 +251,7 @@ configuration:
     https_binds = ["0.0.0.0:8443"]
     http1 = true
     http2 = true
-    http3 = false
+    http3 = {{ .Values.collaboration.webtransport.enabled }}
 
     [health]
     enabled = true
@@ -355,6 +361,29 @@ configuration:
     client_private_key = "/run/secrets/collaboration-edge-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
+    {{ if .Values.collaboration.webtransport.enabled }}
+
+    [[upstreams]]
+    name = "filebelt-collaboration-webtransport"
+    origin = "https://filebelt-collaboration:8086"
+    max_http_version = "h3"
+    connect_timeout_ms = 3000
+    request_timeout_ms = 30000
+    idle_timeout_ms = 75000
+    preserve_host = false
+    websocket = false
+    webrtc = false
+    webtransport = true
+    [upstreams.tls]
+    server_name = "filebelt-collaboration"
+    trust = "exclusive"
+    trusted_ca_certs = ["/run/secrets/collaboration-edge-client-tls/server-ca.crt"]
+    trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
+    client_certificate = "/run/secrets/collaboration-edge-client-tls/tls.crt"
+    client_private_key = "/run/secrets/collaboration-edge-client-tls/tls.key"
+    [upstreams.tls.ech]
+    mode = "disabled"
+    {{ end }}
     {{ end }}
 
     {{ if .Values.documents.enabled }}
@@ -459,6 +488,28 @@ configuration:
     [[routes.actions.response_headers.set]]
     name = "Pragma"
     value = "no-cache"
+    {{ if .Values.collaboration.webtransport.enabled }}
+
+    [[routes]]
+    name = "filebelt-collaboration-webtransport-v1"
+    hosts = ["filebelt.example.invalid"]
+    path_prefix = "/collaboration/v1/wt"
+    upstream = "filebelt-collaboration-webtransport"
+    compression = "off"
+    security_headers = "default"
+    generic_http_upgrade = false
+    connect_tunneling = false
+    grpc_web = false
+    [routes.retry]
+    enabled = false
+    [routes.limits]
+    max_request_body_bytes = 4096
+    [routes.actions.request_headers]
+    remove = ["authorization", "cookie", "x-user", "x-group", "x-groups", "x-principal", "x-tenant", "x-filebelt-principal", "x-filebelt-tenant", "x-auth-request-user", "x-auth-request-groups", "x-remote-user", "x-remote-groups"]
+    [[routes.actions.response_headers.set]]
+    name = "Cache-Control"
+    value = "no-store"
+    {{ end }}
     {{ end }}
 
     {{ if .Values.documents.enabled }}
@@ -721,6 +772,8 @@ mcp:
 
 collaboration:
   enabled: false
+  webtransport:
+    enabled: false
 
 # The Apache coordinator and separate AGPL adapter are opt-in and disabled by
 # default. Install the adapter chart in the named integration namespace first.

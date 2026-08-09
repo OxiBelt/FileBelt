@@ -178,11 +178,12 @@ pub enum Action {
     UseMcp,
     Mount,
     Export,
+    Traverse,
 }
 
 impl Action {
     /// Every action, in stable policy ordering.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::ReadMetadata,
         Self::ListChildren,
         Self::ReadContent,
@@ -204,6 +205,7 @@ impl Action {
         Self::UseMcp,
         Self::Mount,
         Self::Export,
+        Self::Traverse,
     ];
 
     /// Stable uppercase name used by policy and audit contracts.
@@ -231,6 +233,7 @@ impl Action {
             Self::UseMcp => "USE_MCP",
             Self::Mount => "MOUNT",
             Self::Export => "EXPORT",
+            Self::Traverse => "TRAVERSE",
         }
     }
 }
@@ -972,5 +975,12 @@ mod tests {
             &Action::ALL[15..18],
             &[Action::UseExternalEditor, Action::Comment, Action::Review]
         );
+    }
+
+    #[test]
+    fn traverse_is_a_distinct_mount_action() {
+        assert_eq!(Action::Traverse.as_str(), "TRAVERSE");
+        assert!(Action::ALL.contains(&Action::Traverse));
+        assert_ne!(Action::Traverse, Action::ListChildren);
     }
 }

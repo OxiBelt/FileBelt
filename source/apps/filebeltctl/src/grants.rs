@@ -22,6 +22,7 @@ const ROLES: &[&str] = &[
     "filebelt_vfs",
     "filebelt_headscale_sync",
     "filebelt_document",
+    "filebelt_media",
 ];
 const SCHEMAS: &[&str] = &[
     "public",
@@ -31,6 +32,8 @@ const SCHEMAS: &[&str] = &[
     "filebelt_mount",
     "filebelt_mount_vault",
     "filebelt_document",
+    "filebelt_media",
+    "filebelt_phase8",
 ];
 const TABLE_PRIVILEGES: &[&str] = &[
     "SELECT",
@@ -223,6 +226,25 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
             role,
             "filebelt_document" | "filebelt_io" | "filebelt_maintenance" | "filebelt_recovery"
         ),
+        "filebelt_media" => matches!(
+            role,
+            "filebelt_api"
+                | "filebelt_io"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_media"
+        ),
+        "filebelt_phase8" => matches!(
+            role,
+            "filebelt_api"
+                | "filebelt_io"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_collaboration"
+                | "filebelt_vfs"
+                | "filebelt_document"
+                | "filebelt_media"
+        ),
         _ => false,
     }
 }
@@ -358,6 +380,12 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
     if schema == "filebelt_document" {
         return expected_document_table_privilege(role, table, privilege);
     }
+    if schema == "filebelt_media" {
+        return expected_media_table_privilege(role, table, privilege);
+    }
+    if schema == "filebelt_phase8" {
+        return expected_phase8_table_privilege(role, table, privilege);
+    }
     if schema != "public" {
         return false;
     }
@@ -431,6 +459,87 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
                 || table == "file_versions" && privilege == "INSERT"
         }
         "filebelt_headscale_sync" => false,
+        "filebelt_media" => {
+            matches!(
+                table,
+                "groups"
+                    | "group_memberships"
+                    | "drives"
+                    | "nodes"
+                    | "node_ancestry"
+                    | "acl_entries"
+                    | "file_versions"
+                    | "authorization_generations"
+            ) && privilege == "SELECT"
+                || matches!(table, "audit_events" | "outbox_events" | "jobs")
+                    && privilege == "INSERT"
+        }
+        _ => false,
+    }
+}
+
+fn expected_media_table_privilege(role: &str, table: &str, privilege: &str) -> bool {
+    const TABLES: &[&str] = &[
+        "previews",
+        "attempts",
+        "reservations",
+        "segment_receipts",
+        "manifest_revisions",
+        "cache_artifacts",
+        "playback_sessions",
+        "deletion_intents",
+        "diagnostics",
+    ];
+    match role {
+        "filebelt_api" => {
+            matches!(table, "previews" | "playback_sessions" | "deletion_intents")
+                && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+                || matches!(
+                    table,
+                    "segment_receipts" | "manifest_revisions" | "cache_artifacts"
+                ) && privilege == "SELECT"
+        }
+        "filebelt_io" => {
+            matches!(
+                table,
+                "segment_receipts" | "manifest_revisions" | "cache_artifacts"
+            ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+        }
+        "filebelt_media" => {
+            TABLES.contains(&table)
+                && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
+        }
+        "filebelt_maintenance" => {
+            TABLES.contains(&table) && matches!(privilege, "SELECT" | "UPDATE" | "DELETE")
+        }
+        "filebelt_recovery" => TABLES.contains(&table) && privilege == "SELECT",
+        _ => false,
+    }
+}
+
+fn expected_phase8_table_privilege(role: &str, table: &str, privilege: &str) -> bool {
+    if privilege != "SELECT" {
+        return false;
+    }
+    match role {
+        "filebelt_api"
+        | "filebelt_io"
+        | "filebelt_maintenance"
+        | "filebelt_collaboration"
+        | "filebelt_document"
+        | "filebelt_media" => table == "activation_state",
+        "filebelt_vfs" => matches!(
+            table,
+            "activation_state" | "managed_traversal" | "managed_group_memberships"
+        ),
+        "filebelt_recovery" => matches!(
+            table,
+            "activation_state"
+                | "activation_events"
+                | "role_compatibility"
+                | "managed_traversal"
+                | "managed_group_memberships"
+        ),
         _ => false,
     }
 }
@@ -499,6 +608,10 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "passive_allocations",
         "authentication_throttles",
         "deletion_tombstones",
+        "nfs_principal_mappings",
+        "nfs_reclaim_records",
+        "nfs_replay_receipts",
+        "nfs_write_extents",
     ];
     const MAINTENANCE: &[&str] = &[
         "sessions",
@@ -510,6 +623,9 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "write_chunks",
         "passive_allocations",
         "authentication_throttles",
+        "nfs_reclaim_records",
+        "nfs_replay_receipts",
+        "nfs_write_extents",
     ];
     const RECOVERY: &[&str] = &[
         "policies",
@@ -523,12 +639,20 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "write_sessions",
         "write_chunks",
         "deletion_tombstones",
+        "nfs_principal_mappings",
+        "nfs_reclaim_records",
+        "nfs_replay_receipts",
+        "nfs_write_extents",
     ];
     match role {
         "filebelt_api" => {
             matches!(
                 table,
-                "policies" | "credentials" | "session_receipts" | "deletion_tombstones"
+                "policies"
+                    | "credentials"
+                    | "session_receipts"
+                    | "deletion_tombstones"
+                    | "nfs_principal_mappings"
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
                 || matches!(table, "headscale_devices" | "sessions") && privilege == "SELECT"
         }
@@ -541,8 +665,10 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
             table == "headscale_devices" && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
         }
         "filebelt_io" => {
-            matches!(table, "write_sessions" | "write_chunks")
-                && matches!(privilege, "SELECT" | "UPDATE")
+            matches!(
+                table,
+                "write_sessions" | "write_chunks" | "nfs_write_extents"
+            ) && matches!(privilege, "SELECT" | "UPDATE")
         }
         "filebelt_maintenance" => {
             MAINTENANCE.contains(&table) && matches!(privilege, "SELECT" | "UPDATE" | "DELETE")
@@ -1023,6 +1149,31 @@ fn expected_column_privilege(
                     _ => false,
                 }
         }
+        "filebelt_media" => match privilege {
+            "SELECT" => match table {
+                "tenants" => matches!(column, "id" | "slug"),
+                "principals" => matches!(
+                    column,
+                    "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                ),
+                "users" => matches!(column, "tenant_id" | "id" | "principal_id" | "status"),
+                "api_sessions" => matches!(
+                    column,
+                    "tenant_id"
+                        | "id"
+                        | "user_id"
+                        | "principal_id"
+                        | "idle_expires_at"
+                        | "absolute_expires_at"
+                        | "revoked_at"
+                ),
+                _ => false,
+            },
+            "UPDATE" => {
+                table == "drives" && matches!(column, "reserved_bytes" | "used_physical_bytes")
+            }
+            _ => false,
+        },
         _ => false,
     }
 }

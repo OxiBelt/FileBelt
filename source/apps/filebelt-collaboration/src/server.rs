@@ -26,6 +26,7 @@ use filebelt_database::collaboration::{
 use filebelt_database::{Database, DatabaseError};
 use futures_util::{SinkExt as _, StreamExt as _};
 use prost::Message as _;
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::sync::{Mutex, broadcast};
 use tracing::{info, warn};
 use url::Url;
@@ -270,6 +271,219 @@ async fn session(mut socket: WebSocket, state: CollaborationServerState) {
             reason: Utf8Bytes::from_static("session ended"),
         })))
         .await;
+}
+
+/// Runs the collaboration protocol on the single client-created reliable
+/// WebTransport stream. Each item is a bounded Protobuf length-delimited frame;
+/// credentials never enter the CONNECT URI or a datagram.
+pub async fn webtransport_stream<S>(mut stream: S, state: CollaborationServerState)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let authenticated = async {
+        let bytes = read_length_delimited(&mut stream)
+            .await?
+            .ok_or(SessionError::Authentication)?;
+        let frame = decode_frame(&bytes).map_err(|_| SessionError::Authentication)?;
+        let Some(Frame::Authenticate(authenticate)) = frame.frame else {
+            return Err(SessionError::Authentication);
+        };
+        authenticate_grant(&state, &authenticate).await
+    };
+    let (claims, room, mut receiver, connection_id) =
+        match tokio::time::timeout(AUTHENTICATION_TIMEOUT, authenticated).await {
+            Ok(Ok(value)) => value,
+            Ok(Err(error)) => {
+                send_webtransport_error(&mut stream, error).await;
+                return;
+            }
+            Err(_) => {
+                send_webtransport_error(&mut stream, SessionError::Authentication).await;
+                return;
+            }
+        };
+    let client_id = match parse_claim_uuid(&claims.client_id) {
+        Ok(value) => value,
+        Err(error) => {
+            send_webtransport_error(&mut stream, error).await;
+            return;
+        }
+    };
+    let room_key = match parse_claim_uuid(&claims.room_id) {
+        Ok(room_id) => RoomKey {
+            room_id,
+            epoch: claims.room_epoch,
+        },
+        Err(error) => {
+            send_webtransport_error(&mut stream, error).await;
+            return;
+        }
+    };
+    let initial = initial_sync_frames(&room).await;
+    let initial = match initial {
+        Ok(value) => value,
+        Err(error) => {
+            send_webtransport_error(&mut stream, error).await;
+            leave_room(&state, &room, room_key, client_id, connection_id).await;
+            return;
+        }
+    };
+    for frame in initial {
+        if write_length_delimited(&mut stream, &frame).await.is_err() {
+            leave_room(&state, &room, room_key, client_id, connection_id).await;
+            return;
+        }
+    }
+
+    let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut poll = tokio::time::interval(CROSS_REPLICA_POLL_INTERVAL);
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut recheck =
+        tokio::time::interval(Duration::from_secs(state.limits.generation_recheck_seconds));
+    recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    heartbeat.tick().await;
+    poll.tick().await;
+    recheck.tick().await;
+
+    let outcome = 'session: loop {
+        tokio::select! {
+            message = read_length_delimited(&mut stream) => {
+                let bytes = match message {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) => break Ok(()),
+                    Err(error) => break Err(error),
+                };
+                match handle_binary_frame(&state, &claims, &room, &bytes).await {
+                    Ok(frames) => for frame in frames {
+                        if write_length_delimited(&mut stream, &frame).await.is_err() {
+                            break 'session Ok(());
+                        }
+                    },
+                    Err(error) => break Err(error),
+                }
+            }
+            broadcast = receiver.recv() => match broadcast {
+                Ok(frame) => if write_length_delimited(&mut stream, &frame).await.is_err() { break Ok(()); },
+                Err(broadcast::error::RecvError::Lagged(_)) => break Err(SessionError::Unavailable),
+                Err(broadcast::error::RecvError::Closed) => break Ok(()),
+            },
+            _ = heartbeat.tick() => {
+                if state.database.collaboration_heartbeat_participant(state.tenant_id, connection_id).await.is_err() {
+                    break Err(SessionError::Authorization);
+                }
+                let sequence = room.lock().await.document.server_sequence();
+                let frame = encode_frame(Frame::Heartbeat(Heartbeat {
+                    durable_sequence: sequence,
+                    sent_at_unix_millis: unix_millis(),
+                })).map_err(|_| SessionError::Internal);
+                match frame {
+                    Ok(frame) => if write_length_delimited(&mut stream, &frame).await.is_err() { break Ok(()); },
+                    Err(error) => break Err(error),
+                }
+            }
+            _ = poll.tick() => if let Err(error) = catch_up_room(&state, &claims, &room).await { break Err(error); },
+            _ = recheck.tick() => match authority_is_current(&state, &claims).await {
+                Ok(true) => {}
+                Ok(false) => break Err(SessionError::Authorization),
+                Err(_) => {
+                    freeze_claimed_room(&state, &claims, "authorization_uncertain").await;
+                    break Err(SessionError::Authorization);
+                }
+            }
+        }
+    };
+    leave_room(&state, &room, room_key, client_id, connection_id).await;
+    if let Err(error) = outcome {
+        send_webtransport_error(&mut stream, error).await;
+    }
+    let _ = stream.shutdown().await;
+}
+
+async fn read_length_delimited<S>(stream: &mut S) -> Result<Option<Vec<u8>>, SessionError>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut first = [0_u8; 1];
+    match stream.read_exact(&mut first).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(_) => return Err(SessionError::Protocol),
+    }
+    let mut value = u32::from(first[0] & 0x7f);
+    let mut shift = 7_u32;
+    let mut byte = first[0];
+    for _ in 1..5 {
+        if byte & 0x80 == 0 {
+            break;
+        }
+        let mut next = [0_u8; 1];
+        stream
+            .read_exact(&mut next)
+            .await
+            .map_err(|_| SessionError::Protocol)?;
+        byte = next[0];
+        let part = u32::from(byte & 0x7f)
+            .checked_shl(shift)
+            .ok_or(SessionError::Protocol)?;
+        value = value.checked_add(part).ok_or(SessionError::Protocol)?;
+        shift += 7;
+    }
+    if byte & 0x80 != 0 {
+        return Err(SessionError::Protocol);
+    }
+    let length = usize::try_from(value).map_err(|_| SessionError::Protocol)?;
+    if length == 0 || length > filebelt_collaboration_protocol::MAX_FRAME_BYTES {
+        return Err(SessionError::Protocol);
+    }
+    let mut bytes = vec![0_u8; length];
+    stream
+        .read_exact(&mut bytes)
+        .await
+        .map_err(|_| SessionError::Protocol)?;
+    Ok(Some(bytes))
+}
+
+async fn write_length_delimited<S>(stream: &mut S, frame: &[u8]) -> Result<(), SessionError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if frame.is_empty() || frame.len() > filebelt_collaboration_protocol::MAX_FRAME_BYTES {
+        return Err(SessionError::Protocol);
+    }
+    let mut value = u32::try_from(frame.len()).map_err(|_| SessionError::Internal)?;
+    let mut prefix = [0_u8; 5];
+    let mut length = 0_usize;
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        prefix[length] = byte;
+        length += 1;
+        if value == 0 {
+            break;
+        }
+    }
+    stream
+        .write_all(&prefix[..length])
+        .await
+        .map_err(|_| SessionError::Unavailable)?;
+    stream
+        .write_all(frame)
+        .await
+        .map_err(|_| SessionError::Unavailable)?;
+    stream.flush().await.map_err(|_| SessionError::Unavailable)
+}
+
+async fn send_webtransport_error<S>(stream: &mut S, error: SessionError)
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Ok(frame) = encode_frame(Frame::Error(error_frame(error))) {
+        let _ = write_length_delimited(stream, &frame).await;
+    }
 }
 
 async fn authenticate_socket(
@@ -593,6 +807,16 @@ async fn send_initial_sync(
     socket: &mut WebSocket,
     room: &Arc<Mutex<LiveRoom>>,
 ) -> Result<(), SessionError> {
+    for bytes in initial_sync_frames(room).await? {
+        socket
+            .send(Message::Binary(bytes.into()))
+            .await
+            .map_err(|_| SessionError::Unavailable)?;
+    }
+    Ok(())
+}
+
+async fn initial_sync_frames(room: &Arc<Mutex<LiveRoom>>) -> Result<Vec<Vec<u8>>, SessionError> {
     let (sequence, snapshot) = {
         let live = room.lock().await;
         (live.document.server_sequence(), live.document.snapshot())
@@ -606,6 +830,7 @@ async fn send_initial_sync(
             .collect::<Vec<_>>()
     };
     let count = u32::try_from(chunks.len()).map_err(|_| SessionError::Internal)?;
+    let mut frames = Vec::with_capacity(chunks.len());
     for (index, chunk) in chunks.into_iter().enumerate() {
         let bytes = encode_frame(Frame::SyncChunk(SyncChunk {
             sequence,
@@ -615,12 +840,9 @@ async fn send_initial_sync(
             snapshot: true,
         }))
         .map_err(|_| SessionError::Internal)?;
-        socket
-            .send(Message::Binary(bytes.into()))
-            .await
-            .map_err(|_| SessionError::Unavailable)?;
+        frames.push(bytes);
     }
-    Ok(())
+    Ok(frames)
 }
 
 async fn handle_message(
@@ -630,50 +852,56 @@ async fn handle_message(
     message: Message,
 ) -> Result<Vec<Vec<u8>>, SessionError> {
     match message {
-        Message::Binary(bytes) => {
-            let frame = decode_frame(&bytes).map_err(|_| SessionError::Protocol)?;
-            match frame.frame {
-                Some(Frame::UpdateGroup(group)) => apply_update(state, claims, room, group).await,
-                Some(Frame::Awareness(awareness)) => {
-                    validate_awareness(&awareness, state.limits.max_awareness_bytes)
-                        .map_err(|_| SessionError::Protocol)?;
-                    if awareness.client_id != claims.client_id
-                        || awareness.display_label != claims.presence_label
-                        || PresenceState::try_from(awareness.state).ok()
-                            == Some(PresenceState::Unspecified)
-                    {
-                        return Err(SessionError::Authorization);
-                    }
-                    let mut live = room.lock().await;
-                    if live.rate_limiter.admit(
-                        parse_claim_uuid(&claims.client_id)?,
-                        AdmissionKind::Awareness,
-                        u64::try_from(awareness.encoded_len()).unwrap_or(u64::MAX),
-                        Instant::now(),
-                    ) != RateAdmission::Admitted
-                    {
-                        return Err(SessionError::RateLimited);
-                    }
-                    let encoded = encode_frame(Frame::Awareness(awareness))
-                        .map_err(|_| SessionError::Internal)?;
-                    let _ = live.sender.send(encoded);
-                    Ok(Vec::new())
-                }
-                Some(Frame::SyncRequest(_)) => {
-                    drop(frame);
-                    Ok(Vec::new())
-                }
-                Some(Frame::Heartbeat(_)) => Ok(Vec::new()),
-                Some(Frame::CheckpointRequest(request)) => {
-                    prepare_checkpoint(state, claims, room, request).await
-                }
-                _ => Err(SessionError::Protocol),
-            }
-        }
+        Message::Binary(bytes) => handle_binary_frame(state, claims, room, &bytes).await,
         Message::Ping(_) => Ok(Vec::new()),
         Message::Pong(_) => Ok(Vec::new()),
         Message::Close(_) => Err(SessionError::Unavailable),
         Message::Text(_) => Err(SessionError::Protocol),
+    }
+}
+
+async fn handle_binary_frame(
+    state: &CollaborationServerState,
+    claims: &CollaborationGrantClaims,
+    room: &Arc<Mutex<LiveRoom>>,
+    bytes: &[u8],
+) -> Result<Vec<Vec<u8>>, SessionError> {
+    let frame = decode_frame(bytes).map_err(|_| SessionError::Protocol)?;
+    match frame.frame {
+        Some(Frame::UpdateGroup(group)) => apply_update(state, claims, room, group).await,
+        Some(Frame::Awareness(awareness)) => {
+            validate_awareness(&awareness, state.limits.max_awareness_bytes)
+                .map_err(|_| SessionError::Protocol)?;
+            if awareness.client_id != claims.client_id
+                || awareness.display_label != claims.presence_label
+                || PresenceState::try_from(awareness.state).ok() == Some(PresenceState::Unspecified)
+            {
+                return Err(SessionError::Authorization);
+            }
+            let mut live = room.lock().await;
+            if live.rate_limiter.admit(
+                parse_claim_uuid(&claims.client_id)?,
+                AdmissionKind::Awareness,
+                u64::try_from(awareness.encoded_len()).unwrap_or(u64::MAX),
+                Instant::now(),
+            ) != RateAdmission::Admitted
+            {
+                return Err(SessionError::RateLimited);
+            }
+            let encoded =
+                encode_frame(Frame::Awareness(awareness)).map_err(|_| SessionError::Internal)?;
+            let _ = live.sender.send(encoded);
+            Ok(Vec::new())
+        }
+        Some(Frame::SyncRequest(_)) => {
+            drop(frame);
+            Ok(Vec::new())
+        }
+        Some(Frame::Heartbeat(_)) => Ok(Vec::new()),
+        Some(Frame::CheckpointRequest(request)) => {
+            prepare_checkpoint(state, claims, room, request).await
+        }
+        _ => Err(SessionError::Protocol),
     }
 }
 

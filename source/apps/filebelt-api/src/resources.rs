@@ -174,10 +174,11 @@ enum CollaborationPresenceMode {
     DisplayName,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum CollaborationTransport {
     Websocket,
+    Webtransport,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -722,6 +723,11 @@ async fn create_collaboration_grant(
     if !state.config.collaboration.enabled {
         return Err(ApiError::not_found());
     }
+    if matches!(request.transport, CollaborationTransport::Webtransport)
+        && !state.config.collaboration.webtransport_enabled
+    {
+        return Err(ApiError::not_found());
+    }
     let drive_id = parse_uuid_v4(&drive_id)?;
     let node_id = parse_uuid_v4(&node_id)?;
     let client_id = parse_uuid_v4(&request.client_id)?;
@@ -879,11 +885,26 @@ async fn create_collaboration_grant(
             true,
         )
         .await?;
-    let mut endpoint = Url::parse(&state.public_origin).map_err(|_| ApiError::internal())?;
-    endpoint
-        .set_scheme("wss")
-        .map_err(|()| ApiError::internal())?;
-    endpoint.set_path("/collaboration/v1/ws");
+    let (transport, endpoint) = match request.transport {
+        CollaborationTransport::Websocket => {
+            let mut endpoint =
+                Url::parse(&state.public_origin).map_err(|_| ApiError::internal())?;
+            endpoint
+                .set_scheme("wss")
+                .map_err(|()| ApiError::internal())?;
+            endpoint.set_path("/collaboration/v1/ws");
+            ("websocket", endpoint)
+        }
+        CollaborationTransport::Webtransport => (
+            "webtransport",
+            state
+                .config
+                .collaboration
+                .webtransport_endpoint
+                .clone()
+                .ok_or_else(ApiError::internal)?,
+        ),
+    };
     let response = CollaborationGrantResponse {
         grant_id: grant.id,
         authorization: wire,
@@ -893,7 +914,7 @@ async fn create_collaboration_grant(
         presence_label,
         room: collaboration_summary_response(&room, node.head_version_id)?,
         endpoints: vec![CollaborationEndpointResponse {
-            transport: "websocket".into(),
+            transport: transport.into(),
             url: endpoint.to_string(),
         }],
     };
@@ -2215,7 +2236,7 @@ fn upload_capability_range(
     Ok((0, part_size.saturating_sub(1)))
 }
 
-async fn replay<T: DeserializeOwned>(
+pub(crate) async fn replay<T: DeserializeOwned>(
     state: &AppState,
     session: &AuthenticatedSession,
     route: &str,
@@ -2246,7 +2267,7 @@ async fn replay<T: DeserializeOwned>(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn store_idempotent<T: DeserializeOwned + Serialize>(
+pub(crate) async fn store_idempotent<T: DeserializeOwned + Serialize>(
     state: &AppState,
     session: &AuthenticatedSession,
     route: &str,
@@ -2282,7 +2303,7 @@ async fn store_idempotent<T: DeserializeOwned + Serialize>(
     serde_json::from_value(stored.response_body).map_err(|_| ApiError::internal())
 }
 
-fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
+pub(crate) fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
     headers
         .get(IDEMPOTENCY_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -2299,7 +2320,7 @@ fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
         })
 }
 
-fn fingerprint<T: Serialize>(request: &T) -> Result<[u8; 32], ApiError> {
+pub(crate) fn fingerprint<T: Serialize>(request: &T) -> Result<[u8; 32], ApiError> {
     let bytes = serde_json::to_vec(request).map_err(|_| ApiError::internal())?;
     Ok(*blake3::hash(&bytes).as_bytes())
 }

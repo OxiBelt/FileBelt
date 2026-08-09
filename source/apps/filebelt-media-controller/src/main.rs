@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! FileBelt media-controller role smoke probe.
+//! FileBelt media-controller entry point.
 
 #![deny(unsafe_code)]
 
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    filebelt_deployment_diagnostics::run_probe("filebelt-media-controller")
+    filebelt_media_controller::run()
 }

@@ -154,6 +154,39 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/admin/mounts/nfs/mappings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists exact RPCSEC_GSS principal projections for a recently reauthenticated tenant administrator. */
+        readonly get: operations["listNfsPrincipalMappings"];
+        readonly put?: never;
+        readonly post: operations["upsertNfsPrincipalMapping"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/mappings/{credential_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["revokeNfsPrincipalMapping"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/auth/callback": {
         readonly parameters: {
             readonly query?: never;
@@ -467,6 +500,39 @@ export interface paths {
         readonly put?: never;
         readonly post?: never;
         readonly delete: operations["revokeMcpDataGrant"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/media-previews": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Admits a rebuildable, immutable-source media preview only after explicit user confirmation and READ_CONTENT plus TRANSCODE authorization. Adapter options and host paths are never accepted. */
+        readonly post: operations["createMediaPreview"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/media-previews/{preview_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getMediaPreview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["cancelMediaPreview"];
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -1321,7 +1387,7 @@ export interface components {
         };
         readonly CollaborationEndpoint: {
             /** @enum {string} */
-            readonly transport: "websocket";
+            readonly transport: "websocket" | "webtransport";
             /**
              * Format: uri
              * @description Endpoint only; it contains neither authorization material nor session credentials.
@@ -1393,10 +1459,10 @@ export interface components {
              */
             readonly presence_mode: "pseudonym" | "display_name";
             /**
-             * @description Phase 5 uses WebSocket. WebTransport remains reserved until its runtime and deployment boundary receive a separate review.
+             * @description Selects one reviewed collaboration transport. WebTransport is advertised only when its same-origin Kubernetes route is enabled.
              * @enum {string}
              */
-            readonly transport: "websocket";
+            readonly transport: "websocket" | "webtransport";
         };
         readonly CreateDirectory: {
             /** Format: int64 */
@@ -1454,6 +1520,14 @@ export interface components {
             /** @enum {string} */
             readonly transport: "streamable_http" | "stdio_catalog";
             readonly trust_profile: string;
+        };
+        readonly CreateMediaPreview: {
+            /** @constant */
+            readonly audio_codec: "opus";
+            /** @constant */
+            readonly explicit_user_confirmation: true;
+            readonly source_version_id: components["schemas"]["UuidV4"];
+            readonly video_codecs: readonly ("av1" | "vp9")[];
         };
         readonly CreateMountCredential: {
             readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
@@ -1888,6 +1962,17 @@ export interface components {
             readonly protocol_version: ("2026-07-28" | "2025-11-25") | null;
             readonly succeeded: boolean;
         };
+        readonly MediaPreview: {
+            readonly attempt_count: number;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            readonly id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly job_epoch: number;
+            readonly node_id: components["schemas"]["UuidV4"];
+            readonly source_version_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly state: "requested" | "running" | "verifying" | "ready" | "failed" | "quarantined" | "cancelled" | "evicting" | "evicted";
+        };
         /** @description A normalized media type. Values exposed on Node or FileVersion are trusted server-derived metadata; request values are declarations only. */
         readonly MediaType: string;
         readonly MountCredential: {
@@ -1968,6 +2053,17 @@ export interface components {
         readonly NamespaceMutation: {
             /** Format: int64 */
             readonly expected_namespace_generation: number;
+        };
+        readonly NfsPrincipalMapping: {
+            readonly credential_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly generation: number;
+            readonly kerberos_principal: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly projected_gid: number;
+            /** Format: int64 */
+            readonly projected_uid: number;
         };
         readonly Node: {
             /** Format: int64 */
@@ -2108,6 +2204,16 @@ export interface components {
             readonly size_bytes: number;
             readonly upload_id: components["schemas"]["UuidV4"];
         };
+        readonly UpsertNfsPrincipalMapping: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly expected_generation?: number | null;
+            readonly kerberos_principal: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly projected_gid: number;
+            /** Format: int64 */
+            readonly projected_uid: number;
+        };
         /** Format: uuid */
         readonly UuidV4: string;
         readonly VersionPage: {
@@ -2216,6 +2322,7 @@ export interface components {
         readonly NodeId: components["schemas"]["UuidV4"];
         readonly Origin: string;
         readonly ParentId: components["schemas"]["UuidV4"];
+        readonly PreviewId: components["schemas"]["UuidV4"];
         readonly PrincipalId: components["schemas"]["UuidV4"];
         /** @description One bytes range only; it must be contained by the signed inclusive range. */
         readonly Range: string;
@@ -2719,6 +2826,94 @@ export interface operations {
         readonly requestBody?: never;
         readonly responses: {
             /** @description Assignment and its activation revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listNfsPrincipalMappings: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Active NFS principal projections. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["NfsPrincipalMapping"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly upsertNfsPrincipalMapping: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpsertNfsPrincipalMapping"];
+            };
+        };
+        readonly responses: {
+            /** @description Existing mapping advanced by its expected generation. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
+                };
+            };
+            /** @description New exact Kerberos principal mapping. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeNfsPrincipalMapping: {
+        readonly parameters: {
+            readonly query: {
+                readonly expected_generation: number;
+            };
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly credential_id: components["schemas"]["UuidV4"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Mapping and active NFS sessions were revoked and generation-fenced. */
             readonly 204: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -3407,6 +3602,93 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createMediaPreview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateMediaPreview"];
+            };
+        };
+        readonly responses: {
+            /** @description The fenced preview request is durable and queued for an isolated controller. */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MediaPreview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getMediaPreview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+                readonly preview_id: components["parameters"]["PreviewId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current PostgreSQL-authoritative preview state. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MediaPreview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly cancelMediaPreview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+                readonly preview_id: components["parameters"]["PreviewId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Cancellation is durable; a running worker remains fenced from publication. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MediaPreview"];
+                };
             };
             readonly default: components["responses"]["Problem"];
         };

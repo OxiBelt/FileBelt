@@ -16,6 +16,7 @@ mod auth;
 mod documents;
 mod error;
 mod mcp;
+mod media;
 mod mounts;
 mod policy;
 mod resources;

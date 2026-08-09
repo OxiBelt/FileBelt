@@ -152,7 +152,262 @@ pub struct MountPolicyRecord {
     pub updated_at: String,
 }
 
+/// One explicit Kerberos-to-FileBelt projection used by the NFS gateway.
+/// Numeric POSIX projections remain compatibility metadata; callers must still
+/// evaluate the current Virtual ACL before every filesystem operation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NfsPrincipalMapping {
+    pub kerberos_principal: String,
+    pub principal_id: Uuid,
+    pub credential_id: Uuid,
+    pub projected_uid: i64,
+    pub projected_gid: i64,
+    pub generation: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct UpsertNfsPrincipalMappingInput<'a> {
+    pub tenant_id: Uuid,
+    pub actor_principal_id: Uuid,
+    pub principal_id: Uuid,
+    pub kerberos_principal: &'a str,
+    pub projected_uid: i64,
+    pub projected_gid: i64,
+    pub allowed_drive_ids: &'a [Uuid],
+    pub expected_generation: Option<i64>,
+}
+
 impl Database {
+    /// Lists active NFS identity projections for tenant-administrator review.
+    pub async fn list_nfs_principal_mappings(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<NfsPrincipalMapping>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT kerberos_principal,principal_id,credential_id,projected_uid,projected_gid,generation \
+             FROM filebelt_mount.nfs_principal_mappings WHERE tenant_id=$1 AND revoked_at IS NULL \
+             ORDER BY kerberos_principal,principal_id",
+        )
+        .bind(tenant_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| NfsPrincipalMapping {
+                kerberos_principal: row.get("kerberos_principal"),
+                principal_id: row.get("principal_id"),
+                credential_id: row.get("credential_id"),
+                projected_uid: row.get("projected_uid"),
+                projected_gid: row.get("projected_gid"),
+                generation: row.get("generation"),
+            })
+            .collect())
+    }
+
+    /// Creates or generation-fences an explicit Kerberos identity projection.
+    /// No keytab, password verifier, or AUTH_SYS identity is persisted here.
+    pub async fn upsert_nfs_principal_mapping(
+        &self,
+        input: &UpsertNfsPrincipalMappingInput<'_>,
+    ) -> Result<NfsPrincipalMapping, DatabaseError> {
+        if input.kerberos_principal.is_empty()
+            || input.kerberos_principal.len() > 512
+            || input
+                .kerberos_principal
+                .bytes()
+                .any(|byte| byte.is_ascii_whitespace())
+            || !input.kerberos_principal.contains('@')
+            || input.projected_uid <= 0
+            || input.projected_gid <= 0
+            || input.allowed_drive_ids.is_empty()
+            || input.allowed_drive_ids.len() > 256
+            || input.expected_generation.is_some_and(|value| value <= 0)
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool().begin().await?;
+        let target_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM principals p JOIN users u ON u.tenant_id=p.tenant_id AND u.principal_id=p.id \
+             WHERE p.tenant_id=$1 AND p.id=$2 AND p.kind='user' AND p.disabled_at IS NULL AND u.status='active')",
+        )
+        .bind(input.tenant_id)
+        .bind(input.principal_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let drive_count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM drives WHERE tenant_id=$1 AND id=ANY($2)")
+                .bind(input.tenant_id)
+                .bind(input.allowed_drive_ids)
+                .fetch_one(&mut *transaction)
+                .await?;
+        if !target_exists || drive_count != input.allowed_drive_ids.len() as i64 {
+            return Err(DatabaseError::NotFound);
+        }
+
+        let existing = sqlx::query(
+            "SELECT principal_id,credential_id,generation FROM filebelt_mount.nfs_principal_mappings \
+             WHERE tenant_id=$1 AND kerberos_principal=$2 FOR UPDATE",
+        )
+        .bind(input.tenant_id)
+        .bind(input.kerberos_principal)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let credential_id;
+        let generation;
+        if let Some(row) = existing {
+            if row.get::<Uuid, _>("principal_id") != input.principal_id
+                || input.expected_generation != Some(row.get::<i64, _>("generation"))
+            {
+                return Err(DatabaseError::Conflict);
+            }
+            credential_id = row.get("credential_id");
+            generation = sqlx::query_scalar(
+                "UPDATE filebelt_mount.nfs_principal_mappings SET projected_uid=$3,projected_gid=$4,generation=generation+1,revoked_at=NULL,updated_at=clock_timestamp() \
+                 WHERE tenant_id=$1 AND kerberos_principal=$2 RETURNING generation",
+            )
+            .bind(input.tenant_id)
+            .bind(input.kerberos_principal)
+            .bind(input.projected_uid)
+            .bind(input.projected_gid)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+            sqlx::query(
+                "UPDATE filebelt_mount.credentials SET allowed_drive_ids=$3,credential_generation=credential_generation+1,authorization_generation=authorization_generation+1,revoked_at=NULL,expires_at=clock_timestamp()+interval '365 days' \
+                 WHERE tenant_id=$1 AND id=$2 AND principal_id=$4 AND protocol='nfs'",
+            )
+            .bind(input.tenant_id)
+            .bind(credential_id)
+            .bind(input.allowed_drive_ids)
+            .bind(input.principal_id)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            if input.expected_generation.is_some() {
+                return Err(DatabaseError::Conflict);
+            }
+            credential_id = Uuid::new_v4();
+            generation = 1;
+            sqlx::query(
+                "INSERT INTO filebelt_mount.credentials (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,allowed_drive_ids,expires_at) \
+                 VALUES ($1,$2,$3,'nfs',$4,'kerberos_principal',false,$5,clock_timestamp()+interval '365 days')",
+            )
+            .bind(input.tenant_id)
+            .bind(credential_id)
+            .bind(input.principal_id)
+            .bind(credential_id.to_string())
+            .bind(input.allowed_drive_ids)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+            sqlx::query(
+                "INSERT INTO filebelt_mount.nfs_principal_mappings (tenant_id,kerberos_principal,principal_id,credential_id,projected_uid,projected_gid) \
+                 VALUES ($1,$2,$3,$4,$5,$6)",
+            )
+            .bind(input.tenant_id)
+            .bind(input.kerberos_principal)
+            .bind(input.principal_id)
+            .bind(credential_id)
+            .bind(input.projected_uid)
+            .bind(input.projected_gid)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+        }
+        sqlx::query(
+            "INSERT INTO filebelt_mount.policies (tenant_id,principal_id,protocol,enabled,read_only,allowed_drive_ids) \
+             VALUES ($1,$2,'nfs',true,false,$3) ON CONFLICT (tenant_id,principal_id,protocol) DO UPDATE SET \
+             enabled=true,read_only=false,allowed_drive_ids=EXCLUDED.allowed_drive_ids,authorization_generation=filebelt_mount.policies.authorization_generation+1,revision=filebelt_mount.policies.revision+1,updated_at=clock_timestamp()",
+        )
+        .bind(input.tenant_id)
+        .bind(input.principal_id)
+        .bind(input.allowed_drive_ids)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("UPDATE filebelt_mount.sessions SET state='closed',close_reason='nfs_mapping_changed',last_activity_at=clock_timestamp() WHERE tenant_id=$1 AND user_principal_id=$2 AND protocol='nfs' AND state='active'")
+            .bind(input.tenant_id).bind(input.principal_id).execute(&mut *transaction).await?;
+        insert_audit(
+            &mut transaction,
+            input.tenant_id,
+            Some(input.actor_principal_id),
+            Some(input.principal_id),
+            Some(credential_id),
+            "mount.nfs.mapping.update",
+            "allowed",
+            "tenant_admin_mapping",
+            false,
+            json!({"kerberos_principal":input.kerberos_principal,"projected_uid":input.projected_uid,"projected_gid":input.projected_gid,"generation":generation}),
+        )
+        .await?;
+        insert_outbox(
+            &mut transaction,
+            input.tenant_id,
+            "filebelt.v1.mount.nfs.mapping.changed",
+            "nfs_mapping",
+            credential_id,
+            generation,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsPrincipalMapping {
+            kerberos_principal: input.kerberos_principal.to_owned(),
+            principal_id: input.principal_id,
+            credential_id,
+            projected_uid: input.projected_uid,
+            projected_gid: input.projected_gid,
+            generation,
+        })
+    }
+
+    pub async fn revoke_nfs_principal_mapping(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        credential_id: Uuid,
+        expected_generation: i64,
+    ) -> Result<(), DatabaseError> {
+        if expected_generation <= 0 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool().begin().await?;
+        let row = sqlx::query("UPDATE filebelt_mount.nfs_principal_mappings SET revoked_at=clock_timestamp(),generation=generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND credential_id=$2 AND generation=$3 AND revoked_at IS NULL RETURNING principal_id,credential_id,kerberos_principal,generation")
+            .bind(tenant_id).bind(credential_id).bind(expected_generation).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::Conflict)?;
+        let principal_id: Uuid = row.get("principal_id");
+        let credential_id: Uuid = row.get("credential_id");
+        let kerberos_principal: String = row.get("kerberos_principal");
+        let generation: i64 = row.get("generation");
+        sqlx::query("UPDATE filebelt_mount.credentials SET revoked_at=clock_timestamp(),credential_generation=credential_generation+1,authorization_generation=authorization_generation+1 WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NULL")
+            .bind(tenant_id).bind(credential_id).execute(&mut *transaction).await?;
+        sqlx::query("UPDATE filebelt_mount.policies SET enabled=false,authorization_generation=authorization_generation+1,revision=revision+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND principal_id=$2 AND protocol='nfs'")
+            .bind(tenant_id).bind(principal_id).execute(&mut *transaction).await?;
+        sqlx::query("UPDATE filebelt_mount.sessions SET state='closed',close_reason='nfs_mapping_revoked',last_activity_at=clock_timestamp() WHERE tenant_id=$1 AND user_principal_id=$2 AND protocol='nfs' AND state='active'")
+            .bind(tenant_id).bind(principal_id).execute(&mut *transaction).await?;
+        insert_audit(
+            &mut transaction,
+            tenant_id,
+            Some(actor_principal_id),
+            Some(principal_id),
+            Some(credential_id),
+            "mount.nfs.mapping.revoke",
+            "allowed",
+            "tenant_admin_mapping",
+            false,
+            json!({"kerberos_principal":kerberos_principal,"generation":generation}),
+        )
+        .await?;
+        insert_outbox(
+            &mut transaction,
+            tenant_id,
+            "filebelt.v1.mount.nfs.mapping.changed",
+            "nfs_mapping",
+            credential_id,
+            generation,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn mount_authentication_throttled(
         &self,
         tenant_id: Uuid,
@@ -253,7 +508,7 @@ impl Database {
         read_only: bool,
         allowed_drive_ids: &[Uuid],
     ) -> Result<MountPolicyRecord, DatabaseError> {
-        if !matches!(protocol, "smb" | "ftps") || allowed_drive_ids.len() > 256 {
+        if !matches!(protocol, "smb" | "ftps" | "nfs") || allowed_drive_ids.len() > 256 {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool().begin().await?;
@@ -626,6 +881,111 @@ impl Database {
             aad_digest: array_32(row.get::<Vec<u8>, _>("aad_digest"))?,
             aad_version: row.get("aad_version"),
         })
+    }
+
+    /// Resolves only an already-provisioned RPCSEC_GSS identity. This method
+    /// never accepts AUTH_SYS values, reads a vault envelope, or turns a UID,
+    /// GID, or host identity into authority.
+    pub async fn nfs_principal_mapping(
+        &self,
+        tenant_id: Uuid,
+        kerberos_principal: &str,
+    ) -> Result<NfsPrincipalMapping, DatabaseError> {
+        if kerberos_principal.is_empty() || kerberos_principal.len() > 512 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let row = sqlx::query(
+            "SELECT mapping.kerberos_principal,mapping.principal_id,mapping.credential_id,\
+             mapping.projected_uid,mapping.projected_gid,mapping.generation \
+             FROM filebelt_mount.nfs_principal_mappings mapping \
+             JOIN filebelt_mount.credentials credential \
+               ON credential.tenant_id=mapping.tenant_id AND credential.id=mapping.credential_id \
+             JOIN filebelt_mount.policies policy \
+               ON policy.tenant_id=credential.tenant_id AND policy.principal_id=credential.principal_id \
+                 AND policy.protocol='nfs' \
+             JOIN principals principal \
+               ON principal.tenant_id=mapping.tenant_id AND principal.id=mapping.principal_id \
+             WHERE mapping.tenant_id=$1 AND mapping.kerberos_principal=$2 \
+               AND mapping.revoked_at IS NULL AND credential.protocol='nfs' \
+               AND credential.verifier_kind='kerberos_principal' AND credential.revoked_at IS NULL \
+               AND credential.expires_at>clock_timestamp() AND policy.enabled \
+               AND principal.disabled_at IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(kerberos_principal)
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+        Ok(NfsPrincipalMapping {
+            kerberos_principal: row.get("kerberos_principal"),
+            principal_id: row.get("principal_id"),
+            credential_id: row.get("credential_id"),
+            projected_uid: row.get("projected_uid"),
+            projected_gid: row.get("projected_gid"),
+            generation: row.get("generation"),
+        })
+    }
+
+    /// Atomically consumes one NFSv4 slot/sequence receipt. Repeating a slot
+    /// sequence with a different digest is a conflict; replay caches therefore
+    /// cannot be reconstructed from adapter memory after restart.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_nfs_replay_receipt(
+        &self,
+        tenant_id: Uuid,
+        client_id: &str,
+        slot_id: i32,
+        sequence_id: i64,
+        request_digest: &[u8; 32],
+        response_digest: &[u8; 32],
+        gateway_epoch: i64,
+    ) -> Result<(), DatabaseError> {
+        if client_id.is_empty()
+            || client_id.len() > 255
+            || !(0..=1023).contains(&slot_id)
+            || sequence_id <= 0
+            || gateway_epoch <= 0
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let inserted = sqlx::query(
+            "INSERT INTO filebelt_mount.nfs_replay_receipts \
+             (tenant_id,client_id,slot_id,sequence_id,request_digest,response_digest,gateway_epoch,expires_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval '90 seconds') \
+             ON CONFLICT (tenant_id,client_id,slot_id,sequence_id) DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(client_id)
+        .bind(slot_id)
+        .bind(sequence_id)
+        .bind(request_digest.as_slice())
+        .bind(response_digest.as_slice())
+        .bind(gateway_epoch)
+        .execute(self.pool())
+        .await?;
+        if inserted.rows_affected() == 1 {
+            return Ok(());
+        }
+        let existing = sqlx::query(
+            "SELECT request_digest,response_digest,gateway_epoch FROM filebelt_mount.nfs_replay_receipts \
+             WHERE tenant_id=$1 AND client_id=$2 AND slot_id=$3 AND sequence_id=$4 \
+               AND expires_at>clock_timestamp()",
+        )
+        .bind(tenant_id)
+        .bind(client_id)
+        .bind(slot_id)
+        .bind(sequence_id)
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(DatabaseError::StaleGeneration)?;
+        let same = existing.get::<Vec<u8>, _>("request_digest") == request_digest
+            && existing.get::<Vec<u8>, _>("response_digest") == response_digest
+            && existing.get::<i64, _>("gateway_epoch") == gateway_epoch;
+        if same {
+            Ok(())
+        } else {
+            Err(DatabaseError::Conflict)
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

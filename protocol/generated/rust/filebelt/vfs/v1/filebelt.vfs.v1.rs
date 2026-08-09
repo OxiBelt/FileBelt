@@ -28,7 +28,7 @@ pub struct VfsRequest {
     pub credential_generation: u64,
     #[prost(uint64, tag="9")]
     pub authorization_generation: u64,
-    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40")]
+    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50")]
     pub operation: ::core::option::Option<vfs_request::Operation>,
 }
 /// Nested message and enum types in `VfsRequest`.
@@ -77,6 +77,26 @@ pub mod vfs_request {
         EndSession(super::EndSessionRequest),
         #[prost(message, tag="40")]
         GatewayHello(super::GatewayHelloRequest),
+        #[prost(message, tag="41")]
+        NfsAuthenticate(super::NfsAuthenticateRequest),
+        #[prost(message, tag="42")]
+        GetXattr(super::GetXattrRequest),
+        #[prost(message, tag="43")]
+        SetXattr(super::SetXattrRequest),
+        #[prost(message, tag="44")]
+        ListXattr(super::ListXattrRequest),
+        #[prost(message, tag="45")]
+        RemoveXattr(super::RemoveXattrRequest),
+        #[prost(message, tag="46")]
+        Readlink(super::ReadlinkRequest),
+        #[prost(message, tag="47")]
+        Symlink(super::SymlinkRequest),
+        #[prost(message, tag="48")]
+        SparseWrite(super::SparseWriteRequest),
+        #[prost(message, tag="49")]
+        Reclaim(super::ReclaimRequest),
+        #[prost(message, tag="50")]
+        OpenUnlinked(super::OpenUnlinkedRequest),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -288,6 +308,116 @@ pub struct GatewayHelloRequest {
     #[prost(string, tag="1")]
     pub shard_key: ::prost::alloc::string::String,
 }
+/// RPCSEC_GSS is authenticated by NFS-Ganesha. The FSAL/bridge forwards only
+/// its validated principal and a bounded binding digest; it never serializes a
+/// Kerberos ticket, keytab, AUTH_SYS UID/GID, or host identity to Core.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NfsAuthenticateRequest {
+    #[prost(string, tag="1")]
+    pub kerberos_principal: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="2")]
+    pub gss_binding_digest: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag="3")]
+    pub source_address: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetXattrRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetXattrRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="4")]
+    pub value: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bool, tag="5")]
+    pub create_only: bool,
+    #[prost(bool, tag="6")]
+    pub replace_only: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListXattrRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveXattrRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReadlinkRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SymlinkRequest {
+    #[prost(string, tag="1")]
+    pub drive_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub parent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub display_name: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub target: ::prost::alloc::string::String,
+    #[prost(uint64, tag="5")]
+    pub expected_parent_generation: u64,
+}
+/// Sparse extents are explicit so an all-zero range is never inferred from a
+/// transport truncation. The final `CommitRequest` remains the only version
+/// publication boundary.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SparseWriteRequest {
+    #[prost(string, tag="1")]
+    pub handle_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub write_session_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub fencing_token: u64,
+    #[prost(uint64, tag="4")]
+    pub offset: u64,
+    #[prost(uint64, tag="5")]
+    pub length: u64,
+    #[prost(bytes="vec", tag="6")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bool, tag="7")]
+    pub hole: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReclaimRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub gateway_epoch: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OpenUnlinkedRequest {
+    #[prost(string, tag="1")]
+    pub handle_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub write_session_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub fencing_token: u64,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VfsResponse {
     #[prost(uint32, tag="1")]
@@ -328,6 +458,14 @@ pub struct VfsResponse {
     pub next_cursor: ::prost::alloc::string::String,
     #[prost(uint64, tag="19")]
     pub gateway_epoch: u64,
+    #[prost(bytes="vec", tag="20")]
+    pub xattr_value: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, repeated, tag="21")]
+    pub xattr_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag="22")]
+    pub symlink_target: ::prost::alloc::string::String,
+    #[prost(string, tag="23")]
+    pub state_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DirectoryEntry {
@@ -354,6 +492,16 @@ pub struct NodeAttributes {
     pub modified_at_unix_seconds: i64,
     #[prost(bool, tag="7")]
     pub read_only: bool,
+    #[prost(uint32, tag="8")]
+    pub mode: u32,
+    #[prost(uint64, tag="9")]
+    pub projected_uid: u64,
+    #[prost(uint64, tag="10")]
+    pub projected_gid: u64,
+    #[prost(uint32, tag="11")]
+    pub link_count: u32,
+    #[prost(bool, tag="12")]
+    pub sparse: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -361,6 +509,7 @@ pub enum MountProtocol {
     Unspecified = 0,
     Smb = 1,
     Ftps = 2,
+    Nfs = 3,
 }
 impl MountProtocol {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -372,6 +521,7 @@ impl MountProtocol {
             Self::Unspecified => "MOUNT_PROTOCOL_UNSPECIFIED",
             Self::Smb => "MOUNT_PROTOCOL_SMB",
             Self::Ftps => "MOUNT_PROTOCOL_FTPS",
+            Self::Nfs => "MOUNT_PROTOCOL_NFS",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -380,6 +530,7 @@ impl MountProtocol {
             "MOUNT_PROTOCOL_UNSPECIFIED" => Some(Self::Unspecified),
             "MOUNT_PROTOCOL_SMB" => Some(Self::Smb),
             "MOUNT_PROTOCOL_FTPS" => Some(Self::Ftps),
+            "MOUNT_PROTOCOL_NFS" => Some(Self::Nfs),
             _ => None,
         }
     }

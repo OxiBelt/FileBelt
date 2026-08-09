@@ -49,6 +49,9 @@ spec:
           args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]
           ports:
             - {name: collaboration-ws, containerPort: 8085, protocol: TCP}
+            {{- if .Values.collaboration.webtransport.enabled }}
+            - {name: collaboration-wt, containerPort: 8086, protocol: UDP}
+            {{- end }}
             - {name: operations, containerPort: 9090, protocol: TCP}
           startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
           livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}

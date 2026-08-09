@@ -32,6 +32,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.collaboration.enabled -}}
 {{- $configuration = replace "[collaboration]\nenabled = false" "[collaboration]\nenabled = true" $configuration -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $configuration -}}
+{{- if .Values.collaboration.webtransport.enabled -}}
+{{- $configuration = replace "webtransport_enabled = false" "webtransport_enabled = true\nwebtransport_endpoint = \"https://filebelt.example.invalid/collaboration/v1/wt\"\nwebtransport_idle_seconds = 75\nwebtransport_drain_seconds = 300" $configuration -}}
+{{- end -}}
 {{- end -}}
 {{- if .Values.mounts.enabled -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
@@ -75,8 +78,8 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "filebelt.validate" -}}
 {{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
-{{- if not (hasPrefix "version = 5" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 5" -}}
+{{- if not (hasPrefix "version = 6" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 6" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -121,6 +124,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "collaboration.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
+{{- end -}}
+{{- if and .Values.collaboration.webtransport.enabled (not (contains "webtransport_enabled = true" $renderedFilebeltConfig)) -}}
+{{- fail "collaboration.webtransport.enabled requires the reviewed WebTransport runtime configuration" -}}
+{{- end -}}
+{{- if and .Values.collaboration.webtransport.enabled (not .Values.collaboration.enabled) -}}
+{{- fail "collaboration.webtransport.enabled requires collaboration.enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- if .Values.documents.enabled -}}

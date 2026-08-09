@@ -13,6 +13,8 @@ export const AdapterImageRoles = [
   "filebelt-smb-gateway",
   "filebelt-ftp-ftps-gateway",
   "filebelt-onlyoffice-adapter",
+  "filebelt-nfs-gateway",
+  "filebelt-transcoder",
 ] as const;
 
 export type AdapterImageRole = (typeof AdapterImageRoles)[number];
@@ -21,10 +23,14 @@ export type AdapterImageRole = (typeof AdapterImageRoles)[number];
 export interface AdapterImageEvidence {
   readonly role: AdapterImageRole;
   readonly repository: `ghcr.io/oxibelt/${AdapterImageRole}`;
-  readonly license: "AGPL-3.0-only" | "GPL-3.0-or-later";
+  readonly license: "AGPL-3.0-only" | "GPL-3.0-or-later" | "LGPL-3.0-or-later";
   readonly correspondingSource: `https://github.com/OxiBelt/FileBelt/tree/${string}`;
   /** Present only when an adapter has an approved release-platform contract. */
-  readonly publishPlatforms?: readonly ["linux/amd64", "linux/arm64"];
+  readonly publishPlatforms?: readonly (
+    | "linux/amd64"
+    | "linux/arm64"
+    | "linux/riscv64"
+  )[];
   /** RISC-V never joins the published adapter manifest without separate review. */
   readonly riscv64Policy?: "compile-and-probe-only";
 }
@@ -48,6 +54,21 @@ export const AdapterImagePlan: readonly AdapterImageEvidence[] = [
     repository: "ghcr.io/oxibelt/filebelt-onlyoffice-adapter",
     license: "AGPL-3.0-only",
     correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/0.1.0",
+    publishPlatforms: ["linux/amd64", "linux/arm64"],
+    riscv64Policy: "compile-and-probe-only",
+  },
+  {
+    role: "filebelt-nfs-gateway",
+    repository: "ghcr.io/oxibelt/filebelt-nfs-gateway",
+    license: "LGPL-3.0-or-later",
+    correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/nfs",
+    publishPlatforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
+  },
+  {
+    role: "filebelt-transcoder",
+    repository: "ghcr.io/oxibelt/filebelt-transcoder",
+    license: "GPL-3.0-or-later",
+    correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/transcode",
     publishPlatforms: ["linux/amd64", "linux/arm64"],
     riscv64Policy: "compile-and-probe-only",
   },

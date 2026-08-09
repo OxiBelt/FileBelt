@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::{Json, Router, routing};
 use filebelt_control_protocol::{Config, DeploymentMode};
 use filebelt_database::mount::{
     MountCredentialRecord, MountDeviceRecord, MountPolicyRecord, MountSessionSummary,
+    NfsPrincipalMapping, UpsertNfsPrincipalMappingInput,
 };
 use reqwest::{Certificate, Client, Identity};
 use serde::{Deserialize, Serialize};
@@ -51,7 +52,7 @@ struct MountDrive {
     reserved_bytes: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct PolicyInput {
     enabled: bool,
@@ -87,6 +88,23 @@ struct CreateCredentialResponse {
     username: String,
     password: String,
     expires_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct NfsMappingInput {
+    principal_id: Uuid,
+    kerberos_principal: String,
+    projected_uid: i64,
+    projected_gid: i64,
+    allowed_drive_ids: Vec<Uuid>,
+    expected_generation: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GenerationQuery {
+    expected_generation: i64,
 }
 
 pub(crate) fn initialize(config: &Config) -> Result<Option<Arc<MountApiState>>> {
@@ -154,6 +172,162 @@ pub(crate) fn router() -> Router<AppState> {
             "/mounts/credentials/{credential_id}",
             routing::delete(revoke_credential),
         )
+        .route(
+            "/admin/mounts/nfs/mappings",
+            routing::get(list_nfs_mappings).post(upsert_nfs_mapping),
+        )
+        .route(
+            "/admin/mounts/nfs/mappings/{credential_id}",
+            routing::delete(revoke_nfs_mapping),
+        )
+}
+
+async fn list_nfs_mappings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<NfsPrincipalMapping>>, ApiError> {
+    require_nfs_admin(&state, &headers, false).await?;
+    Ok(Json(
+        state
+            .database
+            .list_nfs_principal_mappings(state.tenant_id)
+            .await?,
+    ))
+}
+
+async fn upsert_nfs_mapping(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<NfsMappingInput>,
+) -> Result<(StatusCode, Json<NfsPrincipalMapping>), ApiError> {
+    let session = require_nfs_admin(&state, &headers, true).await?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let fingerprint = crate::resources::fingerprint(&input)?;
+    const ROUTE: &str = "POST /api/v1/admin/mounts/nfs/mappings";
+    if let Some((status, mapping)) =
+        crate::resources::replay::<NfsPrincipalMapping>(&state, &session, ROUTE, key, &fingerprint)
+            .await?
+    {
+        return Ok((
+            StatusCode::from_u16(status).map_err(|_| ApiError::internal())?,
+            Json(mapping),
+        ));
+    }
+    if input.allowed_drive_ids.len() > 256
+        || input
+            .allowed_drive_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len()
+            != input.allowed_drive_ids.len()
+    {
+        return Err(ApiError::bad_request(
+            "mount.nfs.mapping_invalid",
+            "The NFS mapping drive selection is invalid",
+        ));
+    }
+    let created = input.expected_generation.is_none();
+    let mapping = state
+        .database
+        .upsert_nfs_principal_mapping(&UpsertNfsPrincipalMappingInput {
+            tenant_id: state.tenant_id,
+            actor_principal_id: session.record.principal_id,
+            principal_id: input.principal_id,
+            kerberos_principal: &input.kerberos_principal,
+            projected_uid: input.projected_uid,
+            projected_gid: input.projected_gid,
+            allowed_drive_ids: &input.allowed_drive_ids,
+            expected_generation: input.expected_generation,
+        })
+        .await?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    let mapping = crate::resources::store_idempotent(
+        &state,
+        &session,
+        ROUTE,
+        key,
+        &fingerprint,
+        status,
+        &mapping,
+    )
+    .await?;
+    Ok((status, Json(mapping)))
+}
+
+async fn revoke_nfs_mapping(
+    State(state): State<AppState>,
+    Path(credential_id): Path<Uuid>,
+    Query(query): Query<GenerationQuery>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let session = require_nfs_admin(&state, &headers, true).await?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let fingerprint = crate::resources::fingerprint(&(credential_id, query.expected_generation))?;
+    const ROUTE: &str = "DELETE /api/v1/admin/mounts/nfs/mappings/{credential_id}";
+    if let Some((status, ())) =
+        crate::resources::replay::<()>(&state, &session, ROUTE, key, &fingerprint).await?
+    {
+        return StatusCode::from_u16(status).map_err(|_| ApiError::internal());
+    }
+    state
+        .database
+        .revoke_nfs_principal_mapping(
+            state.tenant_id,
+            session.record.principal_id,
+            credential_id,
+            query.expected_generation,
+        )
+        .await?;
+    crate::resources::store_idempotent(
+        &state,
+        &session,
+        ROUTE,
+        key,
+        &fingerprint,
+        StatusCode::NO_CONTENT,
+        &(),
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn require_nfs_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+    mutation: bool,
+) -> Result<AuthenticatedSession, ApiError> {
+    if !state.config.mounts.enabled || !state.config.mounts.nfs.enabled {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "mount.nfs.disabled",
+            "NFS administration is not enabled for this deployment",
+        ));
+    }
+    let active = state.database.phase8_is_active(state.tenant_id).await?;
+    if !active {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "phase8.inactive",
+            "Phase 8 admission is not active",
+        ));
+    }
+    let session = if mutation {
+        authenticate_mutation(state, headers).await?
+    } else {
+        authenticate(state, headers).await?
+    };
+    if !session.record.tenant_admin || !session.record.reauthenticated_recently {
+        return Err(ApiError::forbidden(
+            "admin.reauthentication_required",
+            "Recent tenant administrator authentication is required",
+        ));
+    }
+    Ok(session)
 }
 
 async fn get_overview(

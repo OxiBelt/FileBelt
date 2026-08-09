@@ -24,8 +24,10 @@ adapter_root = "adapters"
 # Adding an adapter manifest requires an explicit, license-reviewed registration.
 registered_adapter_manifests = [
   "adapters/ftp-ftps/Cargo.toml",
+  "adapters/nfs/Cargo.toml",
   "adapters/onlyoffice/Cargo.toml",
   "adapters/smb/Cargo.toml",
+  "adapters/transcode/Cargo.toml",
 ]
 
 [[graph_profiles]]
@@ -173,6 +175,28 @@ forbidden_package_prefixes = []
 [graph_profiles.first_party_features]
 filebelt-onlyoffice-adapter = []
 filebelt-document-protocol = []
+
+[[graph_profiles]]
+label = "LGPL NFS bounded IPC bridge"
+package = "filebelt-nfs-bridge"
+manifest = "adapters/nfs/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-nfs-bridge = []
+
+[[graph_profiles]]
+label = "GPL media transcoder wrapper"
+package = "filebelt-transcoder"
+manifest = "adapters/transcode/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-transcoder = []
 
 [[graph_profiles]]
 label = "shared service runtime"
@@ -787,6 +811,24 @@ public_modules = ["config", "routes", "runtime", "tls"]
 wildcard_reexports = []
 
 [[public_surfaces]]
+package = "filebelt-nfs-bridge"
+crate_root = "adapters/nfs/bridge/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-transcoder"
+crate_root = "adapters/transcode/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-transcoder"
+crate_root = "adapters/transcode/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
 package = "filebelt-onlyoffice-adapter"
 crate_root = "adapters/onlyoffice/src/main.rs"
 public_modules = []
@@ -831,7 +873,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-collaboration"
 crate_root = "source/apps/filebelt-collaboration/src/lib.rs"
-public_modules = ["io_client", "server"]
+public_modules = ["io_client", "server", "webtransport"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -855,7 +897,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["collaboration", "document", "mcp", "mount"]
+public_modules = ["collaboration", "document", "mcp", "media", "mount"]
 wildcard_reexports = []
 
 [[public_surfaces]]

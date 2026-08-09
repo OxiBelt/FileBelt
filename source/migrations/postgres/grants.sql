@@ -4,25 +4,28 @@
 -- reviewed allowlist and the verifier are updated.
 
 REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault, filebelt_document FROM PUBLIC;
+  filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
+  filebelt_phase8 FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
-  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
+  filebelt_media, filebelt_phase8
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-       filebelt_document;
+       filebelt_document, filebelt_media;
 REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
-  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
+  filebelt_media, filebelt_phase8
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-       filebelt_document;
+       filebelt_document, filebelt_media;
 
 GRANT USAGE ON SCHEMA public
   TO filebelt_api, filebelt_io, filebelt_maintenance,
      filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
      filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-     filebelt_document;
+     filebelt_document, filebelt_media;
 GRANT USAGE ON SCHEMA filebelt_mcp
   TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
@@ -36,6 +39,12 @@ GRANT USAGE ON SCHEMA filebelt_mount_vault
   TO filebelt_maintenance, filebelt_recovery, filebelt_vfs;
 GRANT USAGE ON SCHEMA filebelt_document
   TO filebelt_document, filebelt_io, filebelt_maintenance, filebelt_recovery;
+GRANT USAGE ON SCHEMA filebelt_media
+  TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
+     filebelt_media;
+GRANT USAGE ON SCHEMA filebelt_phase8
+  TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
+     filebelt_collaboration, filebelt_vfs, filebelt_document, filebelt_media;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or
@@ -362,6 +371,77 @@ GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
   filebelt_mount.deletion_tombstones TO filebelt_recovery;
 GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
   ON filebelt_mount_vault.secret_envelopes TO filebelt_recovery;
+
+-- Phase 8 NFS control/recovery projections. The API may manage explicit
+-- Kerberos mappings but never reads the keytab or GSS material; VFS owns the
+-- replay/reclaim/write-state mutations.
+GRANT SELECT, INSERT, UPDATE ON filebelt_mount.nfs_principal_mappings
+  TO filebelt_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_reclaim_records,
+  filebelt_mount.nfs_replay_receipts,
+  filebelt_mount.nfs_write_extents TO filebelt_vfs;
+GRANT SELECT, UPDATE ON filebelt_mount.nfs_write_extents TO filebelt_io;
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_mount.nfs_reclaim_records,
+  filebelt_mount.nfs_replay_receipts,
+  filebelt_mount.nfs_write_extents TO filebelt_maintenance;
+GRANT SELECT ON
+  filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_reclaim_records,
+  filebelt_mount.nfs_replay_receipts,
+  filebelt_mount.nfs_write_extents TO filebelt_recovery;
+
+-- Media bytes remain behind scoped I/O. These grants expose only durable job,
+-- receipt, manifest, and rebuildable-cache metadata.
+GRANT SELECT, INSERT, UPDATE ON
+  filebelt_media.previews, filebelt_media.playback_sessions,
+  filebelt_media.deletion_intents TO filebelt_api;
+GRANT SELECT ON
+  filebelt_media.segment_receipts, filebelt_media.manifest_revisions,
+  filebelt_media.cache_artifacts TO filebelt_api;
+GRANT SELECT, INSERT, UPDATE ON
+  filebelt_media.segment_receipts, filebelt_media.manifest_revisions,
+  filebelt_media.cache_artifacts TO filebelt_io;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  filebelt_media.previews, filebelt_media.attempts,
+  filebelt_media.reservations, filebelt_media.segment_receipts,
+  filebelt_media.manifest_revisions, filebelt_media.cache_artifacts,
+  filebelt_media.playback_sessions, filebelt_media.deletion_intents,
+  filebelt_media.diagnostics TO filebelt_media;
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_media.previews, filebelt_media.attempts,
+  filebelt_media.reservations, filebelt_media.segment_receipts,
+  filebelt_media.manifest_revisions, filebelt_media.cache_artifacts,
+  filebelt_media.playback_sessions, filebelt_media.deletion_intents,
+  filebelt_media.diagnostics TO filebelt_maintenance;
+GRANT SELECT ON
+  filebelt_media.previews, filebelt_media.attempts,
+  filebelt_media.reservations, filebelt_media.segment_receipts,
+  filebelt_media.manifest_revisions, filebelt_media.cache_artifacts,
+  filebelt_media.playback_sessions, filebelt_media.deletion_intents,
+  filebelt_media.diagnostics TO filebelt_recovery;
+
+GRANT SELECT (id,slug) ON tenants TO filebelt_media;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals TO filebelt_media;
+GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_media;
+GRANT SELECT (tenant_id,id,user_id,principal_id,idle_expires_at,absolute_expires_at,revoked_at)
+  ON api_sessions TO filebelt_media;
+GRANT SELECT ON groups, group_memberships, drives, nodes, node_ancestry,
+  acl_entries, file_versions, authorization_generations TO filebelt_media;
+GRANT UPDATE (reserved_bytes,used_physical_bytes) ON drives TO filebelt_media;
+GRANT INSERT ON audit_events, outbox_events, jobs TO filebelt_media;
+
+GRANT SELECT ON filebelt_phase8.activation_state
+  TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_collaboration,
+     filebelt_vfs, filebelt_document, filebelt_media;
+GRANT SELECT ON filebelt_phase8.managed_traversal,
+  filebelt_phase8.managed_group_memberships TO filebelt_vfs;
+GRANT SELECT ON filebelt_phase8.activation_state,
+  filebelt_phase8.activation_events, filebelt_phase8.role_compatibility,
+  filebelt_phase8.managed_traversal,
+  filebelt_phase8.managed_group_memberships TO filebelt_recovery;
 
 REVOKE ALL ON FUNCTION filebelt_mcp.require_principal_kind() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mcp.require_service_principal() FROM PUBLIC;

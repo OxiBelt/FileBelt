@@ -26,6 +26,11 @@ spec:
     - from:
 {{ toYaml .Values.networkPolicy.publicIngress.from | indent 8 }}
       ports: [{port: https, protocol: TCP}]
+    {{- if .Values.collaboration.webtransport.enabled }}
+    - from:
+{{ toYaml .Values.networkPolicy.publicIngress.from | indent 8 }}
+      ports: [{port: http3, protocol: UDP}]
+    {{- end }}
 ---
 {{- range $component := list "api" "io" }}
 apiVersion: networking.k8s.io/v1
@@ -111,6 +116,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
       ports: [{port: collaboration-ws, protocol: TCP}]
+    {{- if .Values.collaboration.webtransport.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
+      ports: [{port: collaboration-wt, protocol: UDP}]
+    {{- end }}
     {{- end }}
     {{- if .Values.documents.enabled }}
     - to:
@@ -197,6 +208,12 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
       ports: [{port: collaboration-ws, protocol: TCP}]
+    {{- if .Values.collaboration.webtransport.enabled }}
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: web}
+      ports: [{port: collaboration-wt, protocol: UDP}]
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

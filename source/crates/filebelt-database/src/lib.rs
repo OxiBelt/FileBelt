@@ -7,6 +7,7 @@
 pub mod collaboration;
 pub mod document;
 pub mod mcp;
+pub mod media;
 pub mod mount;
 
 use filebelt_domain::Action;
@@ -296,6 +297,15 @@ impl Database {
     pub async fn health(&self) -> Result<(), DatabaseError> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
         Ok(())
+    }
+
+    pub async fn phase8_is_active(&self, tenant_id: Uuid) -> Result<bool, DatabaseError> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM filebelt_phase8.activation_state WHERE tenant_id=$1 AND state='active')",
+        )
+        .bind(tenant_id)
+        .fetch_one(&self.pool)
+        .await?)
     }
 
     pub async fn bootstrap_tenant(

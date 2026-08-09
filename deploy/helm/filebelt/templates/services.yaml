@@ -18,6 +18,9 @@ spec:
       port: {{ $service.port }}
       targetPort: {{ $service.portName }}
       protocol: TCP
+    {{- if and (eq $service.component "web") $root.Values.collaboration.webtransport.enabled }}
+    - {name: http3, port: 8443, targetPort: http3, protocol: UDP}
+    {{- end }}
 ---
 {{- end }}
 {{- if .Values.collaboration.enabled }}
@@ -32,6 +35,9 @@ spec:
   selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: collaboration}
   ports:
     - {name: collaboration-ws, port: 8085, targetPort: collaboration-ws, protocol: TCP}
+    {{- if .Values.collaboration.webtransport.enabled }}
+    - {name: collaboration-wt, port: 8086, targetPort: collaboration-wt, protocol: UDP}
+    {{- end }}
 ---
 {{- end }}
 {{- if .Values.mcp.enabled }}

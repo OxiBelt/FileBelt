@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Phase 8 performance evidence
+
+on:
+  pull_request:
+    paths:
+      - "tests/performance/phase8/**"
+      - "tests/scripts/test_phase8_performance_evidence.py"
+      - ".github/workflows/phase8-performance.yml"
+  schedule:
+    - cron: "17 3 * * *"
+    - cron: "29 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      cadence:
+        description: Evidence cadence to validate
+        required: true
+        default: pre-release
+        type: choice
+        options: [change-smoke, nightly, weekly, pre-release]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase8-performance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  evidence-contract:
+    name: Validate ${{ github.event.inputs.cadence || 'change-smoke' }} evidence contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Test fail-closed evidence checker
+        run: python3 tests/scripts/test_phase8_performance_evidence.py
+      - name: Validate example evidence
+        run: >-
+          python3 tests/performance/phase8/phase8_evidence.py
+          --input tests/performance/phase8/example.json
+          --output phase8-evidence.json
+      - name: Upload evidence contract result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phase8-performance-evidence-contract
+          path: phase8-evidence.json
+          if-no-files-found: error
+          retention-days: 30

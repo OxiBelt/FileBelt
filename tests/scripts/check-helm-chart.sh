@@ -246,12 +246,19 @@ assert_contains "${temporary}/collaboration.yaml" 'protocols = ["websocket"]'
 assert_not_contains "${temporary}/collaboration.yaml" 'path_prefix = "/collaboration/v1/wt"'
 assert_not_contains "${temporary}/collaboration.yaml" 'host_key_file = "/run/secrets/collaboration-quic-host-key/quic-host-key.b64"'
 
-if helm template phase5 "${chart}" --kube-version 1.36.0 \
+helm template phase8 "${chart}" --kube-version 1.36.0 \
   --set collaboration.enabled=true \
-  --set collaboration.webtransport.enabled=true >"${temporary}/collaboration-webtransport.yaml" 2>/dev/null; then
-  echo "the chart must reject WebTransport until the runtime listener is implemented" >&2
-  exit 1
-fi
+  --set collaboration.webtransport.enabled=true >"${temporary}/collaboration-webtransport.yaml"
+assert_rendered_toml "${temporary}/collaboration-webtransport.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/collaboration-webtransport.yaml" oxibelt.toml
+assert_document_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-web 'containerPort: 8443'
+assert_document_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-collaboration 'containerPort: 8086'
+assert_document_contains "${temporary}/collaboration-webtransport.yaml" Service filebelt-web 'protocol: UDP'
+assert_document_contains "${temporary}/collaboration-webtransport.yaml" Service filebelt-collaboration 'protocol: UDP'
+assert_contains "${temporary}/collaboration-webtransport.yaml" 'path_prefix = "/collaboration/v1/wt"'
+assert_contains "${temporary}/collaboration-webtransport.yaml" 'max_http_version = "h3"'
+assert_contains "${temporary}/collaboration-webtransport.yaml" 'webtransport = true'
+assert_contains "${temporary}/collaboration-webtransport.yaml" 'webtransport_enabled = true'
 preview_line=$(grep -n 'name = "filebelt-markdown-preview"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
 spa_line=$(grep -n 'name = "filebelt-spa"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
 if [ "${preview_line}" -ge "${spa_line}" ]; then
@@ -529,4 +536,4 @@ expect_failure runner_namespace_is_core \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 
-echo "Helm chart contract through Phase 7 passed"
+echo "Helm chart contract through Phase 8 passed"

@@ -391,16 +391,14 @@ The public HTTP contract adds:
 
 - `POST /api/v1/drives/{drive_id}/nodes/{node_id}/media-previews` with an
   immutable source version, validated browser capabilities, explicit
-  confirmation, and `Idempotency-Key`; it returns `200` for an existing READY
-  artifact and `202` for an admitted job;
-- `GET` and `DELETE /api/v1/media-previews/{preview_id}` for status and
-  idempotent cancellation;
-- `POST /api/v1/media-previews/{preview_id}/playback-grants`, which creates a
-  principal-bound playback session of at most 60 seconds and places its secret
-  only in an `HttpOnly`, `Secure`, same-site cookie scoped to that session's
-  playback route; and
-- drive-manager list and eviction operations below
-  `/api/v1/drives/{drive_id}/media-cache`.
+  confirmation, and `Idempotency-Key`; it returns `202` for the durable request;
+- `GET` and `DELETE` on that resource's
+  `/media-previews/{preview_id}` child for status and fenced cancellation.
+
+Playback-grant, segment-delivery, and drive-manager eviction routes remain
+reserved until the probe-only controller and scoped I/O cache path are
+qualified. The checked-in preview component is isolated prequalification code
+and is not wired into the application shell.
 
 Playback manifests are versioned FileBelt JSON. They name one selected codec
 ladder, immutable initialization/media segment identifiers, BLAKE3 digests,
@@ -411,12 +409,10 @@ durably verified its receipt.
 ## Phase 8 NFS and WebTransport contracts
 
 The mount protocol enum adds `NFS`; password-credential endpoints reject it.
-Tenant-administrator identity and group mapping endpoints live below
+Tenant-administrator identity mapping endpoints live below
 `/api/v1/admin/mounts/nfs/`, require recent OIDC authentication, generation
-preconditions, tenant uniqueness, and audit. Retained writes are listed at
-`GET /api/v1/mounts/write-conflicts`; an authorized owner may copy one through
-`POST /api/v1/mounts/write-conflicts/{write_session_id}/copies` after an
-independent `CREATE_CHILD` decision. The operation never overwrites.
+preconditions, idempotency keys, tenant uniqueness, and audit. Retained-write
+copy operations remain reserved until NFS write dispatch is qualified.
 
 VFS v1 adds additive NFS-generic attribute, ACL, xattr, symlink, sparse-write,
 flush, commit, open-unlink, and reclaim messages. Existing field numbers remain
@@ -430,11 +426,9 @@ One WebTransport session and one client-created reliable bidirectional stream
 carry the unchanged length-delimited Protobuf frames for one room participant;
 datagrams and extra streams are rejected. Authentication remains the first
 frame using the one-use 60-second join grant. Reauthorization is bounded to 60
-seconds, tokens never enter URLs, and WebSocket remains behaviorally equivalent
-fallback. Before acknowledgement the client obtains a fresh grant and falls
-back immediately. After acknowledgement it fences and replays durable update
-IDs, obtains a fresh grant, and disables further WebTransport attempts for five
-minutes.
+seconds, tokens never enter URLs, and WebSocket remains the behaviorally
+equivalent fallback. Browser preference/backoff policy remains a client concern;
+the current editor continues to request WebSocket unless it explicitly opts in.
 
 ## Key rotation and configuration
 
@@ -450,7 +444,7 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 5; older versions are rejected. API `fbcap1`,
+The current format is version 6; older versions are rejected. API `fbcap1`,
 collaboration `fbcap1`, and mount `fbcap2` signing keys use distinct private
 keys and generations 1, 2, and 3 respectively; the I/O verification keyset
 contains all currently admitted public generations. `mcp.enabled`

@@ -260,7 +260,9 @@ fn oxibelt_edge_profile_keeps_routes_and_browser_security_explicit() {
     assert!(chart.contains("trusted-types filebelt-markdown-generated"));
     assert!(chart.contains("name = \"Access-Control-Allow-Origin\""));
     assert!(chart.contains("style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"));
-    assert!(!chart.contains("/collaboration/v1/wt"));
+    assert!(chart.contains("{{ if .Values.collaboration.webtransport.enabled }}"));
+    assert!(chart.contains("path_prefix = \"/collaboration/v1/wt\""));
+    assert!(chart.contains("max_http_version = \"h3\""));
     assert!(vite.contains("MarkdownPreviewContentSecurityPolicy"));
     assert!(vite.contains("trusted-types filebelt-markdown-generated"));
     assert!(vite.contains("Access-Control-Allow-Origin"));

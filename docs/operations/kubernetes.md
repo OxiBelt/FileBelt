@@ -62,7 +62,7 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 6. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Confirm `filebelt.toml` uses format 5. If MCP is enabled, validate the
+7. Confirm `filebelt.toml` uses format 6. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
@@ -158,8 +158,8 @@ window.
    compatibility inventory with the change evidence.
 5. Qualify and enable CPU media, NFS, and WebTransport separately. NFS requires
    the external KDC/keytab, handle keyset, `fs_ng` recovery claim, TCP 2049
-   client policy, and single-active fencing. WebTransport requires the stable
-   QUIC host key and UDP policies. VAAPI remains disabled unless experimental
+   client policy, and single-active fencing. WebTransport requires the
+   operator-projected TLS identity and UDP policies. VAAPI remains disabled unless experimental
    use is explicitly accepted.
 
 To roll back, disable new admissions, run `filebeltctl phase8 deactivate`,

@@ -14,6 +14,7 @@ use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
 use clap::{Parser, Subcommand};
 use filebelt_collaboration::io_client::CollaborationIoClient;
 use filebelt_collaboration::server::{CollaborationServerState, router};
+use filebelt_collaboration::webtransport;
 use filebelt_collaboration_protocol::VerificationKey as CollaborationVerificationKey;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::Database;
@@ -80,9 +81,7 @@ async fn serve(config: Config) -> Result<()> {
     if !config.collaboration.enabled {
         bail!("collaboration service is disabled");
     }
-    if config.collaboration.webtransport_enabled {
-        bail!("WebTransport support is not available in this runtime build");
-    }
+    let config = Arc::new(config);
     let database_path = config
         .collaboration
         .database_url_file
@@ -151,6 +150,14 @@ async fn serve(config: Config) -> Result<()> {
         io,
         config.collaboration.limits.clone(),
     );
+    let (webtransport_stop, webtransport_stopped) = tokio::sync::watch::channel(false);
+    let mut webtransport_server = config.collaboration.webtransport_enabled.then(|| {
+        let server_config = Arc::clone(&config);
+        let server_state = state.clone();
+        tokio::spawn(async move {
+            webtransport::serve(server_config, server_state, webtransport_stopped).await
+        })
+    });
     let application = router(state).layer(axum::middleware::from_fn(trace_request));
     let ready_database = database.clone();
     let operations = OperationsState::new(ROLE, config.telemetry.prometheus_enabled, move || {
@@ -231,13 +238,36 @@ async fn serve(config: Config) -> Result<()> {
         }
     };
     info!(%listener, "collaboration service ready");
+    let webtransport_failure = async {
+        match webtransport_server.as_mut() {
+            Some(server) => Some(server.await),
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(webtransport_failure);
     let result = tokio::select! {
         result = &mut application_server => result.context("collaboration server task failed")?,
+        result = &mut webtransport_failure => {
+            let result = result.expect("disabled WebTransport future cannot complete");
+            result.context("WebTransport server task failed")??;
+            Err(anyhow!("WebTransport server stopped before shutdown"))
+        }
         () = wait_for_shutdown() => {
             operations.begin_draining();
             let _ = application_stop.send(());
+            let _ = webtransport_stop.send(true);
             if tokio::time::timeout(Duration::from_secs(75), &mut application_server).await.is_err() {
                 application_server.abort();
+            }
+            if let Some(server) = webtransport_server.as_mut()
+                && tokio::time::timeout(
+                    Duration::from_secs(config.collaboration.webtransport_drain_seconds),
+                    &mut *server,
+                )
+                .await
+                .is_err()
+            {
+                server.abort();
             }
             Ok(())
         }

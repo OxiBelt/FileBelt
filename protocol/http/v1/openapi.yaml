@@ -505,6 +505,134 @@ paths:
                 $ref: "#/components/schemas/CollaborationGrant"
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/media-previews:
+    post:
+      operationId: createMediaPreview
+      description: Admits a rebuildable, immutable-source media preview only after explicit user confirmation and READ_CONTENT plus TRANSCODE authorization. Adapter options and host paths are never accepted.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMediaPreview"
+      responses:
+        "202":
+          description: The fenced preview request is durable and queued for an isolated controller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaPreview"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/media-previews/{preview_id}:
+    get:
+      operationId: getMediaPreview
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/PreviewId"
+      responses:
+        "200":
+          description: Current PostgreSQL-authoritative preview state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaPreview"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: cancelMediaPreview
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/PreviewId"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "200":
+          description: Cancellation is durable; a running worker remains fenced from publication.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaPreview"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/mappings:
+    get:
+      operationId: listNfsPrincipalMappings
+      description: Lists exact RPCSEC_GSS principal projections for a recently reauthenticated tenant administrator.
+      responses:
+        "200":
+          description: Active NFS principal projections.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NfsPrincipalMapping"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: upsertNfsPrincipalMapping
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertNfsPrincipalMapping"
+      responses:
+        "200":
+          description: Existing mapping advanced by its expected generation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsPrincipalMapping"
+        "201":
+          description: New exact Kerberos principal mapping.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsPrincipalMapping"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/mappings/{credential_id}:
+    delete:
+      operationId: revokeNfsPrincipalMapping
+      parameters:
+        - name: credential_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UuidV4"
+        - name: expected_generation
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Mapping and active NFS sessions were revoked and generation-fenced.
+        default:
+          $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents:
     post:
       operationId: createMarkdownImportIntent
@@ -1929,6 +2057,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/UuidV4"
+    PreviewId:
+      name: preview_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
     ParentId:
       name: parent_id
       in: path
@@ -2884,8 +3018,8 @@ components:
       properties:
         transport:
           type: string
-          enum: [websocket]
-          description: Phase 5 uses WebSocket. WebTransport remains reserved until its runtime and deployment boundary receive a separate review.
+          enum: [websocket, webtransport]
+          description: Selects one reviewed collaboration transport. WebTransport is advertised only when its same-origin Kubernetes route is enabled.
         client_id:
           $ref: "#/components/schemas/UuidV4"
         presence_mode:
@@ -2899,7 +3033,7 @@ components:
       properties:
         transport:
           type: string
-          enum: [websocket]
+          enum: [websocket, webtransport]
         url:
           type: string
           format: uri
@@ -2938,6 +3072,106 @@ components:
           maxItems: 2
           items:
             $ref: "#/components/schemas/CollaborationEndpoint"
+    CreateMediaPreview:
+      type: object
+      additionalProperties: false
+      required: [source_version_id, video_codecs, audio_codec, explicit_user_confirmation]
+      properties:
+        source_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        video_codecs:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [av1, vp9]
+        audio_codec:
+          type: string
+          const: opus
+        explicit_user_confirmation:
+          type: boolean
+          const: true
+    MediaPreview:
+      type: object
+      additionalProperties: false
+      required: [id, drive_id, node_id, source_version_id, state, attempt_count, job_epoch]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+        source_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        state:
+          type: string
+          enum: [requested, running, verifying, ready, failed, quarantined, cancelled, evicting, evicted]
+        attempt_count:
+          type: integer
+          minimum: 0
+          maximum: 3
+        job_epoch:
+          type: integer
+          format: int64
+          minimum: 0
+    UpsertNfsPrincipalMapping:
+      type: object
+      additionalProperties: false
+      required: [principal_id, kerberos_principal, projected_uid, projected_gid, allowed_drive_ids]
+      properties:
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        kerberos_principal:
+          type: string
+          minLength: 3
+          maxLength: 512
+          pattern: '^[^\s@]+@[^\s@]+$'
+        projected_uid:
+          type: integer
+          format: int64
+          minimum: 1
+        projected_gid:
+          type: integer
+          format: int64
+          minimum: 1
+        allowed_drive_ids:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/UuidV4"
+        expected_generation:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+            - type: "null"
+    NfsPrincipalMapping:
+      type: object
+      additionalProperties: false
+      required: [kerberos_principal, principal_id, credential_id, projected_uid, projected_gid, generation]
+      properties:
+        kerberos_principal:
+          type: string
+        principal_id:
+          $ref: "#/components/schemas/UuidV4"
+        credential_id:
+          $ref: "#/components/schemas/UuidV4"
+        projected_uid:
+          type: integer
+          format: int64
+          minimum: 1
+        projected_gid:
+          type: integer
+          format: int64
+          minimum: 1
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
     CreateMarkdownImportIntent:
       type: object
       additionalProperties: false

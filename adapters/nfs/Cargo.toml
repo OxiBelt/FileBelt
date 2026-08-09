@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+[package]
+name = "filebelt-nfs-bridge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "LGPL-3.0-or-later"
+publish = false
+
+[lib]
+path = "bridge/src/lib.rs"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"

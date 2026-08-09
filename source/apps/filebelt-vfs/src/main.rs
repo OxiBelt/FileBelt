@@ -4,6 +4,7 @@
 
 #![deny(unsafe_code)]
 
+mod nfs;
 mod policy;
 
 use std::path::PathBuf;
@@ -1053,6 +1054,7 @@ async fn stat_node(
 
 fn node_attributes(node: &NodeRecord, read_only: bool) -> Result<NodeAttributes, ()> {
     let modified = node.updated_at.parse::<jiff::Timestamp>().map_err(|_| ())?;
+    let directory = node.kind == "directory";
     Ok(NodeAttributes {
         kind: match node.kind.as_str() {
             "file" => NodeKind::File as i32,
@@ -1067,6 +1069,16 @@ fn node_attributes(node: &NodeRecord, read_only: bool) -> Result<NodeAttributes,
         acl_generation: u64::try_from(node.acl_generation).map_err(|_| ())?,
         modified_at_unix_seconds: modified.as_second(),
         read_only,
+        mode: match (directory, read_only) {
+            (true, true) => 0o555,
+            (true, false) => 0o770,
+            (false, true) => 0o444,
+            (false, false) => 0o660,
+        },
+        projected_uid: 0,
+        projected_gid: 0,
+        link_count: if directory { 2 } else { 1 },
+        sparse: false,
     })
 }
 
@@ -1203,6 +1215,7 @@ fn protocol_name(protocol: MountProtocol) -> &'static str {
     match protocol {
         MountProtocol::Smb => "smb",
         MountProtocol::Ftps => "ftps",
+        MountProtocol::Nfs => "nfs",
         MountProtocol::Unspecified => unreachable!("validated protocol"),
     }
 }

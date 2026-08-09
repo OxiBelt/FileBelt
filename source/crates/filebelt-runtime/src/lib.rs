@@ -297,7 +297,7 @@ impl MtlsListener {
         let local_address = listener
             .local_addr()
             .map_err(|error| format!("cannot inspect TLS listener {address}: {error}"))?;
-        let server = server_config(settings)?;
+        let server = backend_server_config(settings)?;
         let acceptor = TlsAcceptor::from(Arc::new(server));
         let (sender, accepted) = mpsc::channel(MAX_PENDING_TLS_HANDSHAKES);
         tokio::spawn(accept_mtls_connections(listener, acceptor, sender));
@@ -367,7 +367,11 @@ impl Listener for MtlsListener {
     }
 }
 
-fn server_config(settings: &BackendServerTlsConfig) -> Result<rustls::ServerConfig, String> {
+/// Builds the shared TLS 1.3 and URI-SAN client-auth policy for a backend
+/// transport. HTTP/3 callers add only the `h3` ALPN before adapting it to QUIC.
+pub fn backend_server_config(
+    settings: &BackendServerTlsConfig,
+) -> Result<rustls::ServerConfig, String> {
     let chain = CertificateDer::pem_file_iter(&settings.certificate_chain_file)
         .map_err(|error| format!("cannot read backend TLS certificate chain: {error}"))?
         .collect::<Result<Vec<_>, _>>()

@@ -4,6 +4,7 @@
 # Rust
 /target/
 /adapters/*/target/
+/protocol/*/target/
 **/*.rs.bk
 
 # Python

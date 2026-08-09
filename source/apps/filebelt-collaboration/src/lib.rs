@@ -22,6 +22,7 @@ mod wire;
 
 pub mod io_client;
 pub mod server;
+pub mod webtransport;
 
 pub use rate_limit::{AdmissionKind, RateAdmission, RateLimiter};
 pub use source::{LineEnding, MarkdownSource, MarkdownSourceError};

@@ -34,6 +34,34 @@ pub async fn authorize(
     evaluate_snapshot(&snapshot, action)
 }
 
+/// NFS lookup evaluates traversal separately from listing. This helper keeps
+/// the protocol adapter from treating directory visibility as traversal
+/// authority and preserves deny precedence through the common evaluator.
+#[allow(dead_code)]
+pub async fn authorize_traverse(
+    database: &Database,
+    tenant_id: Uuid,
+    actor_principal_id: Uuid,
+    drive_id: Uuid,
+    ancestor_resource_ids: &[Uuid],
+) -> Result<(), ()> {
+    if ancestor_resource_ids.is_empty() || ancestor_resource_ids.len() > 128 {
+        return Err(());
+    }
+    for resource_id in ancestor_resource_ids {
+        authorize(
+            database,
+            tenant_id,
+            actor_principal_id,
+            drive_id,
+            *resource_id,
+            Action::Traverse,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn evaluate_snapshot(
     snapshot: &AuthorizationSnapshot,
     action: Action,
@@ -170,5 +198,10 @@ mod tests {
         for action in Action::ALL {
             assert_eq!(parse_action(action.as_str()), Ok(action));
         }
+    }
+
+    #[test]
+    fn traversal_uses_the_stable_common_action() {
+        assert_eq!(parse_action("TRAVERSE"), Ok(Action::Traverse));
     }
 }

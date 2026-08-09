@@ -194,7 +194,7 @@ test("copyleft adapter evidence remains outside the Apache core image plan", () 
   );
   for (const image of AdapterImagePlan) {
     assert.equal(image.repository, `ghcr.io/oxibelt/${image.role}`);
-    assert.ok(["AGPL-3.0-only", "GPL-3.0-or-later"].includes(image.license));
+    assert.ok(["AGPL-3.0-only", "GPL-3.0-or-later", "LGPL-3.0-or-later"].includes(image.license));
     assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/(?:main|[0-9]+\.[0-9]+\.[0-9]+)(?:\/adapters\/[^/]+)?$/);
   }
   assert.deepEqual(
@@ -204,6 +204,27 @@ test("copyleft adapter evidence remains outside the Apache core image plan", () 
       repository: "ghcr.io/oxibelt/filebelt-onlyoffice-adapter",
       license: "AGPL-3.0-only",
       correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/0.1.0",
+      publishPlatforms: ["linux/amd64", "linux/arm64"],
+      riscv64Policy: "compile-and-probe-only",
+    },
+  );
+  assert.deepEqual(
+    AdapterImagePlan.find(({ role }) => role === "filebelt-nfs-gateway"),
+    {
+      role: "filebelt-nfs-gateway",
+      repository: "ghcr.io/oxibelt/filebelt-nfs-gateway",
+      license: "LGPL-3.0-or-later",
+      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/nfs",
+      publishPlatforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
+    },
+  );
+  assert.deepEqual(
+    AdapterImagePlan.find(({ role }) => role === "filebelt-transcoder"),
+    {
+      role: "filebelt-transcoder",
+      repository: "ghcr.io/oxibelt/filebelt-transcoder",
+      license: "GPL-3.0-or-later",
+      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/transcode",
       publishPlatforms: ["linux/amd64", "linux/arm64"],
       riscv64Policy: "compile-and-probe-only",
     },

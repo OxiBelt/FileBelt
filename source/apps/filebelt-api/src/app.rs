@@ -243,6 +243,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
                 .merge(crate::auth::router())
                 .merge(crate::mcp::router())
                 .merge(crate::documents::router())
+                .merge(crate::media::router())
                 .merge(crate::mounts::router())
                 .merge(crate::resources::router()),
         )
@@ -486,6 +487,7 @@ mod tests {
             mcp: filebelt_control_protocol::McpConfig::default(),
             collaboration: filebelt_control_protocol::CollaborationConfig::default(),
             documents: DocumentConfig::default(),
+            media: filebelt_control_protocol::MediaConfig::default(),
             mounts: filebelt_control_protocol::MountConfig::default(),
         };
         validate_public_key(&config, &signer).unwrap();

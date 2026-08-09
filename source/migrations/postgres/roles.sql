@@ -37,6 +37,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_document') THEN
     CREATE ROLE filebelt_document NOLOGIN;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebelt_media') THEN
+    CREATE ROLE filebelt_media NOLOGIN;
+  END IF;
 END
 $$;
 
@@ -47,7 +50,11 @@ CREATE SCHEMA IF NOT EXISTS filebelt_collaboration;
 CREATE SCHEMA IF NOT EXISTS filebelt_mount;
 CREATE SCHEMA IF NOT EXISTS filebelt_mount_vault;
 CREATE SCHEMA IF NOT EXISTS filebelt_document;
+CREATE SCHEMA IF NOT EXISTS filebelt_media;
+CREATE SCHEMA IF NOT EXISTS filebelt_phase8;
 REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault, filebelt_document FROM PUBLIC;
+  filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
+  filebelt_phase8 FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
-  filebelt_mount, filebelt_mount_vault, filebelt_document TO filebelt_migrator;
+  filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
+  filebelt_phase8 TO filebelt_migrator;

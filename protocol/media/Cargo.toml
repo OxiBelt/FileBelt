@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+members = ["."]
+resolver = "3"
+
+[package]
+name = "filebelt-media-protocol"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+prost = "=0.14.4"
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"

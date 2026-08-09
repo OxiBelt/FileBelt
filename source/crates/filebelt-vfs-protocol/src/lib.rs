@@ -25,6 +25,7 @@ pub const MAX_DIRECTORY_ENTRIES: usize = 1_000;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationKind {
     Authenticate,
+    NfsAuthenticate,
     List,
     Stat,
     Open,
@@ -45,6 +46,15 @@ pub enum OperationKind {
     Heartbeat,
     EndSession,
     GatewayHello,
+    GetXattr,
+    SetXattr,
+    ListXattr,
+    RemoveXattr,
+    Readlink,
+    Symlink,
+    SparseWrite,
+    Reclaim,
+    OpenUnlinked,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,7 +106,9 @@ impl VfsRequest {
         validate_operation(operation, protocol)?;
         let bootstrap = matches!(
             operation,
-            vfs_request::Operation::Authenticate(_) | vfs_request::Operation::GatewayHello(_)
+            vfs_request::Operation::Authenticate(_)
+                | vfs_request::Operation::NfsAuthenticate(_)
+                | vfs_request::Operation::GatewayHello(_)
         );
         if matches!(operation, vfs_request::Operation::GatewayHello(_)) != (self.gateway_epoch == 0)
         {
@@ -149,6 +161,10 @@ impl VfsResponse {
             || self.data.len() > MAX_DATA_BYTES
             || self.entries.len() > MAX_DIRECTORY_ENTRIES
             || self.next_cursor.len() > 4_096
+            || self.xattr_value.len() > 65_536
+            || self.xattr_names.len() > 256
+            || self.symlink_target.len() > 4_096
+            || self.symlink_target.as_bytes().contains(&0)
         {
             return Err(ValidationError::Limit);
         }
@@ -159,6 +175,7 @@ impl VfsResponse {
             &self.lock_id,
             &self.lease_id,
             &self.version_id,
+            &self.state_id,
         ] {
             optional_uuid(identifier)?;
         }
@@ -174,6 +191,9 @@ impl VfsResponse {
         }
         if let Some(attributes) = &self.attributes {
             validate_attributes(attributes)?;
+        }
+        for name in &self.xattr_names {
+            validate_xattr_name(name)?;
         }
         Ok(())
     }
@@ -213,6 +233,15 @@ fn validate_operation(
                             AuthenticationScheme::PasswordHmacSha256
                         )
                 )
+            {
+                return Err(ValidationError::Operation);
+            }
+        }
+        Operation::NfsAuthenticate(request) => {
+            if protocol != MountProtocol::Nfs
+                || !valid_kerberos_principal(&request.kerberos_principal)
+                || request.gss_binding_digest.len() != 32
+                || request.source_address.parse::<IpAddr>().is_err()
             {
                 return Err(ValidationError::Operation);
             }
@@ -336,6 +365,63 @@ fn validate_operation(
                 return Err(ValidationError::Operation);
             }
         }
+        Operation::GetXattr(request) => {
+            uuids(&[&request.drive_id, &request.resource_id])?;
+            validate_xattr_name(&request.name)?;
+        }
+        Operation::RemoveXattr(request) => {
+            uuids(&[&request.drive_id, &request.resource_id])?;
+            validate_xattr_name(&request.name)?;
+        }
+        Operation::SetXattr(request) => {
+            uuids(&[&request.drive_id, &request.resource_id])?;
+            validate_xattr_name(&request.name)?;
+            if request.value.len() > 65_536 || (request.create_only && request.replace_only) {
+                return Err(ValidationError::Limit);
+            }
+        }
+        Operation::ListXattr(request) => {
+            uuids(&[&request.drive_id, &request.resource_id])?;
+        }
+        Operation::Readlink(request) => {
+            uuids(&[&request.drive_id, &request.resource_id])?;
+        }
+        Operation::Symlink(request) => {
+            uuids(&[&request.drive_id, &request.parent_id])?;
+            validate_display_name(&request.display_name)?;
+            if request.target.is_empty()
+                || request.target.len() > 4_096
+                || request.target.as_bytes().contains(&0)
+            {
+                return Err(ValidationError::Name);
+            }
+            positive(request.expected_parent_generation)?;
+        }
+        Operation::SparseWrite(request) => {
+            uuids(&[&request.handle_id, &request.write_session_id])?;
+            positive(request.fencing_token)?;
+            if request.length == 0
+                || request.length > MAX_DATA_BYTES as u64
+                || request.offset.checked_add(request.length).is_none()
+                || (request.hole && !request.data.is_empty())
+                || (!request.hole && request.data.len() as u64 != request.length)
+            {
+                return Err(ValidationError::Limit);
+            }
+        }
+        Operation::Reclaim(request) => {
+            if protocol != MountProtocol::Nfs
+                || !stable_key(&request.client_id, 255)
+                || uuid(&request.state_id).is_err()
+                || request.gateway_epoch == 0
+            {
+                return Err(ValidationError::Operation);
+            }
+        }
+        Operation::OpenUnlinked(request) => {
+            uuids(&[&request.handle_id, &request.write_session_id])?;
+            positive(request.fencing_token)?;
+        }
     }
     Ok(())
 }
@@ -344,6 +430,7 @@ const fn operation_kind(operation: &vfs_request::Operation) -> OperationKind {
     use vfs_request::Operation;
     match operation {
         Operation::Authenticate(_) => OperationKind::Authenticate,
+        Operation::NfsAuthenticate(_) => OperationKind::NfsAuthenticate,
         Operation::List(_) => OperationKind::List,
         Operation::Stat(_) => OperationKind::Stat,
         Operation::Open(_) => OperationKind::Open,
@@ -364,6 +451,15 @@ const fn operation_kind(operation: &vfs_request::Operation) -> OperationKind {
         Operation::Heartbeat(_) => OperationKind::Heartbeat,
         Operation::EndSession(_) => OperationKind::EndSession,
         Operation::GatewayHello(_) => OperationKind::GatewayHello,
+        Operation::GetXattr(_) => OperationKind::GetXattr,
+        Operation::SetXattr(_) => OperationKind::SetXattr,
+        Operation::ListXattr(_) => OperationKind::ListXattr,
+        Operation::RemoveXattr(_) => OperationKind::RemoveXattr,
+        Operation::Readlink(_) => OperationKind::Readlink,
+        Operation::Symlink(_) => OperationKind::Symlink,
+        Operation::SparseWrite(_) => OperationKind::SparseWrite,
+        Operation::Reclaim(_) => OperationKind::Reclaim,
+        Operation::OpenUnlinked(_) => OperationKind::OpenUnlinked,
     }
 }
 
@@ -386,6 +482,9 @@ fn validate_attributes(attributes: &NodeAttributes) -> Result<(), ValidationErro
     if kind == NodeKind::Unspecified
         || attributes.namespace_generation == 0
         || attributes.acl_generation == 0
+        || attributes.mode & !0o777 != 0
+        || attributes.projected_uid == 0 && attributes.projected_gid != 0
+        || attributes.projected_gid == 0 && attributes.projected_uid != 0
     {
         return Err(ValidationError::Envelope);
     }
@@ -417,6 +516,25 @@ fn stable_key(value: &str, maximum: usize) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'@')
         })
+}
+
+fn valid_kerberos_principal(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'\\' | b'\'' | b'"'))
+}
+
+fn validate_xattr_name(value: &str) -> Result<(), ValidationError> {
+    if !value.starts_with("user.")
+        || value.len() > 255
+        || value.as_bytes().contains(&0)
+        || value.chars().any(char::is_control)
+    {
+        return Err(ValidationError::Name);
+    }
+    Ok(())
 }
 
 fn uuid(value: &str) -> Result<Uuid, ValidationError> {

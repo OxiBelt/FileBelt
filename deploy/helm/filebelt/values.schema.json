@@ -186,10 +186,14 @@
     },
     "collaboration": {
       "type": "object", "additionalProperties": false,
-      "required": ["enabled"],
+      "required": ["enabled", "webtransport"],
       "properties": {
-        "enabled": {"type": "boolean"}
-      }
+        "enabled": {"type": "boolean"},
+        "webtransport": {"type": "object", "additionalProperties": false, "required": ["enabled"], "properties": {"enabled": {"type": "boolean"}}}
+      },
+      "allOf": [
+        {"if": {"properties": {"webtransport": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"enabled": {"const": true}}}}
+      ]
     },
     "documents": {
       "type": "object", "additionalProperties": false,

@@ -6,6 +6,7 @@
 
 mod audit;
 mod grants;
+mod phase8;
 mod recovery;
 mod scrub;
 
@@ -69,6 +70,42 @@ enum Command {
     Recovery {
         #[command(subcommand)]
         command: RecoveryCommand,
+    },
+    Phase8 {
+        #[command(subcommand)]
+        command: Phase8Command,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum Phase8Command {
+    Advertise {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        role: String,
+        #[arg(long)]
+        instance_id: Uuid,
+        #[arg(long)]
+        source_revision: String,
+        #[arg(long, default_value_t = false)]
+        incompatible: bool,
+    },
+    Status {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+    },
+    Activate {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        actor_principal_id: Uuid,
+    },
+    Deactivate {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        actor_principal_id: Uuid,
     },
 }
 
@@ -544,6 +581,53 @@ async fn execute(command: Command) -> Result<String, String> {
         } => {
             let (configuration, database) = configured_database(&config).await?;
             recovery::verify(&database, &configuration, &checkpoint).await
+        }
+        Command::Phase8 {
+            command:
+                Phase8Command::Advertise {
+                    config,
+                    role,
+                    instance_id,
+                    source_revision,
+                    incompatible,
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            phase8::advertise(
+                &database,
+                &configuration.tenant.slug,
+                &role,
+                instance_id,
+                &source_revision,
+                !incompatible,
+            )
+            .await
+        }
+        Command::Phase8 {
+            command: Phase8Command::Status { config },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            phase8::status(&database, &configuration.tenant.slug).await
+        }
+        Command::Phase8 {
+            command:
+                Phase8Command::Activate {
+                    config,
+                    actor_principal_id,
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            phase8::activate(&database, &configuration.tenant.slug, actor_principal_id).await
+        }
+        Command::Phase8 {
+            command:
+                Phase8Command::Deactivate {
+                    config,
+                    actor_principal_id,
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            phase8::deactivate(&database, &configuration.tenant.slug, actor_principal_id).await
         }
     }
 }

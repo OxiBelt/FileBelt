@@ -186,11 +186,11 @@ always creates four replaceable workload definitions: OxiBelt web, API, I/O
 worker, and maintenance worker. `collaboration.enabled=true` additionally
 creates the collaboration Deployment and Service; it requires the approved
 collaboration schema, I/O capability verification path, and exact image
-digest. WebSocket is enabled with the public edge route. WebTransport is
-reserved until a separately reviewed runtime listener, H3 edge route, UDP
-Service, QUIC host-key lifecycle, and browser compatibility evidence land
-together; Phase 5 chart values deliberately expose no WebTransport toggle or
-UDP route. `mcp.enabled=true` additionally creates the
+digest. WebSocket is enabled with the public edge route. The separate Phase 8
+`collaboration.webtransport.enabled=true` opt-in adds the reviewed TLS 1.3 H3
+listener, OxiBelt route, UDP Service/NetworkPolicy path, bounded drain, and the
+same one-use first-frame collaboration grant. WebSocket remains the correctness
+fallback. `mcp.enabled=true` additionally creates the
 broker Deployment and Services. The separate `mcp.runners.enabled=true`
 opt-in creates the core controller Deployment, a narrow Role/RoleBinding and
 runner ServiceAccount in the pre-created runner namespace, and permits one-shot
@@ -315,7 +315,7 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 5; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 6; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
 Prometheus metrics. Enabled collaboration additionally requires the
 collaboration database URL/TLS identity, the combined API-generation-1 and
@@ -373,36 +373,31 @@ fail startup or Helm validation. Phase 8 uses one coordinated version, but
 Apache, LGPL, and GPL images remain independently built, evidenced, and
 published repositories pinned by digest in the chart.
 
-NFS uses a single-active fenced StatefulSet containing NFS-Ganesha `6.5-8`
-from the Ubuntu 26.04 snapshot dated 2026-08-09 and a thin dynamic FileBelt
-FSAL, plus an adapter-local Rust bridge over bounded Unix IPC. It exposes only
-TCP 2049 with NFSv4.1/v4.2 and RPCSEC_GSS `krb5p`. NFSv3, v4.0, UDP, rpcbind,
-pNFS, delegations, and AUTH_SYS are disabled. Ganesha alone receives the
-external-KDC keytab and RWO `fs_ng` recovery claim; only the bridge reaches VFS
-over mTLS. Neither container receives a payload mount or database credential.
+The NFS release target is a single-active fenced StatefulSet containing
+NFS-Ganesha `6.5-8` from the Ubuntu 26.04 snapshot dated 2026-08-09, a thin
+dynamic FileBelt FSAL, and an adapter-local Rust bridge over bounded Unix IPC.
+The current tree contains the generic schema/state model, opaque keyed handles,
+bounded bridge framing, and the portable C boundary check. It does not yet
+contain the ABI-specific Ganesha callback table or a qualified adapter image,
+so the chart exposes no NFS listener and operators must not deploy it.
 
-The media controller creates one Job per attempt in a pre-created namespace.
-Its cross-namespace RBAC is limited to those Jobs and per-attempt Secrets.
-Jobs have no service-account token, database credential, payload/cache mount,
-DNS, or Internet route. A trusted wrapper uses exact mTLS endpoints and
-short-lived source/output/callback capabilities, stores bounded local input and
-output in `emptyDir`, and invokes FFmpeg only with local paths and admitted
-parsers, codecs, and filters.
+The media release target is one isolated Job per fenced attempt in a
+pre-created namespace, with no service-account token, database credential,
+payload/cache mount, DNS, or Internet route. The current tree contains closed
+AV1/VP9 plus Opus profiles, durable admission/attempt/receipt/manifest fences,
+HTTP request/status/cancel control, the GPL local-path-only wrapper, and exact
+image/source-offer contracts. The controller remains probe-only until scoped
+I/O transfer/callback integration, Job reconciliation, malicious-input tests,
+and HTTP playback are qualified; the chart therefore exposes no media enable
+toggle. RISC-V remains compile/probe-only and VAAPI remains disabled.
 
-CPU transcoding is production-supported on AMD64 and ARM64. RISC-V is
-compile/probe-only. Intel and AMD VAAPI are experimental, disabled by default,
-and selected only through operator device-plugin resources; no `/dev/dri`
-hostPath is permitted. The input ceiling is 100 GiB, four hours, 8192 by 4320,
-60 frames per second, and 16 streams. Scheduling admits one running attempt per
-requester, two per drive, and one per CPU replica or assigned VAAPI device;
-queues hold at most two per requester and ten per drive.
-
-OxiBelt terminates public HTTP/3/WebTransport on UDP 443 using a stable
-operator QUIC host-key Secret, TLS 1.3, strict SNI, Retry enabled, and 0-RTT
-disabled. It forwards only the dedicated H3/WebTransport route over UDP 8086
-to collaboration with mTLS. Drain rejects new sessions, retains authenticated
-connections for at most 300 seconds, then requires a fresh grant. The current
-OxiBelt `0.7.1-beta.2` source and digest remain pinned for Phase 8.
+OxiBelt terminates public HTTP/3/WebTransport on UDP 443 with the same
+operator-projected TLS identity as HTTPS. The collaboration QUIC listener uses
+TLS 1.3 mutual authentication and disables 0-RTT. OxiBelt forwards only the
+dedicated H3/WebTransport route over UDP 8086. Drain rejects new sessions,
+retains authenticated connections for at most 300 seconds, then requires a
+fresh grant. The current OxiBelt `0.7.1-beta.2` source and digest remain pinned
+for Phase 8.
 
 Rollout installs migrations and reviewed grants with every feature disabled,
 rolls all compatible roles, takes a coordinated checkpoint, and then runs the
@@ -428,9 +423,9 @@ migration and reviewed narrow grants while collaboration admission is disabled,
 then take a coordinated checkpoint. Enable WebSocket collaboration only after
 the I/O finalize/fsync-to-manifest ACK path, 60-second authorization checks,
 external-head freeze, reconnect, diff3, and dirty-retention tests pass.
-WebTransport is not deployed in Phase 5. Its later admission requires a new
-transport review and cannot be enabled by changing a Helm value. On a fault,
-stop new grants, drain connections, fence rooms, and preserve dirty manifests
+WebTransport is not part of the Phase 5 baseline. Its reviewed Phase 8 route is
+separately opt-in and falls back to WebSocket. On a fault, stop new grants,
+drain connections, fence rooms, and preserve dirty manifests
 for review; never
 acknowledge an update from an event or in-memory replica state.
 
@@ -470,7 +465,7 @@ Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate
-the current format-5 configuration, and take a coordinated checkpoint. Enable the broker
+the current format-6 configuration, and take a coordinated checkpoint. Enable the broker
 without runners, test one personal registration, discovery, explicit approval,
 version-pinned attachment, revocation, and cross-user denial, then admit normal
 MCP traffic. Enable the controller and runner only in a later revision after

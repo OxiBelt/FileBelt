@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.media.v1;
+
+// Provider-neutral controller-to-transcoder boundary. Identifiers are FileBelt
+// UUID strings and capability values are opaque, short-lived references. This
+// schema deliberately carries no FFmpeg option, host path, Kubernetes type, or
+// adapter-internal error.
+message MediaProfile {
+  string profile_id = 1;
+  MediaVideoCodec video_codec = 2;
+  MediaAudioCodec audio_codec = 3;
+  uint32 maximum_width = 4;
+  uint32 maximum_height = 5;
+  uint32 maximum_frame_rate = 6;
+  uint64 maximum_duration_seconds = 7;
+  string container_format = 8;
+  string segment_format = 9;
+  uint32 segment_duration_seconds = 10;
+}
+
+enum MediaVideoCodec {
+  MEDIA_VIDEO_CODEC_UNSPECIFIED = 0;
+  MEDIA_VIDEO_CODEC_AV1 = 1;
+  MEDIA_VIDEO_CODEC_VP9 = 2;
+}
+
+enum MediaAudioCodec {
+  MEDIA_AUDIO_CODEC_UNSPECIFIED = 0;
+  MEDIA_AUDIO_CODEC_OPUS = 1;
+}
+
+message MediaSource {
+  string tenant_id = 1;
+  string drive_id = 2;
+  string node_id = 3;
+  string source_version_id = 4;
+  bytes source_blake3 = 5;
+  uint64 source_size_bytes = 6;
+}
+
+message MediaAuthorizationGenerations {
+  uint64 membership_generation = 1;
+  uint64 drive_acl_generation = 2;
+  uint64 namespace_generation = 3;
+  uint64 resource_acl_generation = 4;
+}
+
+message TranscodeAttempt {
+  string preview_id = 1;
+  string attempt_id = 2;
+  uint64 job_epoch = 3;
+  MediaSource source = 4;
+  MediaProfile profile = 5;
+  bytes profile_digest = 6;
+  bytes transcoder_build_identity = 7;
+  bytes source_capability = 8;
+  bytes output_capability = 9;
+  bytes callback_capability = 10;
+  MediaAuthorizationGenerations generations = 11;
+  int64 expires_at_unix_seconds = 12;
+}
+
+message VerifiedSegmentReceipt {
+  string preview_id = 1;
+  string attempt_id = 2;
+  uint64 job_epoch = 3;
+  uint64 ordinal = 4;
+  string segment_id = 5;
+  bytes blake3 = 6;
+  uint64 byte_length = 7;
+  uint64 start_time_milliseconds = 8;
+  uint64 duration_milliseconds = 9;
+  bool initialization_segment = 10;
+}
+
+message PlaybackManifestRevision {
+  string preview_id = 1;
+  uint64 revision = 2;
+  MediaProfile profile = 3;
+  string manifest_id = 4;
+  bytes manifest_blake3 = 5;
+  repeated VerifiedSegmentReceipt segments = 6;
+}
+
+enum TranscodeResultState {
+  TRANSCODE_RESULT_STATE_UNSPECIFIED = 0;
+  TRANSCODE_RESULT_STATE_VERIFYING = 1;
+  TRANSCODE_RESULT_STATE_READY = 2;
+  TRANSCODE_RESULT_STATE_FAILED = 3;
+  TRANSCODE_RESULT_STATE_QUARANTINED = 4;
+  TRANSCODE_RESULT_STATE_CANCELLED = 5;
+}
+
+message TranscodeResult {
+  string preview_id = 1;
+  string attempt_id = 2;
+  uint64 job_epoch = 3;
+  TranscodeResultState state = 4;
+  PlaybackManifestRevision manifest = 5;
+  string reason_code = 6;
+}

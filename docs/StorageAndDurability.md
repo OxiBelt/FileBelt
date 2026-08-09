@@ -358,7 +358,7 @@ It is not a down migration. Downgrading to a binary that cannot understand the
 expanded schema requires restoring the coordinated pre-activation checkpoint
 into fresh targets.
 
-NFS write sessions durably bind tenant, principal, API-independent NFS session,
+The NFS target requires write sessions to durably bind tenant, principal, API-independent NFS session,
 drive, node, base version, expected head, gateway epoch, owner/state identity,
 quota reservation, and staging generation. Sparse extents and chunk receipts
 remain invisible until COMMIT or final dirty CLOSE atomically creates an
@@ -371,7 +371,9 @@ The NFS gateway is single active. Restart advances its epoch and opens a
 90-second reclaim-only grace period, configurable from 30 through 300 seconds.
 New state is rejected during grace. Delegations are disabled. Filehandles
 survive a healthy restart but become stale when export, node, restore, or
-filehandle generations no longer match.
+filehandle generations no longer match. The schema and generic messages are
+landed, but the current VFS dispatch and adapter do not admit NFS writes; these
+rules are a qualification gate, not a claim of a deployable export.
 
 Media jobs, attempts, reservations, segment receipts, manifest revisions,
 cache artifacts, playback sessions, deletion intents, and diagnostics are
@@ -386,7 +388,9 @@ Derivative bytes are rebuildable cache state on a dedicated claim mounted only
 by I/O and maintenance. They are excluded from backup. Metadata is charged to
 the source drive, defaults to ten percent of its quota, expires after 30 idle
 days, and is evicted between global 80-percent and 70-percent watermarks.
-Restore marks READY artifacts unavailable until verified or regenerated.
+Restore marks READY artifacts unavailable until verified or regenerated. The
+controller and playback/cache I/O path are not yet qualified, so only request,
+status, and cancellation admission may be enabled in development.
 
 ## Payload layout and write durability
 

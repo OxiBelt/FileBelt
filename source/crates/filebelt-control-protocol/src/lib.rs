@@ -14,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 5;
+pub const CONFIG_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +43,8 @@ pub struct Config {
     pub collaboration: CollaborationConfig,
     #[serde(default)]
     pub documents: DocumentConfig,
+    #[serde(default)]
+    pub media: MediaConfig,
     #[serde(default)]
     pub mounts: MountConfig,
 }
@@ -312,6 +314,54 @@ impl Default for DocumentConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct MediaConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub database_url_file: Option<PathBuf>,
+    #[serde(default)]
+    pub capability_private_key_file: Option<PathBuf>,
+    #[serde(default = "default_media_capability_key_generation")]
+    pub capability_key_generation: u32,
+    #[serde(default)]
+    pub job_namespace: Option<String>,
+    #[serde(default)]
+    pub transcoder_image: Option<String>,
+    #[serde(default)]
+    pub cache_claim: Option<String>,
+    #[serde(default = "default_media_generation_recheck_seconds")]
+    pub generation_recheck_seconds: u64,
+    #[serde(default = "default_media_cache_quota_percent")]
+    pub cache_quota_percent: u8,
+    #[serde(default = "default_media_cache_high_watermark_percent")]
+    pub cache_high_watermark_percent: u8,
+    #[serde(default = "default_media_cache_low_watermark_percent")]
+    pub cache_low_watermark_percent: u8,
+    #[serde(default)]
+    pub experimental_vaapi: bool,
+}
+
+impl Default for MediaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            database_url_file: None,
+            capability_private_key_file: None,
+            capability_key_generation: default_media_capability_key_generation(),
+            job_namespace: None,
+            transcoder_image: None,
+            cache_claim: None,
+            generation_recheck_seconds: default_media_generation_recheck_seconds(),
+            cache_quota_percent: default_media_cache_quota_percent(),
+            cache_high_watermark_percent: default_media_cache_high_watermark_percent(),
+            cache_low_watermark_percent: default_media_cache_low_watermark_percent(),
+            experimental_vaapi: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MountConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -343,6 +393,8 @@ pub struct MountConfig {
     pub management_server_ca_file: Option<PathBuf>,
     #[serde(default)]
     pub headscale: HeadscaleSyncConfig,
+    #[serde(default)]
+    pub nfs: NfsMountConfig,
 }
 
 impl Default for MountConfig {
@@ -363,6 +415,49 @@ impl Default for MountConfig {
             management_client_private_key_file: None,
             management_server_ca_file: None,
             headscale: HeadscaleSyncConfig::default(),
+            nfs: NfsMountConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NfsMountConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub realm: Option<String>,
+    #[serde(default)]
+    pub server_principal: Option<String>,
+    #[serde(default)]
+    pub keytab_file: Option<PathBuf>,
+    #[serde(default)]
+    pub handle_keyring_file: Option<PathBuf>,
+    #[serde(default = "default_key_generation")]
+    pub handle_key_generation: u32,
+    #[serde(default)]
+    pub recovery_root: Option<PathBuf>,
+    #[serde(default = "default_nfs_bridge_socket")]
+    pub bridge_socket: PathBuf,
+    #[serde(default = "default_nfs_export_root")]
+    pub export_root: String,
+    #[serde(default = "default_nfs_grace_seconds")]
+    pub grace_seconds: u64,
+}
+
+impl Default for NfsMountConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            realm: None,
+            server_principal: None,
+            keytab_file: None,
+            handle_keyring_file: None,
+            handle_key_generation: default_key_generation(),
+            recovery_root: None,
+            bridge_socket: default_nfs_bridge_socket(),
+            export_root: default_nfs_export_root(),
+            grace_seconds: default_nfs_grace_seconds(),
         }
     }
 }
@@ -419,6 +514,12 @@ pub struct CollaborationConfig {
     #[serde(default)]
     pub webtransport_enabled: bool,
     #[serde(default)]
+    pub webtransport_endpoint: Option<Url>,
+    #[serde(default = "default_webtransport_idle_seconds")]
+    pub webtransport_idle_seconds: u64,
+    #[serde(default = "default_webtransport_drain_seconds")]
+    pub webtransport_drain_seconds: u64,
+    #[serde(default)]
     pub limits: CollaborationLimitConfig,
 }
 
@@ -434,6 +535,9 @@ impl Default for CollaborationConfig {
             client_private_key_file: None,
             server_ca_file: None,
             webtransport_enabled: false,
+            webtransport_endpoint: None,
+            webtransport_idle_seconds: default_webtransport_idle_seconds(),
+            webtransport_drain_seconds: default_webtransport_drain_seconds(),
             limits: CollaborationLimitConfig::default(),
         }
     }
@@ -1053,6 +1157,7 @@ impl Config {
         self.validate_mcp()?;
         self.validate_collaboration()?;
         self.validate_documents()?;
+        self.validate_media()?;
         self.validate_mounts()?;
         Ok(())
     }
@@ -1182,12 +1287,82 @@ impl Config {
         Ok(())
     }
 
+    fn validate_media(&self) -> Result<(), ConfigError> {
+        let media = &self.media;
+        if !media.enabled {
+            if media.database_url_file.is_some()
+                || media.capability_private_key_file.is_some()
+                || media.job_namespace.is_some()
+                || media.transcoder_image.is_some()
+                || media.cache_claim.is_some()
+                || media.experimental_vaapi
+                || media.capability_key_generation != default_media_capability_key_generation()
+            {
+                return Err(invalid(
+                    "disabled media must not configure database, capability, Job, cache, image, or VAAPI authority",
+                ));
+            }
+            return Ok(());
+        }
+        if [
+            media.database_url_file.as_ref(),
+            media.capability_private_key_file.as_ref(),
+        ]
+        .into_iter()
+        .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "enabled media requires absolute database and capability-key paths",
+            ));
+        }
+        if media.capability_key_generation != default_media_capability_key_generation()
+            || media.capability_key_generation == self.keys.current_generation
+            || media.capability_key_generation == self.collaboration.capability_key_generation
+            || media.capability_key_generation == self.mounts.capability_key_generation
+            || media.capability_key_generation == self.documents.capability_key_generation
+        {
+            return Err(invalid(
+                "media requires distinct capability key generation 5",
+            ));
+        }
+        let namespace = media
+            .job_namespace
+            .as_deref()
+            .ok_or_else(|| invalid("enabled media requires a Job namespace"))?;
+        let claim = media
+            .cache_claim
+            .as_deref()
+            .ok_or_else(|| invalid("enabled media requires a cache claim"))?;
+        if !is_dns_label(namespace) || !is_dns_label(claim) {
+            return Err(invalid(
+                "media Job namespace and cache claim must be lowercase DNS labels",
+            ));
+        }
+        let image = media
+            .transcoder_image
+            .as_deref()
+            .ok_or_else(|| invalid("enabled media requires a digest-pinned transcoder image"))?;
+        if !is_digest_pinned_image(image) {
+            return Err(invalid(
+                "media transcoder image must use an immutable lowercase sha256 digest",
+            ));
+        }
+        if !(1..=60).contains(&media.generation_recheck_seconds)
+            || !(1..=50).contains(&media.cache_quota_percent)
+            || !(50..=95).contains(&media.cache_high_watermark_percent)
+            || media.cache_low_watermark_percent >= media.cache_high_watermark_percent
+        {
+            return Err(invalid("media limits are outside the accepted envelope"));
+        }
+        Ok(())
+    }
+
     fn validate_mounts(&self) -> Result<(), ConfigError> {
         let mounts = &self.mounts;
         if !mounts.enabled {
-            if mounts.headscale.enabled {
+            if mounts.headscale.enabled || mounts.nfs.enabled {
                 return Err(invalid(
-                    "Headscale synchronization requires mounts.enabled=true",
+                    "Headscale synchronization and NFS require mounts.enabled=true",
                 ));
             }
             return Ok(());
@@ -1270,6 +1445,7 @@ impl Config {
                 "Kubernetes mounts require separate VFS I/O and management mTLS identities",
             ));
         }
+        self.validate_nfs()?;
         let headscale = &mounts.headscale;
         if !headscale.enabled {
             return Ok(());
@@ -1316,15 +1492,68 @@ impl Config {
         Ok(())
     }
 
+    fn validate_nfs(&self) -> Result<(), ConfigError> {
+        let nfs = &self.mounts.nfs;
+        if !nfs.enabled {
+            if nfs.realm.is_some()
+                || nfs.server_principal.is_some()
+                || nfs.keytab_file.is_some()
+                || nfs.handle_keyring_file.is_some()
+                || nfs.recovery_root.is_some()
+                || nfs.handle_key_generation != default_key_generation()
+            {
+                return Err(invalid(
+                    "disabled NFS must not configure Kerberos, handle-key, or recovery authority",
+                ));
+            }
+            return Ok(());
+        }
+        let realm = nfs
+            .realm
+            .as_deref()
+            .ok_or_else(|| invalid("enabled NFS requires an external Kerberos realm"))?;
+        let principal = nfs
+            .server_principal
+            .as_deref()
+            .ok_or_else(|| invalid("enabled NFS requires a server principal"))?;
+        if realm.is_empty()
+            || realm.len() > 255
+            || !realm.bytes().all(|byte| {
+                byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+            })
+            || !principal.starts_with("nfs/")
+            || !principal.ends_with(&format!("@{realm}"))
+            || principal.len() > 512
+        {
+            return Err(invalid("NFS Kerberos realm or server principal is invalid"));
+        }
+        if [
+            nfs.keytab_file.as_ref(),
+            nfs.handle_keyring_file.as_ref(),
+            nfs.recovery_root.as_ref(),
+        ]
+        .into_iter()
+        .any(|path| path.is_none_or(|path| !path.is_absolute()))
+            || !nfs.bridge_socket.is_absolute()
+            || nfs.export_root != "/filebelt"
+            || !(30..=300).contains(&nfs.grace_seconds)
+            || nfs.handle_key_generation == 0
+            || nfs.handle_key_generation == self.keys.current_generation
+        {
+            return Err(invalid(
+                "NFS requires absolute keytab, handle-key, recovery and bridge paths, /filebelt export root, a 30 to 300 second grace period, and a distinct handle-key generation",
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_collaboration(&self) -> Result<(), ConfigError> {
         let collaboration = &self.collaboration;
         validate_collaboration_limits(&collaboration.limits)?;
-        if collaboration.webtransport_enabled {
-            return Err(invalid(
-                "WebTransport is reserved until the collaboration runtime listener is implemented",
-            ));
-        }
         if !collaboration.enabled {
+            if collaboration.webtransport_enabled || collaboration.webtransport_endpoint.is_some() {
+                return Err(invalid("WebTransport requires collaboration.enabled=true"));
+            }
             return Ok(());
         }
         if [
@@ -1368,6 +1597,30 @@ impl Config {
         if self.listeners.collaboration_ws == self.listeners.collaboration_webtransport {
             return Err(invalid(
                 "collaboration WebSocket and WebTransport listeners must be distinct",
+            ));
+        }
+        if collaboration.webtransport_enabled {
+            let endpoint = collaboration
+                .webtransport_endpoint
+                .as_ref()
+                .ok_or_else(|| invalid("enabled WebTransport requires a public endpoint"))?;
+            if endpoint.scheme() != "https"
+                || endpoint.origin() != self.public_origin.origin()
+                || endpoint.path() != "/collaboration/v1/wt"
+                || endpoint.query().is_some()
+                || endpoint.fragment().is_some()
+                || !endpoint.username().is_empty()
+                || endpoint.password().is_some()
+                || collaboration.webtransport_idle_seconds != 75
+                || collaboration.webtransport_drain_seconds != 300
+            {
+                return Err(invalid(
+                    "WebTransport requires the same-origin /collaboration/v1/wt endpoint with qualified idle and drain limits",
+                ));
+            }
+        } else if collaboration.webtransport_endpoint.is_some() {
+            return Err(invalid(
+                "disabled WebTransport must not advertise an endpoint",
             ));
         }
         if self.deployment.mode == DeploymentMode::Kubernetes {
@@ -1911,6 +2164,10 @@ fn valid_dns_policy_name(name: &str) -> bool {
         })
 }
 
+fn is_dns_label(name: &str) -> bool {
+    !name.contains('.') && valid_dns_policy_name(name)
+}
+
 fn valid_cidr(value: &str) -> bool {
     let Some((address, prefix)) = value.split_once('/') else {
         return false;
@@ -1931,6 +2188,18 @@ fn valid_digest_reference(value: &str) -> bool {
     !name.is_empty()
         && digest.len() == 64
         && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !value.chars().any(char::is_whitespace)
+}
+
+fn is_digest_pinned_image(value: &str) -> bool {
+    let Some((name, digest)) = value.rsplit_once("@sha256:") else {
+        return false;
+    };
+    !name.is_empty()
+        && digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
         && !value.chars().any(char::is_whitespace)
 }
 
@@ -2025,6 +2294,36 @@ const fn default_document_max_bytes() -> u64 {
 }
 const fn default_document_generation_recheck_seconds() -> u64 {
     60
+}
+const fn default_media_capability_key_generation() -> u32 {
+    5
+}
+const fn default_media_generation_recheck_seconds() -> u64 {
+    60
+}
+const fn default_media_cache_quota_percent() -> u8 {
+    10
+}
+const fn default_media_cache_high_watermark_percent() -> u8 {
+    80
+}
+const fn default_media_cache_low_watermark_percent() -> u8 {
+    70
+}
+fn default_nfs_bridge_socket() -> PathBuf {
+    "/run/filebelt-nfs/bridge.sock".into()
+}
+fn default_nfs_export_root() -> String {
+    "/filebelt".into()
+}
+const fn default_nfs_grace_seconds() -> u64 {
+    90
+}
+const fn default_webtransport_idle_seconds() -> u64 {
+    75
+}
+const fn default_webtransport_drain_seconds() -> u64 {
+    300
 }
 const fn default_collaboration_update_bytes() -> u64 {
     262_144
@@ -2211,6 +2510,7 @@ mod tests {
             mcp: McpConfig::default(),
             collaboration: CollaborationConfig::default(),
             documents: DocumentConfig::default(),
+            media: MediaConfig::default(),
             mounts: MountConfig::default(),
         }
     }
@@ -2327,6 +2627,85 @@ mod tests {
         assert_eq!(documents.max_document_bytes, 104_857_600);
         assert_eq!(documents.generation_recheck_seconds, 60);
         assert_eq!(documents.provider_origin, None);
+    }
+    #[test]
+    fn phase8_defaults_are_disabled_and_bounded() {
+        let media = MediaConfig::default();
+        assert!(!media.enabled);
+        assert_eq!(media.capability_key_generation, 5);
+        assert_eq!(media.generation_recheck_seconds, 60);
+        assert_eq!(media.cache_quota_percent, 10);
+        assert_eq!(media.cache_high_watermark_percent, 80);
+        assert_eq!(media.cache_low_watermark_percent, 70);
+
+        let nfs = NfsMountConfig::default();
+        assert!(!nfs.enabled);
+        assert_eq!(nfs.export_root, "/filebelt");
+        assert_eq!(nfs.grace_seconds, 90);
+
+        let collaboration = CollaborationConfig::default();
+        assert!(!collaboration.webtransport_enabled);
+        assert_eq!(collaboration.webtransport_idle_seconds, 75);
+        assert_eq!(collaboration.webtransport_drain_seconds, 300);
+    }
+    #[test]
+    fn enabled_media_requires_digest_pinned_isolated_job_inputs() {
+        let mut candidate = config();
+        candidate.media.enabled = true;
+        candidate.media.database_url_file = Some("/run/secrets/media-database-url".into());
+        candidate.media.capability_private_key_file =
+            Some("/run/secrets/media-capability.pk8".into());
+        candidate.media.job_namespace = Some("filebelt-media-jobs".into());
+        candidate.media.transcoder_image = Some(format!(
+            "ghcr.io/oxibelt/filebelt-transcoder@sha256:{}",
+            "a".repeat(64)
+        ));
+        candidate.media.cache_claim = Some("filebelt-media-cache".into());
+        candidate.validate().unwrap();
+
+        candidate.media.transcoder_image =
+            Some("ghcr.io/oxibelt/filebelt-transcoder:latest".into());
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
+    fn enabled_nfs_requires_explicit_kerberos_and_recovery_authority() {
+        let mut candidate = config();
+        candidate.mounts.enabled = true;
+        candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
+        candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
+        candidate.mounts.capability_private_key_file =
+            Some("/run/secrets/mount-capability.pk8".into());
+        candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8088/").unwrap());
+        candidate.mounts.nfs.enabled = true;
+        candidate.mounts.nfs.realm = Some("EXAMPLE.TEST".into());
+        candidate.mounts.nfs.server_principal = Some("nfs/files.example.test@EXAMPLE.TEST".into());
+        candidate.mounts.nfs.keytab_file = Some("/run/secrets/nfs/keytab".into());
+        candidate.mounts.nfs.handle_keyring_file = Some("/run/secrets/nfs/handles.json".into());
+        candidate.mounts.nfs.handle_key_generation = 6;
+        candidate.mounts.nfs.recovery_root = Some("/var/lib/nfs-ganesha/recovery".into());
+        candidate.validate().unwrap();
+
+        candidate.mounts.nfs.server_principal = Some("root/files.example.test@EXAMPLE.TEST".into());
+        assert!(candidate.validate().is_err());
+    }
+    #[test]
+    fn webtransport_is_same_origin_and_separately_opt_in() {
+        let mut candidate = config();
+        candidate.collaboration.enabled = true;
+        candidate.collaboration.database_url_file =
+            Some("/run/secrets/collaboration-database-url".into());
+        candidate.collaboration.capability_private_key_file =
+            Some("/run/secrets/collaboration-capability.pk8".into());
+        candidate.collaboration.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.collaboration.webtransport_enabled = true;
+        candidate.collaboration.webtransport_endpoint =
+            Some(Url::parse("https://files.example.test/collaboration/v1/wt").unwrap());
+        candidate.validate().unwrap();
+
+        candidate.collaboration.webtransport_endpoint =
+            Some(Url::parse("https://other.example.test/collaboration/v1/wt").unwrap());
+        assert!(candidate.validate().is_err());
     }
     #[test]
     fn disabled_documents_reject_authority_configuration() {

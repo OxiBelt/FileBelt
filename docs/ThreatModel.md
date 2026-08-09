@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 7 Kubernetes, Document, Mount, MCP, and Markdown Threat Model
+# Phase 8 Media, NFS, WebTransport, and Existing Platform Threat Model
 
 - Date: 2026-08-09
 - Owner: `@PiQuark6046`
@@ -9,17 +9,21 @@
   OxiBelt, capability-limited storage workers, PostgreSQL, UUID payload
   storage, durable jobs, optional Iggy, audit, Markdown rendering and
   collaboration rooms, MCP registrations and vault,
-  remote MCP mediation, one-shot curated runners, read-only mount VFS,
+  remote MCP mediation, one-shot curated runners, read-write mount VFS,
   Headscale device synchronization, GPL SMB/explicit-FTPS process boundaries,
   provider-neutral external document sessions, generation-4 document I/O
   capabilities, the separately licensed AGPL ONLYOFFICE adapter and launcher,
   provider callback/JWT processing, output-fetch egress isolation,
-  Kubernetes 1.34-1.36,
+  NFSv4.1/v4.2 with external Kerberos `krb5p`, NFS-Ganesha recovery and
+  filehandles, media scheduling, hostile FFmpeg input, progressive derivative
+  publication and cache, HTTP/3/WebTransport collaboration and WebSocket
+  fallback, Kubernetes 1.34-1.36,
   NetworkPolicy, backend mTLS, GHCR/Helm publication, and quiesced recovery
 - Excluded: managed-cluster/provider internals, online backup, HA/PITR and
   numeric production RPO/RTO, operator-supplied ONLYOFFICE DocumentServer and
-  its database/cluster internals, paid ONLYOFFICE editions, media, application encryption, mount writes, and any
-  collaboration codec other than Yjs/Yrs `yjs-v1`
+  its database/cluster internals, paid ONLYOFFICE editions, application
+  encryption, NFSv3/v4.0, macOS/BSD NFS qualification, pNFS, delegations,
+  NVIDIA encoding, and any collaboration codec other than Yjs/Yrs `yjs-v1`
 
 ## Assets and security objectives
 
@@ -75,6 +79,25 @@
   general database credential, or unrestricted egress. Provider-specific code,
   JWTs, callback status mapping, editor assets, branding, and network source
   access remain outside the Apache process and bundle.
+- Kerberos and numeric POSIX projections cannot become FileBelt authority by
+  implication. Every NFS principal is explicitly tenant-mapped, every path
+  component is authorized through `TRAVERSE`, every mutation rechecks current
+  Virtual ACL, and neither AUTH_SYS nor Kerberos root has a bypass.
+- A compromised Ganesha/FSAL or bridge cannot obtain payload paths, database
+  credentials, browser sessions, capability-signing keys, or KDC material not
+  required by its container. Forged filehandles, stale stateids, replayed
+  slots, old gateway epochs, and old filehandle-key generations fail closed.
+- Hostile media cannot cause Internet/device access, parser widening, payload
+  disclosure, unbounded resource consumption, or publication of partial
+  output. The controller, job wrapper, FFmpeg process, I/O service, and
+  PostgreSQL receipts are independent admission and publication gates.
+- A READY media artifact remains cache state rather than authorization state.
+  Playback and cache reuse require current source authorization, and revocation
+  fences publication within 60 seconds even when Iggy is unavailable.
+- WebTransport cannot weaken collaboration authentication, framing, durable
+  acknowledgement, revocation, drain, or replay semantics relative to
+  WebSocket. QUIC 0-RTT, datagrams, extra streams, forwarded cookies, and URL
+  credentials are disabled.
 
 ## Trust boundaries and data flow
 
@@ -255,6 +278,13 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Pull request or manual run publishes an untrusted image | Read-only validation workflows; tag-only promotion job consumes validated archives, verifies an authorized signed tag, attests and reads back immutable digests | Workflow-integrity and release dry-run tests |
 | Promotion rebuilds or moves a tag after validation | Promotion cannot build; it assembles validated per-platform archives, publishes only version tags, verifies manifest/chart digests, and emits attestations | Release artifact/digest tests |
 | Apache core imports an adapter implementation | Workspace and resolved dependency enforcement; generic protocol process boundary | Dependency-boundary tests |
+| Kerberos, AUTH_SYS, or projected UID/GID bypasses Virtual ACL | `krb5p` only; explicit tenant mapping; AUTH_SYS disabled; zero/root has no privilege; every component requires current `TRAVERSE` and the exact operation action | Real KDC, spoofed AUTH_SYS, unmapped/root, ACL-revoke, and path-component tests |
+| Forged NFS handle, replay, or stale gateway commits bytes | Dedicated rotating handle MAC; current/previous key only; export/node/generation binding; PostgreSQL gateway epoch, replay receipt, expected head, quota, and authorization recheck before immutable commit | Handle fuzzing, key rotation, restart/grace, slot replay, stale epoch, and expected-head tests |
+| Open-unlinked or conflicting NFS writes resurrect or overwrite a name | Tombstoned handle state, immutable base, final-close fence, seven-day retained conflict, separately authorized conflict copy, and no automatic abandoned commit | Open-unlink, concurrent Web/NFS writer, crash, retention, and no-resurrection tests |
+| Malicious media input escapes sandbox or consumes unbounded resources | Exact demuxer/decoder/filter allowlist, no FFmpeg network/device protocols, bounded preflight, `emptyDir`, CPU/memory/deadline limits, no token/DB/payload mount or egress | Parser corpus, network/device/attachment rejection, resource ceiling, seccomp, mount, and NetworkPolicy tests |
+| Partial or attacker-selected transcode bytes become playable | Controller-selected immutable source/profile; job-scoped capabilities; server-computed BLAKE3; durable segment receipt before manifest reference; fenced revision and current ACL/session check | Digest mismatch, partial upload, reordered receipt, stale attempt, revoke-before-publish, and crash tests |
+| Cache hit discloses a revoked source | Cache key is not authority; playback grant creation and renewal re-evaluate current source `READ_CONTENT`; opaque route with scoped HttpOnly cookie | Cross-user, revoke, expiry, cookie scope, URL/referrer, and cache-eviction tests |
+| QUIC retry, 0-RTT, extra streams, or fallback duplicates collaboration updates | Retry enabled, 0-RTT/datagrams/extra streams disabled, first-frame one-use grant, durable update IDs, fenced replay, fresh grant on fallback, bounded drain | Chromium/Firefox loss/reconnect, replay, stream/datagram, grant, drain, and WebSocket-parity tests |
 
 ## Audit and privacy
 

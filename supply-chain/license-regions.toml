@@ -82,6 +82,5 @@ workspace = "adapter"
 
 [[regions]]
 path = "adapters/transcode"
-license = "Apache-2.0"
-workspace = "reserved"
-implementation_forbidden_until_adr = true
+license = "GPL-3.0-or-later"
+workspace = "adapter"

@@ -364,6 +364,55 @@ not mount the collaboration database or signing key. Operators exercise the
 functional path with the `core` profile. Compose never publishes backend ports
 or a UDP/WebTransport port.
 
+## Phase 8 deployment and rollout
+
+Configuration version 6 adds disabled-by-default media, NFS, and collaboration
+WebTransport sections. Unknown fields, mutable image tags, missing Secret keys,
+unbounded resources, unsupported protocol modes, and incomplete network peers
+fail startup or Helm validation. Phase 8 uses one coordinated version, but
+Apache, LGPL, and GPL images remain independently built, evidenced, and
+published repositories pinned by digest in the chart.
+
+NFS uses a single-active fenced StatefulSet containing NFS-Ganesha `6.5-8`
+from the Ubuntu 26.04 snapshot dated 2026-08-09 and a thin dynamic FileBelt
+FSAL, plus an adapter-local Rust bridge over bounded Unix IPC. It exposes only
+TCP 2049 with NFSv4.1/v4.2 and RPCSEC_GSS `krb5p`. NFSv3, v4.0, UDP, rpcbind,
+pNFS, delegations, and AUTH_SYS are disabled. Ganesha alone receives the
+external-KDC keytab and RWO `fs_ng` recovery claim; only the bridge reaches VFS
+over mTLS. Neither container receives a payload mount or database credential.
+
+The media controller creates one Job per attempt in a pre-created namespace.
+Its cross-namespace RBAC is limited to those Jobs and per-attempt Secrets.
+Jobs have no service-account token, database credential, payload/cache mount,
+DNS, or Internet route. A trusted wrapper uses exact mTLS endpoints and
+short-lived source/output/callback capabilities, stores bounded local input and
+output in `emptyDir`, and invokes FFmpeg only with local paths and admitted
+parsers, codecs, and filters.
+
+CPU transcoding is production-supported on AMD64 and ARM64. RISC-V is
+compile/probe-only. Intel and AMD VAAPI are experimental, disabled by default,
+and selected only through operator device-plugin resources; no `/dev/dri`
+hostPath is permitted. The input ceiling is 100 GiB, four hours, 8192 by 4320,
+60 frames per second, and 16 streams. Scheduling admits one running attempt per
+requester, two per drive, and one per CPU replica or assigned VAAPI device;
+queues hold at most two per requester and ten per drive.
+
+OxiBelt terminates public HTTP/3/WebTransport on UDP 443 using a stable
+operator QUIC host-key Secret, TLS 1.3, strict SNI, Retry enabled, and 0-RTT
+disabled. It forwards only the dedicated H3/WebTransport route over UDP 8086
+to collaboration with mTLS. Drain rejects new sessions, retains authenticated
+connections for at most 300 seconds, then requires a fresh grant. The current
+OxiBelt `0.7.1-beta.2` source and digest remain pinned for Phase 8.
+
+Rollout installs migrations and reviewed grants with every feature disabled,
+rolls all compatible roles, takes a coordinated checkpoint, and then runs the
+audited Phase 8 activation. NFS, media, and WebTransport are separately enabled
+only after their qualification evidence passes, although release promotion is
+coordinated. Rollback disables admissions first, fences gateways/jobs/sessions,
+drains workloads, and restores previous compatible image digests. It preserves
+Phase 8 schemas, conflict data, recovery claims, key generations, and cache
+metadata. A binary downgrade uses the recorded pre-activation restore.
+
 ## Administration, observability, and recovery
 
 Database migration, grants verification, tenant bootstrap, storage probe,

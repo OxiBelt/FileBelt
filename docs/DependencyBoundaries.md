@@ -115,6 +115,19 @@ roots, and image evidence remain separate. Helm may describe both processes,
 but rendering a Pod neither changes dependency direction nor proves license or
 release readiness.
 
+The Phase 8 NFS FSAL and its adapter-local bridge live in the independent LGPL
+workspace. The FSAL may link to the selected NFS-Ganesha ABI and exchange only
+the documented generic VFS frames with its bridge; the bridge may use an
+ordinary generated VFS client. Apache VFS must not import an FSAL header,
+Ganesha type, Kerberos implementation, or adapter crate.
+
+The GPL transcode wrapper and FFmpeg build live in their independent adapter
+workspace and image. The Apache media controller exchanges only the committed
+media protocol and job-scoped capabilities. It never imports adapter source,
+FFmpeg bindings, codec-specific Rust types, or Kubernetes Job structures into
+domain or authorization packages. The wrapper has no database or browser
+session dependency, and the controller has no payload or media-cache mount.
+
 ## Change review
 
 Adding a dependency edge across one of these layers requires an explicit

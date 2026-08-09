@@ -2,4 +2,8 @@
 
 # NFS Adapter Third-Party Notices
 
-No adapter implementation or third-party component is present in Phase 0.
+Phase 8 targets NFS-Ganesha 6.5-8 and its Ubuntu 26.04 package composition.
+The image build must generate the complete versioned third-party inventory,
+license texts, source archive, patches, and relinking/replacement instructions
+from the final resolved package set before publication. This file does not
+substitute for that generated evidence.

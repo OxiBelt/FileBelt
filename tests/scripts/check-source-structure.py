@@ -20,7 +20,7 @@ ADAPTER_ROOTS = {
     "adapters/ftp-ftps": "GPL-3.0-or-later",
     "adapters/onlyoffice": "AGPL-3.0-only",
     "adapters/nfs": "LGPL-3.0-or-later",
-    "adapters/transcode": "Apache-2.0",
+    "adapters/transcode": "GPL-3.0-or-later",
 }
 EXPECTED_RUST_MEMBERS = {
     "source",
@@ -183,17 +183,6 @@ def check(root: Path) -> list[str]:
         for filename in ("AGENTS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
             if not (root / adapter / filename).is_file():
                 failures.append(f"{adapter} is missing {filename}")
-
-    transcode_allowed = {"AGENTS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"}
-    transcode_files = {
-        path.name for path in (root / "adapters/transcode").iterdir() if path.is_file()
-    }
-    unexpected_transcode = transcode_files - transcode_allowed
-    if unexpected_transcode:
-        failures.append(
-            "transcode implementation requires reviewed composition and license "
-            f"contracts: {sorted(unexpected_transcode)}"
-        )
 
     cargo = load_toml(root / "Cargo.toml")
     workspace = cargo.get("workspace", {})

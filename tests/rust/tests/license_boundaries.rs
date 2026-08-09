@@ -37,17 +37,11 @@ fn machine_map_contains_every_adapter_expression() {
 }
 
 #[test]
-fn transcode_region_contains_only_governance_material() {
+fn transcode_region_is_a_separate_gpl_workspace() {
     let root = repository_root();
-    let mut names = fs::read_dir(root.join("adapters/transcode"))
-        .expect("transcode region")
-        .map(|entry| entry.expect("directory entry").file_name())
-        .collect::<Vec<_>>();
-    names.sort();
-    let expected = ["AGENTS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"];
-    assert_eq!(
-        names,
-        expected.map(std::ffi::OsString::from),
-        "transcode implementation requires reviewed composition and license contracts"
-    );
+    let policy = fs::read_to_string(root.join("supply-chain/license-regions.toml"))
+        .expect("license regions");
+    assert!(policy.contains(
+        "path = \"adapters/transcode\"\nlicense = \"GPL-3.0-or-later\"\nworkspace = \"adapter\""
+    ));
 }

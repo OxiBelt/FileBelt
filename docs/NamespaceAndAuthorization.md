@@ -313,6 +313,51 @@ data-grant IDs, an hourly quota, and a maximum 30-day expiry. They do not confer
 drive ownership or bypass Virtual ACL. Revocation, suspension, expiry, quota
 uncertainty, or a missing referenced data grant denies the operation.
 
+## Phase 8 NFS and media authorization
+
+NFSv4 access is an opt-in read-write projection of the same tenant, drive,
+namespace, immutable-version, and Virtual ACL model. The stable action
+vocabulary adds `TRAVERSE`. Every NFS lookup evaluates `TRAVERSE` on each
+ancestor without implying `LIST_CHILDREN`; regular-file execute is represented
+by `READ_CONTENT`. Phase 8 activation creates only managed traversal
+projections needed to preserve previously reachable objects. It does not
+weaken an existing deny or disclose an otherwise hidden sibling.
+
+NFS authenticates with RPCSEC_GSS `krb5p` against an operator-managed external
+KDC. A tenant administrator explicitly maps each Kerberos principal to one
+FileBelt user and assigns tenant-unique, non-zero projected UID/GID values and
+flat local groups. `AUTH_SYS`, host ownership, Kerberos root, and numeric ID
+zero confer no authority. The immutable NFS `other` projection contains all
+mapped NFS users in the tenant. Mapping mutations require recent OIDC
+authentication, advance their generation, audit the exact change, and close
+affected sessions.
+
+One export represents one selected drive at `/filebelt/<drive_uuid>`. Mode and
+NFSv4 ACL changes replace only tagged NFS-managed ACL rows and are rejected
+when the requested projection would remove or rewrite owner, inherited,
+share-native, or deny entries. `chown` additionally requires current
+`SET_ATTRIBUTES` and `MANAGE_ACL`, an existing mapped target, and ordinary
+delegation attenuation. Hard links, devices, sockets, FIFOs, setuid, setgid,
+and sticky bits are unsupported. Logical symlinks and `user.*` attributes are
+stored as metadata; other `system.*`, `security.*`, and `trusted.*` attributes
+are rejected except synthesized POSIX ACL views.
+
+NFS holds at most one active staged writer per node, but it never blocks a Web,
+MCP, Markdown, document, SMB, or FTPS version commit. `COMMIT` and final dirty
+`CLOSE` attempt an immutable version with the head captured when staging began.
+A changed head yields a retained seven-day conflict rather than overwrite.
+Dirty state abandoned without COMMIT or final CLOSE never becomes a version.
+Open-unlinked objects remain readable through existing handles; a dirty final
+close is retained as conflict data and cannot resurrect the removed name.
+
+Media cache access never grants content authority. A READY cache hit requires
+current `READ_CONTENT`; creating a missing derivative also requires
+`TRANSCODE` and explicit browser confirmation. The initiating API session and
+both actions are rechecked no less often than every 60 seconds and before each
+manifest publication. Revocation cancels the attempt and fences unpublished
+output. Drive managers may inspect and evict rebuildable cache entries but do
+not thereby gain access to source or derivative bytes.
+
 ## Sharing, trash, audit, and availability
 
 Direct sharing resolves only an already-linked principal by its current

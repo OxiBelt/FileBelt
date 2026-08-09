@@ -342,6 +342,52 @@ referenced payload digest, and only then permits new sessions. Rolling back the
 application keeps migration 000006 and its additive data. An older binary may
 run only with document admission disabled; the migration is never reversed.
 
+## Phase 8 activation, NFS recovery, and media cache
+
+Migrations `000007_phase8_compatibility.sql`, `000008_phase8_media.sql`, and
+`000009_phase8_nfs.sql` are additive and dormant. Phase 8-capable roles publish
+a fresh compatibility advertisement in PostgreSQL. `filebeltctl phase8
+activate` takes an advisory activation lock, verifies every required role,
+creates managed NFS traversal/group projections, and advances one audited
+activation generation in a serializable transaction. Before activation, old
+behavior remains authoritative and no Phase 8 state may be emitted.
+
+`filebeltctl phase8 deactivate` stops new export, writer, preview, and
+WebTransport admission while retaining the expanded schema and readable state.
+It is not a down migration. Downgrading to a binary that cannot understand the
+expanded schema requires restoring the coordinated pre-activation checkpoint
+into fresh targets.
+
+NFS write sessions durably bind tenant, principal, API-independent NFS session,
+drive, node, base version, expected head, gateway epoch, owner/state identity,
+quota reservation, and staging generation. Sparse extents and chunk receipts
+remain invisible until COMMIT or final dirty CLOSE atomically creates an
+immutable version. A failed expected-head comparison retains the staged result
+for seven days. Reclaim records, replay receipts, and gateway fencing are
+PostgreSQL authority; Ganesha `fs_ng` recovery data on its RWO claim supplies
+protocol recovery only and cannot authorize a FileBelt commit.
+
+The NFS gateway is single active. Restart advances its epoch and opens a
+90-second reclaim-only grace period, configurable from 30 through 300 seconds.
+New state is rejected during grace. Delegations are disabled. Filehandles
+survive a healthy restart but become stale when export, node, restore, or
+filehandle generations no longer match.
+
+Media jobs, attempts, reservations, segment receipts, manifest revisions,
+cache artifacts, playback sessions, deletion intents, and diagnostics are
+authoritative PostgreSQL rows. Iggy is only a wake-up. Each manifest revision
+references verified immutable segments and is fenced by job epoch. An
+infrastructure failure may create at most three attempts with bounded backoff;
+malformed input is terminal. Failed attempts publish no new grant, retain
+byte-free diagnostics for 24 hours, and quarantine unpublished bytes for
+reconciliation.
+
+Derivative bytes are rebuildable cache state on a dedicated claim mounted only
+by I/O and maintenance. They are excluded from backup. Metadata is charged to
+the source drive, defaults to ten percent of its quota, expires after 30 idle
+days, and is evicted between global 80-percent and 70-percent watermarks.
+Restore marks READY artifacts unavailable until verified or regenerated.
+
 ## Payload layout and write durability
 
 One configured storage root and one persisted backend ID are supported. The

@@ -378,6 +378,64 @@ subscriptions, arbitrary notifications, and payload writes are not mediated;
 adding one of them requires a new protocol, authorization, threat-model, and
 deployment review.
 
+## Phase 8 media contracts
+
+`protocol/media/v1/media.proto` is the Apache, provider-neutral boundary
+between the controller and a replaceable transcoder. It contains immutable
+source/version identity, a bounded profile, source and output capability
+references, attempt/fencing identity, verified segment receipts, manifest
+revision, and terminal result. It contains no FFmpeg option, library structure,
+Kubernetes type, payload path, or adapter-internal error.
+
+The public HTTP contract adds:
+
+- `POST /api/v1/drives/{drive_id}/nodes/{node_id}/media-previews` with an
+  immutable source version, validated browser capabilities, explicit
+  confirmation, and `Idempotency-Key`; it returns `200` for an existing READY
+  artifact and `202` for an admitted job;
+- `GET` and `DELETE /api/v1/media-previews/{preview_id}` for status and
+  idempotent cancellation;
+- `POST /api/v1/media-previews/{preview_id}/playback-grants`, which creates a
+  principal-bound playback session of at most 60 seconds and places its secret
+  only in an `HttpOnly`, `Secure`, same-site cookie scoped to that session's
+  playback route; and
+- drive-manager list and eviction operations below
+  `/api/v1/drives/{drive_id}/media-cache`.
+
+Playback manifests are versioned FileBelt JSON. They name one selected codec
+ladder, immutable initialization/media segment identifiers, BLAKE3 digests,
+byte lengths, time ranges, and a monotonic revision. Segment URLs contain no
+bearer token. A manifest cannot reference a segment until the I/O service has
+durably verified its receipt.
+
+## Phase 8 NFS and WebTransport contracts
+
+The mount protocol enum adds `NFS`; password-credential endpoints reject it.
+Tenant-administrator identity and group mapping endpoints live below
+`/api/v1/admin/mounts/nfs/`, require recent OIDC authentication, generation
+preconditions, tenant uniqueness, and audit. Retained writes are listed at
+`GET /api/v1/mounts/write-conflicts`; an authorized owner may copy one through
+`POST /api/v1/mounts/write-conflicts/{write_session_id}/copies` after an
+independent `CREATE_CHILD` decision. The operation never overwrites.
+
+VFS v1 adds additive NFS-generic attribute, ACL, xattr, symlink, sparse-write,
+flush, commit, open-unlink, and reclaim messages. Existing field numbers remain
+stable. Filehandles are opaque versioned values authenticated with a dedicated
+rotating key and include export, node, and generation scope without exposing a
+physical locator. Current and immediately previous handle keys may validate;
+capability signing keys are not reused.
+
+Collaboration additionally advertises `/collaboration/v1/wt` when enabled.
+One WebTransport session and one client-created reliable bidirectional stream
+carry the unchanged length-delimited Protobuf frames for one room participant;
+datagrams and extra streams are rejected. Authentication remains the first
+frame using the one-use 60-second join grant. Reauthorization is bounded to 60
+seconds, tokens never enter URLs, and WebSocket remains behaviorally equivalent
+fallback. Before acknowledgement the client obtains a fresh grant and falls
+back immediately. After acknowledgement it fences and replays durable update
+IDs, obtains a fresh grant, and disables further WebTransport attempts for five
+minutes.
+
 ## Key rotation and configuration
 
 `filebeltctl` creates capability signing material and keyed-digest material as

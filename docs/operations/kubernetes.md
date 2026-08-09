@@ -146,6 +146,29 @@ The migration ledger is forward-only. Expand-compatible schema changes precede
 rollout; contract migrations occur only after the documented compatibility
 window.
 
+### Phase 8 staged activation
+
+1. Leave `media.enabled`, `mounts.nfs.enabled`, and
+   `collaboration.webtransport.enabled` false. Apply migrations 000007 through
+   000009 and the reviewed grants.
+2. Roll every long-running and administrative role to a configuration-version-6
+   compatible image and verify its fresh compatibility advertisement.
+3. Quiesce writers and take the coordinated PostgreSQL/payload checkpoint.
+4. Run `filebeltctl phase8 activate` once. Retain its audit identifier and
+   compatibility inventory with the change evidence.
+5. Qualify and enable CPU media, NFS, and WebTransport separately. NFS requires
+   the external KDC/keytab, handle keyset, `fs_ng` recovery claim, TCP 2049
+   client policy, and single-active fencing. WebTransport requires the stable
+   QUIC host key and UDP policies. VAAPI remains disabled unless experimental
+   use is explicitly accepted.
+
+To roll back, disable new admissions, run `filebeltctl phase8 deactivate`,
+advance NFS/job/collaboration fences, drain clients, and restore the previous
+compatible image digests. Preserve migrations, current and previous handle and
+capability public keys, NFS recovery/conflict rows, and media reconciliation
+metadata. A pre-Phase-8 binary requires restoration of the checkpoint into
+fresh database and payload targets; never run a down migration in place.
+
 ## Certificate rotation
 
 1. Add the new CA and new client URI SAN to the API/I/O trust configuration

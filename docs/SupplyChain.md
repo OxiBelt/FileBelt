@@ -396,6 +396,48 @@ bundle has passed readback. Once separately admitted, it may publish only
 immutable amd64/arm64 adapter manifests; it may not rebuild in the
 write-authorized job or publish DocumentServer.
 
+## Phase 8 NFS, transcoder, and WebTransport evidence
+
+The coordinated Phase 8 release adds separate NFS and transcoder adapter image
+plans without merging their license or source evidence into Apache images. The
+NFS image publishes native AMD64, ARM64, and RISC-V artifacts from the pinned
+Ubuntu 26.04 snapshot and NFS-Ganesha `6.5-8`. Evidence includes the exact
+package snapshot, dynamic FSAL ABI probe, LGPL source/replacement instructions,
+bridge lockfile, Kerberos composition, runtime functional probe, normalized
+SBOM, vulnerability result, source archive, provenance, and rebuild comparison.
+
+The transcoder image publishes native AMD64 and ARM64 artifacts. RISC-V is
+compile/probe-only and cannot enter the manifest. Evidence locks FFmpeg
+`8.1.2`, libaom `3.14.1`, libvpx `1.16.0`, Opus `1.5.2`, every configure flag,
+enabled parser/codec/filter, Ubuntu package snapshot, VAAPI package/driver
+identity, first-party wrapper lockfile, GPL source offer, notices, SBOM,
+vulnerability result, malicious-input corpus result, provenance, and normalized
+rebuild. Enabling `version3`, `nonfree`, an additional codec/filter/protocol,
+static linkage, NVIDIA support, or a different upstream version repeats the
+license and security review.
+
+The Apache collaboration image admits the exact Quinn/h3 versions recorded in
+`Cargo.lock` and keeps OxiBelt `0.7.1-beta.2` pinned by public source revision
+and image digest. WebTransport evidence includes UDP service and route
+identity, QUIC host-key lifecycle, Retry/0-RTT settings, browser parity,
+loss/reconnect correctness, drain, CPU/memory comparison, and the required
+latency improvement. The read-only local OxiBelt reference is never a build
+input or release citation.
+
+Performance evidence uses immutable configuration and output artifacts at
+five-minute change smoke, 60-minute nightly, two-hour weekly, and 2.5-hour
+pre-release cadences. The release gate rejects NFS/media regression above ten
+percent against the accepted same-host baseline, WebTransport improvement below
+15 percent against WebSocket in the specified loss/latency scenario, any
+acknowledged loss or orphan, sustained memory growth above one percent per hour,
+or settled descriptor/task growth above five percent.
+
+Tag-only promotion consumes already validated artifacts, publishes distinct
+role repositories and a digest-pinned chart, and never rebuilds in a
+write-authorized job. CPU media and NFS are production subjects only after
+their required evidence passes. VAAPI remains an explicitly experimental,
+disabled value until real Intel/AMD device evidence is reviewed.
+
 ## Changing the policy
 
 A dependency, toolchain, base image, feature, native linkage, license,

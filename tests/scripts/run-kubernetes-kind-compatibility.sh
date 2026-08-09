@@ -293,7 +293,7 @@ old_checksum="$(kubectl_cmd get deployment filebelt-api --namespace "${NAMESPACE
 [[ "$(kubectl_cmd get configmap "${old_config_name}" --namespace "${NAMESPACE}" -o jsonpath='{.immutable}')" == "true" ]] \
   || die "the initial content-addressed ConfigMap is not immutable"
 
-changed_config=$'version = 3\n\n[deployment]\nmode = "kubernetes"\n\n[acceptance]\nrevision = "second"'
+changed_config=$'version = 6\n\n[deployment]\nmode = "kubernetes"\n\n[acceptance]\nrevision = "second"'
 helm --kubeconfig "${KUBECONFIG}" upgrade "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --reuse-values \

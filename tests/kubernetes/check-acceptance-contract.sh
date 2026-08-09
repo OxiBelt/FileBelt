@@ -7,6 +7,8 @@ repo_root="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 workflow="${repo_root}/.github/workflows/check-filebelt.yml"
 kind_script="${repo_root}/tests/scripts/run-kubernetes-kind-compatibility.sh"
 network_script="${repo_root}/tests/scripts/run-kubernetes-network-policy.sh"
+chart_helpers="${repo_root}/deploy/helm/filebelt/templates/_helpers.tpl"
+readonly FILEBELT_CONFIGURATION_VERSION="6"
 
 die() {
   echo "Kubernetes acceptance contract: $*" >&2
@@ -41,6 +43,11 @@ for node_image in \
   assert_contains "${kind_script}" "${node_image}"
   assert_contains "${workflow}" "${node_image}"
 done
+
+assert_contains "${chart_helpers}" \
+  "hasPrefix \"version = ${FILEBELT_CONFIGURATION_VERSION}\""
+assert_contains "${kind_script}" \
+  "changed_config=\$'version = ${FILEBELT_CONFIGURATION_VERSION}\\n"
 
 for mcp_boundary in \
   "server_validate mcp" \

@@ -74,6 +74,8 @@ assert_contains "${network_script}" \
   "registry.k8s.io/e2e-test-images/agnhost:2.61@sha256:101f3357d1ad890c3090e78ea6c6a47dc5137cbe19836796e13d5dcb2b84d2e6"
 assert_contains "${network_script}" \
   "quay.io/cilium/alpine-curl:v1.10.0@sha256:913e8c9f3d960dde03882defa0edd3a919d529c2eb167caa7f54194528bde364"
+assert_contains "${network_script}" \
+  'kubectl_cmd apply --namespace "${FILEBELT_NAMESPACE}"'
 for trust_edge in \
   "public client reaching web" \
   "web reaching API" \

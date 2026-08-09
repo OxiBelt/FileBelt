@@ -562,7 +562,8 @@ helm template "${RELEASE_NAME}" "${chart_dir}" \
   --values "${ci_values}" \
   --set deployment.quiesced=true \
   --show-only templates/networkpolicies.yaml |
-  kubectl_cmd apply --server-side --field-manager=filebelt-network-policy --filename -
+  kubectl_cmd apply --namespace "${FILEBELT_NAMESPACE}" \
+    --server-side --field-manager=filebelt-network-policy --filename -
 
 web_host="fixture-web.${FILEBELT_NAMESPACE}.svc.cluster.local"
 api_host="fixture-api.${FILEBELT_NAMESPACE}.svc.cluster.local"

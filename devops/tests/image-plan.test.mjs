@@ -8,6 +8,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { URL, fileURLToPath } from "node:url";
 
 import {
   CreateImagePlan,
@@ -195,6 +196,36 @@ test("copyleft adapter evidence remains outside the Apache core image plan", () 
     assert.equal(image.license, "GPL-3.0-or-later");
     assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/main\/adapters\//);
   }
+});
+
+test("archive validator license contract matches the immutable Rust image plan", () => {
+  const script = [
+    "import importlib.util",
+    "import json",
+    "import pathlib",
+    "import sys",
+    "path = pathlib.Path(sys.argv[1])",
+    'spec = importlib.util.spec_from_file_location("filebelt_validate_image", path)',
+    'assert spec is not None and spec.loader is not None, "cannot load image validator"',
+    "module = importlib.util.module_from_spec(spec)",
+    "sys.modules[spec.name] = module",
+    "spec.loader.exec_module(module)",
+    "print(json.dumps(module.RUST_IMAGE_LICENSES, sort_keys=True))",
+  ].join("\n");
+  const validatorPath = fileURLToPath(
+    new URL("../../tests/scripts/validate-image.py", import.meta.url),
+  );
+  const validatorLicenses = JSON.parse(
+    execFileSync("python3", ["-c", script, validatorPath], { encoding: "utf8" }),
+  );
+  const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
+  const plannedLicenses = Object.fromEntries(
+    plan.images
+      .filter(({ artifact }) => artifact.kind === "rust-binary")
+      .map(({ role, license }) => [role, license]),
+  );
+
+  assert.deepEqual(validatorLicenses, plannedLicenses);
 });
 
 test("release plans accept exact stable and prerelease SemVer tags", () => {

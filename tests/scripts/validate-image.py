@@ -31,8 +31,8 @@ RUST_IMAGE_LICENSES = {
     "filebelt-controller": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-mcp-runner": "Apache-2.0 AND MIT",
     "filebelt-tools": "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0",
-    "filebelt-vfs": "Apache-2.0 AND MIT",
-    "filebelt-headscale-sync": "Apache-2.0 AND MIT",
+    "filebelt-vfs": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
+    "filebelt-headscale-sync": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
 }
 WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD"
 OXIBELT_IMAGE = (

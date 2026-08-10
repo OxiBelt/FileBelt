@@ -55,6 +55,13 @@ one path:
 - For an ACL evaluator defect, stop all affected access paths together. Do not
   leave a worker or future adapter on different semantics. Anonymous sharing is
   unsupported in Phase 2 and must remain disabled.
+- For the forward ACL replacement fix, temporarily reject the ACL replacement
+  endpoint at method-aware ingress: `PUT
+  /api/v1/drives/{drive_id}/nodes/{node_id}/acl`. Drain and replace every API
+  replica, verify API health and the two-user ACL replacement checks, then
+  re-enable it. The checked-in OxiBelt WAF is disabled and must not be enabled
+  or edited for this cutover. If method-aware ingress is unavailable, use
+  `deployment.quiesced=true` while draining, replacing, and verifying replicas.
 - Preserve generation values and audit events. Never decrement a generation or
   delete a deny to make an old binary accept the data.
 

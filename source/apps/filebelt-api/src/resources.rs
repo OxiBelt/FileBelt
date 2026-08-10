@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
@@ -17,8 +18,8 @@ use filebelt_database::collaboration::{
     CollaborationImportIntentInput,
 };
 use filebelt_database::{
-    AdvancedAclEntryInput, AdvancedAclEntryRecord, DatabaseError, DirectShareRecord, DriveRecord,
-    FileVersionRecord, NodeRecord, UploadRecord,
+    AdvancedAclEntryInput, AdvancedAclEntryRecord, AdvancedAclReplacementPreflight, DatabaseError,
+    DirectShareRecord, DriveRecord, FileVersionRecord, NodeRecord, UploadRecord,
 };
 use filebelt_domain::{Action, NormalizedName};
 use filebelt_storage_protocol::{
@@ -1884,10 +1885,10 @@ async fn replace_acl(
         Action::ManageAcl,
     )
     .await?;
-    let mut actions = std::collections::BTreeSet::new();
+    let mut submitted_actions = BTreeSet::new();
     for entry in &request.entries {
         let action = parse_acl_action(&entry.action)?;
-        if !actions.insert(action)
+        if !submitted_actions.insert(action)
             || !matches!(entry.effect.as_str(), "allow" | "deny")
             || !matches!(
                 entry.inheritance.as_str(),
@@ -1899,17 +1900,6 @@ async fn replace_acl(
                 "ACL actions, effects, or inheritance values are invalid",
             ));
         }
-        let delegated_grant = authorize_session_bound(
-            &state.database,
-            state.tenant_id,
-            session.record.principal_id,
-            session.record.session_id,
-            drive_id,
-            node_id,
-            action,
-        )
-        .await?;
-        require_same_generations(manage_grant, delegated_grant)?;
     }
     let group_id = request
         .principal
@@ -1929,6 +1919,33 @@ async fn replace_acl(
                 "acl.principal_invalid",
                 "Select exactly one verified user or local group",
             ));
+        }
+    }
+    let preflight = state
+        .database
+        .preflight_advanced_acl_replacement(
+            state.tenant_id,
+            drive_id,
+            node_id,
+            &request.principal.kind,
+            request.principal.verified_email.as_deref(),
+            group_id,
+        )
+        .await?;
+    let covered_actions = advanced_acl_replacement_actions(&submitted_actions, &preflight);
+    for action in &covered_actions {
+        if *action != Action::ManageAcl {
+            let delegated_grant = authorize_session_bound(
+                &state.database,
+                state.tenant_id,
+                session.record.principal_id,
+                session.record.session_id,
+                drive_id,
+                node_id,
+                *action,
+            )
+            .await?;
+            require_same_generations(manage_grant, delegated_grant)?;
         }
     }
     let entries = request
@@ -1951,7 +1968,9 @@ async fn replace_acl(
             &request.principal.kind,
             request.principal.verified_email.as_deref(),
             group_id,
+            preflight.target_principal_id,
             &entries,
+            &covered_actions,
             generation_i64(manage_grant.membership_generation)?,
             generation_i64(manage_grant.drive_acl_generation)?,
             generation_i64(manage_grant.namespace_generation)?,
@@ -2408,6 +2427,16 @@ fn parse_acl_action(value: &str) -> Result<Action, ApiError> {
         })
 }
 
+fn advanced_acl_replacement_actions(
+    submitted_actions: &BTreeSet<Action>,
+    preflight: &AdvancedAclReplacementPreflight,
+) -> BTreeSet<Action> {
+    let mut actions = preflight.actions.clone();
+    actions.extend(submitted_actions.iter().copied());
+    actions.insert(Action::ManageAcl);
+    actions
+}
+
 fn require_acl_etag(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
     if headers
         .get(header::IF_MATCH)
@@ -2847,16 +2876,18 @@ impl From<UploadRecord> for UploadAllocationResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
-        CreateShareRequest, ShareInheritance, ShareKind, SharePreset, decode_cursor,
-        decode_part_cursor, decode_version_cursor, direct_share_parameters, encode_cursor,
-        encode_part_cursor, parse_acl_action, require_same_generations, rfc3339,
-        share_preset_delegated_actions, shared_candidate_authorization, upload_capability_range,
-        upload_layout_and_part_count,
+        CreateShareRequest, ShareInheritance, ShareKind, SharePreset,
+        advanced_acl_replacement_actions, decode_cursor, decode_part_cursor, decode_version_cursor,
+        direct_share_parameters, encode_cursor, encode_part_cursor, parse_acl_action,
+        require_same_generations, rfc3339, share_preset_delegated_actions,
+        shared_candidate_authorization, upload_capability_range, upload_layout_and_part_count,
     };
     use crate::policy::AuthorizationGrant;
     use base64::Engine as _;
-    use filebelt_database::{NodeRecord, UploadRecord};
+    use filebelt_database::{AdvancedAclReplacementPreflight, NodeRecord, UploadRecord};
     use filebelt_domain::Action;
     use filebelt_storage_protocol::CapabilityOperation;
     use uuid::Uuid;
@@ -2891,6 +2922,37 @@ mod tests {
         assert!(handler.contains("Action::ManageAcl"));
         assert!(handler.contains("require_acl_etag"));
         assert!(handler.contains("require_same_generations"));
+        assert!(handler.contains("preflight_advanced_acl_replacement"));
+    }
+
+    #[test]
+    fn advanced_acl_replacement_authorizes_deleted_actions_for_an_empty_submission() {
+        let preflight = AdvancedAclReplacementPreflight {
+            target_principal_id: Uuid::nil(),
+            actions: [Action::ReadContent].into_iter().collect(),
+        };
+        let submitted_actions = BTreeSet::new();
+
+        let actions = advanced_acl_replacement_actions(&submitted_actions, &preflight);
+
+        assert_eq!(
+            actions,
+            [Action::ReadContent, Action::ManageAcl]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn advanced_acl_replacement_allows_an_empty_submission_without_existing_rows() {
+        let preflight = AdvancedAclReplacementPreflight {
+            target_principal_id: Uuid::nil(),
+            actions: BTreeSet::new(),
+        };
+
+        let actions = advanced_acl_replacement_actions(&BTreeSet::new(), &preflight);
+
+        assert_eq!(actions, [Action::ManageAcl].into_iter().collect());
     }
 
     #[test]

@@ -132,6 +132,7 @@ class Browser:
         *,
         expected: int = 200,
         idempotent: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ) -> Any:
         headers: dict[str, str] = {"Accept": "application/json"}
         encoded = None
@@ -148,6 +149,8 @@ class Browser:
             )
         if idempotent:
             headers["Idempotency-Key"] = str(uuid.uuid4())
+        if extra_headers is not None:
+            headers.update(extra_headers)
         result = self.request(method, f"/api/v1{path}", body=encoded, headers=headers)
         expect(result, expected, f"{method} {path}")
         if result.status == 204 or not result.body:
@@ -473,6 +476,43 @@ def audit_count(action: str) -> int:
     return int(result.stdout.strip())
 
 
+def acl_replacement_state(node_id: str, principal_id: str) -> tuple[int, int, int, int]:
+    if UUID_V4.fullmatch(node_id) is None or UUID_V4.fullmatch(principal_id) is None:
+        raise AssertionError("refusing to query non-UUID ACL replacement state")
+    result = compose(
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "--username",
+        "filebelt_owner",
+        "--dbname",
+        "filebelt",
+        "--no-psqlrc",
+        "--tuples-only",
+        "--no-align",
+        "--field-separator=|",
+        "--command",
+        (
+            "SELECT n.acl_generation,"
+            "(SELECT count(*) FROM acl_entries a WHERE a.tenant_id=n.tenant_id "
+            "AND a.drive_id=n.drive_id AND a.resource_id=n.id "
+            f"AND a.principal_id='{principal_id}'::uuid AND a.action='READ_CONTENT' "
+            "AND a.effect='deny' AND a.direct_share_id IS NULL),"
+            "(SELECT count(*) FROM audit_events e WHERE e.tenant_id=n.tenant_id "
+            f"AND e.resource_id=n.id AND e.target_principal_id='{principal_id}'::uuid),"
+            "(SELECT count(*) FROM outbox_events o WHERE o.tenant_id=n.tenant_id "
+            "AND o.aggregate_type='node' AND o.aggregate_id=n.id) "
+            f"FROM nodes n WHERE n.id='{node_id}'::uuid"
+        ),
+        capture=True,
+    )
+    values = result.stdout.strip().split("|")
+    if len(values) != 4:
+        raise AssertionError(f"unexpected ACL replacement state: {result.stdout!r}")
+    return (int(values[0]), int(values[1]), int(values[2]), int(values[3]))
+
+
 def exercise() -> None:
     admin = Browser()
     member = Browser()
@@ -607,6 +647,172 @@ def exercise() -> None:
     )
     assert denied is not None
     assert member.api("GET", "/shared?limit=200")["items"] == []
+
+    manager_share = admin.api(
+        "POST",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/shares",
+        {
+            "inheritance": "self_and_descendants",
+            "kind": "direct",
+            "preset": "manager",
+            "verified_email": "member@example.test",
+        },
+        expected=201,
+        idempotent=True,
+    )
+    assert manager_share["principal_id"] == member_session["principal_id"]
+    owner_acl = admin.request(
+        "GET", f"/api/v1/drives/{admin_drive['id']}/nodes/{node_id}/acl"
+    )
+    expect(owner_acl, 200, "list ACL before direct deny")
+    direct_deny = admin.api(
+        "PUT",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/acl",
+        {
+            "principal": {
+                "kind": "user",
+                "verified_email": "member@example.test",
+                "group_id": None,
+            },
+            "entries": [
+                {
+                    "action": "READ_CONTENT",
+                    "effect": "deny",
+                    "inheritance": "self",
+                }
+            ],
+        },
+        extra_headers={"If-Match": owner_acl.headers["ETag"]},
+    )
+    assert any(
+        entry["principal_id"] == member_session["principal_id"]
+        and entry["action"] == "READ_CONTENT"
+        and entry["effect"] == "deny"
+        and entry["source"] == "advanced"
+        for entry in direct_deny["entries"]
+    )
+    member_denied_read = member.api(
+        "POST",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/download-grants",
+        {"version_id": None},
+        expected=404,
+    )
+    assert member_denied_read is not None
+    before_rejected_replacements = acl_replacement_state(
+        node_id, member_session["principal_id"]
+    )
+    assert before_rejected_replacements[1] == 1
+
+    reduced_acl = member.request(
+        "GET", f"/api/v1/drives/{admin_drive['id']}/nodes/{node_id}/acl"
+    )
+    expect(reduced_acl, 200, "list ACL before reduced replacement")
+    reduced_replacement = member.api(
+        "PUT",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/acl",
+        {
+            "principal": {
+                "kind": "user",
+                "verified_email": "member@example.test",
+                "group_id": None,
+            },
+            "entries": [
+                {
+                    "action": "READ_METADATA",
+                    "effect": "allow",
+                    "inheritance": "self",
+                }
+            ],
+        },
+        expected=404,
+        extra_headers={"If-Match": reduced_acl.headers["ETag"]},
+    )
+    assert reduced_replacement is not None
+    assert (
+        acl_replacement_state(node_id, member_session["principal_id"])
+        == before_rejected_replacements
+    )
+    still_denied_after_reduced = member.api(
+        "POST",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/download-grants",
+        {"version_id": None},
+        expected=404,
+    )
+    assert still_denied_after_reduced is not None
+
+    empty_acl = member.request(
+        "GET", f"/api/v1/drives/{admin_drive['id']}/nodes/{node_id}/acl"
+    )
+    expect(empty_acl, 200, "list ACL before empty replacement")
+    empty_replacement = member.api(
+        "PUT",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/acl",
+        {
+            "principal": {
+                "kind": "user",
+                "verified_email": "member@example.test",
+                "group_id": None,
+            },
+            "entries": [],
+        },
+        expected=404,
+        extra_headers={"If-Match": empty_acl.headers["ETag"]},
+    )
+    assert empty_replacement is not None
+    assert (
+        acl_replacement_state(node_id, member_session["principal_id"])
+        == before_rejected_replacements
+    )
+    still_denied_after_empty = member.api(
+        "POST",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/download-grants",
+        {"version_id": None},
+        expected=404,
+    )
+    assert still_denied_after_empty is not None
+
+    owner_clear_acl = admin.request(
+        "GET", f"/api/v1/drives/{admin_drive['id']}/nodes/{node_id}/acl"
+    )
+    expect(owner_clear_acl, 200, "list ACL before owner clear")
+    cleared_acl = admin.api(
+        "PUT",
+        f"/drives/{admin_drive['id']}/nodes/{node_id}/acl",
+        {
+            "principal": {
+                "kind": "user",
+                "verified_email": "member@example.test",
+                "group_id": None,
+            },
+            "entries": [],
+        },
+        extra_headers={"If-Match": owner_clear_acl.headers["ETag"]},
+    )
+    owner_cleared_acl = admin.request(
+        "GET", f"/api/v1/drives/{admin_drive['id']}/nodes/{node_id}/acl"
+    )
+    expect(owner_cleared_acl, 200, "list ACL after owner clear")
+    assert owner_cleared_acl.headers["ETag"] != owner_clear_acl.headers["ETag"]
+    after_owner_clear = acl_replacement_state(node_id, member_session["principal_id"])
+    assert after_owner_clear[0] > before_rejected_replacements[0]
+    assert after_owner_clear[1] == 0
+    assert after_owner_clear[2] == before_rejected_replacements[2] + 1
+    assert after_owner_clear[3] == before_rejected_replacements[3] + 1
+    assert any(
+        entry["principal_id"] == member_session["principal_id"]
+        and entry["action"] == "READ_CONTENT"
+        and entry["effect"] == "allow"
+        and entry["source"] == "share"
+        for entry in cleared_acl["entries"]
+    )
+    assert any(
+        entry["principal_id"] == member_session["principal_id"]
+        and entry["action"] == "MANAGE_ACL"
+        and entry["effect"] == "allow"
+        and entry["source"] == "share"
+        for entry in cleared_acl["entries"]
+    )
+    assert download(member, admin_drive["id"], node_id) == first
 
     residue = admin.api(
         "POST",

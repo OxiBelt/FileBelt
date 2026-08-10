@@ -941,7 +941,7 @@ paths:
           $ref: "#/components/responses/Problem"
     put:
       operationId: replaceAdvancedAcl
-      description: Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every referenced action.
+      description: Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and non-share advanced rows removed by omission, regardless of effect or inheritance. An empty entries array clears advanced rows only when every removed action is held. Authorization denial remains existence-hiding 404; stale concurrent authorization or ACL state is 409.
       parameters:
         - $ref: "#/components/parameters/DriveId"
         - $ref: "#/components/parameters/NodeId"

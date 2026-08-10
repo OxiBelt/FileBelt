@@ -142,7 +142,11 @@ The permission presets expand before persistence:
 - Manager: Contributor plus `SHARE` and `MANAGE_ACL`.
 
 `MANAGE_DRIVE` is not part of the Manager preset. Advanced per-action editing
-requires `MANAGE_ACL` and remains subject to strict attenuation.
+requires `MANAGE_ACL` and remains subject to strict attenuation. An exact
+advanced-ACL replacement requires the actor to hold `MANAGE_ACL` and every
+action in both its submitted rows and any existing non-share advanced rows it
+removes by omission, regardless of effect or inheritance. An empty replacement
+therefore clears advanced rows only when the actor holds every removed action.
 
 ACL, membership, namespace, resource, and session generations qualify an
 authorization result. Relevant changes advance generations in the same

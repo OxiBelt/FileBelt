@@ -345,7 +345,7 @@ export interface paths {
         };
         /** @description Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived rows are included as read-only projections. */
         readonly get: operations["listAdvancedAcl"];
-        /** @description Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every referenced action. */
+        /** @description Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and non-share advanced rows removed by omission, regardless of effect or inheritance. An empty entries array clears advanced rows only when every removed action is held. Authorization denial remains existence-hiding 404; stale concurrent authorization or ACL state is 409. */
         readonly put: operations["replaceAdvancedAcl"];
         readonly post?: never;
         readonly delete?: never;

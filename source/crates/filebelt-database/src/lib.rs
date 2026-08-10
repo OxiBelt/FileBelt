@@ -10,6 +10,8 @@ pub mod mcp;
 pub mod media;
 pub mod mount;
 
+use std::collections::BTreeSet;
+
 use filebelt_domain::Action;
 use filebelt_events_protocol::EventEnvelope;
 use prost::Message;
@@ -179,6 +181,12 @@ pub struct AdvancedAclEntryInput<'a> {
     pub action: &'a str,
     pub effect: &'a str,
     pub inheritance: &'a str,
+}
+
+#[derive(Clone, Debug)]
+pub struct AdvancedAclReplacementPreflight {
+    pub target_principal_id: Uuid,
+    pub actions: BTreeSet<Action>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -891,6 +899,39 @@ impl Database {
             .collect())
     }
 
+    pub async fn preflight_advanced_acl_replacement(
+        &self,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        resource_id: Uuid,
+        target_kind: &str,
+        verified_email: Option<&str>,
+        group_id: Option<Uuid>,
+    ) -> Result<AdvancedAclReplacementPreflight, DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        let target_principal_id = resolve_advanced_acl_target(
+            &mut transaction,
+            tenant_id,
+            target_kind,
+            verified_email,
+            group_id,
+        )
+        .await?;
+        let actions = advanced_acl_actions_for_target(
+            &mut transaction,
+            tenant_id,
+            drive_id,
+            resource_id,
+            target_principal_id,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(AdvancedAclReplacementPreflight {
+            target_principal_id,
+            actions,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn replace_advanced_acl_entries(
         &self,
@@ -902,7 +943,9 @@ impl Database {
         target_kind: &str,
         verified_email: Option<&str>,
         group_id: Option<Uuid>,
+        expected_target_principal_id: Uuid,
         entries: &[AdvancedAclEntryInput<'_>],
+        covered_actions: &BTreeSet<Action>,
         membership_generation: i64,
         drive_acl_generation: i64,
         namespace_generation: i64,
@@ -922,6 +965,10 @@ impl Database {
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
+        let submitted_actions = advanced_acl_actions(entries)?;
+        if !replacement_actions_are_covered(covered_actions, &submitted_actions, &BTreeSet::new()) {
+            return Err(DatabaseError::StaleGeneration);
+        }
         let mut transaction = self.pool.begin().await?;
         lock_authorization_fence(
             &mut transaction,
@@ -938,40 +985,27 @@ impl Database {
             ],
         )
         .await?;
-        let target_principal_id = match target_kind {
-            "user" => {
-                let email = verified_email
-                    .map(str::trim)
-                    .filter(|email| !email.is_empty() && email.len() <= 320)
-                    .ok_or(DatabaseError::InvalidPersistedValue)?;
-                sqlx::query_scalar(
-                    "SELECT u.principal_id FROM users u \
-                     JOIN principals p ON p.tenant_id=u.tenant_id AND p.id=u.principal_id \
-                     WHERE u.tenant_id=$1 AND lower(u.verified_email)=lower($2) \
-                       AND u.status='active' AND p.disabled_at IS NULL FOR SHARE OF u,p",
-                )
-                .bind(tenant_id)
-                .bind(email)
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or(DatabaseError::NotFound)?
-            }
-            "group" => {
-                let id = group_id.ok_or(DatabaseError::InvalidPersistedValue)?;
-                sqlx::query_scalar(
-                    "SELECT g.principal_id FROM groups g \
-                     JOIN principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id \
-                     WHERE g.tenant_id=$1 AND g.id=$2 AND p.disabled_at IS NULL \
-                     FOR SHARE OF g,p",
-                )
-                .bind(tenant_id)
-                .bind(id)
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or(DatabaseError::NotFound)?
-            }
-            _ => return Err(DatabaseError::InvalidPersistedValue),
-        };
+        let target_principal_id = resolve_advanced_acl_target(
+            &mut transaction,
+            tenant_id,
+            target_kind,
+            verified_email,
+            group_id,
+        )
+        .await
+        .map_err(stale_advanced_acl_target_drift)?;
+        require_exact_advanced_acl_target(expected_target_principal_id, target_principal_id)?;
+        let current_actions = advanced_acl_actions_for_target(
+            &mut transaction,
+            tenant_id,
+            drive_id,
+            resource_id,
+            target_principal_id,
+        )
+        .await?;
+        if !replacement_actions_are_covered(covered_actions, &submitted_actions, &current_actions) {
+            return Err(DatabaseError::StaleGeneration);
+        }
         let owner_principal_id: Uuid = sqlx::query_scalar(
             "SELECT owner_principal_id FROM drives WHERE tenant_id=$1 AND id=$2",
         )
@@ -2696,6 +2730,117 @@ fn validate_upload_expectation_shape(
     Ok(())
 }
 
+async fn resolve_advanced_acl_target(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    target_kind: &str,
+    verified_email: Option<&str>,
+    group_id: Option<Uuid>,
+) -> Result<Uuid, DatabaseError> {
+    match target_kind {
+        "user" => {
+            let email = verified_email
+                .map(str::trim)
+                .filter(|email| !email.is_empty() && email.len() <= 320)
+                .ok_or(DatabaseError::InvalidPersistedValue)?;
+            sqlx::query_scalar(
+                "SELECT u.principal_id FROM users u \
+                 JOIN principals p ON p.tenant_id=u.tenant_id AND p.id=u.principal_id \
+                 WHERE u.tenant_id=$1 AND lower(u.verified_email)=lower($2) \
+                   AND u.status='active' AND p.disabled_at IS NULL FOR SHARE OF u,p",
+            )
+            .bind(tenant_id)
+            .bind(email)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .ok_or(DatabaseError::NotFound)
+        }
+        "group" => {
+            let id = group_id.ok_or(DatabaseError::InvalidPersistedValue)?;
+            sqlx::query_scalar(
+                "SELECT g.principal_id FROM groups g \
+                 JOIN principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id \
+                 WHERE g.tenant_id=$1 AND g.id=$2 AND p.disabled_at IS NULL \
+                 FOR SHARE OF g,p",
+            )
+            .bind(tenant_id)
+            .bind(id)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .ok_or(DatabaseError::NotFound)
+        }
+        _ => Err(DatabaseError::InvalidPersistedValue),
+    }
+}
+
+async fn advanced_acl_actions_for_target(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    drive_id: Uuid,
+    resource_id: Uuid,
+    target_principal_id: Uuid,
+) -> Result<BTreeSet<Action>, DatabaseError> {
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM acl_entries WHERE tenant_id=$1 AND drive_id=$2 AND resource_id=$3 \
+         AND principal_id=$4 AND direct_share_id IS NULL FOR SHARE",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(resource_id)
+    .bind(target_principal_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    actions
+        .into_iter()
+        .map(|action| advanced_acl_action(&action))
+        .collect()
+}
+
+fn advanced_acl_actions(
+    entries: &[AdvancedAclEntryInput<'_>],
+) -> Result<BTreeSet<Action>, DatabaseError> {
+    entries
+        .iter()
+        .map(|entry| advanced_acl_action(entry.action))
+        .collect()
+}
+
+fn advanced_acl_action(value: &str) -> Result<Action, DatabaseError> {
+    Action::ALL
+        .into_iter()
+        .find(|action| action.as_str() == value)
+        .ok_or(DatabaseError::InvalidPersistedValue)
+}
+
+fn replacement_actions_are_covered(
+    covered_actions: &BTreeSet<Action>,
+    submitted_actions: &BTreeSet<Action>,
+    current_actions: &BTreeSet<Action>,
+) -> bool {
+    covered_actions.contains(&Action::ManageAcl)
+        && submitted_actions
+            .union(current_actions)
+            .all(|action| covered_actions.contains(action))
+}
+
+fn require_exact_advanced_acl_target(
+    expected_target_principal_id: Uuid,
+    target_principal_id: Uuid,
+) -> Result<(), DatabaseError> {
+    if expected_target_principal_id == target_principal_id {
+        Ok(())
+    } else {
+        Err(DatabaseError::StaleGeneration)
+    }
+}
+
+fn stale_advanced_acl_target_drift(error: DatabaseError) -> DatabaseError {
+    match error {
+        DatabaseError::NotFound => DatabaseError::StaleGeneration,
+        error => error,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn lock_authorization_fence(
     transaction: &mut Transaction<'_, Postgres>,
@@ -2942,6 +3087,8 @@ async fn insert_outbox(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
@@ -3020,6 +3167,51 @@ mod tests {
         assert!(replacement.contains("direct_share_id IS NULL"));
         assert!(replacement.contains("target_principal_id == owner_principal_id"));
         assert!(replacement.contains("filebelt.v1.acl.changed"));
+        assert!(replacement.contains("require_exact_advanced_acl_target"));
+        assert!(replacement.contains("replacement_actions_are_covered"));
+    }
+
+    #[test]
+    fn advanced_acl_replacement_coverage_requires_submitted_and_deleted_actions() {
+        let submitted_actions = [Action::Export].into_iter().collect();
+        let current_actions = [Action::ReadContent].into_iter().collect();
+        let mut covered_actions: BTreeSet<_> =
+            [Action::ManageAcl, Action::Export].into_iter().collect();
+
+        assert!(!replacement_actions_are_covered(
+            &covered_actions,
+            &submitted_actions,
+            &current_actions,
+        ));
+
+        covered_actions.insert(Action::ReadContent);
+        assert!(replacement_actions_are_covered(
+            &covered_actions,
+            &submitted_actions,
+            &current_actions,
+        ));
+
+        assert!(!replacement_actions_are_covered(
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        ));
+        assert!(replacement_actions_are_covered(
+            &[Action::ManageAcl].into_iter().collect(),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        ));
+    }
+
+    #[test]
+    fn advanced_acl_replacement_requires_the_preflight_target() {
+        let expected = Uuid::new_v4();
+
+        assert!(require_exact_advanced_acl_target(expected, expected).is_ok());
+        assert!(matches!(
+            require_exact_advanced_acl_target(expected, Uuid::new_v4()),
+            Err(DatabaseError::StaleGeneration)
+        ));
     }
 
     #[test]

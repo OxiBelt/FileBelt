@@ -18,6 +18,7 @@ blake3.workspace = true
 clap.workspace = true
 filebelt-authz.workspace = true
 filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
+filebelt-capability-keyset.workspace = true
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics.workspace = true
 filebelt-domain.workspace = true

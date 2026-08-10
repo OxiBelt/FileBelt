@@ -253,13 +253,13 @@ async fn callback(
     let csrf_secret = random_secret()?;
     let session_token = format!(
         "fbs1.{}.{}",
-        state.config.keys.current_generation, session_secret
+        state.config.keys.digest_key_generation, session_secret
     );
     let session_id = state
         .database
         .create_session(
             &identity,
-            i32::try_from(state.config.keys.current_generation)
+            i32::try_from(state.config.keys.digest_key_generation)
                 .map_err(|_| ApiError::internal())?,
             &state.digest(SESSION_DIGEST_DOMAIN, session_token.as_bytes()),
             &state.digest(CSRF_DIGEST_DOMAIN, csrf_secret.as_bytes()),

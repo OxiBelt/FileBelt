@@ -96,6 +96,35 @@ forbidden_package_prefixes = []
 filebelt-control-protocol = []
 
 [[graph_profiles]]
+label = "capability keyset"
+package = "filebelt-capability-keyset"
+manifest = "source/crates/filebelt-capability-keyset/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-capability-keyset = []
+
+[[graph_profiles]]
 label = "collaboration protocol"
 package = "filebelt-collaboration-protocol"
 manifest = "source/crates/filebelt-collaboration-protocol/Cargo.toml"
@@ -114,6 +143,7 @@ forbidden_packages = [
 forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
+filebelt-capability-keyset = []
 filebelt-collaboration-protocol = []
 
 [[graph_profiles]]
@@ -129,6 +159,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-collaboration = []
 filebelt-collaboration-protocol = []
 filebelt-control-protocol = []
@@ -220,6 +251,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-controller = []
 filebelt-deployment-diagnostics = []
@@ -262,6 +294,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -336,6 +369,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -385,6 +419,7 @@ forbidden_packages = [
 forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
+filebelt-capability-keyset = []
 filebelt-mcp-protocol = []
 
 [[graph_profiles]]
@@ -428,6 +463,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-deployment-diagnostics = []
 filebelt-mcp-protocol = []
 filebelt-mcp-runner = []
@@ -469,6 +505,7 @@ forbidden_packages = []
 forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
+filebelt-capability-keyset = []
 filebelt-storage-protocol = []
 
 [[graph_profiles]]
@@ -523,6 +560,7 @@ forbidden_package_prefixes = []
 [graph_profiles.first_party_features]
 filebelt-authz = []
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -566,6 +604,7 @@ forbidden_package_prefixes = []
 filebelt-api = []
 filebelt-authz = []
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-collaboration-protocol = []
 filebelt-control-protocol = []
 filebelt-database = []
@@ -588,6 +627,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -629,6 +669,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-build-identity = []
+filebelt-capability-keyset = []
 filebelt-control-protocol = []
 filebelt-database = []
 filebelt-deployment-diagnostics = []
@@ -646,6 +687,7 @@ packages = [
   "filebelt",
   "filebelt-api",
   "filebelt-authz",
+  "filebelt-capability-keyset",
   "filebelt-build-identity",
   "filebelt-collaboration",
   "filebelt-collaboration-protocol",
@@ -742,6 +784,7 @@ forbidden_paths = [
 [[source_boundaries]]
 label = "protocol packages remain transport and persistence neutral"
 packages = [
+  "filebelt-capability-keyset",
   "filebelt-document-protocol",
   "filebelt-collaboration-protocol",
   "filebelt-events-protocol",
@@ -855,6 +898,12 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-control-protocol"
 crate_root = "source/crates/filebelt-control-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-capability-keyset"
+crate_root = "source/crates/filebelt-capability-keyset/src/lib.rs"
 public_modules = []
 wildcard_reexports = []
 

@@ -11,7 +11,7 @@ use axum::{Json, Router, routing};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use filebelt_collaboration_protocol::{
-    CollaborationGrantClaims, PresenceMode, grant_digest, sign_grant,
+    CollaborationGrantClaims, PresenceMode, grant_digest, sign_collaboration_grant,
 };
 use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
@@ -23,7 +23,8 @@ use filebelt_database::{
 };
 use filebelt_domain::{Action, NormalizedName};
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, MAX_CAPABILITY_LIFETIME_SECONDS, sign_capability,
+    ApiStorageCapabilityUse, CapabilityClaims, CapabilityOperation,
+    MAX_CAPABILITY_LIFETIME_SECONDS, sign_api_storage_capability,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -817,11 +818,7 @@ async fn create_collaboration_grant(
         drive_acl_generation: write.drive_acl_generation,
         grant_id: Uuid::new_v4().to_string(),
     };
-    let bootstrap_download_capability = sign_capability(
-        &bootstrap_claims,
-        state.config.keys.current_generation,
-        &state.capability_signer,
-    );
+    let bootstrap_download_capability = sign_api_capability(&state, &bootstrap_claims)?;
     let grant_id = Uuid::new_v4();
     let mode = match request.presence_mode {
         CollaborationPresenceMode::Pseudonym => PresenceMode::Pseudonym,
@@ -857,11 +854,21 @@ async fn create_collaboration_grant(
         nonce: nonce.to_vec(),
         bootstrap_download_capability,
     };
-    let wire = sign_grant(
+    let wire = sign_collaboration_grant(
         &claims,
-        state.config.keys.current_generation,
-        &state.capability_signer,
-    );
+        state
+            .config
+            .keys
+            .api_collaboration_grant
+            .as_ref()
+            .ok_or_else(ApiError::internal)?
+            .current_generation,
+        state
+            .collaboration_grant_signer
+            .as_ref()
+            .ok_or_else(ApiError::internal)?,
+    )
+    .map_err(|_| ApiError::internal())?;
     let digest = grant_digest(&wire);
     let grant = state
         .database
@@ -1528,11 +1535,7 @@ async fn create_download_grant(
         drive_acl_generation: grant.drive_acl_generation,
         grant_id: grant_id.to_string(),
     };
-    let capability = sign_capability(
-        &claims,
-        state.config.keys.current_generation,
-        &state.capability_signer,
-    );
+    let capability = sign_api_capability(&state, &claims)?;
     let path = format!("/io/v1/downloads/{grant_id}");
     let body = DownloadGrantResponse {
         grant_id,
@@ -2232,11 +2235,23 @@ fn issue_capability(
         drive_acl_generation: grant.drive_acl_generation,
         grant_id: Uuid::new_v4().to_string(),
     };
-    Ok(sign_capability(
-        &claims,
-        state.config.keys.current_generation,
-        &state.capability_signer,
-    ))
+    sign_api_capability(state, &claims)
+}
+
+fn sign_api_capability(state: &AppState, claims: &CapabilityClaims) -> Result<String, ApiError> {
+    let use_case = match CapabilityOperation::try_from(claims.operation) {
+        Ok(CapabilityOperation::UploadPart) => ApiStorageCapabilityUse::UploadPart,
+        Ok(CapabilityOperation::FinalizeUpload) => ApiStorageCapabilityUse::FinalizeUpload,
+        Ok(CapabilityOperation::Download) => ApiStorageCapabilityUse::Download,
+        _ => return Err(ApiError::internal()),
+    };
+    sign_api_storage_capability(
+        claims,
+        use_case,
+        state.config.keys.api_storage.current_generation,
+        &state.api_storage_signer,
+    )
+    .map_err(|_| ApiError::internal())
 }
 
 fn upload_capability_range(

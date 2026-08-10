@@ -363,7 +363,7 @@ It follows the same amd64, arm64, and RISC-V build, ELF/native linkage, SBOM,
 Trivy, normalized rebuild, identity, notice, signature, and provenance policy
 as the other WebPKI-enabled Apache roles. Its runtime contract additionally
 proves that the image contains the provider-neutral service executable and
-generation-4 capability logic, exposes only the document listener, and has no
+purpose-bound `document-storage` capability logic, exposes only the document listener, and has no
 adapter source, browser bundle, provider asset, payload mount, Internet path,
 or general API database credential.
 

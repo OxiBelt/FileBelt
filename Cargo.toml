@@ -21,6 +21,7 @@ members = [
   "source/crates/filebelt-database",
   "source/crates/filebelt-events-protocol",
   "source/crates/filebelt-storage",
+  "source/crates/filebelt-capability-keyset",
   "source/crates/filebelt-storage-protocol",
   "source/crates/filebelt-vfs-protocol",
   "source/crates/filebelt-document-protocol",
@@ -63,6 +64,7 @@ blake3 = "=1.8.6"
 bytes = "=1.12.1"
 clap = { version = "=4.6.5", features = ["derive"] }
 filebelt-authz = { version = "=0.1.0", path = "source/crates/filebelt-authz" }
+filebelt-capability-keyset = { version = "=0.1.0", path = "source/crates/filebelt-capability-keyset" }
 filebelt-collaboration-protocol = { version = "=0.1.0", path = "source/crates/filebelt-collaboration-protocol" }
 filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-database" }
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }

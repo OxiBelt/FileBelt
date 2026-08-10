@@ -5,14 +5,16 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
+use aws_lc_rs::signature::Ed25519KeyPair;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_capability_keyset::{
+    ApiCollaborationGrantKeyset, ApiMcpDelegationKeyset, ApiStorageKeyset,
+    public_key_material_is_disjoint,
+};
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::Database;
 use filebelt_runtime::{
@@ -21,7 +23,6 @@ use filebelt_runtime::{
 };
 use openidconnect::core::{CoreClient, CoreClientAuthMethod, CoreProviderMetadata};
 use openidconnect::{AuthType, ClientId, ClientSecret, IssuerUrl, RedirectUrl};
-use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
 
 use crate::auth::OidcClient;
@@ -34,7 +35,9 @@ pub(crate) struct AppState {
     oidc: Arc<tokio::sync::RwLock<OidcClient>>,
     oidc_refreshed_at: Arc<AtomicI64>,
     pub(crate) oidc_http: reqwest::Client,
-    pub(crate) capability_signer: Arc<Ed25519KeyPair>,
+    pub(crate) api_storage_signer: Arc<Ed25519KeyPair>,
+    pub(crate) collaboration_grant_signer: Option<Arc<Ed25519KeyPair>>,
+    pub(crate) mcp_delegation_signer: Option<Arc<Ed25519KeyPair>>,
     pub(crate) public_origin: String,
     pub(crate) mcp: Option<Arc<crate::mcp::McpApiState>>,
     pub(crate) documents: Option<Arc<crate::documents::DocumentApiState>>,
@@ -83,13 +86,20 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
     let oidc_http = oidc_http_client(&config)?;
     let oidc = discover_oidc(&config, &oidc_http).await?;
 
-    let private_key = std::fs::read(&config.keys.capability_private_key_file)
-        .context("cannot read the capability private key")?;
-    let capability_signer = Arc::new(
-        Ed25519KeyPair::from_pkcs8(&private_key)
-            .map_err(|_| anyhow!("capability private key is not valid Ed25519 PKCS#8"))?,
-    );
-    validate_public_key(&config, &capability_signer)?;
+    validate_api_keyset_disjointness(&config)?;
+    let api_storage_signer = load_api_storage_signer(&config)?;
+    let collaboration_grant_signer = config
+        .keys
+        .api_collaboration_grant
+        .as_ref()
+        .map(load_collaboration_grant_signer)
+        .transpose()?;
+    let mcp_delegation_signer = config
+        .keys
+        .api_mcp_delegation
+        .as_ref()
+        .map(load_mcp_delegation_signer)
+        .transpose()?;
     let digest_key_bytes =
         std::fs::read(&config.keys.digest_key_file).context("cannot read the digest key")?;
     let digest_key: [u8; 32] = digest_key_bytes
@@ -108,7 +118,9 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         oidc: Arc::new(tokio::sync::RwLock::new(oidc)),
         oidc_refreshed_at: Arc::new(AtomicI64::new(unix_time()?)),
         oidc_http,
-        capability_signer,
+        api_storage_signer,
+        collaboration_grant_signer,
+        mcp_delegation_signer,
         public_origin,
         mcp,
         documents,
@@ -355,29 +367,88 @@ async fn refresh_oidc(state: AppState) {
     }
 }
 
-fn validate_public_key(config: &Config, signer: &Ed25519KeyPair) -> Result<()> {
-    let bytes = std::fs::read(&config.keys.capability_public_key_file)
-        .context("cannot read the capability public keyset")?;
-    let expected = if bytes.len() == 32 {
-        bytes
-    } else {
-        let text = std::str::from_utf8(&bytes).context("capability public keyset is not UTF-8")?;
-        let mut lines = text.lines();
-        if lines.next() != Some("filebelt-capability-keyset-v1") {
-            bail!("capability public keyset header is invalid");
-        }
-        let generation = config.keys.current_generation.to_string();
-        let encoded = lines
-            .filter_map(|line| line.split_once(':'))
-            .find_map(|(candidate, encoded)| (candidate == generation).then_some(encoded))
-            .ok_or_else(|| anyhow!("current capability key generation is absent"))?;
-        URL_SAFE_NO_PAD
-            .decode(encoded)
-            .context("current capability public key is not base64url")?
-    };
-    if expected.len() != 32 || !bool::from(expected.as_slice().ct_eq(signer.public_key().as_ref()))
-    {
-        bail!("capability private key does not match the current public key generation");
+fn load_signer(key: &filebelt_control_protocol::SigningKeyConfig) -> Result<Arc<Ed25519KeyPair>> {
+    let private =
+        std::fs::read(&key.private_key_file).context("cannot read capability private key")?;
+    Ed25519KeyPair::from_pkcs8(&private)
+        .map(Arc::new)
+        .map_err(|_| anyhow!("capability private key is not valid Ed25519 PKCS#8"))
+}
+
+fn load_api_storage_signer(config: &Config) -> Result<Arc<Ed25519KeyPair>> {
+    let signer = load_signer(&config.keys.api_storage)?;
+    let source = std::fs::read_to_string(&config.keys.api_storage.public_keyset_file)?;
+    let keys = ApiStorageKeyset::parse(&source)
+        .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+    let probe = signer.sign(b"filebelt.api-storage.keyset.self-check");
+    keys.verify(
+        config.keys.api_storage.current_generation,
+        b"filebelt.api-storage.keyset.self-check",
+        probe.as_ref(),
+    )
+    .map_err(|_| {
+        anyhow!("capability private key does not match the current public key generation")
+    })?;
+    Ok(signer)
+}
+
+fn load_collaboration_grant_signer(
+    key: &filebelt_control_protocol::SigningKeyConfig,
+) -> Result<Arc<Ed25519KeyPair>> {
+    let signer = load_signer(key)?;
+    let source = std::fs::read_to_string(&key.public_keyset_file)?;
+    let keys = ApiCollaborationGrantKeyset::parse(&source)
+        .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+    let probe = signer.sign(b"filebelt.api-collaboration-grant.keyset.self-check");
+    keys.verify(
+        key.current_generation,
+        b"filebelt.api-collaboration-grant.keyset.self-check",
+        probe.as_ref(),
+    )
+    .map_err(|_| {
+        anyhow!("capability private key does not match the current public key generation")
+    })?;
+    Ok(signer)
+}
+
+fn load_mcp_delegation_signer(
+    key: &filebelt_control_protocol::SigningKeyConfig,
+) -> Result<Arc<Ed25519KeyPair>> {
+    let signer = load_signer(key)?;
+    let source = std::fs::read_to_string(&key.public_keyset_file)?;
+    let keys = ApiMcpDelegationKeyset::parse(&source)
+        .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+    let probe = signer.sign(b"filebelt.api-mcp-delegation.keyset.self-check");
+    keys.verify(
+        key.current_generation,
+        b"filebelt.api-mcp-delegation.keyset.self-check",
+        probe.as_ref(),
+    )
+    .map_err(|_| {
+        anyhow!("capability private key does not match the current public key generation")
+    })?;
+    Ok(signer)
+}
+
+fn validate_api_keyset_disjointness(config: &Config) -> Result<()> {
+    let source = std::fs::read_to_string(&config.keys.api_storage.public_keyset_file)?;
+    let api = ApiStorageKeyset::parse(&source)
+        .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+    let mut material = api.entries().map(|(_, key)| *key).collect::<Vec<_>>();
+    if let Some(key) = &config.keys.api_collaboration_grant {
+        let source = std::fs::read_to_string(&key.public_keyset_file)?;
+        let collaboration = ApiCollaborationGrantKeyset::parse(&source)
+            .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+        material.extend(collaboration.entries().map(|(_, key)| *key));
+    }
+    if let Some(key) = &config.keys.api_mcp_delegation {
+        let source = std::fs::read_to_string(&key.public_keyset_file)?;
+        let mcp = ApiMcpDelegationKeyset::parse(&source)
+            .map_err(|_| anyhow!("capability public keyset is invalid"))?;
+        material.extend(mcp.entries().map(|(_, key)| *key));
+    }
+    if !public_key_material_is_disjoint(material) {
+        bail!("capability public key material is reused across purposes");
     }
     Ok(())
 }
@@ -392,10 +463,9 @@ fn unix_time() -> Result<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{select_oidc_auth_type, validate_public_key};
+    use super::{load_api_storage_signer, select_oidc_auth_type, validate_api_keyset_disjointness};
     use aws_lc_rs::rand::SystemRandom;
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
-    use base64::Engine as _;
     use filebelt_control_protocol::{
         Config, DatabaseConfig, DeploymentConfig, DeploymentMode, DocumentConfig, ExternalSubject,
         KeyConfig, LimitConfig, ListenerConfig, OidcConfig, StorageConfig, TelemetryConfig,
@@ -436,13 +506,14 @@ mod tests {
         let keyset_path = directory.path().join("capability.pub");
         fs::write(
             &keyset_path,
-            format!(
-                "filebelt-capability-keyset-v1\n7:{}\n",
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signer.public_key())
-            ),
+            filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiStorage,
+                &[(7, signer.public_key().as_ref().try_into().unwrap())],
+            )
+            .unwrap(),
         )
         .unwrap();
-        let config = Config {
+        let mut config = Config {
             version: filebelt_control_protocol::CONFIG_VERSION,
             deployment: DeploymentConfig {
                 mode: DeploymentMode::Development,
@@ -474,10 +545,15 @@ mod tests {
                 backend_id: Uuid::new_v4(),
             },
             keys: KeyConfig {
-                capability_private_key_file: "/run/secrets/capability.pk8".into(),
-                capability_public_key_file: keyset_path,
                 digest_key_file: "/run/secrets/digest-key".into(),
-                current_generation: 7,
+                digest_key_generation: 1,
+                api_storage: filebelt_control_protocol::SigningKeyConfig {
+                    private_key_file: directory.path().join("capability.pk8"),
+                    public_keyset_file: keyset_path,
+                    current_generation: 7,
+                },
+                api_collaboration_grant: None,
+                api_mcp_delegation: None,
             },
             backend_tls: None,
             telemetry: TelemetryConfig::default(),
@@ -490,6 +566,24 @@ mod tests {
             media: filebelt_control_protocol::MediaConfig::default(),
             mounts: filebelt_control_protocol::MountConfig::default(),
         };
-        validate_public_key(&config, &signer).unwrap();
+        fs::write(&config.keys.api_storage.private_key_file, private.as_ref()).unwrap();
+        load_api_storage_signer(&config).unwrap();
+
+        let collaboration_path = directory.path().join("collaboration.pub");
+        fs::write(
+            &collaboration_path,
+            filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiCollaborationGrant,
+                &[(7, signer.public_key().as_ref().try_into().unwrap())],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        config.keys.api_collaboration_grant = Some(filebelt_control_protocol::SigningKeyConfig {
+            private_key_file: directory.path().join("collaboration.pk8"),
+            public_keyset_file: collaboration_path,
+            current_generation: 7,
+        });
+        assert!(validate_api_keyset_disjointness(&config).is_err());
     }
 }

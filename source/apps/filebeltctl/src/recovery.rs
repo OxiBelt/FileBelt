@@ -2,28 +2,32 @@
 
 //! Deterministic, bounded recovery checkpoints and restored-state verification.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::Path;
 
 use aws_lc_rs::digest::{Context, SHA256};
-use filebelt_control_protocol::Config;
+use filebelt_capability_keyset::{KeyPurpose, encode_keyset};
+use filebelt_control_protocol::{Config, SigningKeyConfig};
 use filebelt_database::Database;
 use serde_json::{Value, json};
 use sqlx::Row as _;
 use uuid::Uuid;
 
 use crate::grants::{encode_hex, migration_manifest_in};
+use crate::read_keyset;
 
-const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v2";
-const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v2";
+const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v3";
+const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v3";
+const LEGACY_CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v2";
 const MAX_CHECKPOINT_BYTES: u64 = 1_048_576;
 const PAYLOAD_BATCH_SIZE: i64 = 1_000;
 const CHECKPOINT_FIELDS: &[&str] = &[
     "schema",
     "tenant",
     "storage_backend_id",
-    "capability_key_generation",
+    "digest_key_generation",
+    "capability_keysets",
     "database_key_generations",
     "migrations",
     "audit_watermark",
@@ -39,10 +43,47 @@ pub async fn verify(
     database: &Database,
     configuration: &Config,
     checkpoint_path: &Path,
+    legacy_v2_offline: bool,
 ) -> Result<String, String> {
     let expected = read_checkpoint(checkpoint_path)?;
-    validate_checkpoint(&expected)?;
     let actual = checkpoint_value(database, configuration).await?;
+    if expected.get("schema").and_then(Value::as_str) == Some(LEGACY_CHECKPOINT_SCHEMA) {
+        if !legacy_v2_offline {
+            return Err("legacy recovery checkpoint requires --legacy-v2-offline".into());
+        }
+        validate_legacy_v2_checkpoint(&expected)?;
+        let legacy_actual = legacy_v2_value(actual.clone(), configuration);
+        let fields = [
+            "schema",
+            "tenant",
+            "storage_backend_id",
+            "capability_key_generation",
+            "database_key_generations",
+            "migrations",
+            "audit_watermark",
+            "inventory",
+        ];
+        let differences = fields
+            .iter()
+            .filter(|field| expected.get(**field) != legacy_actual.get(**field))
+            .copied()
+            .collect::<Vec<_>>();
+        let document = json!({
+            "schema": VERIFICATION_SCHEMA,
+            "status": if differences.is_empty() { "legacy_offline_verified" } else { "mismatch" },
+            "checkpoint_schema": LEGACY_CHECKPOINT_SCHEMA,
+            "differences": differences,
+            "admission_verified": false,
+            "key_purpose_proven": false,
+            "traffic_admission": false,
+            "required_next_step": "create and verify a v3 recovery checkpoint before admitting traffic",
+        });
+        if !differences.is_empty() {
+            return Err(serde_json::to_string(&document).map_err(|error| error.to_string())?);
+        }
+        return serde_json::to_string_pretty(&document).map_err(|error| error.to_string());
+    }
+    validate_checkpoint(&expected)?;
     let differences = CHECKPOINT_FIELDS
         .iter()
         .filter(|field| expected.get(**field) != actual.get(**field))
@@ -60,6 +101,21 @@ pub async fn verify(
         return Err(serde_json::to_string(&document).map_err(|error| error.to_string())?);
     }
     serde_json::to_string_pretty(&document).map_err(|error| error.to_string())
+}
+
+fn legacy_v2_value(mut actual: Value, configuration: &Config) -> Value {
+    let object = actual.as_object_mut().expect("checkpoint object");
+    object.insert(
+        "schema".into(),
+        Value::String(LEGACY_CHECKPOINT_SCHEMA.into()),
+    );
+    object.remove("digest_key_generation");
+    object.remove("capability_keysets");
+    object.insert(
+        "capability_key_generation".into(),
+        json!(configuration.keys.api_storage.current_generation),
+    );
+    actual
 }
 
 async fn checkpoint_value(database: &Database, configuration: &Config) -> Result<Value, String> {
@@ -141,7 +197,8 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "slug": tenant.get::<String, _>("slug"),
         },
         "storage_backend_id": configuration.storage.backend_id,
-        "capability_key_generation": configuration.keys.current_generation,
+        "digest_key_generation": configuration.keys.digest_key_generation,
+        "capability_keysets": capability_keysets(configuration)?,
         "database_key_generations": {
             "sessions": session_generations,
             "share_links": share_generations,
@@ -171,6 +228,82 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "payload_manifest_sha256": payload_manifest_sha256,
         },
     }))
+}
+
+fn capability_keysets(configuration: &Config) -> Result<Value, String> {
+    let mut configured: Vec<(&str, KeyPurpose, &SigningKeyConfig)> = vec![
+        (
+            "api_storage",
+            KeyPurpose::ApiStorage,
+            &configuration.keys.api_storage,
+        ),
+        (
+            "media_storage",
+            KeyPurpose::MediaStorage,
+            &configuration.media.capability_signing,
+        ),
+    ];
+    if let Some(key) = &configuration.keys.api_collaboration_grant {
+        configured.push((
+            "api_collaboration_grant",
+            KeyPurpose::ApiCollaborationGrant,
+            key,
+        ));
+    }
+    if let Some(key) = &configuration.keys.api_mcp_delegation {
+        configured.push(("api_mcp_delegation", KeyPurpose::ApiMcpDelegation, key));
+    }
+    if let Some(key) = &configuration.collaboration.capability_signing {
+        configured.push((
+            "collaboration_storage",
+            KeyPurpose::CollaborationStorage,
+            key,
+        ));
+    }
+    if let Some(key) = &configuration.documents.capability_signing {
+        configured.push(("document_storage", KeyPurpose::DocumentStorage, key));
+    }
+    if let Some(key) = &configuration.mounts.capability_signing {
+        configured.push(("mount_storage", KeyPurpose::MountStorage, key));
+    }
+    let mut result = serde_json::Map::new();
+    let mut observed = Vec::<[u8; 32]>::new();
+    for (name, purpose, key) in configured {
+        let source = fs::read_to_string(&key.public_keyset_file)
+            .map_err(|_| "capability public keyset is invalid".to_owned())?;
+        let records = read_keyset(&source, purpose)
+            .map_err(|_| "capability public keyset is invalid".to_owned())?;
+        if !records
+            .iter()
+            .any(|(generation, _)| *generation == key.current_generation)
+        {
+            return Err("capability current generation is absent".into());
+        }
+        for (_, public) in &records {
+            if observed.contains(public) {
+                return Err("capability public key material is reused across purposes".into());
+            }
+            observed.push(*public);
+        }
+        let canonical_records = records
+            .iter()
+            .map(|(generation, public)| (*generation, *public))
+            .collect::<Vec<_>>();
+        let canonical = encode_keyset(purpose, &canonical_records)
+            .map_err(|_| "capability public keyset is invalid".to_owned())?;
+        let mut digest = Context::new(&SHA256);
+        digest.update(canonical.as_bytes());
+        result.insert(
+            name.into(),
+            json!({
+                "purpose": purpose.as_str(),
+                "current_generation": key.current_generation,
+                "admitted_generations": records.iter().map(|(generation, _)| *generation).collect::<Vec<_>>(),
+                "canonical_sha256": encode_hex(digest.finish().as_ref()),
+            }),
+        );
+    }
+    Ok(Value::Object(result))
 }
 
 async fn distinct_generations(
@@ -272,6 +405,29 @@ fn validate_checkpoint(checkpoint: &Value) -> Result<(), String> {
     }
     if !matches!(checkpoint.get("migrations"), Some(Value::Array(_))) {
         return Err("recovery checkpoint migrations are invalid".into());
+    }
+    Ok(())
+}
+
+fn validate_legacy_v2_checkpoint(checkpoint: &Value) -> Result<(), String> {
+    let object = checkpoint
+        .as_object()
+        .ok_or_else(|| "recovery checkpoint must be a JSON object".to_owned())?;
+    const FIELDS: &[&str] = &[
+        "schema",
+        "tenant",
+        "storage_backend_id",
+        "capability_key_generation",
+        "database_key_generations",
+        "migrations",
+        "audit_watermark",
+        "inventory",
+    ];
+    if checkpoint.get("schema").and_then(Value::as_str) != Some(LEGACY_CHECKPOINT_SCHEMA)
+        || object.len() != FIELDS.len()
+        || FIELDS.iter().any(|field| !object.contains_key(*field))
+    {
+        return Err("legacy recovery checkpoint fields are invalid".into());
     }
     Ok(())
 }

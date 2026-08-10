@@ -13,14 +13,14 @@
 - Iggy contains no rollback authority. PostgreSQL and the payload checkpoint
   determine recovery state.
 - MCP policy/vault schemas are forward-only. Retain every KEK generation named
-  by `filebelt.recovery.checkpoint.v2`; disabling MCP never authorizes dropping
+  by `filebelt.recovery.checkpoint.v3`; disabling MCP never authorizes dropping
   its tables or deleting encrypted rows.
 - Collaboration room and manifest schemas are forward-only. A rollback fences
   active rooms and retains their UUID CRDT objects and PostgreSQL manifest
   evidence through the 30-day dirty-state retention period; Iggy and an
   in-memory replica never substitute for that evidence.
 - Mount policy/vault schemas are forward-only. Keep gateways disabled, retain
-  the generation-3 public key and every referenced mount KEK, and never use
+  every admitted `mount-storage` public key and every referenced mount KEK, and never use
   tailstate or adapter caches to reconstruct PostgreSQL state.
 
 ## Failure before workload rollout
@@ -61,7 +61,9 @@ only the opt-in Job in the next Helm revision after evidence is retained.
    external-head freeze, and retained diff3 review state.
 6. Record the failed digest/config and prevent it from being selected again.
 
-Do not roll back a Secret in place. Restore the previous versioned Secret name
+Do not roll back a Secret in place. After v7 admission, configuration and
+keyset incompatibilities are forward-fix-only: keep the v7 purpose records and
+replace only the affected immutable Secret/generation. Restore the previous versioned Secret name
 or contents, update the matching generation, and roll Pods deliberately.
 
 ## Collaboration rollback
@@ -88,9 +90,11 @@ are independently healthy.
 To disable all MCP, revoke affected registrations/services, wait for active
 invocations to reach a terminal state, then set `mcp.enabled=false`. Restore the
 recorded previous API/web images and configuration together so the public
-contract and SPA do not diverge. A binary expecting configuration version 2
-must receive its recorded version-2 ConfigMap; current binaries require version
-5. The expanded PostgreSQL schema and vault ciphertext remain in place.
+contract and SPA do not diverge. Current binaries require configuration version
+7 and purpose-tagged version-2 keysets. After any version-7 admission, roll back
+only to a previously recorded fixed version-7 image, ConfigMap, and overlapping
+same-purpose keyset set; never reintroduce a shared-key verifier. The expanded
+PostgreSQL schema and vault ciphertext remain in place.
 
 Never roll a catalog entry back by moving a digest or weakening signature
 policy. Select a previously reviewed immutable catalog/root/bundle ConfigMap and
@@ -105,8 +109,8 @@ revoke active credentials as required, close sessions/handles/locks in
 PostgreSQL, and scale gateway, VFS, and Headscale-sync workloads to zero before
 rolling API or I/O. Retain both gateway RWO tailstate claims for incident
 evidence; do not attach them to another gateway identity. The additive
-`filebelt_mount` and `filebelt_mount_vault` schemas, mount KEKs, and
-generation-3 verification key remain in place until no retained recovery
+`filebelt_mount` and `filebelt_mount_vault` schemas, mount KEKs, and admitted
+`mount-storage` verification keys remain in place until no retained recovery
 evidence references them.
 
 ## Incompatible schema or inconsistent state

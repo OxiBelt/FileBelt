@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use aws_lc_rs::signature::Ed25519KeyPair;
+use filebelt_capability_keyset::{ApiStorageKeyset, CollaborationStorageKeyset};
 use filebelt_collaboration_protocol::CollaborationGrantClaims;
 use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
@@ -12,8 +13,9 @@ use filebelt_database::collaboration::{
 };
 use filebelt_database::{Database, DatabaseError};
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, VerificationKey, sign_capability, unix_time_now,
-    verify_capability,
+    ApiStorageCapabilityUse, CapabilityClaims, CapabilityOperation,
+    CollaborationStorageCapabilityUse, sign_collaboration_storage_capability, unix_time_now,
+    verify_api_storage_capability,
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, StatusCode};
@@ -47,7 +49,8 @@ pub struct CollaborationIoClient {
     io_url: Url,
     signer: Arc<Ed25519KeyPair>,
     signing_generation: u32,
-    verification_keys: Arc<Vec<VerificationKey>>,
+    api_storage_keys: Arc<ApiStorageKeyset>,
+    collaboration_storage_keys: Arc<CollaborationStorageKeyset>,
 }
 
 pub(crate) struct PersistUpdateGroupInput<'a> {
@@ -66,14 +69,16 @@ impl CollaborationIoClient {
         io_url: Url,
         signer: Arc<Ed25519KeyPair>,
         signing_generation: u32,
-        verification_keys: Arc<Vec<VerificationKey>>,
+        api_storage_keys: Arc<ApiStorageKeyset>,
+        collaboration_storage_keys: Arc<CollaborationStorageKeyset>,
     ) -> Self {
         Self {
             http,
             io_url,
             signer,
             signing_generation,
-            verification_keys,
+            api_storage_keys,
+            collaboration_storage_keys,
         }
     }
 
@@ -82,14 +87,15 @@ impl CollaborationIoClient {
         collaboration: &CollaborationGrantClaims,
     ) -> Result<Vec<u8>, IoClientError> {
         let now = unix_time_now().map_err(|_| IoClientError::InvalidCapability)?;
-        let capability = verify_capability(
+        let capability = verify_api_storage_capability(
             &collaboration.bootstrap_download_capability,
-            &self.verification_keys,
+            &self.api_storage_keys,
             CAPABILITY_AUDIENCE,
-            CapabilityOperation::Download,
+            ApiStorageCapabilityUse::Download,
             now,
         )
-        .map_err(|_| IoClientError::InvalidCapability)?;
+        .map_err(|_| IoClientError::InvalidCapability)?
+        .claims;
         if capability.tenant_id != collaboration.tenant_id
             || capability.principal_id != collaboration.principal_id
             || capability.session_id != collaboration.session_id
@@ -393,11 +399,29 @@ impl CollaborationIoClient {
             drive_acl_generation: collaboration.drive_acl_generation,
             grant_id: object.id.to_string(),
         };
-        Ok(sign_capability(
+        let use_case = match operation {
+            CapabilityOperation::WriteCollaborationObject => {
+                CollaborationStorageCapabilityUse::WriteObject
+            }
+            CapabilityOperation::FinalizeCollaborationObject => {
+                CollaborationStorageCapabilityUse::FinalizeObject
+            }
+            CapabilityOperation::ReadCollaborationObject => {
+                CollaborationStorageCapabilityUse::ReadObject
+            }
+            _ => return Err(IoClientError::InvalidContext),
+        };
+        let wire = sign_collaboration_storage_capability(
             &claims,
+            use_case,
             self.signing_generation,
             &self.signer,
-        ))
+        )
+        .map_err(|_| IoClientError::InvalidCapability)?;
+        // The configured keyset is checked at startup and retained here to
+        // make accidental signer/keyset cross-wiring impossible to ignore.
+        let _ = &self.collaboration_storage_keys;
+        Ok(wire)
     }
 
     fn object_url(&self, object_id: Uuid, finalize: bool) -> Result<Url, IoClientError> {

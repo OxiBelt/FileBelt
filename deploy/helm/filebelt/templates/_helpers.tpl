@@ -31,22 +31,27 @@ app.kubernetes.io/component: {{ .component }}
 {{- $configuration := tpl .Values.configuration.filebelt . -}}
 {{- if .Values.collaboration.enabled -}}
 {{- $configuration = replace "[collaboration]\nenabled = false" "[collaboration]\nenabled = true" $configuration -}}
+{{- $configuration = printf "%s\n\n[keys.api_collaboration_grant]\nprivate_key_file = \"/run/secrets/api-collaboration-grant-capability-private-key\"\npublic_keyset_file = \"/run/secrets/api-collaboration-grant-capability-public-keyset\"\ncurrent_generation = 1\n\n[collaboration.capability_signing]\nprivate_key_file = \"/run/secrets/collaboration-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/collaboration-storage-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" $configuration -}}
 {{- if .Values.collaboration.webtransport.enabled -}}
 {{- $configuration = replace "webtransport_enabled = false" "webtransport_enabled = true\nwebtransport_endpoint = \"https://filebelt.example.invalid/collaboration/v1/wt\"\nwebtransport_idle_seconds = 75\nwebtransport_drain_seconds = 300" $configuration -}}
 {{- end -}}
 {{- end -}}
+{{- if .Values.mcp.enabled -}}
+{{- $configuration = printf "%s\n\n[keys.api_mcp_delegation]\nprivate_key_file = \"/run/secrets/api-mcp-delegation-capability-private-key\"\npublic_keyset_file = \"/run/secrets/api-mcp-delegation-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
+{{- end -}}
 {{- if .Values.mounts.enabled -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
 {{- $configuration = replace "[mounts]\nenabled = false" "[mounts]\nenabled = true" $configuration -}}
+{{- $configuration = printf "%s\n\n[mounts.capability_signing]\nprivate_key_file = \"/run/secrets/mount-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/mount-storage-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
 {{- $configuration = replace "[mounts.headscale]\nenabled = false" "[mounts.headscale]\nenabled = true" $configuration -}}
 {{- $configuration = replace "api_url = \"https://headscale.example.invalid/\"" (printf "api_url = %q" .Values.mounts.headscale.apiUrl) $configuration -}}
 {{- $configuration = replace "oidc_issuer = \"https://issuer.example.invalid/\"" (printf "oidc_issuer = %q" .Values.mounts.headscale.oidcIssuer) $configuration -}}
 {{- $configuration = replace "sync_seconds = 15" (printf "sync_seconds = %v" .Values.mounts.headscale.syncSeconds) $configuration -}}
 {{- end -}}
 {{- if .Values.documents.enabled -}}
-{{- $documentConfig := printf "[documents]\nenabled = true\nprovider_id = \"onlyoffice-community-9-4\"\ndatabase_url_file = \"/run/secrets/document-database-url\"\nurl = \"https://filebelt-document:8089/\"\nlaunch_action = %q\nprovider_origin = %q\nclient_certificate_chain_file = \"/run/secrets/document-api-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/document-api-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/document-api-client-tls/server-ca.crt\"\ncapability_private_key_file = \"/run/secrets/document-capability-private-key\"\ncapability_key_generation = 4\nmax_active_tabs = 20\nmax_document_bytes = 104857600\ngeneration_recheck_seconds = 60" .Values.documents.launchAction .Values.documents.providerOrigin -}}
+{{- $documentConfig := printf "[documents]\nenabled = true\nprovider_id = \"onlyoffice-community-9-4\"\ndatabase_url_file = \"/run/secrets/document-database-url\"\nurl = \"https://filebelt-document:8089/\"\nlaunch_action = %q\nprovider_origin = %q\nclient_certificate_chain_file = \"/run/secrets/document-api-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/document-api-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/document-api-client-tls/server-ca.crt\"\nmax_active_tabs = 20\nmax_document_bytes = 104857600\ngeneration_recheck_seconds = 60\n\n[documents.capability_signing]\nprivate_key_file = \"/run/secrets/document-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/document-storage-capability-public-keyset\"\ncurrent_generation = 1" .Values.documents.launchAction .Values.documents.providerOrigin -}}
 {{- $configuration = replace "[documents]\nenabled = false" $documentConfig $configuration -}}
 {{- $configuration = printf "%s\n\n[backend_tls.document]\ncertificate_chain_file = \"/run/secrets/document-api-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/document-api-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/document-api-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/api/document\"]\n\n[backend_tls.document_adapter]\ncertificate_chain_file = \"/run/secrets/document-adapter-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/document-adapter-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/document-adapter-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/onlyoffice-adapter/document\"]" $configuration -}}
 {{- range $current := list
@@ -78,8 +83,8 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "filebelt.validate" -}}
 {{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
-{{- if not (hasPrefix "version = 6" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 6" -}}
+{{- if not (hasPrefix "version = 7" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 7" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -120,7 +125,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (not (contains $collaborationIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact web, enabled MCP, and collaboration SPIFFE identities" -}}
 {{- end -}}
-{{- range $required := list "capability_public_key_file = \"/run/secrets/capability-public-keyset\"" "collaboration_ws = \"0.0.0.0:8085\"" "collaboration_webtransport = \"0.0.0.0:8086\"" "capability_key_generation = 2" "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/collaboration-io-client-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/collaboration-io-client-tls/tls.key\"" "server_ca_file = \"/run/secrets/collaboration-io-client-tls/server-ca.crt\"" -}}
+{{- range $required := list "[keys.api_collaboration_grant]" "[collaboration.capability_signing]" "collaboration_ws = \"0.0.0.0:8085\"" "collaboration_webtransport = \"0.0.0.0:8086\"" "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/collaboration-io-client-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/collaboration-io-client-tls/tls.key\"" "server_ca_file = \"/run/secrets/collaboration-io-client-tls/server-ca.crt\"" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "collaboration.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
@@ -154,7 +159,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail (printf "backend_tls.%s must permit only its exact document client SPIFFE identity" $section) -}}
 {{- end -}}
 {{- end -}}
-{{- range $required := list "document = \"0.0.0.0:8089\"" "document_adapter = \"0.0.0.0:8090\"" "url = \"https://filebelt-document:8089/\"" (printf "launch_action = %q" .Values.documents.launchAction) (printf "provider_origin = %q" .Values.documents.providerOrigin) "capability_key_generation = 4" "max_active_tabs = 20" "max_document_bytes = 104857600" "generation_recheck_seconds = 60" -}}
+{{- range $required := list "document = \"0.0.0.0:8089\"" "document_adapter = \"0.0.0.0:8090\"" "url = \"https://filebelt-document:8089/\"" (printf "launch_action = %q" .Values.documents.launchAction) (printf "provider_origin = %q" .Values.documents.providerOrigin) "[documents.capability_signing]" "max_active_tabs = 20" "max_document_bytes = 104857600" "generation_recheck_seconds = 60" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "documents.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
@@ -253,7 +258,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (eq (len .Values.networkPolicy.headscale.to) 0) (eq (len .Values.networkPolicy.mountIngress.from) 0) -}}
 {{- fail "mounts.enabled requires exact Headscale egress and mount ingress peer allowlists" -}}
 {{- end -}}
-{{- range $required := list "[mounts]" "enabled = true" "database_url_file = \"/run/secrets/mount-database-url\"" "vault_keyring_file = \"/run/secrets/mount-vault-keyring.json\"" "capability_private_key_file = \"/run/secrets/mount-capability-private-key\"" "capability_key_generation = 3" "io_url = \"https://filebelt-worker-io:8081/\"" "io_client_certificate_chain_file = \"/run/secrets/vfs-io-client-tls/tls.crt\"" "management_url = \"https://filebelt-vfs-management:8088/\"" "[backend_tls.vfs]" "[backend_tls.vfs_management]" -}}
+{{- range $required := list "[mounts]" "enabled = true" "database_url_file = \"/run/secrets/mount-database-url\"" "vault_keyring_file = \"/run/secrets/mount-vault-keyring.json\"" "[mounts.capability_signing]" "io_url = \"https://filebelt-worker-io:8081/\"" "io_client_certificate_chain_file = \"/run/secrets/vfs-io-client-tls/tls.crt\"" "management_url = \"https://filebelt-vfs-management:8088/\"" "[backend_tls.vfs]" "[backend_tls.vfs_management]" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "mounts.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
@@ -277,8 +282,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq .Values.operation.type "storage-scrub-start") (ne .Values.operation.payloadId "") (ne .Values.operation.tenantSlugConfirmation "") -}}
 {{- fail "targeted storage-scrub-start must not include operation.tenantSlugConfirmation" -}}
 {{- end -}}
-{{- if and (has .Values.operation.type (list "recovery-checkpoint" "recovery-verify")) (not .Values.deployment.quiesced) -}}
-{{- fail "recovery operations require deployment.quiesced=true" -}}
+{{- if and (has .Values.operation.type (list "keys-audit" "recovery-checkpoint" "recovery-verify")) (not .Values.deployment.quiesced) -}}
+{{- fail "keyset audit and recovery operations require deployment.quiesced=true" -}}
 {{- end -}}
 {{- if and (eq .Values.operation.type "recovery-verify") (eq .Values.operation.checkpoint.secretName "") -}}
 {{- fail "operation.checkpoint.secretName is required for recovery-verify" -}}

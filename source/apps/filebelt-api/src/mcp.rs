@@ -28,10 +28,11 @@ use filebelt_mcp_policy::{
 use filebelt_mcp_protocol::{
     AttachmentClaim, AttachmentDisclosure, AttachmentEncoding, AttachmentFieldClaim,
     DelegationClaims, InvocationFrameKind, InvocationRequest as BrokerInvocationRequest,
-    MAX_FRAME_BYTES, McpOperation, McpPrimitive, decode_frames, sign_delegation,
+    MAX_FRAME_BYTES, McpOperation, McpPrimitive, decode_frames, sign_mcp_delegation,
 };
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, MAX_CAPABILITY_LIFETIME_SECONDS, sign_capability,
+    ApiStorageCapabilityUse, CapabilityClaims, CapabilityOperation,
+    MAX_CAPABILITY_LIFETIME_SECONDS, sign_api_storage_capability,
 };
 use prost::Message as _;
 use reqwest::{Certificate, Client, Identity};
@@ -2731,11 +2732,21 @@ async fn call_broker(
         expires_at_unix_seconds: now.saturating_add(120),
         service_grant_id: String::new(),
     };
-    let delegation = sign_delegation(
+    let delegation = sign_mcp_delegation(
         &claims,
-        state.config.keys.current_generation,
-        &state.capability_signer,
-    );
+        state
+            .config
+            .keys
+            .api_mcp_delegation
+            .as_ref()
+            .ok_or_else(ApiError::internal)?
+            .current_generation,
+        state
+            .mcp_delegation_signer
+            .as_ref()
+            .ok_or_else(ApiError::internal)?,
+    )
+    .map_err(|_| ApiError::internal())?;
     let request = BrokerInvocationRequest {
         request_id: request_id.unwrap_or_else(Uuid::new_v4).to_string(),
         delegation,
@@ -3229,7 +3240,7 @@ async fn build_attachment_claims(
             .collect::<Result<Vec<_>, _>>()?;
         let capability_id = Uuid::new_v4();
         let now = unix_time()?;
-        let capability = sign_capability(
+        let capability = sign_api_storage_capability(
             &CapabilityClaims {
                 capability_id: capability_id.to_string(),
                 audience: STORAGE_CAPABILITY_AUDIENCE.into(),
@@ -3253,9 +3264,11 @@ async fn build_attachment_claims(
                 drive_acl_generation: use_mcp.drive_acl_generation,
                 grant_id: capability_id.to_string(),
             },
-            state.config.keys.current_generation,
-            &state.capability_signer,
-        );
+            ApiStorageCapabilityUse::Download,
+            state.config.keys.api_storage.current_generation,
+            &state.api_storage_signer,
+        )
+        .map_err(|_| ApiError::internal())?;
         claims.push(AttachmentClaim {
             drive_id: attachment.drive_id.to_string(),
             node_id: attachment.node_id.to_string(),

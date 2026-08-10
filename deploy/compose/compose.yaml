@@ -213,8 +213,10 @@ services:
     secrets:
       - api-database-url
       - oidc-client-secret
-      - capability-private-key
-      - capability-public-keyset
+      - api-storage-capability-private-key
+      - api-storage-capability-public-keyset
+      - api-collaboration-grant-capability-private-key
+      - api-collaboration-grant-capability-public-keyset
       - digest-key
     configs:
       - source: filebelt-config
@@ -243,7 +245,8 @@ services:
       FILEBELT_DATABASE_URL_FILE: /run/secrets/io-database-url
     secrets:
       - io-database-url
-      - capability-public-keyset
+      - api-storage-capability-public-keyset
+      - collaboration-storage-capability-public-keyset
     configs:
       - source: filebelt-config
         target: /etc/filebelt/filebelt.toml
@@ -327,7 +330,7 @@ services:
     secrets:
       - mcp-database-url
       - mcp-vault-keyring
-      - capability-public-keyset
+      - api-mcp-delegation-capability-public-keyset
       - source: mcp-egress-client-certificate
         target: /run/secrets/mcp-egress-client.crt
         mode: 0444
@@ -338,7 +341,7 @@ services:
         target: /run/secrets/mcp-egress-ca.crt
         mode: 0444
     configs:
-      - source: filebelt-config
+      - source: filebelt-mcp-config
         target: /etc/filebelt/filebelt.toml
         mode: 0444
     networks: [control]
@@ -361,8 +364,10 @@ services:
     command: [serve, --config, /etc/filebelt/filebelt.toml]
     secrets:
       - collaboration-database-url
-      - collaboration-capability-private-key
-      - capability-public-keyset
+      - collaboration-storage-capability-private-key
+      - collaboration-storage-capability-public-keyset
+      - api-storage-capability-public-keyset
+      - api-collaboration-grant-capability-public-keyset
     configs:
       - source: filebelt-collaboration-config
         target: /etc/filebelt/filebelt.toml
@@ -441,7 +446,8 @@ services:
       FILEBELT_DATABASE_URL_FILE: /run/secrets/io-database-url
     secrets:
       - io-database-url
-      - capability-public-keyset
+      - api-storage-capability-public-keyset
+      - collaboration-storage-capability-public-keyset
     configs:
       - source: filebelt-config
         target: /etc/filebelt/filebelt.toml
@@ -466,6 +472,8 @@ volumes:
 configs:
   filebelt-config:
     file: ${FILEBELT_CONFIG_FILE:-./filebelt.toml}
+  filebelt-mcp-config:
+    file: ${FILEBELT_MCP_CONFIG_FILE:-./filebelt-mcp.toml}
   filebelt-collaboration-config:
     file: ${FILEBELT_COLLABORATION_CONFIG_FILE:-./filebelt-collaboration.toml}
   filebelt-acceptance-edge-config:
@@ -516,14 +524,22 @@ secrets:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-vault-keyring.json
   oidc-client-secret:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret
-  capability-private-key:
-    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-private-key
-  collaboration-capability-private-key:
-    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-capability-private-key
-  mount-capability-private-key:
-    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mount-capability-private-key
-  capability-public-keyset:
-    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/capability-public-keyset
+  api-storage-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-storage-capability-private-key
+  api-storage-capability-public-keyset:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-storage-capability-public-keyset
+  api-collaboration-grant-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-collaboration-grant-capability-private-key
+  api-collaboration-grant-capability-public-keyset:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-collaboration-grant-capability-public-keyset
+  api-mcp-delegation-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-mcp-delegation-capability-private-key
+  api-mcp-delegation-capability-public-keyset:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-mcp-delegation-capability-public-keyset
+  collaboration-storage-capability-private-key:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-storage-capability-private-key
+  collaboration-storage-capability-public-keyset:
+    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/collaboration-storage-capability-public-keyset
   digest-key:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/digest-key
   filebelt-tls-certificate:

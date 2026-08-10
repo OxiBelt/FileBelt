@@ -17,8 +17,8 @@ sensitive operational evidence.
 ## Create a coordinated backup
 
 1. Record the chart revision, selected workload image digests, ConfigMap
-   identities, Secret generations, API, collaboration, and mount capability-key
-   generations and the combined verification keyset, MCP and mount KEK generations, runner
+   identities, Secret generations, every capability purpose/digest/local
+   generation and its purpose-specific public keyset, MCP and mount KEK generations, runner
    catalog/root/bundle identities, and certificate overlap.
 2. Stop new collaboration grants, fence active rooms, and wait for every
    durable CRDT group to reach a PostgreSQL manifest terminal state. Stop new
@@ -28,7 +28,7 @@ sensitive operational evidence.
    Wait for web/API/I/O/maintenance/broker/controller Pods and all remaining
    streams and leases to drain or fence.
 3. In a second revision, still quiesced, run the recovery checkpoint Job. Save
-   its single `filebelt.recovery.checkpoint.v2` JSON document outside the
+   its single `filebelt.recovery.checkpoint.v3` JSON document outside the
    cluster.
 4. While still quiesced, take the external PostgreSQL backup and RWX volume
    snapshot/copy. Record their immutable provider identifiers alongside the
@@ -54,7 +54,7 @@ unredacted logs in ordinary CI artifacts.
    registration/tombstone/vault inventories, every referenced MCP KEK
    generation, retained mount policy/vault inventory and every referenced mount
    KEK generation, and the deterministic expected-payload inventory hash must
-   agree. The emitted schema is `filebelt.recovery.verification.v2`.
+   agree. The emitted schema is `filebelt.recovery.verification.v3`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
    deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP
    invocation/runner leases and revocation tombstones, mount
@@ -92,9 +92,14 @@ unredacted logs in ordinary CI artifacts.
   revoke and cryptographically erase the registrations under an explicit
   incident plan. Core file operations may resume only after proving they remain
   isolated from the disabled MCP path.
-- Lost mount KEK or generation-3 signing material: keep mount admission
+- Lost mount KEK or `mount-storage` signing material: keep mount admission
   disabled. Revoke affected credentials and gateway runtime state under an
   explicit incident plan; do not derive a verifier from a tailstate volume or
   reuse an API/collaboration signing key.
 - Partial scrub: rerun the same run UUID to resume idempotently. Do not treat a
   partial run as verification.
+Recovery v3 records each capability purpose, digest generation, and local
+generation. Recovery verification may wait up to 120 seconds for MCP quiesce
+and reconciliation. Version-2 evidence is offline-only: it can inform an
+investigation but cannot be used to admit a v7 runtime. After v7 admission,
+repair incompatibilities forward; never roll a running deployment back to v6.

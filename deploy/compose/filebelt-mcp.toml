@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 6
+version = 7
 public_origin = "https://filebelt.localhost:8443/"
 
 [deployment]
@@ -29,9 +29,22 @@ root = "/var/lib/filebelt/payloads"
 backend_id = "00000000-0000-4000-8000-000000000001"
 
 [keys]
-capability_private_key_file = "/run/secrets/capability-private-key"
-capability_public_key_file = "/run/secrets/capability-public-keyset"
 digest_key_file = "/run/secrets/digest-key"
+digest_key_generation = 1
+
+[keys.api_storage]
+private_key_file = "/run/secrets/api-storage-capability-private-key"
+public_keyset_file = "/run/secrets/api-storage-capability-public-keyset"
+current_generation = 1
+
+[keys.api_collaboration_grant]
+private_key_file = "/run/secrets/api-collaboration-grant-capability-private-key"
+public_keyset_file = "/run/secrets/api-collaboration-grant-capability-public-keyset"
+current_generation = 1
+
+[keys.api_mcp_delegation]
+private_key_file = "/run/secrets/api-mcp-delegation-capability-private-key"
+public_keyset_file = "/run/secrets/api-mcp-delegation-capability-public-keyset"
 current_generation = 1
 
 [listeners]
@@ -52,13 +65,21 @@ prometheus_enabled = true
 [collaboration]
 enabled = true
 database_url_file = "/run/secrets/collaboration-database-url"
-capability_private_key_file = "/run/secrets/collaboration-capability-private-key"
-capability_key_generation = 2
 io_url = "http://filebelt-worker-io:8081/"
 webtransport_enabled = false
 
+[collaboration.capability_signing]
+private_key_file = "/run/secrets/collaboration-storage-capability-private-key"
+public_keyset_file = "/run/secrets/collaboration-storage-capability-public-keyset"
+current_generation = 1
+
 [media]
 enabled = false
+
+[media.capability_signing]
+private_key_file = "/run/secrets/media-storage-capability-private-key"
+public_keyset_file = "/run/secrets/media-storage-capability-public-keyset"
+current_generation = 1
 
 [limits]
 whole_threshold_bytes = 33554432
@@ -99,15 +120,6 @@ ports = [443]
 [mcp.runners]
 enabled = false
 
-[mounts]
-enabled = false
-capability_private_key_file = "/run/secrets/mount-capability-private-key"
-capability_key_generation = 3
-# The development VFS-to-I/O path is plain HTTP inside the isolated Compose network.
-io_url = "http://filebelt-worker-io:8081/"
-
-[mounts.nfs]
-enabled = false
 
 [iggy]
 endpoint = "tcp://filebelt-iggy:8090"

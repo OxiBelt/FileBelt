@@ -23,7 +23,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "collaboration") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s" .Values.secrets.collaborationDatabase.generation .Values.secrets.collaborationCapabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.collaborationServerTls.generation .Values.secrets.collaborationIoClientTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.collaborationDatabase.generation .Values.secrets.collaborationStorageCapabilityPrivateKey.generation .Values.secrets.collaborationStorageCapabilityPublicKeyset.generation .Values.secrets.apiStorageCapabilityPublicKeyset.generation .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.generation .Values.secrets.collaborationServerTls.generation .Values.secrets.collaborationIoClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-collaboration
       automountServiceAccountToken: false
@@ -63,8 +63,10 @@ spec:
           volumeMounts:
             - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
             - {name: database, mountPath: /run/secrets/collaboration-database-url, subPath: database-url, readOnly: true}
-            - {name: capability-private, mountPath: /run/secrets/collaboration-capability-private-key, subPath: private-key, readOnly: true}
-            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: collaboration-storage-capability-private, mountPath: /run/secrets/collaboration-storage-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: collaboration-storage-capability-public, mountPath: /run/secrets/collaboration-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            - {name: api-storage-capability-public, mountPath: /run/secrets/api-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            - {name: api-collaboration-grant-capability-public, mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset, subPath: public-keyset, readOnly: true}
             - {name: server-tls, mountPath: /run/secrets/collaboration-server-tls, readOnly: true}
             - {name: io-client-tls, mountPath: /run/secrets/collaboration-io-client-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
@@ -72,10 +74,14 @@ spec:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
         - name: database
           secret: {secretName: {{ .Values.secrets.collaborationDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationDatabase.key }}, path: database-url}]}
-        - name: capability-private
-          secret: {secretName: {{ .Values.secrets.collaborationCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationCapabilityPrivateKey.key }}, path: private-key}]}
-        - name: capability-public
-          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: collaboration-storage-capability-private
+          secret: {secretName: {{ .Values.secrets.collaborationStorageCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationStorageCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: collaboration-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        - name: api-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        - name: api-collaboration-grant-capability-public
+          secret: {secretName: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.key }}, path: public-keyset}]}
         - name: server-tls
           secret:
             secretName: {{ .Values.secrets.collaborationServerTls.name }}

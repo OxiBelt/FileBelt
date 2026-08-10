@@ -11,7 +11,7 @@
   collaboration rooms, MCP registrations and vault,
   remote MCP mediation, one-shot curated runners, read-write mount VFS,
   Headscale device synchronization, GPL SMB/explicit-FTPS process boundaries,
-  provider-neutral external document sessions, generation-4 document I/O
+  provider-neutral external document sessions, purpose-bound document I/O
   capabilities, the separately licensed AGPL ONLYOFFICE adapter and launcher,
   provider callback/JWT processing, output-fetch egress isolation,
   NFSv4.1/v4.2 with external Kerberos `krb5p`, NFS-Ganesha recovery and
@@ -130,7 +130,7 @@ tailnet client ──SMB/explicit FTPS──> GPL gateway ──mTLS/VFS v1─�
 browser ──session+CSRF──> public OxiBelt ──mTLS/API──> API ──mTLS/document v1──> document coordinator
        └──one-use top-level form POST──> editor OxiBelt ──mTLS──> AGPL adapter ──provider JWT/config──> DocumentServer
                                                                    ├──mTLS/document v1─────────> coordinator
-                                                                   ├──generation-4 fbcap1/mTLS─> I/O worker ──> RWX payload root
+                                                                   ├──document-storage fbcap1/mTLS─> I/O worker ──> RWX payload root
                                                                    └──mTLS/exact target────────> output egress gateway ──> DocumentServer
 ```
 
@@ -157,7 +157,7 @@ TLS server-name authentication separate.
 
 VFS and Headscale sync are Apache processes with distinct narrow PostgreSQL
 roles and no payload mount. The VFS is the only process that decrypts a mount
-verifier and signs generation-3 `fbcap2`; the I/O worker verifies that envelope
+verifier and signs `mount-storage` `fbcap2`; the I/O worker verifies that envelope
 and authoritative handle/version fences before reading bytes. GPL gateways are
 replaceable clients of the generic mTLS protocol and receive no database,
 vault, signing, browser-session, Kubernetes-token, or payload authority.
@@ -168,7 +168,7 @@ adapter release images lack production acceptance evidence.
 
 The Apache document coordinator owns provider-neutral session, participant,
 revision, and reconciliation state through its narrow PostgreSQL role. It has
-the generation-4 signing key and no payload mount or Internet egress. The AGPL
+the `document-storage` signing key and no payload mount or Internet egress. The AGPL
 adapter owns ONLYOFFICE configuration, status mapping, callback JWT validation,
 and launcher/source surfaces; OxiBelt reaches it with a dedicated exact mTLS
 identity, it can reach Core and capability-limited I/O only with its own exact
@@ -210,14 +210,14 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Brute force exhausts verifier comparison or reveals valid usernames | Keyed username/source throttle in PostgreSQL, constant verifier comparison, uniform authentication failure, bounded session/credential lifetimes | Rate-window, successful-clear, unknown-user equivalence, and concurrent-attempt tests |
 | Stale or malicious Headscale data authorizes another principal or preserves a disappeared device | Exact OIDC issuer/subject mapping; ignore tagged/service nodes; validate bounded full snapshot, duplicate IDs and expiry before one atomic replacement; device ownership generation fences sessions | Partial/malformed/duplicate/expired snapshot, identity swap, disappearance, and rollback tests |
 | Gateway restart or another replica replays an opaque session | PostgreSQL gateway epoch returned by zero-epoch hello and bound to every request/session/handle; restart or retirement invalidates dependent state | Cross-gateway, stale-epoch, restart, request-correlation, and expiry tests |
-| Mount capability is replayed, widened, or accepted as API authority | Distinct `fbcap2` prefix and generation-3 key; exact read audience/range/version/handle/generation claims, random nonce, <=15-second expiry, I/O PostgreSQL revalidation | Prefix/key confusion, claim mutation, stale-handle/version, range, expiry, and cross-audience tests |
+| Mount capability is replayed, widened, or accepted as API authority | Distinct `fbcap2` prefix and purpose-tagged `mount-storage` keyset; exact read audience/range/version/handle/generation claims, random nonce, <=15-second expiry, I/O PostgreSQL revalidation | Prefix/key confusion, claim mutation, stale-handle/version, range, expiry, and cross-audience tests |
 | Compromised VFS or gateway reads arbitrary payload paths | No payload mount; VFS can issue read-only `fbcap2` only for an admitted handle; I/O resolves UUID locator through narrow immutable-version state; gateway receives only bytes and generic IDs | Container mount, DB grant, arbitrary-ID, write-operation, and direct-worker denial tests |
 | Adapter falls back to local filesystem or crosses the license boundary | Apache core imports only generic schema; separate GPL workspaces/processes/images/notices/source offers; Samba callbacks return `ENOSYS` until reviewed IPC exists; adapters disabled by default | Cargo boundary, dependency graph, ABI callback, local-fallback, REUSE, notice, source-offer, and image-plan tests |
 | Tailnet sidecar or state expands core Pod authority | Tailscaled exists only beside gateways, kernel networking is explicit, non-privileged sidecar has only `NET_ADMIN` and one `/dev/net/tun`, separate RWO state, no ServiceAccount token, default-deny peers | Rendered securityContext/device/mount/RBAC and NetworkPolicy tests |
 | Provider callback is forged, replayed, reordered, or used for another document | Exact opaque route binding, HS256 algorithm/claim/context validation with separate current and bounded-retiring secret, canonical event digest persisted before acknowledgement, monotonic state/fence checks, and idempotent Core outcome lookup | Bad-algorithm/signature/claim/key, cross-document, duplicate, out-of-order, response-loss, and restart tests |
 | Provider output URL performs SSRF, DNS rebinding, redirect escape, or oversized download | Exact configured HTTPS origin and provider identity; no userinfo/fragment; direct adapter Internet denied; mTLS egress gateway revalidates DNS/IP and TLS target, refuses redirects, and streams under header/time/100 MiB limits | Private/link-local/metadata, IPv4/IPv6, rebinding, redirect, slow/large, CA/SNI, and NetworkPolicy denial tests |
 | Callback overwrites a newer Web, Markdown, mount, or document version | Core locks current authorization/session generations, revision fence, and expected node head in one PostgreSQL transaction; mismatch creates a seven-day retained conflict and never updates the head | Two-writer head race, ACL/session revoke, conflict-copy authorization, retry, and no-overwrite tests |
-| Adapter or DocumentServer reads arbitrary FileBelt content | No browser cookie, payload mount, API signing key, or general DB credential; one-use launch; generation-4 exact-version/range capability; I/O resolves only the signed immutable version and rechecks generations | Cross-tenant/node/version/range, expired/replayed grant, arbitrary-ID, mount, database-grant, and direct-worker tests |
+| Adapter or DocumentServer reads arbitrary FileBelt content | No browser cookie, payload mount, API signing key, or general DB credential; one-use launch; `document-storage` exact-version/range capability; I/O resolves only the signed immutable version and rechecks generations | Cross-tenant/node/version/range, expired/replayed grant, arbitrary-ID, mount, database-grant, and direct-worker tests |
 | Malicious editor script escapes into the Apache SPA, uses a FileBelt browser session, misstates the external provider, or leaks a launch grant | Dedicated FileBelt-controlled editor hostname distinct from public/provider hosts; disjoint OxiBelt routes and repeated adapter host checks; exact public `Origin` on top-level POST; no API CORS or launcher cookie; Core-issued display-only provider origin; memory-only one-use form value; fixed script/connect sources and exact CSP sandbox; no FileBelt token in query/referrer/storage | Chromium/Firefox real-provider CSP and cookie isolation, hostile-script API denial, old-route 404, consent-origin, clickjacking, form-action, postMessage schema/origin, referrer, Web Storage, and cross-tab tests |
 | Community edition limits or license/source obligations are hidden or bypassed | Fixed provider `9.4.0`, 20 active-participant admission under PostgreSQL lock, no clustering claim, retained branding, public exact source/about endpoints, immutable source URL/build instructions/notices, truthful distinct OCI labels | Capacity race, source-link HTTP, branding, REUSE, notice, SBOM/source-map, image-label, and release-gate tests |
 | Document save is acknowledged but lost or duplicated across adapter/Core/I/O crash | Durable event/revision/reconciliation rows precede acknowledgement; UUID allocation and quota reserve are transactional; I/O fsync and digest precede staged state; reconciliation reads terminal committed/no-op/conflict result and never creates a second version | Kill points at callback, allocation, byte write, finalize, commit, and response; duplicate revision and Iggy-down tests |
@@ -260,7 +260,7 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Adjacent Pod connects directly to a backend | Namespace default-deny plus per-role allowlist; backend TLS 1.3 requires the exact OxiBelt API or I/O client URI SAN | Calico/Cilium denial and mTLS-negative tests |
 | Compromised web client identity reaches the other backend | Separate client certificates and exact URI SAN allowlists for API and I/O; one retiring identity allowed only during rotation | Cross-upstream certificate and rotation tests |
 | Kubelet cannot authenticate to an mTLS application listener | Separate low-information operations listener; never expose it publicly; metrics ingress restricted to configured monitoring peers | Probe and NetworkPolicy tests |
-| Mutable Secret changes without a controlled restart | Existing key-filtered Secret projections plus an explicit generation in the Pod template; configuration and trust load only at startup | Secret/certificate rollout tests |
+| Mutable Secret changes or a projected keyset crosses a purpose boundary | Existing key-filtered, purpose-specific Secret projections plus an explicit generation in the Pod template; v2 keysets bind a purpose and globally disjoint public-key bytes | Secret/certificate rollout and hostile-signer tests |
 | Unexpected ServiceAccount token or RBAC expands a compromised Pod | Token automount disabled for every role except the controller; its exact runner-namespace Role is the only Role/Binding rendered and grants no core-namespace authority | Static manifests and `kubectl auth can-i` tests |
 | API bypasses the OIDC egress allowlist | Dedicated OIDC HTTP client uses an explicit in-cluster CONNECT gateway; NetworkPolicy permits only its namespace/pod/port; gateway allowlists the issuer | Direct-Internet denial and gateway destination tests |
 | DNS or external dependency addressing creates catch-all egress | Core roles use explicit DNS peers; runner Pods have no DNS path and receive only controller-resolved numeric broker/gateway addresses; chart rejects IPv4/IPv6 default routes | Schema/helper and live policy tests |

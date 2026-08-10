@@ -396,7 +396,7 @@ spec:
   podSelector:
     matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: tools-operation}
   policyTypes: [Egress]
-  {{- if eq .Values.operation.type "storage-probe" }}
+  {{- if has .Values.operation.type (list "keys-audit" "storage-probe") }}
   egress: []
   {{- else }}
   egress:

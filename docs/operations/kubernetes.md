@@ -34,7 +34,7 @@ Operators provide:
   pre-created exclusive runner namespace separate from the release namespace;
 - before any future mount enablement, external Headscale `0.29.3`, API token and
   CA, VFS/Headscale database logins, a distinct mount-vault keyring,
-  generation-3 capability signing key and combined public keyset, VFS/API/I/O
+  `mount-storage` purpose private/public material, VFS/API/I/O
   mTLS identities, gateway tailnet auth, node `/dev/net/tun`, and one distinct
   operator-owned RWO tailstate claim per gateway;
 - a public L4/TCP path to the web ClusterIP Service; and
@@ -62,14 +62,18 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 6. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Confirm `filebelt.toml` uses format 6. If MCP is enabled, validate the
+7. Confirm `filebelt.toml` uses format 7. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
    `mcp.runners.namespace` and must not equal the release namespace.
    Keep `mounts.enabled=false`; a render that enables it is preview evidence,
    not authorization to expose SMB or FTPS.
-8. Render with strict lint and server-side dry-run before changing the release.
+8. While workloads remain quiesced, run the chart's `keys-audit` operation with
+   all configured purpose public keysets projected. Require successful proof
+   that every current generation is present and no public key bytes occur in
+   two purposes; retain the Job output with the candidate release evidence.
+9. Render with strict lint and server-side dry-run before changing the release.
    For runners, inspect the namespaced Role and prove it cannot read or mutate
    resources outside the runner namespace.
 
@@ -137,10 +141,11 @@ Never combine a new workload image/config rollout with the migration revision.
    revision.
 
 For the additive mount migrations, keep mount workloads disabled while the DBA
-applies VFS and Headscale grants. Provision the generation-3 public key in I/O
-before any VFS signer could start. Rollback leaves migrations `000004` and
-`000005`, the mount KEK, and the retiring public key in place; never drop the
-schemas or remove key material referenced by recovery evidence.
+applies VFS and Headscale grants. Provision the purpose-tagged `mount-storage`
+public keyset in I/O before any VFS signer could start. Rollback leaves
+migrations `000004` and `000005`, the mount KEK, and every admitted retiring
+public key in place; never drop the schemas or remove key material referenced
+by recovery evidence.
 
 The migration ledger is forward-only. Expand-compatible schema changes precede
 rollout; contract migrations occur only after the documented compatibility
@@ -262,3 +267,8 @@ registry artifacts are never cleanup targets.
 For failures during an upgrade, follow
 [the Kubernetes rollback runbook](kubernetes-rollback.md). For backups and
 restore rehearsals, follow [Kubernetes recovery](kubernetes-recovery.md).
+For v7, create independent, immutable Secret objects for each purpose-private
+and purpose-public keyset. Record every exact Secret generation before rollout;
+the chart rolls only workloads that project that material. The API owns enabled
+API pairs, I/O receives only API-storage plus enabled storage-purpose public
+sets, and no runtime media workload receives media material.

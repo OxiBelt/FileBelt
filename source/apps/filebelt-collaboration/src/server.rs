@@ -11,12 +11,13 @@ use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgr
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Router, routing};
+use filebelt_capability_keyset::ApiCollaborationGrantKeyset;
 use filebelt_collaboration_protocol::collaboration_frame::Frame;
 use filebelt_collaboration_protocol::{
     Acknowledgement, Authenticate, Checkpoint as CheckpointFrame, CheckpointRequest,
     CheckpointState, CollaborationCodec, CollaborationError, CollaborationErrorCode,
     CollaborationGrantClaims, Heartbeat, PROTOCOL_VERSION, PresenceState, SyncChunk, UpdateGroup,
-    VerificationKey, grant_digest, verify_grant,
+    grant_digest, verify_collaboration_grant,
 };
 use filebelt_control_protocol::CollaborationLimitConfig;
 use filebelt_database::collaboration::{
@@ -67,7 +68,7 @@ pub struct CollaborationServerState {
     pub database: Database,
     pub tenant_id: Uuid,
     pub public_origin: String,
-    pub grant_verification_keys: Arc<Vec<VerificationKey>>,
+    pub grant_verification_keys: Arc<ApiCollaborationGrantKeyset>,
     pub io: CollaborationIoClient,
     pub limits: CollaborationLimitConfig,
     room_loads: Arc<Mutex<HashMap<RoomKey, Arc<Mutex<()>>>>>,
@@ -80,7 +81,7 @@ impl CollaborationServerState {
         database: Database,
         tenant_id: Uuid,
         public_origin: String,
-        grant_verification_keys: Arc<Vec<VerificationKey>>,
+        grant_verification_keys: Arc<ApiCollaborationGrantKeyset>,
         io: CollaborationIoClient,
         limits: CollaborationLimitConfig,
     ) -> Self {
@@ -525,19 +526,8 @@ async fn authenticate_grant(
     ),
     SessionError,
 > {
-    if authenticate.protocol_version != PROTOCOL_VERSION
-        || authenticate.codec != CollaborationCodec::YjsV1 as i32
-    {
-        return Err(SessionError::Protocol);
-    }
-    let wire =
-        std::str::from_utf8(&authenticate.grant).map_err(|_| SessionError::Authentication)?;
-    let now = unix_seconds();
-    let claims = verify_grant(wire, &state.grant_verification_keys, now)
-        .map_err(|_| SessionError::Authentication)?;
-    if authenticate.room_id != claims.room_id {
-        return Err(SessionError::Authentication);
-    }
+    let (claims, wire) =
+        verify_grant_before_state(authenticate, &state.grant_verification_keys, unix_seconds())?;
     let tenant_id = parse_claim_uuid(&claims.tenant_id)?;
     if tenant_id != state.tenant_id {
         return Err(SessionError::Authorization);
@@ -592,6 +582,27 @@ async fn authenticate_grant(
     };
     info!(room_id = %claims.room_id, client_id = %claims.client_id, "collaboration participant joined");
     Ok((claims, room, receiver, connection_id))
+}
+
+fn verify_grant_before_state<'a>(
+    authenticate: &'a Authenticate,
+    keys: &ApiCollaborationGrantKeyset,
+    now: i64,
+) -> Result<(CollaborationGrantClaims, &'a str), SessionError> {
+    if authenticate.protocol_version != PROTOCOL_VERSION
+        || authenticate.codec != CollaborationCodec::YjsV1 as i32
+    {
+        return Err(SessionError::Protocol);
+    }
+    let wire =
+        std::str::from_utf8(&authenticate.grant).map_err(|_| SessionError::Authentication)?;
+    let claims = verify_collaboration_grant(wire, keys, now)
+        .map_err(|_| SessionError::Authentication)?
+        .claims;
+    if authenticate.room_id != claims.room_id {
+        return Err(SessionError::Authentication);
+    }
+    Ok((claims, wire))
 }
 
 async fn load_room(
@@ -1400,7 +1411,34 @@ fn unix_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
     use axum::http::HeaderValue;
+
+    fn grant_claims() -> CollaborationGrantClaims {
+        CollaborationGrantClaims {
+            grant_id: Uuid::new_v4().to_string(),
+            tenant_id: Uuid::new_v4().to_string(),
+            room_id: Uuid::new_v4().to_string(),
+            room_epoch: 1,
+            drive_id: Uuid::new_v4().to_string(),
+            node_id: Uuid::new_v4().to_string(),
+            base_version_id: Uuid::new_v4().to_string(),
+            principal_id: Uuid::new_v4().to_string(),
+            session_id: Uuid::new_v4().to_string(),
+            client_id: Uuid::new_v4().to_string(),
+            presence_mode: filebelt_collaboration_protocol::PresenceMode::Pseudonym as i32,
+            presence_label: "Editor 7".into(),
+            resource_acl_generation: 1,
+            drive_acl_generation: 1,
+            membership_generation: 1,
+            namespace_generation: 1,
+            can_checkpoint: true,
+            issued_at_unix_seconds: 100,
+            expires_at_unix_seconds: 160,
+            nonce: vec![7; 32],
+            bootstrap_download_capability: "fbcap1.test".into(),
+        }
+    }
 
     fn test_room() -> Arc<Mutex<LiveRoom>> {
         let limits = CollaborationLimitConfig::default();
@@ -1434,6 +1472,60 @@ mod tests {
             validate_upgrade_headers("https://files.example/", &headers),
             Err(StatusCode::FORBIDDEN)
         );
+    }
+
+    #[test]
+    fn collaboration_admission_rejects_foreign_signer_before_grant_consumption() {
+        let retiring = Ed25519KeyPair::generate().unwrap();
+        let current = Ed25519KeyPair::generate().unwrap();
+        let foreign = Ed25519KeyPair::generate().unwrap();
+        let keys = ApiCollaborationGrantKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiCollaborationGrant,
+                &[
+                    (1, retiring.public_key().as_ref().try_into().unwrap()),
+                    (2, current.public_key().as_ref().try_into().unwrap()),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let _foreign_storage_keys = filebelt_capability_keyset::CollaborationStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::CollaborationStorage,
+                &[(1, foreign.public_key().as_ref().try_into().unwrap())],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let claims = grant_claims();
+
+        for (generation, signer) in [(1, &retiring), (2, &current)] {
+            let wire = filebelt_collaboration_protocol::sign_collaboration_grant(
+                &claims, generation, signer,
+            )
+            .unwrap();
+            let authenticate = Authenticate {
+                grant: wire.into_bytes(),
+                room_id: claims.room_id.clone(),
+                codec: CollaborationCodec::YjsV1 as i32,
+                protocol_version: PROTOCOL_VERSION,
+            };
+            assert!(verify_grant_before_state(&authenticate, &keys, 120).is_ok());
+        }
+
+        let wire = filebelt_collaboration_protocol::sign_collaboration_grant(&claims, 1, &foreign)
+            .unwrap();
+        let authenticate = Authenticate {
+            grant: wire.into_bytes(),
+            room_id: claims.room_id,
+            codec: CollaborationCodec::YjsV1 as i32,
+            protocol_version: PROTOCOL_VERSION,
+        };
+        assert!(matches!(
+            verify_grant_before_state(&authenticate, &keys, 120),
+            Err(SessionError::Authentication)
+        ));
     }
 
     #[test]

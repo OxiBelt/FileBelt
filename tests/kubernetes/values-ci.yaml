@@ -25,8 +25,20 @@ secrets:
   recoveryDatabase: {name: filebelt-recovery-database-ci, key: database-url, generation: ci-1}
   oidcClient: {name: filebelt-oidc-client-ci, key: client-secret, generation: ci-1}
   oidcCa: {name: filebelt-oidc-ca-ci, key: ca.crt, generation: ci-1}
-  capabilityPrivateKey: {name: filebelt-capability-private-ci, key: private-key, generation: ci-1}
-  capabilityPublicKeyset: {name: filebelt-capability-public-ci, key: public-keyset, generation: ci-1}
+  apiStorageCapabilityPrivateKey: {name: filebelt-api-storage-capability-private-ci, key: private-key, generation: ci-1}
+  apiStorageCapabilityPublicKeyset: {name: filebelt-api-storage-capability-public-ci, key: public-keyset, generation: ci-1}
+  apiCollaborationGrantCapabilityPrivateKey: {name: filebelt-api-collaboration-grant-capability-private-ci, key: private-key, generation: ci-1}
+  apiCollaborationGrantCapabilityPublicKeyset: {name: filebelt-api-collaboration-grant-capability-public-ci, key: public-keyset, generation: ci-1}
+  apiMcpDelegationCapabilityPrivateKey: {name: filebelt-api-mcp-delegation-capability-private-ci, key: private-key, generation: ci-1}
+  apiMcpDelegationCapabilityPublicKeyset: {name: filebelt-api-mcp-delegation-capability-public-ci, key: public-keyset, generation: ci-1}
+  collaborationStorageCapabilityPrivateKey: {name: filebelt-collaboration-storage-capability-private-ci, key: private-key, generation: ci-1}
+  collaborationStorageCapabilityPublicKeyset: {name: filebelt-collaboration-storage-capability-public-ci, key: public-keyset, generation: ci-1}
+  documentStorageCapabilityPrivateKey: {name: filebelt-document-storage-capability-private-ci, key: private-key, generation: ci-1}
+  documentStorageCapabilityPublicKeyset: {name: filebelt-document-storage-capability-public-ci, key: public-keyset, generation: ci-1}
+  mountStorageCapabilityPrivateKey: {name: filebelt-mount-storage-capability-private-ci, key: private-key, generation: ci-1}
+  mountStorageCapabilityPublicKeyset: {name: filebelt-mount-storage-capability-public-ci, key: public-keyset, generation: ci-1}
+  mediaStorageCapabilityPrivateKey: {name: filebelt-media-storage-capability-private-ci, key: private-key, generation: ci-1}
+  mediaStorageCapabilityPublicKeyset: {name: filebelt-media-storage-capability-public-ci, key: public-keyset, generation: ci-1}
   digestKey: {name: filebelt-digest-key-ci, key: digest-key, generation: ci-1}
   publicTls: {name: filebelt-public-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, generation: ci-1}
   apiServerTls: {name: filebelt-api-server-tls-ci, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: ci-1}

@@ -3,6 +3,8 @@
 {{- $type := .Values.operation.type -}}
 {{- $storageOperation := has $type (list "storage-probe" "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
 {{- $payloadOperation := eq $type "storage-probe" -}}
+{{- $recoveryOperation := has $type (list "recovery-checkpoint" "recovery-verify") -}}
+{{- $keysetInventoryOperation := or $recoveryOperation (eq $type "keys-audit") -}}
 {{- $databaseSecret := "" -}}
 {{- if eq $type "migrate" -}}
 {{- $databaseSecret = .Values.secrets.migratorDatabase.name -}}
@@ -14,7 +16,7 @@
 {{- $databaseSecret = .Values.secrets.auditDatabase.name -}}
 {{- else if has $type (list "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
 {{- $databaseSecret = .Values.secrets.maintenanceDatabase.name -}}
-{{- else if ne $type "storage-probe" -}}
+{{- else if not (has $type (list "keys-audit" "storage-probe")) -}}
 {{- $databaseSecret = .Values.secrets.recoveryDatabase.name -}}
 {{- end -}}
 {{- $databaseKey := "" -}}
@@ -79,6 +81,9 @@ spec:
           {{- else if eq $type "storage-probe" }}
             - storage
             - probe
+          {{- else if eq $type "keys-audit" }}
+            - keys
+            - audit
           {{- else if eq $type "storage-scrub-start" }}
             - storage
             - scrub
@@ -150,6 +155,23 @@ spec:
             {{- if eq $type "recovery-verify" }}
             - {name: checkpoint, mountPath: /run/input, readOnly: true}
             {{- end }}
+            {{- if $keysetInventoryOperation }}
+            - {name: api-storage-capability-public, mountPath: /run/secrets/api-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            - {name: media-storage-capability-public, mountPath: /run/secrets/media-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- if .Values.collaboration.enabled }}
+            - {name: api-collaboration-grant-capability-public, mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            - {name: collaboration-storage-capability-public, mountPath: /run/secrets/collaboration-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.mcp.enabled }}
+            - {name: api-mcp-delegation-capability-public, mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.documents.enabled }}
+            - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.mounts.enabled }}
+            - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
@@ -170,6 +192,51 @@ spec:
             secretName: {{ .Values.operation.checkpoint.secretName }}
             defaultMode: 0440
             items: [{key: {{ .Values.operation.checkpoint.key }}, path: checkpoint.json}]
+        {{- end }}
+        {{- if $keysetInventoryOperation }}
+        - name: api-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        - name: media-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.mediaStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.mediaStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- if .Values.collaboration.enabled }}
+        - name: api-collaboration-grant-capability-public
+          secret:
+            secretName: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.key }}, path: public-keyset}]
+        - name: collaboration-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- end }}
+        {{- if .Values.mcp.enabled }}
+        - name: api-mcp-delegation-capability-public
+          secret:
+            secretName: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- end }}
+        {{- if .Values.documents.enabled }}
+        - name: document-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- end }}
+        {{- if .Values.mounts.enabled }}
+        - name: mount-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- end }}
         {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 {{- end }}

@@ -15,8 +15,8 @@ and enable both profiles with the MCP-specific configuration:
 ```sh
 FILEBELT_STATE_DIR=/absolute/disposable/path deploy/compose/prepare-state.sh
 FILEBELT_STATE_DIR=/absolute/disposable/path \
-FILEBELT_CONFIG_FILE=./filebelt-mcp.toml \
-docker compose -f deploy/compose/compose.yaml --profile core --profile mcp up --build
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.mcp.yaml \
+  --profile core --profile mcp up --build
 ```
 
 The development egress gateway is the only service attached to the

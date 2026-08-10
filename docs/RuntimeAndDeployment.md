@@ -50,13 +50,25 @@ The current build matrix contains thirteen Apache-region images on
 | `filebelt-tools` | Active and publishable. Runs bounded, explicit configuration, migration, bootstrap, key, audit, job, storage, and recovery commands with command-specific credentials and mounts. |
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
 | `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
-| `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs generation-4 exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
+| `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs `document-storage` exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
 | `filebelt-mcp-runner` | Active and publishable. Supplies the trusted relay/shim injected into one-shot curated server Pods; it receives no FileBelt database, payload, session, or vault credential. |
-| `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs generation-3 `fbcap2` reads to I/O. It has no payload mount. |
+| `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs `mount-storage` `fbcap2` reads to I/O. It has no payload mount. |
 | `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
+
+Format-7 deployment material is purpose-scoped and operator-created. API mounts
+only its enabled API private/public pairs; I/O mounts API-storage plus enabled
+storage-purpose public keysets; collaboration additionally receives its own
+pair and API storage/grant public sets; broker receives API-MCP-delegation
+public material only; document and VFS receive their own pairs. No runtime Pod
+mounts media signing material; recovery/admin Jobs receive the media public
+keyset. Helm values name every Secret separately and exact Secret generations
+are included in the relevant immutable-Secret rollout checksum. Before any
+format-7 admission, the public-only `keys-audit` Job must load the complete
+configured inventory and prove that current generations are present and public
+key bytes are globally disjoint across purposes.
 
 Copyleft adapter roles `filebelt-smb-gateway` and
 `filebelt-ftp-ftps-gateway` remain outside the Apache image plan and release
@@ -204,7 +216,7 @@ bounded administrative Jobs. FileBelt deploys no HPA.
 
 `documents.enabled=true` additionally renders the Apache document coordinator
 Deployment and Service only after migration 000006, grants verification, the
-generation-4 capability key, API/document/I/O mTLS projections, an exact
+`document-storage` purpose keyset, API/document/I/O mTLS projections, an exact
 operator-configured isolated editor launch action, and an exact external
 provider HTTPS origin are present. The editor action must be HTTPS at
 `/onlyoffice/launch` on a hostname distinct from both the FileBelt public host
@@ -325,26 +337,25 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 6; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 7; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
 Prometheus metrics. Enabled collaboration additionally requires the
-collaboration database URL/TLS identity, the combined API-generation-1 and
-collaboration-generation-2 capability verification keyset, distinct
-collaboration signing key, internal I/O capability endpoint and TLS identity,
+collaboration database URL/TLS identity, purpose-specific API-storage and
+collaboration-storage public keysets, the API collaboration-grant public
+keyset, a distinct collaboration signer, internal I/O capability endpoint and TLS identity,
 60-second maximum reauthentication interval, 30-day dirty-room retention, and
 a day-23 warning threshold. `webtransport_enabled` remains false in the typed
 runtime configuration and is not an operator-facing deployment option. Enabled
-collaboration filters join-grant verification to API generation 1; the
-generation-2 collaboration key remains storage-capability-only even though both
-public keys share the restored verification keyset. Enabled document
+collaboration filters join-grant verification to the API collaboration-grant
+purpose; the collaboration-storage key remains storage-capability-only. Enabled document
 integration additionally requires the document database URL, fixed provider ID,
 isolated editor launch action, and external provider HTTPS origin, API-to-document
 and adapter-to-document client identities,
-adapter-to-I/O client identity, generation-4 capability signing key, a combined
-I/O verification keyset, 20-participant admission limit, 100 MiB
+adapter-to-I/O client identity, `document-storage` signing key, its
+purpose-specific I/O verification keyset, 20-participant admission limit, 100 MiB
 document limit, and a recheck interval no greater than 60 seconds. The document
 role accepts no provider callback JSON and the API receives neither the
-generation-4 private key nor document-role database credential. Enabled MCP
+`document-storage` private key nor document-role database credential. Enabled MCP
 additionally requires the broker database URL,
 vault keyring, broker URL/TLS, gateway URL/TLS, the internal I/O URL and
 broker-to-I/O client TLS, and at least one named trust profile. The I/O server
@@ -355,7 +366,7 @@ offline trusted root and bundles, digest-pinned runner image, and positive
 principal/tenant limits. The configured runner namespace must differ from the
 core release namespace and be reserved for that release. Enabled mount preview
 additionally requires VFS and Headscale database URLs, the distinct
-generation-3 mount signing key, a combined public verification keyset, a
+`mount-storage` signing key, its purpose-specific public verification keyset, a
 distinct mount-vault keyring, API/VFS/I/O mTLS projections, external Headscale
 URL/token/CA and exact OIDC issuer, and kernel tailnet networking for the
 gateways. VFS and Headscale sync do not run tailscaled and receive no TUN
@@ -376,7 +387,7 @@ or a UDP/WebTransport port.
 
 ## Phase 8 deployment and rollout
 
-Configuration version 6 adds disabled-by-default media, NFS, and collaboration
+Configuration version 7 retains disabled-by-default media, NFS, and collaboration
 WebTransport sections. Unknown fields, mutable image tags, missing Secret keys,
 unbounded resources, unsupported protocol modes, and incomplete network peers
 fail startup or Helm validation. Phase 8 uses one coordinated version, but
@@ -440,7 +451,7 @@ for review; never
 acknowledge an update from an event or in-memory replica state.
 
 Phase 6 mount rollout remains gated. Apply migrations `000004` and `000005`
-and reviewed VFS/Headscale grants first, provision generation-3 signing and
+and reviewed VFS/Headscale grants first, provision `mount-storage` signing and
 mount-vault secrets, render the chart with `mounts.enabled=false`, and verify
 that API/I/O have no new payload or database authority. Do not enable the
 preview until separately reviewed GPL image builds, corresponding-source
@@ -448,13 +459,15 @@ offers, Samba authentication/session IPC, explicit-FTPS listener integration,
 two-user Virtual ACL/revocation tests, tailnet device fencing, and live
 Calico/Cilium policy tests all pass. Rollback disables gateway admission first,
 advances gateway epochs, closes sessions/handles/locks, then scales VFS and
-Headscale sync to zero. Keep the additive schemas, KEKs, and generation-3
-public key while retained state or recovery evidence references them.
+Headscale sync to zero. Keep the additive schemas, KEKs, and every admitted
+`mount-storage` public key while retained state or recovery evidence references
+them.
 
 Phase 7 document rollout is also staged and disabled by default. First apply
 migration `000006`, expand built-in ACL presets under the statement-scoped
-generation trigger, apply reviewed grants, add generation-4 public verification
-material to I/O, and run grant/schema plus recovery-checkpoint verification
+generation trigger, apply reviewed grants, add the purpose-tagged
+`document-storage` public keyset to I/O, and run grant/schema plus
+recovery-checkpoint verification
 while `documents.enabled=false`. Then deploy the Apache document coordinator,
 test exact-version range read, revision finalize/fsync, duplicate callback,
 lost-response reconciliation, ACL/session revocation, and concurrent-head
@@ -476,8 +489,9 @@ Rollback removes the OxiBelt adapter route and stops new launches first, then
 drains the adapter and fences active document sessions before scaling the
 document coordinator to zero. Preserve finalized checkpoints/conflicts and
 continue maintenance/recovery with the previous compatible core images. Do not
-drop `filebelt_document`, reverse migration 000006, remove capability generation
-4 while an unexpired claim or recovery record references it, or relabel the
+drop `filebelt_document`, reverse migration 000006, remove a
+`document-storage` keyset generation while an unexpired claim or recovery record
+references it, or relabel the
 AGPL image as Apache. Migration 000010 is forward-only: never restore the old
 public-host launch route or a binary that can mint it while documents are
 enabled. If provider-script compromise is suspected, keep reauthentication
@@ -487,7 +501,8 @@ Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate
-the current format-6 configuration, and take a coordinated checkpoint. Enable the broker
+the current format-7 configuration with its independent API-MCP-delegation
+purpose, and take a coordinated recovery-v3 checkpoint. Enable the broker
 without runners, test one personal registration, discovery, explicit approval,
 version-pinned attachment, revocation, and cross-user denial, then admit normal
 MCP traffic. Enable the controller and runner only in a later revision after
@@ -497,11 +512,11 @@ credential rotation, broker rollout, and runner activation.
 
 Rollback disables runner admission first, cancels active invocations, waits for
 the controller to remove one-shot Pods and bootstrap Secrets, and then disables
-the broker. Restore the recorded previous image digests, Secret generations,
-and version-2 ConfigMap only when that binary is compatible with the expanded
-schema. Do not drop `filebelt_mcp` or `filebelt_mcp_vault`, run a down migration,
-or remove a KEK generation referenced by a
-`filebelt.recovery.checkpoint.v2` document.
+the broker. After v7 admission, configuration and keyset repair is forward-only:
+retain purpose-specific immutable Secret generations and use a compatible v7
+ConfigMap revision only. Do not drop `filebelt_mcp` or `filebelt_mcp_vault`, run
+a down migration, roll back to a v6 configuration, or remove a KEK generation
+referenced by a `filebelt.recovery.checkpoint.v3` document.
 
 When compatibility cannot be proved, remain quiesced and restore the last
 coordinated checkpoint into fresh targets before migrating forward.

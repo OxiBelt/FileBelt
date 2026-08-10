@@ -18,9 +18,12 @@ use std::process::ExitCode;
 
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use filebelt_capability_keyset::{
+    ApiCollaborationGrantKeyset, ApiMcpDelegationKeyset, ApiStorageKeyset,
+    CollaborationStorageKeyset, DocumentStorageKeyset, KeyPurpose as CoreKeyPurpose,
+    MediaStorageKeyset, MountStorageKeyset, encode_keyset,
+};
 use filebelt_control_protocol::{Config, read_secret_string};
 use filebelt_database::Database;
 use filebelt_storage::StorageLayout;
@@ -152,6 +155,8 @@ enum TenantCommand {
 #[derive(Debug, Subcommand)]
 enum KeyCommand {
     Generate {
+        #[arg(long, value_enum)]
+        purpose: KeyPurposeArg,
         #[arg(long)]
         private_key: PathBuf,
         #[arg(long)]
@@ -161,6 +166,57 @@ enum KeyCommand {
         #[arg(long)]
         force: bool,
     },
+    Rotate {
+        #[arg(long, value_enum)]
+        purpose: KeyPurposeArg,
+        #[arg(long)]
+        previous_public_keyset: PathBuf,
+        #[arg(long)]
+        private_key: PathBuf,
+        #[arg(long)]
+        public_keyset: PathBuf,
+        #[arg(long)]
+        generation: u32,
+    },
+    Verify {
+        #[arg(long, value_enum)]
+        purpose: KeyPurposeArg,
+        #[arg(long)]
+        private_key: PathBuf,
+        #[arg(long)]
+        public_keyset: PathBuf,
+        #[arg(long)]
+        generation: u32,
+    },
+    Audit {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum KeyPurposeArg {
+    ApiStorage,
+    ApiCollaborationGrant,
+    ApiMcpDelegation,
+    CollaborationStorage,
+    DocumentStorage,
+    MountStorage,
+    MediaStorage,
+}
+
+impl From<KeyPurposeArg> for CoreKeyPurpose {
+    fn from(value: KeyPurposeArg) -> Self {
+        match value {
+            KeyPurposeArg::ApiStorage => Self::ApiStorage,
+            KeyPurposeArg::ApiCollaborationGrant => Self::ApiCollaborationGrant,
+            KeyPurposeArg::ApiMcpDelegation => Self::ApiMcpDelegation,
+            KeyPurposeArg::CollaborationStorage => Self::CollaborationStorage,
+            KeyPurposeArg::DocumentStorage => Self::DocumentStorage,
+            KeyPurposeArg::MountStorage => Self::MountStorage,
+            KeyPurposeArg::MediaStorage => Self::MediaStorage,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -224,6 +280,10 @@ enum RecoveryCommand {
         config: PathBuf,
         #[arg(long)]
         checkpoint: PathBuf,
+        /// Permit offline comparison of legacy v2 evidence. This never proves
+        /// purpose-bound key admission and cannot authorize restored traffic.
+        #[arg(long)]
+        legacy_v2_offline: bool,
     },
 }
 
@@ -352,12 +412,51 @@ async fn execute(command: Command) -> Result<String, String> {
         Command::Keys {
             command:
                 KeyCommand::Generate {
+                    purpose,
                     private_key,
                     public_keyset,
                     generation,
                     force,
                 },
-        } => generate_keys(&private_key, &public_keyset, generation, force),
+        } => generate_keys(
+            purpose.into(),
+            &private_key,
+            &public_keyset,
+            generation,
+            force,
+        ),
+        Command::Keys {
+            command:
+                KeyCommand::Rotate {
+                    purpose,
+                    previous_public_keyset,
+                    private_key,
+                    public_keyset,
+                    generation,
+                },
+        } => rotate_keys(
+            purpose.into(),
+            &previous_public_keyset,
+            &private_key,
+            &public_keyset,
+            generation,
+        ),
+        Command::Keys {
+            command:
+                KeyCommand::Verify {
+                    purpose,
+                    private_key,
+                    public_keyset,
+                    generation,
+                },
+        } => verify_key_pair(purpose.into(), &private_key, &public_keyset, generation),
+        Command::Keys {
+            command: KeyCommand::Audit { config },
+        } => {
+            let configuration = Config::load(&config).map_err(|error| error.to_string())?;
+            audit_keysets(&configuration)?;
+            Ok("configured capability keysets are purpose-isolated".into())
+        }
         Command::Storage {
             command: StorageCommand::Probe { config },
         } => {
@@ -577,10 +676,15 @@ async fn execute(command: Command) -> Result<String, String> {
             recovery::checkpoint(&database, &configuration).await
         }
         Command::Recovery {
-            command: RecoveryCommand::Verify { config, checkpoint },
+            command:
+                RecoveryCommand::Verify {
+                    config,
+                    checkpoint,
+                    legacy_v2_offline,
+                },
         } => {
             let (configuration, database) = configured_database(&config).await?;
-            recovery::verify(&database, &configuration, &checkpoint).await
+            recovery::verify(&database, &configuration, &checkpoint, legacy_v2_offline).await
         }
         Command::Phase8 {
             command:
@@ -663,6 +767,7 @@ async fn configured_maintenance(
 }
 
 fn generate_keys(
+    purpose: CoreKeyPurpose,
     private_key_path: &Path,
     public_keyset_path: &Path,
     generation: u32,
@@ -678,10 +783,18 @@ fn generate_keys(
         .map_err(|_| "failed to generate Ed25519 key".to_owned())?;
     let pair = Ed25519KeyPair::from_pkcs8(private_key.as_ref())
         .map_err(|_| "generated Ed25519 key is invalid".to_owned())?;
-    let public_keyset = format!(
-        "filebelt-capability-keyset-v1\n{generation}:{}\n",
-        URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
-    );
+    let public_keyset = encode_keyset(
+        purpose,
+        &[(
+            generation,
+            pair.public_key()
+                .as_ref()
+                .try_into()
+                .expect("Ed25519 public key length"),
+        )],
+    )
+    .map_err(|_| "capability keyset is invalid".to_owned())?;
+    verify_pair(&public_keyset, purpose, generation, &pair)?;
     write_key_file(private_key_path, private_key.as_ref(), 0o600, force)?;
     if let Err(error) = write_key_file(public_keyset_path, public_keyset.as_bytes(), 0o644, force) {
         if !force {
@@ -689,7 +802,164 @@ fn generate_keys(
         }
         return Err(error);
     }
-    Ok(format!("capability key generation {generation} created"))
+    Ok(format!(
+        "{} capability key generation {generation} created",
+        purpose
+    ))
+}
+
+fn rotate_keys(
+    purpose: CoreKeyPurpose,
+    previous_public_keyset_path: &Path,
+    private_key_path: &Path,
+    public_keyset_path: &Path,
+    generation: u32,
+) -> Result<String, String> {
+    if generation == 0
+        || private_key_path == public_keyset_path
+        || private_key_path == previous_public_keyset_path
+        || public_keyset_path == previous_public_keyset_path
+    {
+        return Err("rotation key paths and generation are invalid".into());
+    }
+    let existing =
+        fs::read_to_string(previous_public_keyset_path).map_err(|error| error.to_string())?;
+    let records = read_keyset(&existing, purpose)?;
+    if records.len() != 1 || records.iter().any(|(known, _)| *known == generation) {
+        return Err(
+            "rotation requires exactly one previous generation and a new generation".into(),
+        );
+    }
+    let private_key = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
+        .map_err(|_| "failed to generate Ed25519 key".to_owned())?;
+    let pair = Ed25519KeyPair::from_pkcs8(private_key.as_ref())
+        .map_err(|_| "generated Ed25519 key is invalid".to_owned())?;
+    let public = pair
+        .public_key()
+        .as_ref()
+        .try_into()
+        .expect("Ed25519 public key length");
+    let public_keyset = encode_keyset(
+        purpose,
+        &[(records[0].0, records[0].1), (generation, public)],
+    )
+    .map_err(|_| "capability keyset is invalid".to_owned())?;
+    verify_pair(&public_keyset, purpose, generation, &pair)?;
+    // A private rotation target is always created; it is never overwritten.
+    write_key_file(private_key_path, private_key.as_ref(), 0o600, false)?;
+    if let Err(error) = write_key_file(public_keyset_path, public_keyset.as_bytes(), 0o644, false) {
+        let _ = fs::remove_file(private_key_path);
+        return Err(error);
+    }
+    Ok(format!(
+        "{} capability key rotated to generation {generation}",
+        purpose
+    ))
+}
+
+fn verify_pair(
+    keyset: &str,
+    purpose: CoreKeyPurpose,
+    generation: u32,
+    pair: &Ed25519KeyPair,
+) -> Result<(), String> {
+    let records = read_keyset(keyset, purpose)?;
+    if records
+        .iter()
+        .find(|(candidate, _)| *candidate == generation)
+        .is_none_or(|(_, public)| public.as_slice() != pair.public_key().as_ref())
+    {
+        return Err("generated capability private key does not match public keyset".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn read_keyset(
+    source: &str,
+    purpose: CoreKeyPurpose,
+) -> Result<Vec<(u32, [u8; 32])>, String> {
+    macro_rules! entries {
+        ($keyset:ty) => {{
+            <$keyset>::parse(source)
+                .map_err(|_| "capability keyset is invalid".to_owned())?
+                .entries()
+                .map(|(generation, public)| (generation, *public))
+                .collect()
+        }};
+    }
+    Ok(match purpose {
+        CoreKeyPurpose::ApiStorage => entries!(ApiStorageKeyset),
+        CoreKeyPurpose::ApiCollaborationGrant => entries!(ApiCollaborationGrantKeyset),
+        CoreKeyPurpose::ApiMcpDelegation => entries!(ApiMcpDelegationKeyset),
+        CoreKeyPurpose::CollaborationStorage => entries!(CollaborationStorageKeyset),
+        CoreKeyPurpose::DocumentStorage => entries!(DocumentStorageKeyset),
+        CoreKeyPurpose::MountStorage => entries!(MountStorageKeyset),
+        CoreKeyPurpose::MediaStorage => entries!(MediaStorageKeyset),
+    })
+}
+
+fn verify_key_pair(
+    purpose: CoreKeyPurpose,
+    private_key_path: &Path,
+    public_keyset_path: &Path,
+    generation: u32,
+) -> Result<String, String> {
+    let private =
+        fs::read(private_key_path).map_err(|_| "capability private key is invalid".to_owned())?;
+    let pair = Ed25519KeyPair::from_pkcs8(&private)
+        .map_err(|_| "capability private key is invalid".to_owned())?;
+    let keyset = fs::read_to_string(public_keyset_path)
+        .map_err(|_| "capability public keyset is invalid".to_owned())?;
+    verify_pair(&keyset, purpose, generation, &pair)?;
+    Ok(format!(
+        "{} capability key generation {generation} verified",
+        purpose
+    ))
+}
+
+fn audit_keysets(configuration: &Config) -> Result<(), String> {
+    let mut configured = vec![
+        (CoreKeyPurpose::ApiStorage, &configuration.keys.api_storage),
+        (
+            CoreKeyPurpose::MediaStorage,
+            &configuration.media.capability_signing,
+        ),
+    ];
+    if let Some(key) = &configuration.keys.api_collaboration_grant {
+        configured.push((CoreKeyPurpose::ApiCollaborationGrant, key));
+    }
+    if let Some(key) = &configuration.keys.api_mcp_delegation {
+        configured.push((CoreKeyPurpose::ApiMcpDelegation, key));
+    }
+    if let Some(key) = &configuration.collaboration.capability_signing {
+        configured.push((CoreKeyPurpose::CollaborationStorage, key));
+    }
+    if let Some(key) = &configuration.documents.capability_signing {
+        configured.push((CoreKeyPurpose::DocumentStorage, key));
+    }
+    if let Some(key) = &configuration.mounts.capability_signing {
+        configured.push((CoreKeyPurpose::MountStorage, key));
+    }
+    let mut observed = Vec::<[u8; 32]>::new();
+    for (purpose, key) in configured {
+        let source = fs::read_to_string(&key.public_keyset_file)
+            .map_err(|_| "capability public keyset is invalid".to_owned())?;
+        let records = read_keyset(&source, purpose)
+            .map_err(|_| "capability public keyset is invalid".to_owned())?;
+        if !records
+            .iter()
+            .any(|(generation, _)| *generation == key.current_generation)
+        {
+            return Err("capability current generation is absent".into());
+        }
+        for (_, public) in records {
+            if observed.contains(&public) {
+                return Err("capability public key material is reused across purposes".into());
+            }
+            observed.push(public);
+        }
+    }
+    Ok(())
 }
 
 fn write_key_file(path: &Path, bytes: &[u8], mode: u32, force: bool) -> Result<(), String> {
@@ -738,11 +1008,70 @@ mod tests {
             .expect("secure temporary directory");
         let private = temporary.path().join("capability.pk8");
         let public = temporary.path().join("capability.pub");
-        generate_keys(&private, &public, 7, false).expect("generate key pair");
+        generate_keys(CoreKeyPurpose::ApiStorage, &private, &public, 7, false)
+            .expect("generate key pair");
         let private_metadata = fs::metadata(&private).expect("private key metadata");
         assert_eq!(private_metadata.permissions().mode() & 0o777, 0o600);
         let public_text = fs::read_to_string(public).expect("public keyset");
-        assert!(public_text.starts_with("filebelt-capability-keyset-v1\n7:"));
-        assert!(generate_keys(&private, &temporary.path().join("second.pub"), 8, false).is_err());
+        assert!(public_text.starts_with("filebelt-capability-keyset-v2\npurpose=api-storage\n7:"));
+        assert!(
+            generate_keys(
+                CoreKeyPurpose::ApiStorage,
+                &private,
+                &temporary.path().join("second.pub"),
+                8,
+                false,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rotation_preserves_only_current_and_one_retiring_generation() {
+        let temporary = tempfile::tempdir().expect("temporary key directory");
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700))
+            .expect("secure temporary directory");
+        let first_private = temporary.path().join("first.pk8");
+        let public = temporary.path().join("keys.pub");
+        generate_keys(
+            CoreKeyPurpose::ApiStorage,
+            &first_private,
+            &public,
+            4,
+            false,
+        )
+        .expect("initial key");
+        let second_private = temporary.path().join("second.pk8");
+        let rotated = temporary.path().join("rotated.pub");
+        rotate_keys(
+            CoreKeyPurpose::ApiStorage,
+            &public,
+            &second_private,
+            &rotated,
+            5,
+        )
+        .expect("rotation");
+        let records = read_keyset(
+            &fs::read_to_string(&rotated).expect("keyset"),
+            CoreKeyPurpose::ApiStorage,
+        )
+        .expect("valid keyset");
+        assert_eq!(
+            records
+                .iter()
+                .map(|(generation, _)| *generation)
+                .collect::<Vec<_>>(),
+            [4, 5]
+        );
+        assert!(
+            rotate_keys(
+                CoreKeyPurpose::ApiStorage,
+                &public,
+                &second_private,
+                &rotated,
+                6
+            )
+            .is_err()
+        );
     }
 }

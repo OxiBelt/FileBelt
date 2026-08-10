@@ -174,8 +174,12 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "api") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.apiDatabase.generation .Values.secrets.oidcClient.generation .Values.secrets.oidcCa.generation .Values.secrets.capabilityPrivateKey.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.digestKey.generation .Values.secrets.apiServerTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.apiDatabase.generation .Values.secrets.oidcClient.generation .Values.secrets.oidcCa.generation .Values.secrets.apiStorageCapabilityPrivateKey.generation .Values.secrets.apiStorageCapabilityPublicKeyset.generation .Values.secrets.digestKey.generation .Values.secrets.apiServerTls.generation | sha256sum | quote }}
+        {{- if .Values.collaboration.enabled }}
+        checksum/api-collaboration-grant: {{ printf "%s:%s" .Values.secrets.apiCollaborationGrantCapabilityPrivateKey.generation .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.generation | sha256sum | quote }}
+        {{- end }}
         {{- if .Values.mcp.enabled }}
+        checksum/api-mcp-delegation: {{ printf "%s:%s" .Values.secrets.apiMcpDelegationCapabilityPrivateKey.generation .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.generation | sha256sum | quote }}
         checksum/mcp-client-tls: {{ .Values.secrets.apiMcpClientTls.generation | sha256sum | quote }}
         {{- end }}
         {{- if .Values.mounts.enabled }}
@@ -224,8 +228,16 @@ spec:
             - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
             - {name: oidc-client, mountPath: /run/secrets/oidc-client-secret, subPath: oidc-client-secret, readOnly: true}
             - {name: oidc-ca, mountPath: /run/secrets/oidc-ca/ca.crt, subPath: ca.crt, readOnly: true}
-            - {name: capability-private, mountPath: /run/secrets/capability-private-key, subPath: capability-private-key, readOnly: true}
-            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: api-storage-capability-private, mountPath: /run/secrets/api-storage-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: api-storage-capability-public, mountPath: /run/secrets/api-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- if .Values.collaboration.enabled }}
+            - {name: api-collaboration-grant-capability-private, mountPath: /run/secrets/api-collaboration-grant-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: api-collaboration-grant-capability-public, mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.mcp.enabled }}
+            - {name: api-mcp-delegation-capability-private, mountPath: /run/secrets/api-mcp-delegation-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: api-mcp-delegation-capability-public, mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
             - {name: digest-key, mountPath: /run/secrets/digest-key, subPath: digest-key, readOnly: true}
             - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
             {{- if .Values.mcp.enabled }}
@@ -246,10 +258,22 @@ spec:
           secret: {secretName: {{ .Values.secrets.oidcClient.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.oidcClient.key }}, path: oidc-client-secret}]}
         - name: oidc-ca
           secret: {secretName: {{ .Values.secrets.oidcCa.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.oidcCa.key }}, path: ca.crt}]}
-        - name: capability-private
-          secret: {secretName: {{ .Values.secrets.capabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPrivateKey.key }}, path: capability-private-key}]}
-        - name: capability-public
-          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: api-storage-capability-private
+          secret: {secretName: {{ .Values.secrets.apiStorageCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiStorageCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: api-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- if .Values.collaboration.enabled }}
+        - name: api-collaboration-grant-capability-private
+          secret: {secretName: {{ .Values.secrets.apiCollaborationGrantCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiCollaborationGrantCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: api-collaboration-grant-capability-public
+          secret: {secretName: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiCollaborationGrantCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
+        {{- if .Values.mcp.enabled }}
+        - name: api-mcp-delegation-capability-private
+          secret: {secretName: {{ .Values.secrets.apiMcpDelegationCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiMcpDelegationCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: api-mcp-delegation-capability-public
+          secret: {secretName: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
         - name: digest-key
           secret: {secretName: {{ .Values.secrets.digestKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.digestKey.key }}, path: digest-key}]}
         - name: backend-tls
@@ -313,7 +337,16 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "io") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.ioDatabase.generation .Values.secrets.capabilityPublicKeyset.generation .Values.secrets.ioServerTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.ioDatabase.generation .Values.secrets.apiStorageCapabilityPublicKeyset.generation .Values.secrets.ioServerTls.generation | sha256sum | quote }}
+        {{- if .Values.collaboration.enabled }}
+        checksum/collaboration-storage: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.documents.enabled }}
+        checksum/document-storage: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.mounts.enabled }}
+        checksum/mount-storage: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-io
       automountServiceAccountToken: false
@@ -351,7 +384,16 @@ spec:
           volumeMounts:
             - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
             - {name: database, mountPath: /run/secrets/database-url, subPath: database-url, readOnly: true}
-            - {name: capability-public, mountPath: /run/secrets/capability-public-keyset, subPath: capability-public-keyset, readOnly: true}
+            - {name: api-storage-capability-public, mountPath: /run/secrets/api-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- if .Values.collaboration.enabled }}
+            - {name: collaboration-storage-capability-public, mountPath: /run/secrets/collaboration-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.documents.enabled }}
+            - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
+            {{- if .Values.mounts.enabled }}
+            - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
             - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
             - {name: payloads, mountPath: {{ .Values.storage.mountPath }}}
             - {name: tmp, mountPath: /tmp}
@@ -359,8 +401,20 @@ spec:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
         - name: database
           secret: {secretName: {{ .Values.secrets.ioDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.ioDatabase.key }}, path: database-url}]}
-        - name: capability-public
-          secret: {secretName: {{ .Values.secrets.capabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.capabilityPublicKeyset.key }}, path: capability-public-keyset}]}
+        - name: api-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- if .Values.collaboration.enabled }}
+        - name: collaboration-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.collaborationStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
+        {{- if .Values.documents.enabled }}
+        - name: document-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
+        {{- if .Values.mounts.enabled }}
+        - name: mount-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
         - name: backend-tls
           secret:
             secretName: {{ .Values.secrets.ioServerTls.name }}

@@ -22,6 +22,7 @@ use axum::{Router, routing};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use clap::{Parser, Subcommand};
+use filebelt_capability_keyset::ApiMcpDelegationKeyset;
 use filebelt_control_protocol::{
     Config, DeploymentMode, McpLimitConfig, McpTrustProfile, read_secret_string,
 };
@@ -35,8 +36,8 @@ use filebelt_mcp_protocol::{
     CreateRunnerLeaseRequest, CreateRunnerLeaseResponse, DeleteRunnerLeaseRequest,
     DeleteRunnerLeaseResponse, InvocationFrame, InvocationFrameKind, InvocationRequest,
     MAX_RUNNER_RELAY_MESSAGE_BYTES, MAX_RUNNER_RELAY_PAYLOAD_BYTES, McpOperation, McpPrimitive,
-    RunnerRelayFrame, RunnerRelayFrameKind, VerificationKey, decode_runner_hello,
-    decode_runner_relay_frame, encode_frame, encode_runner_relay_frame, verify_delegation,
+    RunnerRelayFrame, RunnerRelayFrameKind, decode_runner_hello, decode_runner_relay_frame,
+    encode_frame, encode_runner_relay_frame, verify_mcp_delegation,
 };
 use filebelt_mcp_vault::{Keyring, SecretContext, SecretEnvelope};
 use filebelt_runtime::{
@@ -81,7 +82,7 @@ enum Command {
 struct BrokerState {
     database: Database,
     keyring: Arc<Keyring>,
-    verification_keys: Arc<Vec<VerificationKey>>,
+    verification_keys: Arc<ApiMcpDelegationKeyset>,
     gateway: Client,
     gateway_url: Url,
     attachment_client: Client,
@@ -243,9 +244,12 @@ async fn serve(config: Config) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("MCP keyring path is absent"))?;
     let keyring = Arc::new(Keyring::load(keyring_path).context("cannot load MCP keyring")?);
-    let verification_keys = Arc::new(load_verification_keys(
-        &config.keys.capability_public_key_file,
-    )?);
+    let delegation = config
+        .keys
+        .api_mcp_delegation
+        .as_ref()
+        .ok_or_else(|| anyhow!("API MCP delegation signing is absent"))?;
+    let verification_keys = Arc::new(load_verification_keys(&delegation.public_keyset_file)?);
     let gateway = gateway_client(&config)?;
     let (attachment_client, attachment_io_url) = attachment_client(&config)?;
     let gateway_url = config
@@ -673,14 +677,12 @@ async fn invoke(
         .map_err(|_| BrokerError::bad_request("mcp.protocol.invalid"))?;
     let operation = operation_for(&request)?;
     let now = unix_time()?;
-    let claims = verify_delegation(
+    let claims = verify_request_delegation(
         &request.delegation,
         &state.verification_keys,
-        "filebelt-mcp-broker",
         operation,
         now,
-    )
-    .map_err(|_| BrokerError::forbidden("mcp.delegation.invalid"))?;
+    )?;
     if Uuid::parse_str(&request.request_id).is_err()
         || request.arguments_json.len() > state.limits.message_bytes as usize
         || request.semantic_input_json.len() > MAX_SEMANTIC_MARKDOWN_BYTES + 128
@@ -3645,47 +3647,21 @@ fn load_oauth_clients(config: &Config) -> Result<HashMap<String, OauthClientStat
     Ok(clients)
 }
 
-fn load_verification_keys(path: &std::path::Path) -> Result<Vec<VerificationKey>> {
-    let bytes = std::fs::read(path).context("cannot read capability public keyset")?;
-    if bytes.len() == 32 {
-        return Ok(vec![VerificationKey {
-            generation: 1,
-            public_key: bytes,
-        }]);
-    }
-    let text = std::str::from_utf8(&bytes).context("capability keyset is not UTF-8")?;
-    let mut lines = text.lines();
-    if lines.next() != Some("filebelt-capability-keyset-v1") {
-        bail!("capability keyset header is invalid");
-    }
-    let mut keys = Vec::new();
-    for line in lines {
-        let (generation, encoded) = line
-            .split_once(':')
-            .ok_or_else(|| anyhow!("capability keyset entry is invalid"))?;
-        let generation = generation
-            .parse::<u32>()
-            .context("capability generation is invalid")?;
-        let public_key = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(encoded)
-            .context("capability public key is invalid")?;
-        if generation == 0
-            || public_key.len() != 32
-            || keys
-                .iter()
-                .any(|key: &VerificationKey| key.generation == generation)
-        {
-            bail!("capability keyset entry is invalid");
-        }
-        keys.push(VerificationKey {
-            generation,
-            public_key,
-        });
-    }
-    if keys.is_empty() {
-        bail!("capability keyset is empty");
-    }
-    Ok(keys)
+fn load_verification_keys(path: &std::path::Path) -> Result<ApiMcpDelegationKeyset> {
+    let source = std::fs::read_to_string(path).context("cannot read capability public keyset")?;
+    ApiMcpDelegationKeyset::parse(&source)
+        .map_err(|_| anyhow!("capability public keyset is invalid"))
+}
+
+fn verify_request_delegation(
+    wire: &str,
+    keys: &ApiMcpDelegationKeyset,
+    operation: McpOperation,
+    now: i64,
+) -> Result<filebelt_mcp_protocol::DelegationClaims, BrokerError> {
+    verify_mcp_delegation(wire, keys, "filebelt-mcp-broker", operation, now)
+        .map(|verified| verified.claims)
+        .map_err(|_| BrokerError::forbidden("mcp.delegation.invalid"))
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, BrokerError> {
@@ -3769,6 +3745,29 @@ impl IntoResponse for BrokerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
+
+    fn delegation_claims(operation: McpOperation) -> filebelt_mcp_protocol::DelegationClaims {
+        filebelt_mcp_protocol::DelegationClaims {
+            capability_id: Uuid::new_v4().to_string(),
+            audience: "filebelt-mcp-broker".into(),
+            operation: operation as i32,
+            tenant_id: Uuid::new_v4().to_string(),
+            principal_id: Uuid::new_v4().to_string(),
+            session_id: Uuid::new_v4().to_string(),
+            application_id: "filebelt.settings.mcp-test".into(),
+            registration_id: Uuid::new_v4().to_string(),
+            capability_fingerprint: vec![3; 32],
+            arguments_digest: vec![4; 32],
+            attachments: Vec::new(),
+            policy_generation: 1,
+            membership_generation: 1,
+            nonce: vec![5; 32],
+            issued_at_unix_seconds: 100,
+            expires_at_unix_seconds: 220,
+            service_grant_id: String::new(),
+        }
+    }
 
     fn test_runner_state() -> RunnerBrokerState {
         let _ = install_crypto_provider();
@@ -3795,6 +3794,39 @@ mod tests {
         assert!(validate_endpoint(&registration).is_err());
         registration.endpoint_uri = Some("https://example.test:8443/mcp".into());
         assert!(validate_endpoint(&registration).is_err());
+    }
+
+    #[test]
+    fn broker_admission_rejects_foreign_signer_before_broker_effects() {
+        let retiring = Ed25519KeyPair::generate().unwrap();
+        let current = Ed25519KeyPair::generate().unwrap();
+        let foreign = Ed25519KeyPair::generate().unwrap();
+        let keys = ApiMcpDelegationKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiMcpDelegation,
+                &[
+                    (1, retiring.public_key().as_ref().try_into().unwrap()),
+                    (2, current.public_key().as_ref().try_into().unwrap()),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let claims = delegation_claims(McpOperation::Invoke);
+
+        for (generation, signer) in [(1, &retiring), (2, &current)] {
+            let wire =
+                filebelt_mcp_protocol::sign_mcp_delegation(&claims, generation, signer).unwrap();
+            assert!(verify_request_delegation(&wire, &keys, McpOperation::Invoke, 110).is_ok());
+        }
+
+        let forged = filebelt_mcp_protocol::sign_mcp_delegation(&claims, 1, &foreign).unwrap();
+        assert_eq!(
+            verify_request_delegation(&forged, &keys, McpOperation::Invoke, 110)
+                .unwrap_err()
+                .code,
+            "mcp.delegation.invalid"
+        );
     }
 
     #[test]

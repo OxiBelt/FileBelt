@@ -85,7 +85,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 6
+    version = 7
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -115,10 +115,12 @@ configuration:
     backend_id = "00000000-0000-4000-8000-000000000001"
 
     [keys]
-    capability_private_key_file = "/run/secrets/capability-private-key"
-    # The projected keyset contains the API and collaboration verification keys.
-    capability_public_key_file = "/run/secrets/capability-public-keyset"
     digest_key_file = "/run/secrets/digest-key"
+    digest_key_generation = 1
+
+    [keys.api_storage]
+    private_key_file = "/run/secrets/api-storage-capability-private-key"
+    public_keyset_file = "/run/secrets/api-storage-capability-public-keyset"
     current_generation = 1
 
     [listeners]
@@ -169,8 +171,6 @@ configuration:
     [collaboration]
     enabled = false
     database_url_file = "/run/secrets/collaboration-database-url"
-    capability_private_key_file = "/run/secrets/collaboration-capability-private-key"
-    capability_key_generation = 2
     io_url = "https://filebelt-worker-io:8081/"
     client_certificate_chain_file = "/run/secrets/collaboration-io-client-tls/tls.crt"
     client_private_key_file = "/run/secrets/collaboration-io-client-tls/tls.key"
@@ -183,13 +183,16 @@ configuration:
     [media]
     enabled = false
 
+    [media.capability_signing]
+    private_key_file = "/run/secrets/media-storage-capability-private-key"
+    public_keyset_file = "/run/secrets/media-storage-capability-public-keyset"
+    current_generation = 1
+
     [mounts]
     enabled = false
     database_url_file = "/run/secrets/mount-database-url"
     vault_keyring_file = "/run/secrets/mount-vault-keyring.json"
     vault_key_generation = 1
-    capability_private_key_file = "/run/secrets/mount-capability-private-key"
-    capability_key_generation = 3
     io_url = "https://filebelt-worker-io:8081/"
     io_client_certificate_chain_file = "/run/secrets/vfs-io-client-tls/tls.crt"
     io_client_private_key_file = "/run/secrets/vfs-io-client-tls/tls.key"
@@ -776,8 +779,20 @@ secrets:
   recoveryDatabase: {name: filebelt-recovery-database, key: database-url, generation: "1"}
   oidcClient: {name: filebelt-oidc-client, key: client-secret, generation: "1"}
   oidcCa: {name: filebelt-oidc-ca, key: ca.crt, generation: "1"}
-  capabilityPrivateKey: {name: filebelt-capability-private, key: private-key, generation: "1"}
-  capabilityPublicKeyset: {name: filebelt-capability-public, key: public-keyset, generation: "1"}
+  apiStorageCapabilityPrivateKey: {name: filebelt-api-storage-capability-private, key: private-key, generation: "1"}
+  apiStorageCapabilityPublicKeyset: {name: filebelt-api-storage-capability-public, key: public-keyset, generation: "1"}
+  apiCollaborationGrantCapabilityPrivateKey: {name: filebelt-api-collaboration-grant-capability-private, key: private-key, generation: "1"}
+  apiCollaborationGrantCapabilityPublicKeyset: {name: filebelt-api-collaboration-grant-capability-public, key: public-keyset, generation: "1"}
+  apiMcpDelegationCapabilityPrivateKey: {name: filebelt-api-mcp-delegation-capability-private, key: private-key, generation: "1"}
+  apiMcpDelegationCapabilityPublicKeyset: {name: filebelt-api-mcp-delegation-capability-public, key: public-keyset, generation: "1"}
+  collaborationStorageCapabilityPrivateKey: {name: filebelt-collaboration-storage-capability-private, key: private-key, generation: "1"}
+  collaborationStorageCapabilityPublicKeyset: {name: filebelt-collaboration-storage-capability-public, key: public-keyset, generation: "1"}
+  documentStorageCapabilityPrivateKey: {name: filebelt-document-storage-capability-private, key: private-key, generation: "1"}
+  documentStorageCapabilityPublicKeyset: {name: filebelt-document-storage-capability-public, key: public-keyset, generation: "1"}
+  mountStorageCapabilityPrivateKey: {name: filebelt-mount-storage-capability-private, key: private-key, generation: "1"}
+  mountStorageCapabilityPublicKeyset: {name: filebelt-mount-storage-capability-public, key: public-keyset, generation: "1"}
+  mediaStorageCapabilityPrivateKey: {name: filebelt-media-storage-capability-private, key: private-key, generation: "1"}
+  mediaStorageCapabilityPublicKeyset: {name: filebelt-media-storage-capability-public, key: public-keyset, generation: "1"}
   digestKey: {name: filebelt-digest-key, key: digest-key, generation: "1"}
   publicTls: {name: filebelt-public-tls, certificateKey: tls.crt, privateKeyKey: tls.key, generation: "1"}
   apiServerTls: {name: filebelt-api-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
@@ -785,8 +800,6 @@ secrets:
   apiClientTls: {name: filebelt-api-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   ioClientTls: {name: filebelt-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   collaborationDatabase: {name: filebelt-collaboration-database, key: database-url, generation: "1"}
-  collaborationCapabilityPrivateKey: {name: filebelt-collaboration-capability-private, key: private-key, generation: "1"}
-  mountCapabilityPrivateKey: {name: filebelt-mount-capability-private, key: private-key, generation: "1"}
   collaborationServerTls: {name: filebelt-collaboration-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   collaborationIoClientTls: {name: filebelt-collaboration-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   collaborationEdgeClientTls: {name: filebelt-collaboration-edge-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
@@ -810,7 +823,6 @@ secrets:
   headscaleApiToken: {name: filebelt-headscale-api-token, key: token, generation: "1"}
   headscaleServerCa: {name: filebelt-headscale-server-ca, key: ca.crt, generation: "1"}
   documentDatabase: {name: filebelt-document-database, key: database-url, generation: "1"}
-  documentCapabilityPrivateKey: {name: filebelt-document-capability-private, key: private-key, generation: "1"}
   documentApiServerTls: {name: filebelt-document-api-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   documentAdapterServerTls: {name: filebelt-document-adapter-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   apiDocumentClientTls: {name: filebelt-api-document-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}

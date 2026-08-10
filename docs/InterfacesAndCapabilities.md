@@ -128,7 +128,7 @@ a channel-binding field, but the adapter remains fail-closed until a reviewed
 Samba authentication/session IPC bridge can populate it.
 
 For a content read, the VFS revalidates the open handle and signs a distinct
-`fbcap2` envelope with mount key generation 3. The deterministic
+`fbcap2` envelope with the current purpose-local `mount-storage` generation. The deterministic
 `filebelt.mount.capability.v2` claims bind the I/O audience, read operation,
 tenant, principal, mount session, credential, drive, node, immutable version,
 byte range, gateway epoch, all relevant authorization generations, nonce,
@@ -444,6 +444,17 @@ the current editor continues to request WebSocket unless it explicitly opts in.
 
 ## Key rotation and configuration
 
+Configuration format 7 scopes signing material by purpose. `[keys]` contains
+only `digest_key_file` and `digest_key_generation`; every signer has
+`private_key_file`, `public_keyset_file`, and `current_generation`. API storage
+is always `[keys.api_storage]`; API collaboration-grant and MCP-delegation are
+enabled only with their features. Collaboration, document, and mount storage
+signers occur only in enabled feature blocks; media storage is always
+provisioned for administrative preflight and recovery. Strict
+`filebelt-capability-keyset-v2` files contain `purpose=<name>`, a current key,
+and at most one retiring key. Public-key bytes are globally disjoint and every
+fresh v7 purpose begins at local generation 1.
+
 `filebeltctl` creates capability signing material and keyed-digest material as
 versioned generations. The current capability generation signs new envelopes;
 workers retain retiring public keys for at least the 60-second capability
@@ -456,10 +467,10 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 6; older versions are rejected. API `fbcap1`,
-collaboration `fbcap1`, and mount `fbcap2` signing keys use distinct private
-keys and generations 1, 2, and 3 respectively; the I/O verification keyset
-contains all currently admitted public generations. `mcp.enabled`
+The current format is version 7; older versions are rejected. API `fbcap1`,
+collaboration `fbcap1`, document, and mount `fbcap2` signing keys use distinct
+purpose-local private keys; I/O receives only API-storage and enabled
+storage-purpose public keysets. `mcp.enabled`
 defaults to false, and `mcp.runners.enabled` is a separate Kubernetes-only
 opt-in that requires broker/controller mTLS, a digest-pinned runner image, and
 the verified catalog inputs.

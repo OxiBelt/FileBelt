@@ -22,6 +22,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Router, routing::post};
 use clap::{Parser, Subcommand};
+use filebelt_capability_keyset::DocumentStorageKeyset;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::document::{
     BeginDocumentRevisionInput, CreateDocumentSessionInput, DocumentAuthorizationGenerations,
@@ -46,7 +47,8 @@ use filebelt_runtime::{
     install_crypto_provider, operations_router, trace_request, wait_for_shutdown,
 };
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, sign_capability, unix_time_now,
+    CapabilityClaims, CapabilityOperation, DocumentStorageCapabilityUse,
+    sign_document_storage_capability, unix_time_now,
 };
 use getrandom::fill as random_fill;
 use prost::Message as _;
@@ -134,22 +136,26 @@ async fn serve(config: Config) -> Result<()> {
     let database = Database::connect(&database_url, config.database.max_connections).await?;
     database.health().await?;
     let tenant_id = database.tenant_by_slug(&config.tenant.slug).await?;
-    let private_key = std::fs::read(
-        config
-            .documents
-            .capability_private_key_file
-            .as_ref()
-            .ok_or_else(|| anyhow!("document capability key is absent"))?,
-    )?;
+    let signing = config
+        .documents
+        .capability_signing
+        .as_ref()
+        .ok_or_else(|| anyhow!("document capability signing is absent"))?;
+    let private_key = std::fs::read(&signing.private_key_file)?;
     let signer = Arc::new(
         Ed25519KeyPair::from_pkcs8(&private_key)
             .map_err(|_| anyhow!("document capability key is not Ed25519 PKCS#8"))?,
     );
+    self_check_signer(
+        &signing.public_keyset_file,
+        signing.current_generation,
+        &signer,
+    )?;
     let state = AppState {
         database: database.clone(),
         tenant_id,
         signer,
-        signing_generation: config.documents.capability_key_generation,
+        signing_generation: signing.current_generation,
         max_active_tabs: i64::from(config.documents.max_active_tabs),
         max_document_bytes: i64::try_from(config.documents.max_document_bytes)
             .map_err(|_| anyhow!("document max bytes is invalid"))?,
@@ -930,7 +936,15 @@ fn mint_capability(
     let mut nonce = [0_u8; CAPABILITY_NONCE_BYTES];
     random_fill(&mut nonce).map_err(|_| DocumentSessionErrorCode::Unavailable)?;
     let generations = participant.generations;
-    Ok(sign_capability(
+    let use_case = match operation {
+        CapabilityOperation::ReadDocumentVersion => DocumentStorageCapabilityUse::ReadVersion,
+        CapabilityOperation::WriteDocumentRevision => DocumentStorageCapabilityUse::WriteRevision,
+        CapabilityOperation::FinalizeDocumentRevision => {
+            DocumentStorageCapabilityUse::FinalizeRevision
+        }
+        _ => return Err(DocumentSessionErrorCode::Internal),
+    };
+    sign_document_storage_capability(
         &CapabilityClaims {
             capability_id: Uuid::new_v4().to_string(),
             audience: CAPABILITY_AUDIENCE.into(),
@@ -959,9 +973,30 @@ fn mint_capability(
                 .map_err(|_| DocumentSessionErrorCode::Internal)?,
             grant_id: grant_id.to_string(),
         },
+        use_case,
         state.signing_generation,
         &state.signer,
-    ))
+    )
+    .map_err(|_| DocumentSessionErrorCode::Internal)
+}
+
+fn self_check_signer(
+    path: &std::path::Path,
+    generation: u32,
+    signer: &Ed25519KeyPair,
+) -> Result<()> {
+    let source =
+        std::fs::read_to_string(path).context("cannot read document capability public keyset")?;
+    let keyset = DocumentStorageKeyset::parse(&source)
+        .map_err(|_| anyhow!("document capability public keyset is invalid"))?;
+    let probe = signer.sign(b"filebelt.document.storage.keyset.self-check");
+    keyset
+        .verify(
+            generation,
+            b"filebelt.document.storage.keyset.self-check",
+            probe.as_ref(),
+        )
+        .map_err(|_| anyhow!("document capability private key does not match the keyset"))
 }
 
 fn commit_outcome(outcome: DocumentCommitResult) -> DocumentCommitOutcome {

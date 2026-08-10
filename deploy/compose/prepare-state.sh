@@ -71,38 +71,23 @@ printf '{"format":"filebelt.mcp-keyring.v1","keys":[{"generation":1,"key_base64"
 random_hex >"${state_dir}/secrets/oidc-client-secret"
 openssl rand 32 >"${state_dir}/secrets/digest-key"
 
-openssl genpkey -algorithm ED25519 -outform DER \
-  -out "${state_dir}/secrets/capability-private-key"
-api_public_key=$(
-  openssl pkey -inform DER -in "${state_dir}/secrets/capability-private-key" \
-    -pubout -outform DER |
-    tail -c 32 |
-    base64 |
-    tr '+/' '-_' |
-    tr -d '=\n'
-)
-openssl genpkey -algorithm ED25519 -outform DER \
-  -out "${state_dir}/secrets/collaboration-capability-private-key"
-collaboration_public_key=$(
-  openssl pkey -inform DER -in "${state_dir}/secrets/collaboration-capability-private-key" \
-    -pubout -outform DER |
-    tail -c 32 |
-    base64 |
-    tr '+/' '-_' |
-    tr -d '=\n'
-)
-openssl genpkey -algorithm ED25519 -outform DER \
-  -out "${state_dir}/secrets/mount-capability-private-key"
-mount_public_key=$(
-  openssl pkey -inform DER -in "${state_dir}/secrets/mount-capability-private-key" \
-    -pubout -outform DER |
-    tail -c 32 |
-    base64 |
-    tr '+/' '-_' |
-    tr -d '=\n'
-)
-printf 'filebelt-capability-keyset-v1\n1:%s\n2:%s\n3:%s\n' "${api_public_key}" "${collaboration_public_key}" "${mount_public_key}" \
-  >"${state_dir}/secrets/capability-public-keyset"
+create_capability_material() {
+  purpose=$1
+  name=$2
+  private_file="${state_dir}/secrets/${name}-capability-private-key"
+  public_file="${state_dir}/secrets/${name}-capability-public-keyset"
+  openssl genpkey -algorithm ED25519 -outform DER -out "${private_file}"
+  public_key=$(openssl pkey -inform DER -in "${private_file}" -pubout -outform DER |
+    tail -c 32 | base64 | tr '+/' '-_' | tr -d '=\n')
+  # Version 2 keysets bind every public key to one non-reusable purpose.
+  printf 'filebelt-capability-keyset-v2\npurpose=%s\n1:%s\n' "${purpose}" "${public_key}" >"${public_file}"
+}
+
+create_capability_material api-storage api-storage
+create_capability_material api-collaboration-grant api-collaboration-grant
+create_capability_material api-mcp-delegation api-mcp-delegation
+create_capability_material collaboration-storage collaboration-storage
+create_capability_material media-storage media-storage
 
 openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
   -subj '/CN=filebelt.localhost' \
@@ -111,7 +96,7 @@ openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
   -out "${state_dir}/tls/filebelt.crt" >/dev/null 2>&1
 chmod 0600 "${state_dir}/tls/filebelt.key"
 chmod 0644 "${state_dir}/tls/filebelt.crt" \
-  "${state_dir}/secrets/capability-public-keyset"
+  "${state_dir}/secrets/"*-capability-public-keyset
 
 openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
   -subj '/CN=FileBelt development MCP egress CA' \

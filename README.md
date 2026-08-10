@@ -95,7 +95,7 @@ Additional supply-chain checks are described in
   Internet path.
 - Mount policies, credentials, devices, sessions, handles, and locks are
   PostgreSQL-authoritative and enforce the same Virtual ACL. VFS reads use a
-  distinct generation-3, maximum-15-second `fbcap2` capability at the I/O
+  distinct `mount-storage`, maximum-15-second `fbcap2` capability at the I/O
   worker; VFS, Headscale sync, and protocol adapters never mount payloads.
 - OxiBelt terminates public TLS and serves/proxies the SPA, REST API, uploads,
   and Range downloads. Kubernetes backends require native mTLS and

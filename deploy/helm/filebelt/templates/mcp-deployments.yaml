@@ -23,7 +23,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "mcp-broker") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s" .Values.secrets.mcpDatabase.generation .Values.secrets.mcpVaultKeyring.generation .Values.secrets.mcpBrokerServerTls.generation .Values.secrets.mcpGatewayClientTls.generation .Values.secrets.mcpBackendClientTls.generation .Values.secrets.controllerClientTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.mcpDatabase.generation .Values.secrets.mcpVaultKeyring.generation .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.generation .Values.secrets.mcpBrokerServerTls.generation .Values.secrets.mcpGatewayClientTls.generation .Values.secrets.mcpBackendClientTls.generation .Values.secrets.controllerClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-mcp-broker
       automountServiceAccountToken: false
@@ -62,6 +62,7 @@ spec:
             - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
             - {name: database, mountPath: /run/secrets/mcp-database-url, subPath: database-url, readOnly: true}
             - {name: vault, mountPath: /run/secrets/mcp-vault-keyring.json, subPath: keyring.json, readOnly: true}
+            - {name: api-mcp-delegation-capability-public, mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset, subPath: public-keyset, readOnly: true}
             - {name: server-tls, mountPath: /run/secrets/mcp-broker-server-tls, readOnly: true}
             - {name: gateway-tls, mountPath: /run/secrets/mcp-gateway-tls, readOnly: true}
             - {name: backend-tls, mountPath: /run/secrets/mcp-backend-tls, readOnly: true}
@@ -73,6 +74,8 @@ spec:
           secret: {secretName: {{ .Values.secrets.mcpDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.mcpDatabase.key }}, path: database-url}]}
         - name: vault
           secret: {secretName: {{ .Values.secrets.mcpVaultKeyring.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.mcpVaultKeyring.key }}, path: keyring.json}]}
+        - name: api-mcp-delegation-capability-public
+          secret: {secretName: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.key }}, path: public-keyset}]}
         - name: server-tls
           secret:
             secretName: {{ .Values.secrets.mcpBrokerServerTls.name }}

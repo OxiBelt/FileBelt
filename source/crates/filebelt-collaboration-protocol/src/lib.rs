@@ -4,9 +4,10 @@
 
 #![deny(unsafe_code)]
 
-use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
+use aws_lc_rs::signature::Ed25519KeyPair;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_capability_keyset::{ApiCollaborationGrantKeyset, KeysetError};
 use prost::Message as _;
 use thiserror::Error;
 use uuid::Uuid;
@@ -38,10 +39,11 @@ pub use generated::{
     collaboration_frame,
 };
 
-#[derive(Clone, Debug)]
-pub struct VerificationKey {
+/// An authenticated claim together with the rotation generation that verified it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Verified<T> {
+    pub claims: T,
     pub generation: u32,
-    pub public_key: Vec<u8>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -108,12 +110,14 @@ impl CollaborationGrantClaims {
     }
 }
 
-#[must_use]
-pub fn sign_grant(
+pub fn sign_collaboration_grant(
     claims: &CollaborationGrantClaims,
     generation: u32,
     key_pair: &Ed25519KeyPair,
-) -> String {
+) -> Result<String, GrantError> {
+    if generation == 0 {
+        return Err(GrantError::InvalidClaims);
+    }
     let claims_bytes = claims.encode_to_vec();
     let signing_input = [GRANT_SIGNATURE_DOMAIN, claims_bytes.as_slice()].concat();
     let signed = SignedCollaborationGrant {
@@ -121,17 +125,17 @@ pub fn sign_grant(
         claims: claims_bytes,
         signature: key_pair.sign(&signing_input).as_ref().to_vec(),
     };
-    format!(
+    Ok(format!(
         "fbcollab1.{}",
         URL_SAFE_NO_PAD.encode(signed.encode_to_vec())
-    )
+    ))
 }
 
-pub fn verify_grant(
+pub fn verify_collaboration_grant(
     wire: &str,
-    keys: &[VerificationKey],
+    keys: &ApiCollaborationGrantKeyset,
     now_unix_seconds: i64,
-) -> Result<CollaborationGrantClaims, GrantError> {
+) -> Result<Verified<CollaborationGrantClaims>, GrantError> {
     let encoded = wire
         .strip_prefix("fbcollab1.")
         .ok_or(GrantError::InvalidEncoding)?;
@@ -140,18 +144,25 @@ pub fn verify_grant(
         .map_err(|_| GrantError::InvalidEncoding)?;
     let signed = SignedCollaborationGrant::decode(bytes.as_slice())
         .map_err(|_| GrantError::InvalidEncoding)?;
-    let key = keys
-        .iter()
-        .find(|key| key.generation == signed.key_generation)
-        .ok_or(GrantError::UnknownKey)?;
     let signing_input = [GRANT_SIGNATURE_DOMAIN, signed.claims.as_slice()].concat();
-    UnparsedPublicKey::new(&ED25519, &key.public_key)
-        .verify(&signing_input, &signed.signature)
-        .map_err(|_| GrantError::InvalidSignature)?;
+    keys.verify(signed.key_generation, &signing_input, &signed.signature)
+        .map_err(map_keyset_error)?;
     let claims = CollaborationGrantClaims::decode(signed.claims.as_slice())
         .map_err(|_| GrantError::InvalidClaims)?;
     claims.validate_at(now_unix_seconds)?;
-    Ok(claims)
+    Ok(Verified {
+        claims,
+        generation: signed.key_generation,
+    })
+}
+
+const fn map_keyset_error(error: KeysetError) -> GrantError {
+    match error {
+        KeysetError::UnknownKey => GrantError::UnknownKey,
+        KeysetError::InvalidEncoding | KeysetError::InvalidSignature => {
+            GrantError::InvalidSignature
+        }
+    }
 }
 
 /// Stable database lookup digest for a signed, already high-entropy grant.
@@ -209,26 +220,55 @@ mod tests {
     fn signed_grant_round_trips_and_expires() {
         let pair = Ed25519KeyPair::generate().unwrap();
         let expected = claims();
-        let wire = sign_grant(&expected, 3, &pair);
-        let keys = [VerificationKey {
-            generation: 3,
-            public_key: pair.public_key().as_ref().to_vec(),
-        }];
-        assert_eq!(verify_grant(&wire, &keys, 120).unwrap(), expected);
-        assert_eq!(verify_grant(&wire, &keys, 160), Err(GrantError::Expired));
+        let wire = sign_collaboration_grant(&expected, 3, &pair).unwrap();
+        let keys = ApiCollaborationGrantKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=api-collaboration-grant\n3:{}\n",
+            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+        ))
+        .unwrap();
+        assert_eq!(
+            verify_collaboration_grant(&wire, &keys, 120)
+                .unwrap()
+                .claims,
+            expected
+        );
+        assert_eq!(
+            verify_collaboration_grant(&wire, &keys, 160),
+            Err(GrantError::Expired)
+        );
     }
 
     #[test]
     fn wrong_generation_and_tampering_fail_closed() {
         let pair = Ed25519KeyPair::generate().unwrap();
-        let mut wire = sign_grant(&claims(), 3, &pair);
-        assert_eq!(verify_grant(&wire, &[], 120), Err(GrantError::UnknownKey));
+        let mut wire = sign_collaboration_grant(&claims(), 3, &pair).unwrap();
+        let empty = ApiCollaborationGrantKeyset::parse(
+            "filebelt-capability-keyset-v2\npurpose=api-collaboration-grant\n",
+        );
+        assert!(empty.is_err());
         wire.push('x');
-        let keys = [VerificationKey {
-            generation: 3,
-            public_key: pair.public_key().as_ref().to_vec(),
-        }];
-        assert!(verify_grant(&wire, &keys, 120).is_err());
+        let keys = ApiCollaborationGrantKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=api-collaboration-grant\n3:{}\n",
+            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+        ))
+        .unwrap();
+        assert!(verify_collaboration_grant(&wire, &keys, 120).is_err());
+    }
+
+    #[test]
+    fn same_generation_from_a_foreign_purpose_signer_fails_closed() {
+        let grant_pair = Ed25519KeyPair::generate().unwrap();
+        let foreign_pair = Ed25519KeyPair::generate().unwrap();
+        let wire = sign_collaboration_grant(&claims(), 3, &foreign_pair).unwrap();
+        let keys = ApiCollaborationGrantKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=api-collaboration-grant\n3:{}\n",
+            URL_SAFE_NO_PAD.encode(grant_pair.public_key().as_ref())
+        ))
+        .unwrap();
+        assert_eq!(
+            verify_collaboration_grant(&wire, &keys, 120),
+            Err(GrantError::InvalidSignature)
+        );
     }
 
     #[test]

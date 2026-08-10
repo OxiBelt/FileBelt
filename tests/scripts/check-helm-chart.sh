@@ -138,6 +138,12 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
 helm template phase7 "${chart}" --kube-version 1.36.0 \
   --set documents.enabled=true \
   >"${temporary}/render-documents.yaml"
+helm template phase7-recovery "${chart}" --kube-version 1.36.0 \
+  --set deployment.quiesced=true \
+  --set documents.enabled=true \
+  --set-string operation.type=recovery-checkpoint \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  >"${temporary}/recovery-documents.yaml"
 helm template phase7-editor-override "${chart}" --kube-version 1.36.0 \
   --set documents.enabled=true \
   --set-string documents.launchAction=https://editor.example.test/onlyoffice/launch \
@@ -213,6 +219,7 @@ assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy file
 assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-io-ingress 'filebelt-onlyoffice'
 assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-web-egress 'filebelt-onlyoffice'
 assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /run/secrets/onlyoffice-edge-client-tls'
+assert_document_contains "${temporary}/recovery-documents.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/document-storage-capability-public-keyset'
 assert_contains "${temporary}/render-documents.yaml" 'origin = "https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089"'
 assert_contains "${temporary}/render-documents.yaml" 'server_name = "filebelt-onlyoffice-adapter.filebelt-integrations.svc"'
 assert_contains "${temporary}/render-documents.yaml" 'launch_action = "https://filebelt-editor.example.invalid/onlyoffice/launch"'
@@ -321,7 +328,14 @@ for component in web api io maintenance; do
 done
 
 helm template phase5 "${chart}" --kube-version 1.36.0 \
-  --set collaboration.enabled=true >"${temporary}/collaboration.yaml"
+  --set collaboration.enabled=true \
+  >"${temporary}/collaboration.yaml"
+helm template phase5-recovery "${chart}" --kube-version 1.36.0 \
+  --set deployment.quiesced=true \
+  --set collaboration.enabled=true \
+  --set-string operation.type=recovery-checkpoint \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  >"${temporary}/recovery-collaboration.yaml"
 assert_rendered_toml "${temporary}/collaboration.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/collaboration.yaml" oxibelt.toml
 assert_count "${temporary}/collaboration.yaml" '^kind: Deployment$' 5
@@ -330,7 +344,11 @@ assert_count "${temporary}/collaboration.yaml" '^kind: NetworkPolicy$' 11
 assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'replicas: 2'
 assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'automountServiceAccountToken: false'
 assert_document_not_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'claimName:'
-assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'mountPath: /run/secrets/capability-public-keyset'
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'mountPath: /run/secrets/collaboration-storage-capability-public-keyset'
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'mountPath: /run/secrets/api-storage-capability-public-keyset'
+assert_document_contains "${temporary}/collaboration.yaml" Deployment filebelt-collaboration 'mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset'
+assert_document_contains "${temporary}/recovery-collaboration.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset'
+assert_document_contains "${temporary}/recovery-collaboration.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/collaboration-storage-capability-public-keyset'
 assert_document_contains "${temporary}/collaboration.yaml" Service filebelt-collaboration 'port: 8085'
 assert_document_contains "${temporary}/collaboration.yaml" NetworkPolicy filebelt-collaboration-ingress 'port: collaboration-ws'
 assert_document_contains "${temporary}/collaboration.yaml" NetworkPolicy filebelt-collaboration-egress 'port: io'
@@ -397,6 +415,24 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set-string operation.operationId="${OPERATION_ID}" \
   >"${temporary}/recovery.yaml"
 assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'claimName:'
+assert_document_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/api-storage-capability-public-keyset'
+assert_document_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/media-storage-capability-public-keyset'
+assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/api-collaboration-grant-capability-public-keyset'
+assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/collaboration-storage-capability-public-keyset'
+assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset'
+assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/document-storage-capability-public-keyset'
+assert_document_not_contains "${temporary}/recovery.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/mount-storage-capability-public-keyset'
+
+helm template phase4 "${chart}" --kube-version 1.36.0 \
+  --set deployment.quiesced=true \
+  --set-string operation.type=keys-audit \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  >"${temporary}/keys-audit.yaml"
+assert_document_not_contains "${temporary}/keys-audit.yaml" Job filebelt-keys-audit-123e4567-e89 'name: database'
+assert_document_contains "${temporary}/keys-audit.yaml" Job filebelt-keys-audit-123e4567-e89 'mountPath: /run/secrets/api-storage-capability-public-keyset'
+assert_document_contains "${temporary}/keys-audit.yaml" Job filebelt-keys-audit-123e4567-e89 'mountPath: /run/secrets/media-storage-capability-public-keyset'
+assert_document_not_contains "${temporary}/keys-audit.yaml" Job filebelt-keys-audit-123e4567-e89 'capability-private-key'
+assert_document_contains "${temporary}/keys-audit.yaml" NetworkPolicy filebelt-operation-egress 'egress: []'
 
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set deployment.quiesced=true \
@@ -407,6 +443,8 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
 assert_document_contains "${temporary}/recovery-verify.yaml" Job filebelt-recovery-verify-123e4567-e89 'secretName: filebelt-checkpoint-ci'
 assert_document_contains "${temporary}/recovery-verify.yaml" Job filebelt-recovery-verify-123e4567-e89 'items: [{key: checkpoint.json, path: checkpoint.json}]'
 assert_document_not_contains "${temporary}/recovery-verify.yaml" Job filebelt-recovery-verify-123e4567-e89 'claimName:'
+assert_document_contains "${temporary}/recovery-verify.yaml" Job filebelt-recovery-verify-123e4567-e89 'mountPath: /run/secrets/api-storage-capability-public-keyset'
+assert_document_contains "${temporary}/recovery-verify.yaml" Job filebelt-recovery-verify-123e4567-e89 'mountPath: /run/secrets/media-storage-capability-public-keyset'
 
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --api-versions monitoring.coreos.com/v1/ServiceMonitor \
@@ -488,6 +526,17 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml" \
   >"${temporary}/mcp.yaml"
+helm template phase4-recovery "${chart}" --kube-version 1.36.0 \
+  --set deployment.quiesced=true \
+  --set mcp.enabled=true \
+  --set mcp.runners.enabled=true \
+  --set networkPolicy.mcpGateway.enabled=true \
+  --set networkPolicy.kubernetesApi.enabled=true \
+  --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
+  --set-string operation.type=recovery-checkpoint \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml" \
+  >"${temporary}/recovery-mcp.yaml"
 assert_count "${temporary}/mcp.yaml" '^kind: Deployment$' 6
 assert_count "${temporary}/mcp.yaml" '^kind: ServiceAccount$' 8
 assert_count "${temporary}/mcp.yaml" '^kind: PodDisruptionBudget$' 5
@@ -517,15 +566,42 @@ assert_document_contains "${temporary}/mcp.yaml" Service filebelt-mcp-broker 'po
 assert_document_contains "${temporary}/mcp.yaml" NetworkPolicy filebelt-mcp-broker-ingress 'port: runner-relay'
 assert_document_contains "${temporary}/mcp.yaml" NetworkPolicy filebelt-mcp-broker-ingress 'kubernetes.io/metadata.name: filebelt-mcp-runners'
 assert_document_contains "${temporary}/mcp.yaml" Deployment filebelt-api 'checksum/mcp-client-tls:'
+assert_document_contains "${temporary}/mcp.yaml" Deployment filebelt-mcp-broker 'mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset'
+assert_document_contains "${temporary}/recovery-mcp.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'checksum/mcp-client-tls:'
 assert_not_contains "${temporary}/mcp.yaml" 'kind: ClusterRole'
 assert_not_contains "${temporary}/mcp.yaml" 'hostPath:'
+
+# MCP remains independently operable: its API delegation purpose does not
+# depend on collaboration being enabled or on collaboration Secret projections.
+helm template phase4 "${chart}" --kube-version 1.36.0 \
+  --set mcp.enabled=true \
+  --set mcp.runners.enabled=true \
+  --set collaboration.enabled=false \
+  --set networkPolicy.mcpGateway.enabled=true \
+  --set networkPolicy.kubernetesApi.enabled=true \
+  --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
+  --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml" \
+  >"${temporary}/mcp-without-collaboration.yaml"
+assert_rendered_toml "${temporary}/mcp-without-collaboration.yaml" filebelt.toml
+assert_contains "${temporary}/mcp-without-collaboration.yaml" '[keys.api_mcp_delegation]'
+assert_not_contains "${temporary}/mcp-without-collaboration.yaml" '[keys.api_collaboration_grant]'
+assert_document_contains "${temporary}/mcp-without-collaboration.yaml" Deployment filebelt-api 'mountPath: /run/secrets/api-mcp-delegation-capability-private-key'
+assert_document_contains "${temporary}/mcp-without-collaboration.yaml" Deployment filebelt-mcp-broker 'mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset'
 
 helm template phase6 "${chart}" --kube-version 1.36.0 \
   --set mounts.enabled=true \
   --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
   --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]' \
   >"${temporary}/mounts.yaml"
+helm template phase6-recovery "${chart}" --kube-version 1.36.0 \
+  --set deployment.quiesced=true \
+  --set mounts.enabled=true \
+  --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
+  --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]' \
+  --set-string operation.type=recovery-checkpoint \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  >"${temporary}/recovery-mounts.yaml"
 assert_count "${temporary}/mounts.yaml" '^kind: Deployment$' 6
 assert_count "${temporary}/mounts.yaml" '^kind: StatefulSet$' 2
 assert_count "${temporary}/mounts.yaml" '^kind: PodDisruptionBudget$' 6
@@ -535,6 +611,8 @@ assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 
 assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'claimName:'
 assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/mount-database-url'
 assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/vfs-server-tls'
+assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/mount-storage-capability-public-keyset'
+assert_document_contains "${temporary}/recovery-mounts.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/mount-storage-capability-public-keyset'
 assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'name: tailscaled'
 assert_document_not_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'claimName:'
 assert_document_contains "${temporary}/mounts.yaml" Deployment filebelt-headscale-sync 'mountPath: /run/secrets/headscale-api-token'

@@ -82,7 +82,7 @@ all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
 
-The default `filebelt.toml` is version 6 in Kubernetes mode and configures the
+The default `filebelt.toml` is version 7 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
 logs, Prometheus, and the OIDC egress proxy. Replace the example origin,
 issuer, tenant, administrator, backend UUID, certificate identities, and edge
@@ -133,7 +133,14 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | `auditDatabase` | `database-url` | Audit export |
 | `recoveryDatabase` | `database-url` | Recovery operations |
 | `oidcClient` and `oidcCa` | `client-secret` and `ca.crt` | API |
-| capability and digest values | one configured key each | API or I/O as required |
+| `apiStorageCapabilityPrivateKey` and `apiStorageCapabilityPublicKeyset` | `private-key`, `public-keyset` | API signer and I/O verifier |
+| `apiCollaborationGrantCapabilityPrivateKey` and `apiCollaborationGrantCapabilityPublicKeyset` | `private-key`, `public-keyset` | API and enabled collaboration only |
+| `apiMcpDelegationCapabilityPrivateKey` and `apiMcpDelegationCapabilityPublicKeyset` | `private-key`, `public-keyset` | API and enabled MCP broker only |
+| `collaborationStorageCapabilityPrivateKey` and `collaborationStorageCapabilityPublicKeyset` | `private-key`, `public-keyset` | Enabled collaboration and I/O only |
+| `documentStorageCapabilityPrivateKey` and `documentStorageCapabilityPublicKeyset` | `private-key`, `public-keyset` | Enabled document coordinator and I/O only |
+| `mountStorageCapabilityPrivateKey` and `mountStorageCapabilityPublicKeyset` | `private-key`, `public-keyset` | Enabled VFS and I/O only |
+| `mediaStorageCapabilityPrivateKey` and `mediaStorageCapabilityPublicKeyset` | `private-key`, `public-keyset` | Admin preflight/recovery only; never a runtime media Pod |
+| `digestKey` | `digest-key` | API digest operations |
 | `publicTls` | `tls.crt`, `tls.key` | Web |
 | API/I/O server TLS | `tls.crt`, `tls.key`, `client-ca.crt` | Corresponding backend |
 | API/I/O client TLS | `tls.crt`, `tls.key`, `server-ca.crt` | Web |
@@ -144,7 +151,6 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | runner broker/gateway TLS | `tls.crt`, `tls.key`, `ca.crt` | Trusted relay sidecar only; create in `mcp.runners.namespace` |
 | `vfsDatabase` and `headscaleSyncDatabase` | `database-url` | VFS and Headscale synchronization |
 | `mountVaultKeyring` | `keyring.json` | VFS verifier vault only |
-| `mountCapabilityPrivateKey` | `private-key` | VFS generation-3 `fbcap2` signer only |
 | VFS server, management, and I/O client TLS | certificate, key, and exact CA keys | Gateways, API, VFS, and I/O |
 | `headscaleApiToken` and `headscaleServerCa` | `token` and `ca.crt` | Headscale synchronization only |
 
@@ -205,13 +211,17 @@ For a fresh installation:
 2. Install with `deployment.quiesced=true` and run `migrate`.
 3. Apply release-matched `grants.sql` as the database owner.
 4. Run `verify-grants`, then the idempotent `bootstrap` operation.
-5. Run `storage-probe` and retain its logs.
-6. Install a normal revision with `operation.type=none` and
+5. Run `keys-audit` with all purpose public keysets projected and retain its
+   successful output as the global key-byte-disjointness preflight.
+6. Run `storage-probe` and retain its logs.
+7. Install a normal revision with `operation.type=none` and
    `deployment.quiesced=false`.
 
 For an upgrade, run `migrate` without changing the existing workload images or
-configuration, apply `grants.sql`, and run `verify-grants`. Only after both
-steps pass should a separate release roll out new image/config digests. The
+configuration, apply `grants.sql`, run `verify-grants`, and run `keys-audit`
+against the complete candidate version-7 public keyset inventory. Only after
+all three steps pass should a separate release roll out new image/config
+digests. The
 chart gives no database-owner credential to a Job, never runs migrations from
 an API Pod, and has no down-migration path.
 
@@ -231,7 +241,7 @@ operation:
     key: checkpoint.json
 ```
 
-Supported types are `migrate`, `bootstrap`, `verify-grants`, `storage-probe`,
+Supported types are `migrate`, `bootstrap`, `verify-grants`, `keys-audit`, `storage-probe`,
 `storage-scrub-start`, `storage-scrub-status`, `storage-scrub-verify`,
 `recovery-checkpoint`, `recovery-verify`, and `audit-export`. Scrub start is a
 full-tenant operation and requires the exact tenant slug in
@@ -240,7 +250,10 @@ and leave the tenant confirmation empty; the chart renders the two modes as
 mutually exclusive. `args` appends bounded arguments without invoking a shell,
 for example an audit cursor or export limit.
 
-Recovery checkpoint and verification require quiesced workloads. Capture the
+Keyset audit, recovery checkpoint, and recovery verification require quiesced
+workloads. `keys-audit` receives all configured public keysets and no private
+key or database credential; its success is required before any version-7
+traffic admission. Capture the
 checkpoint Job's stdout. To verify it, store that sensitive operational JSON in
 an operator-owned Secret and set `operation.checkpoint.secretName`; the chart
 projects only its configured key at `/run/input/checkpoint.json`. A recovery is

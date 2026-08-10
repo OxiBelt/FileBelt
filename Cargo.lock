@@ -1762,6 +1762,7 @@ dependencies = [
  "blake3",
  "clap",
  "filebelt-authz",
+ "filebelt-capability-keyset",
  "filebelt-collaboration-protocol",
  "filebelt-control-protocol",
  "filebelt-database",
@@ -1802,6 +1803,15 @@ name = "filebelt-build-identity"
 version = "0.1.0"
 
 [[package]]
+name = "filebelt-capability-keyset"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "filebelt-collaboration"
 version = "0.1.0"
 dependencies = [
@@ -1812,6 +1822,7 @@ dependencies = [
  "blake3",
  "bytes",
  "clap",
+ "filebelt-capability-keyset",
  "filebelt-collaboration-protocol",
  "filebelt-control-protocol",
  "filebelt-database",
@@ -1846,6 +1857,7 @@ dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
  "blake3",
+ "filebelt-capability-keyset",
  "prost",
  "thiserror 2.0.18",
  "uuid",
@@ -1923,6 +1935,7 @@ dependencies = [
  "blake3",
  "bytes",
  "clap",
+ "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",
@@ -1996,6 +2009,7 @@ dependencies = [
  "base64 0.23.1",
  "blake3",
  "clap",
+ "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",
@@ -2035,6 +2049,7 @@ version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
+ "filebelt-capability-keyset",
  "prost",
  "thiserror 2.0.18",
  "uuid",
@@ -2135,6 +2150,7 @@ version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
+ "filebelt-capability-keyset",
  "prost",
  "thiserror 2.0.18",
  "uuid",
@@ -2155,6 +2171,7 @@ dependencies = [
  "blake3",
  "clap",
  "filebelt-authz",
+ "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",
@@ -2188,11 +2205,13 @@ dependencies = [
 name = "filebelt-worker-io"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "axum",
  "base64 0.23.1",
  "blake3",
  "bytes",
  "clap",
+ "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",
@@ -2244,6 +2263,7 @@ dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
  "clap",
+ "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",
  "filebelt-deployment-diagnostics",

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Opt-in MCP overlay. Keep the API-MCP delegation signer out of the base core
+# profile: it is needed only when the MCP broker topology is configured.
+services:
+  filebelt-api:
+    secrets:
+      - api-mcp-delegation-capability-private-key
+      - api-mcp-delegation-capability-public-keyset
+    configs:
+      - source: filebelt-mcp-config
+        target: /etc/filebelt/filebelt.toml
+        mode: 0444

@@ -16,6 +16,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.yaml"
+MCP_COMPOSE = ROOT / "deploy/compose/compose.mcp.yaml"
 PREPARE = ROOT / "deploy/compose/prepare-state.sh"
 POSTGRES = (
     "docker.io/library/postgres@"
@@ -63,18 +64,60 @@ def main() -> int:
     for name in ("filebelt.toml", "filebelt-mcp.toml"):
         collaboration_settings = configurations[name]["collaboration"]
         assert collaboration_settings["enabled"] is True, name
-        assert collaboration_settings["capability_key_generation"] == 2, name
+        signing = collaboration_settings["capability_signing"]
+        assert signing["current_generation"] == 1, name
+        assert signing["public_keyset_file"].endswith(
+            "collaboration-storage-capability-public-keyset"
+        ), name
         assert collaboration_settings["io_url"] == "http://filebelt-worker-io:8081/", name
     with tempfile.TemporaryDirectory(prefix="filebelt-phase2-compose-") as directory:
         state = Path(directory) / "state"
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
         subprocess.run([str(PREPARE)], cwd=ROOT, env=environment, check=True)
+        purposes = {
+            "api-storage": "api-storage",
+            "api-collaboration-grant": "api-collaboration-grant",
+            "api-mcp-delegation": "api-mcp-delegation",
+            "collaboration-storage": "collaboration-storage",
+            "media-storage": "media-storage",
+        }
+        public_keys: set[str] = set()
+        for purpose, name in purposes.items():
+            lines = (
+                state / "secrets" / f"{name}-capability-public-keyset"
+            ).read_text(encoding="utf-8").splitlines()
+            assert lines[0] == "filebelt-capability-keyset-v2", purpose
+            assert lines[1] == f"purpose={purpose}", purpose
+            assert lines[2].startswith("1:"), purpose
+            assert len(lines) == 3, purpose
+            public_keys.add(lines[2])
+        assert len(public_keys) == len(purposes), "public key bytes must be disjoint"
+        base_rendered = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--file",
+                str(COMPOSE),
+                "--profile",
+                "core",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         rendered = subprocess.run(
             [
                 "docker",
                 "compose",
                 "--file",
                 str(COMPOSE),
+                "--file",
+                str(MCP_COMPOSE),
                 "--profile",
                 "core",
                 "--profile",
@@ -94,6 +137,16 @@ def main() -> int:
             text=True,
         )
 
+    base_model = json.loads(base_rendered.stdout)
+    assert secret_sources(base_model["services"]["filebelt-api"]) == {
+        "api-database-url",
+        "oidc-client-secret",
+        "api-storage-capability-private-key",
+        "api-storage-capability-public-keyset",
+        "api-collaboration-grant-capability-private-key",
+        "api-collaboration-grant-capability-public-keyset",
+        "digest-key",
+    }
     model = json.loads(rendered.stdout)
     services = model["services"]
     assert model["networks"]["control"]["internal"] is True
@@ -158,24 +211,34 @@ def main() -> int:
     assert secret_sources(api) == {
         "api-database-url",
         "oidc-client-secret",
-        "capability-private-key",
-        "capability-public-keyset",
+        "api-storage-capability-private-key",
+        "api-storage-capability-public-keyset",
+        "api-collaboration-grant-capability-private-key",
+        "api-collaboration-grant-capability-public-keyset",
+        "api-mcp-delegation-capability-private-key",
+        "api-mcp-delegation-capability-public-keyset",
         "digest-key",
     }
-    assert secret_sources(io) == {"io-database-url", "capability-public-keyset"}
+    assert secret_sources(io) == {
+        "io-database-url",
+        "api-storage-capability-public-keyset",
+        "collaboration-storage-capability-public-keyset",
+    }
     assert secret_sources(maintenance) == {"maintenance-database-url"}
     assert secret_sources(broker) == {
         "mcp-database-url",
         "mcp-vault-keyring",
-        "capability-public-keyset",
+        "api-mcp-delegation-capability-public-keyset",
         "mcp-egress-client-certificate",
         "mcp-egress-client-private-key",
         "mcp-egress-ca-certificate",
     }
     assert secret_sources(collaboration) == {
         "collaboration-database-url",
-        "collaboration-capability-private-key",
-        "capability-public-keyset",
+        "collaboration-storage-capability-private-key",
+        "collaboration-storage-capability-public-keyset",
+        "api-storage-capability-public-keyset",
+        "api-collaboration-grant-capability-public-keyset",
     }
     collaboration_config = next(
         config

@@ -26,6 +26,7 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use clap::{Parser, Subcommand};
+use filebelt_capability_keyset::MountStorageKeyset;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::mount::{
     MountAuthenticationMaterial, MountSecretEnvelopeInput, MountSessionFence,
@@ -38,7 +39,8 @@ use filebelt_runtime::{
 };
 use filebelt_secret_vault::{Keyring, SecretContext, SecretEnvelope, VaultProfile};
 use filebelt_storage_protocol::{
-    MountCapabilityClaims, MountCapabilityOperation, sign_mount_capability, unix_time_now,
+    MountCapabilityClaims, MountCapabilityOperation, sign_mount_storage_read_capability,
+    unix_time_now,
 };
 use filebelt_vfs_protocol::vfs_request::Operation;
 use filebelt_vfs_protocol::{
@@ -155,18 +157,22 @@ async fn run() -> Result<()> {
             .ok_or_else(|| anyhow!("mount vault keyring file is absent"))?,
         VaultProfile::mount(),
     )?);
-    let capability_private_key = std::fs::read(
-        config
-            .mounts
-            .capability_private_key_file
-            .as_ref()
-            .ok_or_else(|| anyhow!("mount capability private key is absent"))?,
-    )
-    .context("cannot read mount capability private key")?;
+    let signing = config
+        .mounts
+        .capability_signing
+        .as_ref()
+        .ok_or_else(|| anyhow!("mount capability signing is absent"))?;
+    let capability_private_key = std::fs::read(&signing.private_key_file)
+        .context("cannot read mount capability private key")?;
     let capability_signer = Arc::new(
         Ed25519KeyPair::from_pkcs8(&capability_private_key)
             .map_err(|_| anyhow!("mount capability key is not Ed25519 PKCS#8"))?,
     );
+    self_check_signer(
+        &signing.public_keyset_file,
+        signing.current_generation,
+        &capability_signer,
+    )?;
     let io = MountIoClient {
         http: mount_io_http_client(&config)?,
         io_url: config
@@ -175,7 +181,7 @@ async fn run() -> Result<()> {
             .clone()
             .ok_or_else(|| anyhow!("mount I/O URL is absent"))?,
         signer: capability_signer,
-        signing_generation: config.mounts.capability_key_generation,
+        signing_generation: signing.current_generation,
     };
     let digest_key_bytes =
         std::fs::read(&config.keys.digest_key_file).context("cannot read the mount digest key")?;
@@ -559,11 +565,14 @@ async fn read_handle(
         expires_at_unix_seconds: now + 15,
         grant_id: handle.id.to_string(),
     };
-    let capability = sign_mount_capability(
+    let capability = match sign_mount_storage_read_capability(
         &claims,
         state.io.signing_generation,
         state.io.signer.as_ref(),
-    );
+    ) {
+        Ok(capability) => capability,
+        Err(_) => return unavailable(request, "vfs.capability_generation_failed"),
+    };
     let url = match state
         .io
         .io_url
@@ -830,6 +839,25 @@ async fn authenticate(
         },
         Err(_) => denied(fence, "vfs.authentication_failed"),
     }
+}
+
+fn self_check_signer(
+    path: &std::path::Path,
+    generation: u32,
+    signer: &Ed25519KeyPair,
+) -> Result<()> {
+    let source =
+        std::fs::read_to_string(path).context("cannot read mount capability public keyset")?;
+    let keyset = MountStorageKeyset::parse(&source)
+        .map_err(|_| anyhow!("mount capability public keyset is invalid"))?;
+    let probe = signer.sign(b"filebelt.mount.storage.keyset.self-check");
+    keyset
+        .verify(
+            generation,
+            b"filebelt.mount.storage.keyset.self-check",
+            probe.as_ref(),
+        )
+        .map_err(|_| anyhow!("mount capability private key does not match the keyset"))
 }
 
 fn authentication_index(key: &[u8; 32], domain: &[u8], value: &str) -> [u8; 32] {

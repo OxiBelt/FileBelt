@@ -25,7 +25,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" $root "component" $workload.name) | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" $root | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s:%s:%s:%s" $root.Values.secrets.vfsDatabase.generation $root.Values.secrets.headscaleSyncDatabase.generation $root.Values.secrets.mountVaultKeyring.generation $root.Values.secrets.mountCapabilityPrivateKey.generation $root.Values.secrets.digestKey.generation $root.Values.secrets.vfsServerTls.generation $root.Values.secrets.vfsManagementServerTls.generation $root.Values.secrets.vfsIoClientTls.generation $root.Values.secrets.headscaleApiToken.generation $root.Values.secrets.headscaleServerCa.generation | sha256sum | quote }}
+        checksum/secrets: {{ ternary (printf "%s:%s:%s:%s:%s:%s:%s" $root.Values.secrets.vfsDatabase.generation $root.Values.secrets.mountVaultKeyring.generation $root.Values.secrets.mountStorageCapabilityPrivateKey.generation $root.Values.secrets.mountStorageCapabilityPublicKeyset.generation $root.Values.secrets.vfsServerTls.generation $root.Values.secrets.vfsManagementServerTls.generation $root.Values.secrets.vfsIoClientTls.generation) (printf "%s:%s:%s" $root.Values.secrets.headscaleSyncDatabase.generation $root.Values.secrets.headscaleApiToken.generation $root.Values.secrets.headscaleServerCa.generation) (eq $workload.name "vfs") | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" $root }}-{{ $workload.name }}
       automountServiceAccountToken: false
@@ -56,8 +56,8 @@ spec:
             - {name: database, mountPath: /run/secrets/mount-database-url, subPath: database-url, readOnly: true}
           {{- if eq $workload.name "vfs" }}
             - {name: vault, mountPath: /run/secrets/mount-vault-keyring.json, subPath: keyring.json, readOnly: true}
-            - {name: capability-private, mountPath: /run/secrets/mount-capability-private-key, subPath: capability-private-key, readOnly: true}
-            - {name: digest-key, mountPath: /run/secrets/digest-key, subPath: digest-key, readOnly: true}
+            - {name: mount-storage-capability-private, mountPath: /run/secrets/mount-storage-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             - {name: vfs-server-tls, mountPath: /run/secrets/vfs-server-tls, readOnly: true}
             - {name: management-server-tls, mountPath: /run/secrets/vfs-management-server-tls, readOnly: true}
             - {name: io-client-tls, mountPath: /run/secrets/vfs-io-client-tls, readOnly: true}
@@ -73,10 +73,10 @@ spec:
 {{- if eq $workload.name "vfs" }}
         - name: vault
           secret: {secretName: {{ $root.Values.secrets.mountVaultKeyring.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountVaultKeyring.key }}, path: keyring.json}]}
-        - name: capability-private
-          secret: {secretName: {{ $root.Values.secrets.mountCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountCapabilityPrivateKey.key }}, path: capability-private-key}]}
-        - name: digest-key
-          secret: {secretName: {{ $root.Values.secrets.digestKey.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.digestKey.key }}, path: digest-key}]}
+        - name: mount-storage-capability-private
+          secret: {secretName: {{ $root.Values.secrets.mountStorageCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountStorageCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: mount-storage-capability-public
+          secret: {secretName: {{ $root.Values.secrets.mountStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.mountStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
         - name: vfs-server-tls
           secret: {secretName: {{ $root.Values.secrets.vfsServerTls.name }}, defaultMode: 0440, items: [{key: {{ $root.Values.secrets.vfsServerTls.certificateKey }}, path: tls.crt}, {key: {{ $root.Values.secrets.vfsServerTls.privateKeyKey }}, path: tls.key}, {key: {{ $root.Values.secrets.vfsServerTls.caKey }}, path: client-ca.crt}]}
         - name: management-server-tls

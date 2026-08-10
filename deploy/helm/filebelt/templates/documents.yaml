@@ -29,7 +29,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "document") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s" .Values.secrets.documentDatabase.generation .Values.secrets.documentCapabilityPrivateKey.generation .Values.secrets.documentApiServerTls.generation .Values.secrets.documentAdapterServerTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s" .Values.secrets.documentDatabase.generation .Values.secrets.documentStorageCapabilityPrivateKey.generation .Values.secrets.documentStorageCapabilityPublicKeyset.generation .Values.secrets.documentApiServerTls.generation .Values.secrets.documentAdapterServerTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-document
       automountServiceAccountToken: false
@@ -59,7 +59,8 @@ spec:
           volumeMounts:
             - {name: filebelt-config, mountPath: /etc/filebelt, readOnly: true}
             - {name: database, mountPath: /run/secrets/document-database-url, subPath: database-url, readOnly: true}
-            - {name: capability-private, mountPath: /run/secrets/document-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: document-storage-capability-private, mountPath: /run/secrets/document-storage-capability-private-key, subPath: private-key, readOnly: true}
+            - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             - {name: api-server-tls, mountPath: /run/secrets/document-api-server-tls, readOnly: true}
             - {name: adapter-server-tls, mountPath: /run/secrets/document-adapter-server-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
@@ -67,8 +68,10 @@ spec:
 {{ include "filebelt.filebeltConfigVolume" . | indent 8 }}
         - name: database
           secret: {secretName: {{ .Values.secrets.documentDatabase.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentDatabase.key }}, path: database-url}]}
-        - name: capability-private
-          secret: {secretName: {{ .Values.secrets.documentCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: document-storage-capability-private
+          secret: {secretName: {{ .Values.secrets.documentStorageCapabilityPrivateKey.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentStorageCapabilityPrivateKey.key }}, path: private-key}]}
+        - name: document-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
         - name: api-server-tls
           secret: {secretName: {{ .Values.secrets.documentApiServerTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentApiServerTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.documentApiServerTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.documentApiServerTls.caKey }}, path: client-ca.crt}]}
         - name: adapter-server-tls

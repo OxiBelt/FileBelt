@@ -10,19 +10,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
-use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
+use aws_lc_rs::signature::Ed25519KeyPair;
 use clap::{Parser, Subcommand};
+use filebelt_capability_keyset::{
+    ApiCollaborationGrantKeyset, ApiStorageKeyset, CollaborationStorageKeyset,
+    public_key_material_is_disjoint,
+};
 use filebelt_collaboration::io_client::CollaborationIoClient;
 use filebelt_collaboration::server::{CollaborationServerState, router};
 use filebelt_collaboration::webtransport;
-use filebelt_collaboration_protocol::VerificationKey as CollaborationVerificationKey;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::Database;
 use filebelt_runtime::{
     MtlsListener, OperationsState, certificate_not_after_unix_seconds, init_telemetry,
     install_crypto_provider, operations_router, trace_request, wait_for_shutdown,
 };
-use filebelt_storage_protocol::{VerificationKey, parse_verification_keyset};
 use reqwest::{Certificate, Client, Identity};
 use tracing::{error, info};
 
@@ -101,35 +103,42 @@ async fn serve(config: Config) -> Result<()> {
         .await
         .context("configured tenant is unavailable")?;
 
-    let key_path = config
+    let signing = config
         .collaboration
-        .capability_private_key_file
+        .capability_signing
         .as_ref()
-        .ok_or_else(|| anyhow!("collaboration capability private key is absent"))?;
-    let private_key =
-        std::fs::read(key_path).context("cannot read collaboration capability private key")?;
+        .ok_or_else(|| anyhow!("collaboration capability signing is absent"))?;
+    let private_key = std::fs::read(&signing.private_key_file)
+        .context("cannot read collaboration capability private key")?;
     let signer = Arc::new(
         Ed25519KeyPair::from_pkcs8(&private_key)
             .map_err(|_| anyhow!("collaboration capability key is not Ed25519 PKCS#8"))?,
     );
-    let keyset_source = std::fs::read_to_string(&config.keys.capability_public_key_file)
-        .context("cannot read capability verification keyset")?;
+    let keyset_source = std::fs::read_to_string(&signing.public_keyset_file)
+        .context("cannot read collaboration storage keyset")?;
     let verification_keys = Arc::new(
-        parse_verification_keyset(
-            &keyset_source,
-            config.collaboration.capability_key_generation,
-        )
-        .map_err(|_| anyhow!("capability verification keyset is invalid"))?,
+        CollaborationStorageKeyset::parse(&keyset_source)
+            .map_err(|_| anyhow!("collaboration storage keyset is invalid"))?,
     );
-    validate_signer(
-        &verification_keys,
-        config.collaboration.capability_key_generation,
-        &signer,
-    )?;
-    let grant_keys = Arc::new(grant_verification_keys(
-        &verification_keys,
-        config.keys.current_generation,
-    )?);
+    validate_signer(&verification_keys, signing.current_generation, &signer)?;
+    let api_source = std::fs::read_to_string(&config.keys.api_storage.public_keyset_file)
+        .context("cannot read API storage keyset")?;
+    let api_keys = Arc::new(
+        ApiStorageKeyset::parse(&api_source)
+            .map_err(|_| anyhow!("API storage keyset is invalid"))?,
+    );
+    let grants = config
+        .keys
+        .api_collaboration_grant
+        .as_ref()
+        .ok_or_else(|| anyhow!("API collaboration grant signing is absent"))?;
+    let grant_source = std::fs::read_to_string(&grants.public_keyset_file)
+        .context("cannot read collaboration grant keyset")?;
+    let grant_keys = Arc::new(
+        ApiCollaborationGrantKeyset::parse(&grant_source)
+            .map_err(|_| anyhow!("collaboration grant keyset is invalid"))?,
+    );
+    validate_keyset_disjointness(&verification_keys, &api_keys, &grant_keys)?;
     let http = io_http_client(&config)?;
     let io = CollaborationIoClient::new(
         http,
@@ -139,7 +148,8 @@ async fn serve(config: Config) -> Result<()> {
             .clone()
             .ok_or_else(|| anyhow!("collaboration I/O URL is absent"))?,
         signer,
-        config.collaboration.capability_key_generation,
+        signing.current_generation,
+        api_keys,
         verification_keys,
     );
     let state = CollaborationServerState::new(
@@ -280,36 +290,33 @@ async fn serve(config: Config) -> Result<()> {
 }
 
 fn validate_signer(
-    keys: &[VerificationKey],
+    keys: &CollaborationStorageKeyset,
     generation: u32,
     signer: &Ed25519KeyPair,
 ) -> Result<()> {
-    let expected = keys
-        .iter()
-        .find(|key| key.generation == generation)
-        .ok_or_else(|| anyhow!("collaboration capability generation is absent"))?;
-    if expected.public_key.as_slice() != signer.public_key().as_ref() {
-        bail!("collaboration capability private key does not match the keyset");
-    }
-    Ok(())
+    let probe = signer.sign(b"filebelt.collaboration.storage.keyset.self-check");
+    keys.verify(
+        generation,
+        b"filebelt.collaboration.storage.keyset.self-check",
+        probe.as_ref(),
+    )
+    .map_err(|_| anyhow!("collaboration capability private key does not match the keyset"))
 }
 
-fn grant_verification_keys(
-    keys: &[VerificationKey],
-    api_generation: u32,
-) -> Result<Vec<CollaborationVerificationKey>> {
-    let keys = keys
-        .iter()
-        .filter(|key| key.generation == api_generation)
-        .map(|key| CollaborationVerificationKey {
-            generation: key.generation,
-            public_key: key.public_key.clone(),
-        })
-        .collect::<Vec<_>>();
-    if keys.len() != 1 {
-        bail!("exactly one API grant verification key is required");
+fn validate_keyset_disjointness(
+    collaboration: &CollaborationStorageKeyset,
+    api_storage: &ApiStorageKeyset,
+    api_grant: &ApiCollaborationGrantKeyset,
+) -> Result<()> {
+    let material = collaboration
+        .entries()
+        .map(|(_, key)| *key)
+        .chain(api_storage.entries().map(|(_, key)| *key))
+        .chain(api_grant.entries().map(|(_, key)| *key));
+    if !public_key_material_is_disjoint(material) {
+        bail!("capability public key material is reused across purposes");
     }
-    Ok(keys)
+    Ok(())
 }
 
 fn io_http_client(config: &Config) -> Result<Client> {
@@ -354,32 +361,37 @@ fn io_http_client(config: &Config) -> Result<Client> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::validate_keyset_disjointness;
 
     #[test]
-    fn grant_verification_excludes_collaboration_signing_generation() {
-        let keys = vec![
-            VerificationKey {
-                generation: 1,
-                public_key: vec![1; 32],
-            },
-            VerificationKey {
-                generation: 2,
-                public_key: vec![2; 32],
-            },
-        ];
-        let grants = grant_verification_keys(&keys, 1).unwrap();
-        assert_eq!(grants.len(), 1);
-        assert_eq!(grants[0].generation, 1);
-        assert_eq!(grants[0].public_key, vec![1; 32]);
+    fn collaboration_storage_keyset_cannot_be_parsed_as_api_grant_keyset() {
+        let source = filebelt_capability_keyset::encode_keyset(
+            filebelt_capability_keyset::KeyPurpose::CollaborationStorage,
+            &[(1, [7; 32])],
+        )
+        .unwrap();
+        assert!(filebelt_capability_keyset::ApiCollaborationGrantKeyset::parse(&source).is_err());
     }
 
     #[test]
-    fn grant_verification_requires_exact_api_generation() {
-        let keys = vec![VerificationKey {
-            generation: 2,
-            public_key: vec![2; 32],
-        }];
-        assert!(grant_verification_keys(&keys, 1).is_err());
+    fn startup_rejects_public_key_reuse_across_readable_purposes() {
+        use filebelt_capability_keyset::{
+            ApiCollaborationGrantKeyset, ApiStorageKeyset, CollaborationStorageKeyset, KeyPurpose,
+            encode_keyset,
+        };
+
+        let collaboration = CollaborationStorageKeyset::parse(
+            &encode_keyset(KeyPurpose::CollaborationStorage, &[(1, [1; 32])]).unwrap(),
+        )
+        .unwrap();
+        let api = ApiStorageKeyset::parse(
+            &encode_keyset(KeyPurpose::ApiStorage, &[(1, [2; 32])]).unwrap(),
+        )
+        .unwrap();
+        let grant = ApiCollaborationGrantKeyset::parse(
+            &encode_keyset(KeyPurpose::ApiCollaborationGrant, &[(1, [1; 32])]).unwrap(),
+        )
+        .unwrap();
+        assert!(validate_keyset_disjointness(&collaboration, &api, &grant).is_err());
     }
 }

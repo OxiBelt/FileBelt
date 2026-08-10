@@ -93,7 +93,10 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
     assert!(
         schema["properties"]["operation"]["properties"]["type"]["enum"]
             .as_array()
-            .is_some_and(|operations| operations.len() == 11)
+            .is_some_and(|operations| {
+                operations.len() == 12
+                    && operations.iter().any(|operation| operation == "keys-audit")
+            })
     );
     assert!(values.contains("linux/riscv64"));
     assert_eq!(catalog_schema["properties"]["schemaVersion"]["const"], 1);

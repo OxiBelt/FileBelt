@@ -14,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 6;
+pub const CONFIG_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +43,6 @@ pub struct Config {
     pub collaboration: CollaborationConfig,
     #[serde(default)]
     pub documents: DocumentConfig,
-    #[serde(default)]
     pub media: MediaConfig,
     #[serde(default)]
     pub mounts: MountConfig,
@@ -194,10 +193,21 @@ pub struct StorageConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KeyConfig {
-    pub capability_private_key_file: PathBuf,
-    pub capability_public_key_file: PathBuf,
     pub digest_key_file: PathBuf,
-    #[serde(default = "default_key_generation")]
+    pub digest_key_generation: u32,
+    pub api_storage: SigningKeyConfig,
+    #[serde(default)]
+    pub api_collaboration_grant: Option<SigningKeyConfig>,
+    #[serde(default)]
+    pub api_mcp_delegation: Option<SigningKeyConfig>,
+}
+
+/// One purpose-scoped Ed25519 signing authority and its admitted public keys.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigningKeyConfig {
+    pub private_key_file: PathBuf,
+    pub public_keyset_file: PathBuf,
     pub current_generation: u32,
 }
 
@@ -280,9 +290,7 @@ pub struct DocumentConfig {
     #[serde(default)]
     pub server_ca_file: Option<PathBuf>,
     #[serde(default)]
-    pub capability_private_key_file: Option<PathBuf>,
-    #[serde(default = "default_document_capability_key_generation")]
-    pub capability_key_generation: u32,
+    pub capability_signing: Option<SigningKeyConfig>,
     #[serde(default = "default_document_max_active_tabs")]
     pub max_active_tabs: u32,
     #[serde(default = "default_document_max_bytes")]
@@ -303,8 +311,7 @@ impl Default for DocumentConfig {
             client_certificate_chain_file: None,
             client_private_key_file: None,
             server_ca_file: None,
-            capability_private_key_file: None,
-            capability_key_generation: default_document_capability_key_generation(),
+            capability_signing: None,
             max_active_tabs: default_document_max_active_tabs(),
             max_document_bytes: default_document_max_bytes(),
             generation_recheck_seconds: default_document_generation_recheck_seconds(),
@@ -319,10 +326,7 @@ pub struct MediaConfig {
     pub enabled: bool,
     #[serde(default)]
     pub database_url_file: Option<PathBuf>,
-    #[serde(default)]
-    pub capability_private_key_file: Option<PathBuf>,
-    #[serde(default = "default_media_capability_key_generation")]
-    pub capability_key_generation: u32,
+    pub capability_signing: SigningKeyConfig,
     #[serde(default)]
     pub job_namespace: Option<String>,
     #[serde(default)]
@@ -346,8 +350,7 @@ impl Default for MediaConfig {
         Self {
             enabled: false,
             database_url_file: None,
-            capability_private_key_file: None,
-            capability_key_generation: default_media_capability_key_generation(),
+            capability_signing: default_media_capability_signing(),
             job_namespace: None,
             transcoder_image: None,
             cache_claim: None,
@@ -372,9 +375,7 @@ pub struct MountConfig {
     #[serde(default = "default_key_generation")]
     pub vault_key_generation: u32,
     #[serde(default)]
-    pub capability_private_key_file: Option<PathBuf>,
-    #[serde(default = "default_mount_capability_key_generation")]
-    pub capability_key_generation: u32,
+    pub capability_signing: Option<SigningKeyConfig>,
     #[serde(default)]
     pub io_url: Option<Url>,
     #[serde(default)]
@@ -404,8 +405,7 @@ impl Default for MountConfig {
             database_url_file: None,
             vault_keyring_file: None,
             vault_key_generation: default_key_generation(),
-            capability_private_key_file: None,
-            capability_key_generation: default_mount_capability_key_generation(),
+            capability_signing: None,
             io_url: None,
             io_client_certificate_chain_file: None,
             io_client_private_key_file: None,
@@ -500,9 +500,7 @@ pub struct CollaborationConfig {
     #[serde(default)]
     pub database_url_file: Option<PathBuf>,
     #[serde(default)]
-    pub capability_private_key_file: Option<PathBuf>,
-    #[serde(default = "default_collaboration_capability_key_generation")]
-    pub capability_key_generation: u32,
+    pub capability_signing: Option<SigningKeyConfig>,
     #[serde(default)]
     pub io_url: Option<Url>,
     #[serde(default)]
@@ -528,8 +526,7 @@ impl Default for CollaborationConfig {
         Self {
             enabled: false,
             database_url_file: None,
-            capability_private_key_file: None,
-            capability_key_generation: default_collaboration_capability_key_generation(),
+            capability_signing: None,
             io_url: None,
             client_certificate_chain_file: None,
             client_private_key_file: None,
@@ -960,8 +957,6 @@ impl Config {
         if !self.database.url_file.is_absolute()
             || !self.oidc.client_secret_file.is_absolute()
             || !self.storage.root.is_absolute()
-            || !self.keys.capability_private_key_file.is_absolute()
-            || !self.keys.capability_public_key_file.is_absolute()
             || !self.keys.digest_key_file.is_absolute()
             || self
                 .oidc
@@ -1151,9 +1146,32 @@ impl Config {
         {
             return Err(invalid("drive quota is outside 1 GiB to 1 PiB"));
         }
-        if self.keys.current_generation == 0 {
-            return Err(invalid("key generation must be positive"));
+        validate_signing_key(&self.keys.api_storage, "API storage")?;
+        if self.keys.digest_key_generation == 0 {
+            return Err(invalid("digest key generation must be positive"));
         }
+        match (
+            &self.keys.api_collaboration_grant,
+            self.collaboration.enabled,
+        ) {
+            (Some(key), true) => validate_signing_key(key, "API collaboration grant")?,
+            (None, true) | (Some(_), false) => {
+                return Err(invalid(
+                    "API collaboration-grant signing must be present exactly when collaboration is enabled",
+                ));
+            }
+            (None, false) => {}
+        }
+        match (&self.keys.api_mcp_delegation, self.mcp.enabled) {
+            (Some(key), true) => validate_signing_key(key, "API MCP delegation")?,
+            (None, true) | (Some(_), false) => {
+                return Err(invalid(
+                    "API MCP-delegation signing must be present exactly when MCP is enabled",
+                ));
+            }
+            (None, false) => {}
+        }
+        self.validate_signing_key_topology()?;
         if let Some(iggy) = &self.iggy
             && (iggy.stream != "filebelt" || iggy.partitions != 16)
         {
@@ -1169,6 +1187,42 @@ impl Config {
         Ok(())
     }
 
+    fn validate_signing_key_topology(&self) -> Result<(), ConfigError> {
+        let mut configured = vec![&self.keys.api_storage, &self.media.capability_signing];
+        if let Some(key) = &self.keys.api_collaboration_grant {
+            configured.push(key);
+        }
+        if let Some(key) = &self.keys.api_mcp_delegation {
+            configured.push(key);
+        }
+        if let Some(key) = &self.collaboration.capability_signing {
+            configured.push(key);
+        }
+        if let Some(key) = &self.documents.capability_signing {
+            configured.push(key);
+        }
+        if let Some(key) = &self.mounts.capability_signing {
+            configured.push(key);
+        }
+        let mut paths = Vec::with_capacity(configured.len() * 2);
+        for key in configured {
+            if key.private_key_file == key.public_keyset_file {
+                return Err(invalid(
+                    "signing private and public-keyset paths must differ",
+                ));
+            }
+            paths.push(&key.private_key_file);
+            paths.push(&key.public_keyset_file);
+        }
+        paths.sort_unstable();
+        if paths.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid(
+                "configured signing private and public-keyset paths must be purpose-distinct",
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_documents(&self) -> Result<(), ConfigError> {
         let documents = &self.documents;
         validate_document_limits(documents)?;
@@ -1180,9 +1234,7 @@ impl Config {
                 || documents.client_certificate_chain_file.is_some()
                 || documents.client_private_key_file.is_some()
                 || documents.server_ca_file.is_some()
-                || documents.capability_private_key_file.is_some()
-                || documents.capability_key_generation
-                    != default_document_capability_key_generation()
+                || documents.capability_signing.is_some()
                 || self
                     .backend_tls
                     .as_ref()
@@ -1200,29 +1252,19 @@ impl Config {
             || !documents.provider_id.bytes().all(|byte| {
                 byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
             })
-            || [
-                documents.database_url_file.as_ref(),
-                documents.capability_private_key_file.as_ref(),
-            ]
-            .into_iter()
-            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+            || [documents.database_url_file.as_ref()]
+                .into_iter()
+                .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
             return Err(invalid(
-                "enabled documents require a provider ID and absolute database and capability-key paths",
+                "enabled documents require a provider ID and an absolute database path",
             ));
         }
-        if documents.capability_key_generation != default_document_capability_key_generation()
-            || documents.capability_key_generation == self.keys.current_generation
-            || (self.collaboration.enabled
-                && documents.capability_key_generation
-                    == self.collaboration.capability_key_generation)
-            || (self.mounts.enabled
-                && documents.capability_key_generation == self.mounts.capability_key_generation)
-        {
-            return Err(invalid(
-                "document capability key generation must be 4 and distinct from API, collaboration, and mount generations",
-            ));
-        }
+        let signing = documents
+            .capability_signing
+            .as_ref()
+            .ok_or_else(|| invalid("enabled documents require capability signing"))?;
+        validate_signing_key(signing, "document storage")?;
         validate_internal_service_url(
             documents.url.as_ref(),
             self.deployment.mode,
@@ -1300,41 +1342,27 @@ impl Config {
 
     fn validate_media(&self) -> Result<(), ConfigError> {
         let media = &self.media;
+        // Media is deliberately not a runtime capability consumer yet, but its
+        // configured public keyset is recovery evidence and must be valid.
+        validate_signing_key(&media.capability_signing, "media storage")?;
         if !media.enabled {
             if media.database_url_file.is_some()
-                || media.capability_private_key_file.is_some()
                 || media.job_namespace.is_some()
                 || media.transcoder_image.is_some()
                 || media.cache_claim.is_some()
                 || media.experimental_vaapi
-                || media.capability_key_generation != default_media_capability_key_generation()
             {
                 return Err(invalid(
-                    "disabled media must not configure database, capability, Job, cache, image, or VAAPI authority",
+                    "disabled media must not configure database, Job, cache, image, or VAAPI authority",
                 ));
             }
             return Ok(());
         }
-        if [
-            media.database_url_file.as_ref(),
-            media.capability_private_key_file.as_ref(),
-        ]
-        .into_iter()
-        .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        if [media.database_url_file.as_ref()]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
-            return Err(invalid(
-                "enabled media requires absolute database and capability-key paths",
-            ));
-        }
-        if media.capability_key_generation != default_media_capability_key_generation()
-            || media.capability_key_generation == self.keys.current_generation
-            || media.capability_key_generation == self.collaboration.capability_key_generation
-            || media.capability_key_generation == self.mounts.capability_key_generation
-            || media.capability_key_generation == self.documents.capability_key_generation
-        {
-            return Err(invalid(
-                "media requires distinct capability key generation 5",
-            ));
+            return Err(invalid("enabled media requires an absolute database path"));
         }
         let namespace = media
             .job_namespace
@@ -1371,7 +1399,8 @@ impl Config {
     fn validate_mounts(&self) -> Result<(), ConfigError> {
         let mounts = &self.mounts;
         if !mounts.enabled {
-            if mounts.headscale.enabled || mounts.nfs.enabled {
+            if mounts.headscale.enabled || mounts.nfs.enabled || mounts.capability_signing.is_some()
+            {
                 return Err(invalid(
                     "Headscale synchronization and NFS require mounts.enabled=true",
                 ));
@@ -1379,22 +1408,22 @@ impl Config {
             return Ok(());
         }
         if mounts.vault_key_generation == 0
-            || mounts.capability_key_generation == 0
-            || mounts.capability_key_generation == self.keys.current_generation
-            || (self.collaboration.enabled
-                && mounts.capability_key_generation == self.collaboration.capability_key_generation)
             || [
                 mounts.database_url_file.as_ref(),
                 mounts.vault_keyring_file.as_ref(),
-                mounts.capability_private_key_file.as_ref(),
             ]
             .into_iter()
             .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
             return Err(invalid(
-                "enabled mounts require absolute database, vault, and capability-key paths plus a distinct positive capability generation",
+                "enabled mounts require absolute database and vault paths plus a positive vault generation",
             ));
         }
+        let signing = mounts
+            .capability_signing
+            .as_ref()
+            .ok_or_else(|| invalid("enabled mounts require capability signing"))?;
+        validate_signing_key(signing, "mount storage")?;
         let expected_scheme = if self.deployment.mode == DeploymentMode::Kubernetes {
             "https"
         } else {
@@ -1549,10 +1578,9 @@ impl Config {
             || nfs.export_root != "/filebelt"
             || !(30..=300).contains(&nfs.grace_seconds)
             || nfs.handle_key_generation == 0
-            || nfs.handle_key_generation == self.keys.current_generation
         {
             return Err(invalid(
-                "NFS requires absolute keytab, handle-key, recovery and bridge paths, /filebelt export root, a 30 to 300 second grace period, and a distinct handle-key generation",
+                "NFS requires absolute keytab, handle-key, recovery and bridge paths, /filebelt export root, a 30 to 300 second grace period, and a positive handle-key generation",
             ));
         }
         Ok(())
@@ -1562,29 +1590,27 @@ impl Config {
         let collaboration = &self.collaboration;
         validate_collaboration_limits(&collaboration.limits)?;
         if !collaboration.enabled {
-            if collaboration.webtransport_enabled || collaboration.webtransport_endpoint.is_some() {
+            if collaboration.webtransport_enabled
+                || collaboration.webtransport_endpoint.is_some()
+                || collaboration.capability_signing.is_some()
+            {
                 return Err(invalid("WebTransport requires collaboration.enabled=true"));
             }
             return Ok(());
         }
-        if [
-            collaboration.database_url_file.as_ref(),
-            collaboration.capability_private_key_file.as_ref(),
-        ]
-        .into_iter()
-        .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        if [collaboration.database_url_file.as_ref()]
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
             return Err(invalid(
-                "enabled collaboration requires absolute database and capability key paths",
+                "enabled collaboration requires an absolute database path",
             ));
         }
-        if collaboration.capability_key_generation == 0
-            || collaboration.capability_key_generation == self.keys.current_generation
-        {
-            return Err(invalid(
-                "collaboration capability key generation must be positive and distinct from the API generation",
-            ));
-        }
+        let signing = collaboration
+            .capability_signing
+            .as_ref()
+            .ok_or_else(|| invalid("enabled collaboration requires capability signing"))?;
+        validate_signing_key(signing, "collaboration storage")?;
         let io_url = collaboration
             .io_url
             .as_ref()
@@ -2241,6 +2267,18 @@ pub fn read_secret_string(path: &Path) -> Result<String, ConfigError> {
 fn invalid(message: &str) -> ConfigError {
     ConfigError::Invalid(message.into())
 }
+
+fn validate_signing_key(key: &SigningKeyConfig, purpose: &str) -> Result<(), ConfigError> {
+    if !key.private_key_file.is_absolute()
+        || !key.public_keyset_file.is_absolute()
+        || key.current_generation == 0
+    {
+        return Err(invalid(&format!(
+            "{purpose} signing requires absolute private and public-keyset paths and a positive current generation"
+        )));
+    }
+    Ok(())
+}
 const fn default_database_connections() -> u32 {
     16
 }
@@ -2296,17 +2334,8 @@ const fn default_headscale_sync_seconds() -> u64 {
 const fn default_collaboration_participants() -> u32 {
     32
 }
-const fn default_collaboration_capability_key_generation() -> u32 {
-    2
-}
-const fn default_mount_capability_key_generation() -> u32 {
-    3
-}
 fn default_document_provider_id() -> String {
     "onlyoffice-community-9-4".into()
-}
-const fn default_document_capability_key_generation() -> u32 {
-    4
 }
 const fn default_document_max_active_tabs() -> u32 {
     20
@@ -2317,8 +2346,12 @@ const fn default_document_max_bytes() -> u64 {
 const fn default_document_generation_recheck_seconds() -> u64 {
     60
 }
-const fn default_media_capability_key_generation() -> u32 {
-    5
+fn default_media_capability_signing() -> SigningKeyConfig {
+    SigningKeyConfig {
+        private_key_file: "/run/secrets/media-storage-capability-private-key".into(),
+        public_keyset_file: "/run/secrets/media-storage-capability-public-keyset".into(),
+        current_generation: 1,
+    }
 }
 const fn default_media_generation_recheck_seconds() -> u64 {
     60
@@ -2486,6 +2519,14 @@ const fn default_iggy_partitions() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn signing(private: &str, public: &str, generation: u32) -> SigningKeyConfig {
+        SigningKeyConfig {
+            private_key_file: private.into(),
+            public_keyset_file: public.into(),
+            current_generation: generation,
+        }
+    }
+
     fn config() -> Config {
         Config {
             version: CONFIG_VERSION,
@@ -2519,10 +2560,15 @@ mod tests {
                 backend_id: Uuid::new_v4(),
             },
             keys: KeyConfig {
-                capability_private_key_file: "/run/secrets/capability.pk8".into(),
-                capability_public_key_file: "/run/secrets/capability.pub".into(),
                 digest_key_file: "/run/secrets/digest-key".into(),
-                current_generation: 1,
+                digest_key_generation: 1,
+                api_storage: signing(
+                    "/run/secrets/api-storage.pk8",
+                    "/run/secrets/api-storage.pub",
+                    1,
+                ),
+                api_collaboration_grant: None,
+                api_mcp_delegation: None,
             },
             backend_tls: None,
             telemetry: TelemetryConfig::default(),
@@ -2620,6 +2666,11 @@ mod tests {
             Some("/run/secrets/mcp-egress.crt".into());
         candidate.mcp.egress.client_private_key_file = Some("/run/secrets/mcp-egress.key".into());
         candidate.mcp.egress.server_ca_file = Some("/run/secrets/mcp-egress-ca.crt".into());
+        candidate.keys.api_mcp_delegation = Some(signing(
+            "/run/secrets/api-mcp-delegation.pk8",
+            "/run/secrets/api-mcp-delegation.pub",
+            1,
+        ));
         candidate.mcp.trust_profiles.insert(
             "public".into(),
             McpTrustProfile {
@@ -2644,7 +2695,7 @@ mod tests {
         let documents = DocumentConfig::default();
         assert!(!documents.enabled);
         assert_eq!(documents.provider_id, "onlyoffice-community-9-4");
-        assert_eq!(documents.capability_key_generation, 4);
+        assert!(documents.capability_signing.is_none());
         assert_eq!(documents.max_active_tabs, 20);
         assert_eq!(documents.max_document_bytes, 104_857_600);
         assert_eq!(documents.generation_recheck_seconds, 60);
@@ -2654,7 +2705,7 @@ mod tests {
     fn phase8_defaults_are_disabled_and_bounded() {
         let media = MediaConfig::default();
         assert!(!media.enabled);
-        assert_eq!(media.capability_key_generation, 5);
+        assert_eq!(media.capability_signing.current_generation, 1);
         assert_eq!(media.generation_recheck_seconds, 60);
         assert_eq!(media.cache_quota_percent, 10);
         assert_eq!(media.cache_high_watermark_percent, 80);
@@ -2675,8 +2726,6 @@ mod tests {
         let mut candidate = config();
         candidate.media.enabled = true;
         candidate.media.database_url_file = Some("/run/secrets/media-database-url".into());
-        candidate.media.capability_private_key_file =
-            Some("/run/secrets/media-capability.pk8".into());
         candidate.media.job_namespace = Some("filebelt-media-jobs".into());
         candidate.media.transcoder_image = Some(format!(
             "ghcr.io/oxibelt/filebelt-transcoder@sha256:{}",
@@ -2695,8 +2744,11 @@ mod tests {
         candidate.mounts.enabled = true;
         candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
         candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
-        candidate.mounts.capability_private_key_file =
-            Some("/run/secrets/mount-capability.pk8".into());
+        candidate.mounts.capability_signing = Some(signing(
+            "/run/secrets/mount-capability.pk8",
+            "/run/secrets/mount-capability.pub",
+            1,
+        ));
         candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
         candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8088/").unwrap());
         candidate.mounts.nfs.enabled = true;
@@ -2717,8 +2769,16 @@ mod tests {
         candidate.collaboration.enabled = true;
         candidate.collaboration.database_url_file =
             Some("/run/secrets/collaboration-database-url".into());
-        candidate.collaboration.capability_private_key_file =
-            Some("/run/secrets/collaboration-capability.pk8".into());
+        candidate.collaboration.capability_signing = Some(signing(
+            "/run/secrets/collaboration-capability.pk8",
+            "/run/secrets/collaboration-capability.pub",
+            1,
+        ));
+        candidate.keys.api_collaboration_grant = Some(signing(
+            "/run/secrets/api-collaboration-grant.pk8",
+            "/run/secrets/api-collaboration-grant.pub",
+            1,
+        ));
         candidate.collaboration.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
         candidate.collaboration.webtransport_enabled = true;
         candidate.collaboration.webtransport_endpoint =
@@ -2741,8 +2801,11 @@ mod tests {
         let mut candidate = config();
         candidate.documents.enabled = true;
         candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
-        candidate.documents.capability_private_key_file =
-            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.capability_signing = Some(signing(
+            "/run/secrets/document-capability.pk8",
+            "/run/secrets/document-capability.pub",
+            1,
+        ));
         candidate.documents.url = Some(Url::parse("http://127.0.0.1:8089/").unwrap());
         candidate.documents.launch_action =
             Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
@@ -2755,8 +2818,11 @@ mod tests {
         let mut candidate = config();
         candidate.documents.enabled = true;
         candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
-        candidate.documents.capability_private_key_file =
-            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.capability_signing = Some(signing(
+            "/run/secrets/document-capability.pk8",
+            "/run/secrets/document-capability.pub",
+            1,
+        ));
         candidate.documents.url = Some(Url::parse("http://document:8089/").unwrap());
         candidate.documents.launch_action =
             Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
@@ -2828,7 +2894,12 @@ mod tests {
         candidate.documents.generation_recheck_seconds = 59;
         assert!(candidate.validate().is_err());
         candidate.documents.generation_recheck_seconds = 60;
-        candidate.documents.capability_key_generation = 5;
+        candidate
+            .documents
+            .capability_signing
+            .as_mut()
+            .unwrap()
+            .current_generation = 0;
         assert!(candidate.validate().is_err());
     }
     #[test]
@@ -2840,8 +2911,11 @@ mod tests {
         candidate.telemetry.prometheus_enabled = true;
         candidate.documents.enabled = true;
         candidate.documents.database_url_file = Some("/run/secrets/document-database-url".into());
-        candidate.documents.capability_private_key_file =
-            Some("/run/secrets/document-capability.pk8".into());
+        candidate.documents.capability_signing = Some(signing(
+            "/run/secrets/document-capability.pk8",
+            "/run/secrets/document-capability.pub",
+            1,
+        ));
         candidate.documents.url = Some(Url::parse("https://document:8089/").unwrap());
         candidate.documents.launch_action =
             Some(Url::parse("https://editor.example.test/onlyoffice/launch").unwrap());
@@ -2917,8 +2991,11 @@ mod tests {
         candidate.mounts.enabled = true;
         candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
         candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
-        candidate.mounts.capability_private_key_file =
-            Some("/run/secrets/mount-capability.pk8".into());
+        candidate.mounts.capability_signing = Some(signing(
+            "/run/secrets/mount-capability.pk8",
+            "/run/secrets/mount-capability.pub",
+            1,
+        ));
         candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
         candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8091/").unwrap());
         candidate.mounts.headscale.enabled = true;

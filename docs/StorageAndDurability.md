@@ -350,7 +350,7 @@ normal recovery and maintenance.
 
 Backups include document sessions, participants, revision/contributor state,
 reconciliation jobs, retained output deadlines, payload references, and
-capability key generation 4. Restore leaves document admission disabled,
+`document-storage` purpose material. Restore leaves document admission disabled,
 expires all restored active sessions and launch grants, advances their fences,
 reconciles staged/committing rows against immutable versions, verifies every
 referenced payload digest, and only then permits new sessions. Rolling back the
@@ -546,17 +546,20 @@ reconciliation, checkpoint comparison, a complete physical BLAKE3 scrub, and
 two-user authorization acceptance must pass before traffic returns.
 
 The current checkpoint and verification formats are
-`filebelt.recovery.checkpoint.v2` and `filebelt.recovery.verification.v2`.
-Version 2 adds collaboration room/manifest/checkpoint inventory and dirty-room
+`filebelt.recovery.checkpoint.v3` and `filebelt.recovery.verification.v3`.
+Version 3 records every purpose name, digest generation, and local signer
+generation in its `capability_keysets` inventory; version 2 remains offline-only
+and cannot admit a v7 deployment.
+It retains collaboration room/manifest/checkpoint inventory and dirty-room
 retention deadlines, plus MCP registration, deletion-tombstone, active
 runner-slot, secret-envelope, and OAuth attempt inventories. It records every
 referenced MCP vault KEK generation without granting recovery access to
 ciphertext, nonce, issuer, or secret kind. The checkpoint remains bounded to 1
 MiB. Restore verification fails when a collaboration inventory or retention
 deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
-or payload manifest differs. Operators must restore the capability verification
-keyset that contains API, collaboration, and mount public keys before enabling
-I/O, collaboration, or mount reads, and must restore MCP and mount vault KEK
+or payload manifest differs. Operators must restore purpose-specific v7 public
+keysets, digest generation, and local signer generations before enabling I/O,
+collaboration, document, or mount reads, and must restore MCP and mount vault KEK
 generations before enabling the broker or any MCP or mount authentication flow.
 Mount policy, credential, device, gateway, session, handle, and lock rows are
 part of the same quiesced PostgreSQL recovery boundary. After restore, keep

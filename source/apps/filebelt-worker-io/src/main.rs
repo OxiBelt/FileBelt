@@ -22,10 +22,12 @@ use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
+use filebelt_capability_keyset::{
+    ApiStorageKeyset, CollaborationStorageKeyset, DocumentStorageKeyset, MountStorageKeyset,
+    public_key_material_is_disjoint,
+};
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
@@ -39,8 +41,10 @@ use filebelt_runtime::{
 };
 use filebelt_storage::{DownloadSegment, StorageError, StorageLayout};
 use filebelt_storage_protocol::{
-    CapabilityClaims, CapabilityOperation, MountCapabilityClaims, MountCapabilityOperation,
-    VerificationKey, unix_time_now, verify_capability, verify_mount_capability,
+    ApiStorageCapabilityUse, CapabilityClaims, CapabilityOperation,
+    CollaborationStorageCapabilityUse, DocumentStorageCapabilityUse, MountCapabilityClaims,
+    unix_time_now, verify_api_storage_capability, verify_collaboration_storage_capability,
+    verify_document_storage_capability, verify_mount_storage_read_capability,
 };
 use futures_util::StreamExt as _;
 use serde::Serialize;
@@ -74,7 +78,10 @@ enum Command {
 struct AppState {
     database: Database,
     storage: StorageLayout,
-    keys: Arc<Vec<VerificationKey>>,
+    api_storage_keys: Arc<ApiStorageKeyset>,
+    collaboration_storage_keys: Option<Arc<CollaborationStorageKeyset>>,
+    document_storage_keys: Option<Arc<DocumentStorageKeyset>>,
+    mount_storage_keys: Option<Arc<MountStorageKeyset>>,
     generation_recheck: Duration,
     tenant_id: Uuid,
     backend_id: Uuid,
@@ -207,15 +214,41 @@ async fn serve(config: Config) -> Result<(), String> {
         true,
     )
     .await?;
-    let keys = load_verification_keys(
-        &config.keys.capability_public_key_file,
-        config.keys.current_generation,
+    let api_storage_keys = Arc::new(load_api_storage_keys(
+        &config.keys.api_storage.public_keyset_file,
+    )?);
+    let collaboration_storage_keys = config
+        .collaboration
+        .capability_signing
+        .as_ref()
+        .map(|key| load_collaboration_storage_keys(&key.public_keyset_file).map(Arc::new))
+        .transpose()?;
+    let document_storage_keys = config
+        .documents
+        .capability_signing
+        .as_ref()
+        .map(|key| load_document_storage_keys(&key.public_keyset_file).map(Arc::new))
+        .transpose()?;
+    let mount_storage_keys = config
+        .mounts
+        .capability_signing
+        .as_ref()
+        .map(|key| load_mount_storage_keys(&key.public_keyset_file).map(Arc::new))
+        .transpose()?;
+    validate_storage_keyset_disjointness(
+        &api_storage_keys,
+        collaboration_storage_keys.as_deref(),
+        document_storage_keys.as_deref(),
+        mount_storage_keys.as_deref(),
     )?;
     let storage_ready = Arc::new(AtomicBool::new(true));
     let state = AppState {
         database,
         storage,
-        keys: Arc::new(keys),
+        api_storage_keys,
+        collaboration_storage_keys,
+        document_storage_keys,
+        mount_storage_keys,
         generation_recheck: Duration::from_secs(config.limits.generation_recheck_seconds),
         tenant_id,
         backend_id: config.storage.backend_id,
@@ -1464,14 +1497,17 @@ fn authorize_mount_read(
 ) -> Result<AuthorizedMountRead, AppError> {
     let wire = mount_capability_wire(headers).ok_or(AppError::Unauthorized)?;
     let now = unix_time_now().map_err(|_| AppError::Unauthorized)?;
-    let claims = verify_mount_capability(
+    let claims = verify_mount_storage_read_capability(
         &wire,
-        &state.keys,
+        state
+            .mount_storage_keys
+            .as_ref()
+            .ok_or(AppError::Unauthorized)?,
         CAPABILITY_AUDIENCE,
-        MountCapabilityOperation::Read,
         now,
     )
-    .map_err(|_| AppError::Unauthorized)?;
+    .map_err(|_| AppError::Unauthorized)?
+    .claims;
     let fence = MountReadCapabilityFence {
         tenant_id: parse_required_uuid(&claims.tenant_id)?,
         principal_id: parse_required_uuid(&claims.principal_id)?,
@@ -1502,8 +1538,14 @@ async fn authorize(
 ) -> Result<AuthorizedCapability, AppError> {
     let wire = capability_wire(headers).ok_or(AppError::Unauthorized)?;
     let now = unix_time_now().map_err(|_| AppError::Unauthorized)?;
-    let claims = verify_capability(&wire, &state.keys, CAPABILITY_AUDIENCE, operation, now)
-        .map_err(|_| AppError::Unauthorized)?;
+    let claims = verify_capability_for_operation(
+        &wire,
+        operation,
+        now,
+        &state.api_storage_keys,
+        state.collaboration_storage_keys.as_deref(),
+        state.document_storage_keys.as_deref(),
+    )?;
     let tenant_id = parse_required_uuid(&claims.tenant_id)?;
     if tenant_id != state.tenant_id {
         return Err(AppError::Forbidden);
@@ -1520,6 +1562,94 @@ async fn authorize(
         resource_id,
         capability_id,
     })
+}
+
+fn verify_capability_for_operation(
+    wire: &str,
+    operation: CapabilityOperation,
+    now: i64,
+    api_storage_keys: &ApiStorageKeyset,
+    collaboration_storage_keys: Option<&CollaborationStorageKeyset>,
+    document_storage_keys: Option<&DocumentStorageKeyset>,
+) -> Result<CapabilityClaims, AppError> {
+    match operation {
+        CapabilityOperation::UploadPart => verify_api_storage_capability(
+            wire,
+            api_storage_keys,
+            CAPABILITY_AUDIENCE,
+            ApiStorageCapabilityUse::UploadPart,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::FinalizeUpload => verify_api_storage_capability(
+            wire,
+            api_storage_keys,
+            CAPABILITY_AUDIENCE,
+            ApiStorageCapabilityUse::FinalizeUpload,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::Download => verify_api_storage_capability(
+            wire,
+            api_storage_keys,
+            CAPABILITY_AUDIENCE,
+            ApiStorageCapabilityUse::Download,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::WriteCollaborationObject => verify_collaboration_storage_capability(
+            wire,
+            collaboration_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            CollaborationStorageCapabilityUse::WriteObject,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::FinalizeCollaborationObject => {
+            verify_collaboration_storage_capability(
+                wire,
+                collaboration_storage_keys.ok_or(AppError::Unauthorized)?,
+                CAPABILITY_AUDIENCE,
+                CollaborationStorageCapabilityUse::FinalizeObject,
+                now,
+            )
+            .map(|verified| verified.claims)
+        }
+        CapabilityOperation::ReadCollaborationObject => verify_collaboration_storage_capability(
+            wire,
+            collaboration_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            CollaborationStorageCapabilityUse::ReadObject,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::ReadDocumentVersion => verify_document_storage_capability(
+            wire,
+            document_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            DocumentStorageCapabilityUse::ReadVersion,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::WriteDocumentRevision => verify_document_storage_capability(
+            wire,
+            document_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            DocumentStorageCapabilityUse::WriteRevision,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::FinalizeDocumentRevision => verify_document_storage_capability(
+            wire,
+            document_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            DocumentStorageCapabilityUse::FinalizeRevision,
+            now,
+        )
+        .map(|verified| verified.claims),
+        _ => return Err(AppError::Unauthorized),
+    }
+    .map_err(|_| AppError::Unauthorized)
 }
 
 fn mount_capability_wire(headers: &HeaderMap) -> Option<String> {
@@ -1828,51 +1958,49 @@ fn parse_required_uuid(value: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(value).map_err(|_| AppError::Unauthorized)
 }
 
-fn load_verification_keys(
-    path: &FilePath,
-    current_generation: u32,
-) -> Result<Vec<VerificationKey>, String> {
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-    if bytes.len() == 32 {
-        return Ok(vec![VerificationKey {
-            generation: current_generation,
-            public_key: bytes,
-        }]);
+fn keyset_source(path: &FilePath) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
+fn load_api_storage_keys(path: &FilePath) -> Result<ApiStorageKeyset, String> {
+    ApiStorageKeyset::parse(&keyset_source(path)?)
+        .map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
+fn load_collaboration_storage_keys(path: &FilePath) -> Result<CollaborationStorageKeyset, String> {
+    CollaborationStorageKeyset::parse(&keyset_source(path)?)
+        .map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
+fn load_document_storage_keys(path: &FilePath) -> Result<DocumentStorageKeyset, String> {
+    DocumentStorageKeyset::parse(&keyset_source(path)?)
+        .map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
+fn load_mount_storage_keys(path: &FilePath) -> Result<MountStorageKeyset, String> {
+    MountStorageKeyset::parse(&keyset_source(path)?)
+        .map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
+fn validate_storage_keyset_disjointness(
+    api: &ApiStorageKeyset,
+    collaboration: Option<&CollaborationStorageKeyset>,
+    document: Option<&DocumentStorageKeyset>,
+    mount: Option<&MountStorageKeyset>,
+) -> Result<(), String> {
+    let mut material = api.entries().map(|(_, key)| *key).collect::<Vec<_>>();
+    if let Some(keys) = collaboration {
+        material.extend(keys.entries().map(|(_, key)| *key));
     }
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|_| "capability public keyset is invalid".to_owned())?;
-    let mut lines = text.lines();
-    if lines.next() != Some("filebelt-capability-keyset-v1") {
-        return Err("capability public keyset header is invalid".into());
+    if let Some(keys) = document {
+        material.extend(keys.entries().map(|(_, key)| *key));
     }
-    let mut keys = Vec::new();
-    for line in lines.filter(|line| !line.is_empty()) {
-        let (generation, encoded) = line
-            .split_once(':')
-            .ok_or_else(|| "capability public key entry is invalid".to_owned())?;
-        let generation = generation
-            .parse::<u32>()
-            .map_err(|_| "capability public key generation is invalid".to_owned())?;
-        let public_key = URL_SAFE_NO_PAD
-            .decode(encoded)
-            .map_err(|_| "capability public key is invalid".to_owned())?;
-        if generation == 0
-            || public_key.len() != 32
-            || keys
-                .iter()
-                .any(|key: &VerificationKey| key.generation == generation)
-        {
-            return Err("capability public key entry is invalid".into());
-        }
-        keys.push(VerificationKey {
-            generation,
-            public_key,
-        });
+    if let Some(keys) = mount {
+        material.extend(keys.entries().map(|(_, key)| *key));
     }
-    if keys.is_empty() || !keys.iter().any(|key| key.generation == current_generation) {
-        return Err("current capability key generation is absent".into());
-    }
-    Ok(keys)
+    public_key_material_is_disjoint(material)
+        .then_some(())
+        .ok_or_else(|| "capability public key material is reused across purposes".to_owned())
 }
 
 fn storage_error(error: StorageError) -> AppError {
@@ -1959,12 +2087,39 @@ impl IntoResponse for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair as _};
 
     fn claims(start: u64, end: u64) -> CapabilityClaims {
         CapabilityClaims {
             range_start: start,
             range_end: end,
             ..CapabilityClaims::default()
+        }
+    }
+
+    fn valid_claims(operation: CapabilityOperation) -> CapabilityClaims {
+        CapabilityClaims {
+            capability_id: Uuid::new_v4().to_string(),
+            audience: CAPABILITY_AUDIENCE.into(),
+            operation: operation as i32,
+            tenant_id: Uuid::new_v4().to_string(),
+            principal_id: Uuid::new_v4().to_string(),
+            session_id: Uuid::new_v4().to_string(),
+            resource_id: Uuid::new_v4().to_string(),
+            upload_id: Uuid::new_v4().to_string(),
+            payload_id: Uuid::new_v4().to_string(),
+            part_number: 1,
+            range_start: 0,
+            range_end: 15,
+            resource_acl_generation: 1,
+            membership_generation: 1,
+            namespace_generation: 1,
+            fencing_token: 1,
+            nonce: vec![7; 32],
+            issued_at_unix_seconds: 100,
+            expires_at_unix_seconds: 160,
+            drive_acl_generation: 1,
+            grant_id: Uuid::new_v4().to_string(),
         }
     }
 
@@ -2001,18 +2156,105 @@ mod tests {
     fn keyset_parser_supports_rotation_file() {
         let temporary = tempfile::tempdir().expect("temporary key directory");
         let path = temporary.path().join("keys.pub");
-        std::fs::write(
-            &path,
-            format!(
-                "filebelt-capability-keyset-v1\n1:{}\n2:{}\n",
-                URL_SAFE_NO_PAD.encode([1_u8; 32]),
-                URL_SAFE_NO_PAD.encode([2_u8; 32])
-            ),
+        let keyset = filebelt_capability_keyset::encode_keyset(
+            filebelt_capability_keyset::KeyPurpose::ApiStorage,
+            &[(1, [1_u8; 32]), (2, [2_u8; 32])],
         )
-        .expect("write keyset");
-        let keys = load_verification_keys(&path, 2).expect("valid keyset");
+        .expect("keyset");
+        std::fs::write(&path, keyset).expect("write keyset");
+        let keys = load_api_storage_keys(&path).expect("valid keyset");
         assert_eq!(keys.len(), 2);
-        assert_eq!(keys[1].generation, 2);
+        assert!(keys.contains_generation(2));
+    }
+
+    #[test]
+    fn startup_rejects_public_key_reuse_across_storage_purposes() {
+        let api = ApiStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiStorage,
+                &[(1, [7; 32])],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let collaboration = CollaborationStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::CollaborationStorage,
+                &[(1, [7; 32])],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            validate_storage_keyset_disjointness(&api, Some(&collaboration), None, None).is_err()
+        );
+    }
+
+    #[test]
+    fn io_admission_rejects_foreign_signer_before_authoritative_state_access() {
+        let retiring = Ed25519KeyPair::generate().unwrap();
+        let current = Ed25519KeyPair::generate().unwrap();
+        let foreign = Ed25519KeyPair::generate().unwrap();
+        let api = ApiStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::ApiStorage,
+                &[
+                    (1, retiring.public_key().as_ref().try_into().unwrap()),
+                    (2, current.public_key().as_ref().try_into().unwrap()),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let collaboration = CollaborationStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::CollaborationStorage,
+                &[(1, foreign.public_key().as_ref().try_into().unwrap())],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let claims = valid_claims(CapabilityOperation::UploadPart);
+
+        for (generation, signer) in [(1, &retiring), (2, &current)] {
+            let wire = filebelt_storage_protocol::sign_api_storage_capability(
+                &claims,
+                ApiStorageCapabilityUse::UploadPart,
+                generation,
+                signer,
+            )
+            .unwrap();
+            assert!(
+                verify_capability_for_operation(
+                    &wire,
+                    CapabilityOperation::UploadPart,
+                    120,
+                    &api,
+                    Some(&collaboration),
+                    None,
+                )
+                .is_ok()
+            );
+        }
+
+        let forged = filebelt_storage_protocol::sign_api_storage_capability(
+            &claims,
+            ApiStorageCapabilityUse::UploadPart,
+            1,
+            &foreign,
+        )
+        .unwrap();
+        assert!(matches!(
+            verify_capability_for_operation(
+                &forged,
+                CapabilityOperation::UploadPart,
+                120,
+                &api,
+                Some(&collaboration),
+                None,
+            ),
+            Err(AppError::Unauthorized)
+        ));
     }
 
     #[test]

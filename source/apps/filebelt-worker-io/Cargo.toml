@@ -16,6 +16,7 @@ blake3.workspace = true
 bytes.workspace = true
 clap.workspace = true
 filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
+filebelt-capability-keyset.workspace = true
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "../../crates/filebelt-deployment-diagnostics" }
 filebelt-runtime.workspace = true
@@ -35,4 +36,5 @@ uuid.workspace = true
 workspace = true
 
 [dev-dependencies]
+aws-lc-rs.workspace = true
 tempfile.workspace = true

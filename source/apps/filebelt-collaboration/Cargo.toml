@@ -18,6 +18,7 @@ blake3.workspace = true
 bytes.workspace = true
 clap.workspace = true
 filebelt-collaboration-protocol.workspace = true
+filebelt-capability-keyset.workspace = true
 filebelt-control-protocol = { version = "=0.1.0", path = "../../crates/filebelt-control-protocol" }
 filebelt-database.workspace = true
 filebelt-deployment-diagnostics.workspace = true

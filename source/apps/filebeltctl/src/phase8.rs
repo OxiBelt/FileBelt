@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use sqlx::Row as _;
 use uuid::Uuid;
 
-const CONFIG_VERSION: i32 = 6;
+const CONFIG_VERSION: i32 = 7;
 const SCHEMA_MAX: i32 = 9;
 const REQUIRED_ROLES: &[&str] = &[
     "filebelt-api",

@@ -29,10 +29,11 @@ last at most 24 hours, reconnect for at most 100 seconds, and reauthorize within
    audit rows before starting a replacement binary; a deployment with no prior
    document state records zero affected sessions. The cutover revokes affected
    live API sessions, so those users must authenticate again.
-2. Generate a distinct Ed25519 generation-4 capability key. Mount the private
-   key only into `filebelt-document` and add the public key to the I/O worker's
-   verified keyset. Do not reuse API, collaboration, mount, OIDC, or provider
-   JWT keys.
+2. Generate a distinct `document-storage` Ed25519 purpose at local generation
+   1. Mount its private/public pair only into `filebelt-document` and its
+   public keyset into I/O. The strict v2 keyset carries
+   `purpose=document-storage`; do not reuse API, collaboration, mount, media,
+   OIDC, or provider JWT keys.
 3. Provision distinct TLS 1.3 identities for API-to-document,
    adapter-to-document, adapter-to-I/O, OxiBelt-to-adapter, and
    adapter-to-egress-gateway traffic. Configure exact URI/DNS SAN allowlists.
@@ -120,7 +121,7 @@ compatibility gate. Verify all of the following:
 Rotate provider JWT secrets by mounting a new current generation and at most
 one retiring generation, restarting adapter replicas, verifying both during the
 bounded overlap, then removing the retiring secret after 30 minutes. Rotate
-mTLS and generation-4 capability keys with the ordinary overlapping-public-key
+mTLS and `document-storage` capability material with the ordinary overlapping-public-key
 procedure; do not remove a public key while an unexpired capability or recovery
 checkpoint references it.
 
@@ -133,7 +134,7 @@ grants and retained outputs.
 Rollback removes both OxiBelt adapter virtual-host route sets first and sets
 `documents.enabled=false`.
 Restore the previous verified adapter and coordinator digests only when they
-understand migrations 000006 and 000010, capability generation 4, and the
+understand migrations 000006 and 000010, the `document-storage` purpose, and the
 isolated editor-origin contract. Never restore the public-host launcher or a
 binary that can mint its action while documents are enabled. Do not run a down
 migration, drop `filebelt_document`, delete retained conflict bytes, remove

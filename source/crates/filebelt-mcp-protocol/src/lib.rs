@@ -4,9 +4,10 @@
 
 #![deny(unsafe_code)]
 
-use aws_lc_rs::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
+use aws_lc_rs::signature::Ed25519KeyPair;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_capability_keyset::{ApiMcpDelegationKeyset, KeysetError};
 use prost::Message;
 use thiserror::Error;
 use uuid::Uuid;
@@ -30,10 +31,11 @@ pub use generated::{
     RunnerRelayFrameKind, RunnerRelayHello, SignedDelegation,
 };
 
-#[derive(Clone, Debug)]
-pub struct VerificationKey {
+/// An authenticated claim together with the rotation generation that verified it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Verified<T> {
+    pub claims: T,
     pub generation: u32,
-    pub public_key: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
@@ -61,10 +63,9 @@ pub enum ProtocolError {
 }
 
 impl DelegationClaims {
-    pub fn validate_at(
+    fn validate_at(
         &self,
         expected_audience: &str,
-        expected_operation: McpOperation,
         now_unix_seconds: i64,
     ) -> Result<(), ProtocolError> {
         for identifier in [
@@ -84,7 +85,8 @@ impl DelegationClaims {
         if self.audience != expected_audience {
             return Err(ProtocolError::WrongAudience);
         }
-        if self.operation != expected_operation as i32 {
+        if !matches!(McpOperation::try_from(self.operation), Ok(operation) if operation != McpOperation::Unspecified)
+        {
             return Err(ProtocolError::WrongOperation);
         }
         if self.expires_at_unix_seconds < self.issued_at_unix_seconds
@@ -197,11 +199,16 @@ fn invalid_tilde(token: &str) -> bool {
     })
 }
 
-pub fn sign_delegation(
+pub fn sign_mcp_delegation(
     claims: &DelegationClaims,
     generation: u32,
     key_pair: &Ed25519KeyPair,
-) -> String {
+) -> Result<String, ProtocolError> {
+    if generation == 0
+        || !matches!(McpOperation::try_from(claims.operation), Ok(operation) if operation != McpOperation::Unspecified)
+    {
+        return Err(ProtocolError::InvalidClaims);
+    }
     let claims_bytes = claims.encode_to_vec();
     let input = [DELEGATION_DOMAIN, claims_bytes.as_slice()].concat();
     let envelope = SignedDelegation {
@@ -209,19 +216,19 @@ pub fn sign_delegation(
         claims: claims_bytes,
         signature: key_pair.sign(&input).as_ref().to_vec(),
     };
-    format!(
+    Ok(format!(
         "fbmcp1.{}",
         URL_SAFE_NO_PAD.encode(envelope.encode_to_vec())
-    )
+    ))
 }
 
-pub fn verify_delegation(
+pub fn verify_mcp_delegation(
     wire: &str,
-    keys: &[VerificationKey],
+    keys: &ApiMcpDelegationKeyset,
     expected_audience: &str,
     expected_operation: McpOperation,
     now_unix_seconds: i64,
-) -> Result<DelegationClaims, ProtocolError> {
+) -> Result<Verified<DelegationClaims>, ProtocolError> {
     let encoded = wire
         .strip_prefix("fbmcp1.")
         .ok_or(ProtocolError::InvalidEncoding)?;
@@ -230,18 +237,28 @@ pub fn verify_delegation(
         .map_err(|_| ProtocolError::InvalidEncoding)?;
     let envelope =
         SignedDelegation::decode(bytes.as_slice()).map_err(|_| ProtocolError::InvalidEncoding)?;
-    let key = keys
-        .iter()
-        .find(|key| key.generation == envelope.key_generation)
-        .ok_or(ProtocolError::UnknownKey)?;
     let input = [DELEGATION_DOMAIN, envelope.claims.as_slice()].concat();
-    UnparsedPublicKey::new(&ED25519, &key.public_key)
-        .verify(&input, &envelope.signature)
-        .map_err(|_| ProtocolError::InvalidSignature)?;
+    keys.verify(envelope.key_generation, &input, &envelope.signature)
+        .map_err(map_keyset_error)?;
     let claims = DelegationClaims::decode(envelope.claims.as_slice())
         .map_err(|_| ProtocolError::InvalidClaims)?;
-    claims.validate_at(expected_audience, expected_operation, now_unix_seconds)?;
-    Ok(claims)
+    claims.validate_at(expected_audience, now_unix_seconds)?;
+    if claims.operation != expected_operation as i32 {
+        return Err(ProtocolError::WrongOperation);
+    }
+    Ok(Verified {
+        claims,
+        generation: envelope.key_generation,
+    })
+}
+
+const fn map_keyset_error(error: KeysetError) -> ProtocolError {
+    match error {
+        KeysetError::UnknownKey => ProtocolError::UnknownKey,
+        KeysetError::InvalidEncoding | KeysetError::InvalidSignature => {
+            ProtocolError::InvalidSignature
+        }
+    }
 }
 
 pub fn encode_frame(frame: &InvocationFrame) -> Result<Vec<u8>, ProtocolError> {
@@ -389,23 +406,24 @@ mod tests {
     #[test]
     fn delegation_round_trip_is_audience_bound() {
         let pair = Ed25519KeyPair::generate().unwrap();
-        let wire = sign_delegation(&claims(), 2, &pair);
-        let keys = [VerificationKey {
-            generation: 2,
-            public_key: pair.public_key().as_ref().to_vec(),
-        }];
+        let wire = sign_mcp_delegation(&claims(), 2, &pair).unwrap();
+        let keys = ApiMcpDelegationKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=api-mcp-delegation\n2:{}\n",
+            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+        ))
+        .unwrap();
         assert!(
-            verify_delegation(
+            verify_mcp_delegation(
                 &wire,
                 &keys,
                 "filebelt-mcp-broker",
                 McpOperation::Invoke,
-                110
+                110,
             )
             .is_ok()
         );
         assert_eq!(
-            verify_delegation(
+            verify_mcp_delegation(
                 &wire,
                 &keys,
                 "filebelt-controller",
@@ -413,6 +431,28 @@ mod tests {
                 110
             ),
             Err(ProtocolError::WrongAudience),
+        );
+    }
+
+    #[test]
+    fn same_generation_from_a_foreign_purpose_signer_fails_closed() {
+        let delegation_pair = Ed25519KeyPair::generate().unwrap();
+        let foreign_pair = Ed25519KeyPair::generate().unwrap();
+        let wire = sign_mcp_delegation(&claims(), 2, &foreign_pair).unwrap();
+        let keys = ApiMcpDelegationKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=api-mcp-delegation\n2:{}\n",
+            URL_SAFE_NO_PAD.encode(delegation_pair.public_key().as_ref())
+        ))
+        .unwrap();
+        assert_eq!(
+            verify_mcp_delegation(
+                &wire,
+                &keys,
+                "filebelt-mcp-broker",
+                McpOperation::Invoke,
+                110
+            ),
+            Err(ProtocolError::InvalidSignature)
         );
     }
 
@@ -453,14 +493,10 @@ mod tests {
             media_type: "text/plain".into(),
             size_bytes: 8,
         });
-        assert!(
-            claims
-                .validate_at("filebelt-mcp-broker", McpOperation::Invoke, 110)
-                .is_ok()
-        );
+        assert!(claims.validate_at("filebelt-mcp-broker", 110).is_ok());
         claims.attachments[0].data_grant_id = "not-a-uuid".into();
         assert_eq!(
-            claims.validate_at("filebelt-mcp-broker", McpOperation::Invoke, 110),
+            claims.validate_at("filebelt-mcp-broker", 110),
             Err(ProtocolError::InvalidClaims)
         );
     }

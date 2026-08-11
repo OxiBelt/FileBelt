@@ -29,6 +29,8 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "filebelt.renderedFilebeltConfiguration" -}}
 {{- $configuration := tpl .Values.configuration.filebelt . -}}
+{{- $mountsEnabled := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled -}}
+{{- $headscaleRequired := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled -}}
 {{- if .Values.collaboration.enabled -}}
 {{- $configuration = replace "[collaboration]\nenabled = false" "[collaboration]\nenabled = true" $configuration -}}
 {{- $configuration = printf "%s\n\n[keys.api_collaboration_grant]\nprivate_key_file = \"/run/secrets/api-collaboration-grant-capability-private-key\"\npublic_keyset_file = \"/run/secrets/api-collaboration-grant-capability-public-keyset\"\ncurrent_generation = 1\n\n[collaboration.capability_signing]\nprivate_key_file = \"/run/secrets/collaboration-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/collaboration-storage-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
@@ -40,11 +42,45 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.mcp.enabled -}}
 {{- $configuration = printf "%s\n\n[keys.api_mcp_delegation]\nprivate_key_file = \"/run/secrets/api-mcp-delegation-capability-private-key\"\npublic_keyset_file = \"/run/secrets/api-mcp-delegation-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
 {{- end -}}
-{{- if .Values.mounts.enabled -}}
+{{- if $mountsEnabled -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
-{{- $configuration = replace "[mounts]\nenabled = false" "[mounts]\nenabled = true" $configuration -}}
 {{- $configuration = printf "%s\n\n[mounts.capability_signing]\nprivate_key_file = \"/run/secrets/mount-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/mount-storage-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
+{{- $gatewayUriSans := list -}}
+{{- if .Values.mounts.smb.enabled -}}
+{{- $configuration = replace "[mounts.smb]\nenabled = false" "[mounts.smb]\nenabled = true" $configuration -}}
+{{- $gatewayUriSans = append $gatewayUriSans "spiffe://filebelt/smb-gateway/vfs" -}}
+{{- if ne .Values.mounts.smb.previousGatewayUriSan "" -}}
+{{- $configuration = replace "gateway_uri_san = \"spiffe://filebelt/smb-gateway/vfs\"" (printf "gateway_uri_san = \"spiffe://filebelt/smb-gateway/vfs\"\nprevious_gateway_uri_san = %q" .Values.mounts.smb.previousGatewayUriSan) $configuration -}}
+{{- $gatewayUriSans = append $gatewayUriSans .Values.mounts.smb.previousGatewayUriSan -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.mounts.ftpFtps.enabled -}}
+{{- $configuration = replace "[mounts.ftp_ftps]\nenabled = false" "[mounts.ftp_ftps]\nenabled = true" $configuration -}}
+{{- $gatewayUriSans = append $gatewayUriSans "spiffe://filebelt/ftp-ftps-gateway/vfs" -}}
+{{- if ne .Values.mounts.ftpFtps.previousGatewayUriSan "" -}}
+{{- $configuration = replace "gateway_uri_san = \"spiffe://filebelt/ftp-ftps-gateway/vfs\"" (printf "gateway_uri_san = \"spiffe://filebelt/ftp-ftps-gateway/vfs\"\nprevious_gateway_uri_san = %q" .Values.mounts.ftpFtps.previousGatewayUriSan) $configuration -}}
+{{- $gatewayUriSans = append $gatewayUriSans .Values.mounts.ftpFtps.previousGatewayUriSan -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.mounts.nfs.enabled -}}
+{{- $nfsConfig := printf "[mounts.nfs]\nenabled = true\ngateway_uri_san = \"spiffe://filebelt/nfs-gateway/vfs\"\nrealm = %q\nidmap_domain = %q\nhandle_keyring_file = \"/run/secrets/nfs-handle-keyring.json\"\nhandle_key_generation = %v\ngrace_seconds = %v" .Values.mounts.nfs.realm .Values.mounts.nfs.idmapDomain .Values.mounts.nfs.handleKeyGeneration .Values.mounts.nfs.graceSeconds -}}
+{{- if ne .Values.mounts.nfs.previousGatewayUriSan "" -}}
+{{- $nfsConfig = printf "%s\nprevious_gateway_uri_san = %q" $nfsConfig .Values.mounts.nfs.previousGatewayUriSan -}}
+{{- end -}}
+{{- $configuration = replace "[mounts.nfs]\nenabled = false\ngateway_uri_san = \"spiffe://filebelt/nfs-gateway/vfs\"\ngrace_seconds = 90" $nfsConfig $configuration -}}
+{{- $gatewayUriSans = append $gatewayUriSans "spiffe://filebelt/nfs-gateway/vfs" -}}
+{{- if ne .Values.mounts.nfs.previousGatewayUriSan "" -}}
+{{- $gatewayUriSans = append $gatewayUriSans .Values.mounts.nfs.previousGatewayUriSan -}}
+{{- end -}}
+{{- end -}}
+{{- $quotedGatewayUriSans := list -}}
+{{- range $gatewayUriSan := $gatewayUriSans -}}
+{{- $quotedGatewayUriSans = append $quotedGatewayUriSans (printf "%q" $gatewayUriSan) -}}
+{{- end -}}
+{{- $configuration = printf "%s\n\n[backend_tls.vfs]\ncertificate_chain_file = \"/run/secrets/vfs-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/vfs-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/vfs-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [%s]\n\n[backend_tls.vfs_management]\ncertificate_chain_file = \"/run/secrets/vfs-management-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/vfs-management-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/vfs-management-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/api/vfs-management\"]" $configuration (join ", " $quotedGatewayUriSans) -}}
+{{- end -}}
+{{- if $headscaleRequired -}}
 {{- $configuration = replace "[mounts.headscale]\nenabled = false" "[mounts.headscale]\nenabled = true" $configuration -}}
 {{- $configuration = replace "api_url = \"https://headscale.example.invalid/\"" (printf "api_url = %q" .Values.mounts.headscale.apiUrl) $configuration -}}
 {{- $configuration = replace "oidc_issuer = \"https://issuer.example.invalid/\"" (printf "oidc_issuer = %q" .Values.mounts.headscale.oidcIssuer) $configuration -}}
@@ -83,8 +119,10 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "filebelt.validate" -}}
 {{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
-{{- if not (hasPrefix "version = 7" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 7" -}}
+{{- $mountsEnabled := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled -}}
+{{- $headscaleRequired := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled -}}
+{{- if not (hasPrefix "version = 8" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 8" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -116,7 +154,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- $ioTls := first (regexSplit "(?m)^\\[" (last $ioSections) 2) -}}
 {{- $collaborationIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]" -}}
-{{- if .Values.mounts.enabled -}}
+{{- if $mountsEnabled -}}
 {{- $collaborationIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]" -}}
 {{- end -}}
 {{- if .Values.documents.enabled -}}
@@ -193,7 +231,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- $ioTls := first (regexSplit "(?m)^\\[" (last $ioSections) 2) -}}
 {{- $mcpIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" -}}
-{{- if .Values.mounts.enabled -}}
+{{- if $mountsEnabled -}}
 {{- $mcpIoClientUris = "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" -}}
 {{- end -}}
 {{- if .Values.documents.enabled -}}
@@ -251,21 +289,79 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- if .Values.mounts.enabled -}}
+{{- if and (not .Values.mounts.smb.enabled) (ne .Values.mounts.smb.previousGatewayUriSan "") -}}
+{{- fail "disabled SMB must not carry a previous gateway URI SAN" -}}
+{{- end -}}
+{{- if and (not .Values.mounts.ftpFtps.enabled) (ne .Values.mounts.ftpFtps.previousGatewayUriSan "") -}}
+{{- fail "disabled FTP/FTPS must not carry a previous gateway URI SAN" -}}
+{{- end -}}
+{{- if not .Values.mounts.nfs.enabled -}}
+{{- if or (ne .Values.mounts.nfs.previousGatewayUriSan "") (ne .Values.mounts.nfs.realm "") (ne .Values.mounts.nfs.idmapDomain "") (ne .Values.mounts.nfs.tailstateClaim "") (ne .Values.mounts.nfs.recoveryClaim "") (ne (int .Values.mounts.nfs.handleKeyGeneration) 1) (ne (int .Values.mounts.nfs.graceSeconds) 90) -}}
+{{- fail "disabled NFS must not carry a previous gateway URI SAN or authority overrides" -}}
+{{- end -}}
+{{- end -}}
+{{- $currentGatewayUriSans := list "spiffe://filebelt/smb-gateway/vfs" "spiffe://filebelt/ftp-ftps-gateway/vfs" "spiffe://filebelt/nfs-gateway/vfs" -}}
+{{- $previousGatewayUriSans := list -}}
+{{- range $protocol := list .Values.mounts.smb .Values.mounts.ftpFtps .Values.mounts.nfs -}}
+{{- if and $protocol.enabled (ne $protocol.previousGatewayUriSan "") -}}
+{{- if has $protocol.previousGatewayUriSan $currentGatewayUriSans -}}
+{{- fail "a previous gateway URI SAN must not equal any current protocol identity" -}}
+{{- end -}}
+{{- $previousGatewayUriSans = append $previousGatewayUriSans $protocol.previousGatewayUriSan -}}
+{{- end -}}
+{{- end -}}
+{{- if ne (len $previousGatewayUriSans) (len (uniq $previousGatewayUriSans)) -}}
+{{- fail "previous gateway URI SANs must be pairwise distinct" -}}
+{{- end -}}
+{{- if $mountsEnabled -}}
 {{- if not .Values.mounts.tailnet.kernelNetworking -}}
-{{- fail "mounts.enabled requires tailnet.kernelNetworking=true for direct SMB/FTPS reachability" -}}
+{{- fail "an enabled mount protocol requires tailnet.kernelNetworking=true" -}}
 {{- end -}}
 {{- if or (eq (len .Values.networkPolicy.headscale.to) 0) (eq (len .Values.networkPolicy.mountIngress.from) 0) -}}
-{{- fail "mounts.enabled requires exact Headscale egress and mount ingress peer allowlists" -}}
+{{- fail "an enabled mount protocol requires exact tailnet-control egress and mount ingress peer allowlists" -}}
 {{- end -}}
-{{- range $required := list "[mounts]" "enabled = true" "database_url_file = \"/run/secrets/mount-database-url\"" "vault_keyring_file = \"/run/secrets/mount-vault-keyring.json\"" "[mounts.capability_signing]" "io_url = \"https://filebelt-worker-io:8081/\"" "io_client_certificate_chain_file = \"/run/secrets/vfs-io-client-tls/tls.crt\"" "management_url = \"https://filebelt-vfs-management:8088/\"" "[backend_tls.vfs]" "[backend_tls.vfs_management]" -}}
+{{- range $required := list "[mounts]" "database_url_file = \"/run/secrets/mount-database-url\"" "vault_keyring_file = \"/run/secrets/mount-vault-keyring.json\"" "[mounts.capability_signing]" "io_url = \"https://filebelt-worker-io:8081/\"" "io_client_certificate_chain_file = \"/run/secrets/vfs-io-client-tls/tls.crt\"" "management_url = \"https://filebelt-vfs-management:8088/\"" "[backend_tls.vfs]" "[backend_tls.vfs_management]" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
-{{- fail (printf "mounts.enabled requires configuration.filebelt setting %s" $required) -}}
+{{- fail (printf "an enabled mount protocol requires configuration.filebelt setting %s" $required) -}}
+{{- end -}}
+{{- end -}}
+{{- if $headscaleRequired -}}
+{{- if not (regexMatch "(?m)^\\[mounts\\.headscale\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
+{{- fail "enabled SMB or FTP/FTPS requires Headscale synchronization" -}}
 {{- end -}}
 {{- end -}}
 {{- range $workload := list .Values.mounts.smb .Values.mounts.ftpFtps -}}
-{{- if eq $workload.tailstateClaim "" -}}
-{{- fail "mounts.enabled requires an operator-provided RWO tailstate claim for every workload" -}}
+{{- if and $workload.enabled (eq $workload.tailstateClaim "") -}}
+{{- fail "an enabled SMB or FTP/FTPS gateway requires an operator-provided RWO tailstate claim" -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.mounts.nfs.enabled -}}
+{{- $zeroDigest := "sha256:0000000000000000000000000000000000000000000000000000000000000000" -}}
+{{- if or (eq (index .Values.images "filebelt-nfs-gateway").digest $zeroDigest) (eq .Values.images.tailscaled.digest $zeroDigest) -}}
+{{- fail "mounts.nfs.enabled requires published non-sentinel NFS gateway and tailscaled image digests" -}}
+{{- end -}}
+{{- if or (eq .Values.mounts.nfs.realm "") (eq .Values.mounts.nfs.idmapDomain "") (eq .Values.mounts.nfs.tailstateClaim "") (eq .Values.mounts.nfs.recoveryClaim "") -}}
+{{- fail "mounts.nfs.enabled requires an exact realm, idmap domain, and distinct operator-owned RWO tailstate and recovery claims" -}}
+{{- end -}}
+{{- if eq .Values.mounts.nfs.tailstateClaim .Values.mounts.nfs.recoveryClaim -}}
+{{- fail "NFS tailstate and recovery claims must be distinct" -}}
+{{- end -}}
+{{- if or (eq (len .Values.mounts.nfs.ganesha.command) 0) (eq (len .Values.mounts.nfs.ganesha.healthCommand) 0) (eq (len .Values.mounts.nfs.ganesha.preStopCommand) 0) (eq .Values.mounts.nfs.ganesha.configMap.name "") (eq (len .Values.mounts.nfs.bridge.command) 0) (eq (len .Values.mounts.nfs.bridge.healthCommand) 0) (eq (len .Values.mounts.nfs.bridge.preStopCommand) 0) (eq .Values.mounts.nfs.bridge.configMap.name "") -}}
+{{- fail "mounts.nfs.enabled requires explicit Ganesha and bridge command, health, preStop, and ConfigMap ABI contracts" -}}
+{{- end -}}
+{{- if eq .Values.mounts.nfs.ganesha.configMap.name .Values.mounts.nfs.bridge.configMap.name -}}
+{{- fail "NFS Ganesha and bridge configuration projections must be distinct" -}}
+{{- end -}}
+{{- if or (eq .Values.secrets.nfsGaneshaKeytab.name .Values.secrets.nfsBridgeVfsClientTls.name) (eq .Values.secrets.nfsGaneshaKeytab.name .Values.secrets.nfsHandleKeyring.name) (eq .Values.secrets.nfsBridgeVfsClientTls.name .Values.secrets.nfsHandleKeyring.name) -}}
+{{- fail "NFS Ganesha keytab, bridge VFS identity, and VFS handle-key Secrets must be distinct" -}}
+{{- end -}}
+{{- if ne (int .Values.networkPolicy.headscale.port) 443 -}}
+{{- fail "NFS tailnet control egress is fixed to HTTPS port 443; KDC egress is forbidden" -}}
+{{- end -}}
+{{- range $required := list "[mounts.nfs]" "enabled = true" "gateway_uri_san = \"spiffe://filebelt/nfs-gateway/vfs\"" (printf "realm = %q" .Values.mounts.nfs.realm) (printf "idmap_domain = %q" .Values.mounts.nfs.idmapDomain) "handle_keyring_file = \"/run/secrets/nfs-handle-keyring.json\"" -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
+{{- fail (printf "mounts.nfs.enabled requires configuration.filebelt setting %s" $required) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

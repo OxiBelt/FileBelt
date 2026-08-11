@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-version = 7
+version = 8
 public_origin = "https://filebelt.localhost:8443/"
 
 [deployment]
@@ -76,8 +76,17 @@ private_key_file = "/run/secrets/media-storage-capability-private-key"
 public_keyset_file = "/run/secrets/media-storage-capability-public-keyset"
 current_generation = 1
 
+[mounts.smb]
+enabled = false
+gateway_uri_san = "spiffe://filebelt/smb-gateway/vfs"
+
+[mounts.ftp_ftps]
+enabled = false
+gateway_uri_san = "spiffe://filebelt/ftp-ftps-gateway/vfs"
+
 [mounts.nfs]
 enabled = false
+gateway_uri_san = "spiffe://filebelt/nfs-gateway/vfs"
 
 [limits]
 whole_threshold_bytes = 33554432

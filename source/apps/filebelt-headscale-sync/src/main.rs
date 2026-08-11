@@ -139,7 +139,7 @@ async fn run() -> Result<()> {
         command: Command::Serve { config },
     } = Arguments::parse();
     let config = Config::load(&config)?;
-    if !config.mounts.enabled || !config.mounts.headscale.enabled {
+    if !config.mounts.headscale_required() {
         bail!("Headscale synchronization is disabled");
     }
     let _telemetry = init_telemetry(&config.telemetry, ROLE).map_err(|message| anyhow!(message))?;

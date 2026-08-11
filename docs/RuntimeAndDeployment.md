@@ -141,7 +141,7 @@ their lifetime.
 | MCP broker request API | 8082 | API only, mTLS in Kubernetes |
 | Runner controller | 8083 | MCP broker only, mTLS |
 | MCP runner relay | 8084 | one-shot runner relay only, mTLS |
-| VFS gateway protocol | 8087 | SMB/FTPS adapter identities only, mTLS; disabled by default |
+| VFS gateway protocol | 8087 | enabled SMB, FTP/FTPS, or NFS adapter identities only, exact URI-SAN mTLS; disabled by default |
 | VFS credential management | 8088 | API identity only, mTLS; disabled by default |
 | Document API control | 8089 | API identity only, mTLS; disabled by default |
 | Document adapter control | 8090 | Approved document-adapter identity only, mTLS; disabled by default |
@@ -227,13 +227,17 @@ fallback. `mcp.enabled=true` additionally creates the
 broker Deployment and Services. The separate `mcp.runners.enabled=true`
 opt-in creates the core controller Deployment, a narrow Role/RoleBinding and
 runner ServiceAccount in the pre-created runner namespace, and permits one-shot
-runner Pods there. `mounts.enabled=true` renders VFS and Headscale-sync
-Deployments plus one SMB and one explicit-FTPS gateway StatefulSet with
-separate operator-provided RWO tailstate claims. This preview is rejected
-unless kernel tailnet networking and exact Headscale/mount peers are configured;
-it is not production-admissible until both copyleft adapter release images and
-their protocol acceptance evidence exist. The tools image runs explicit
-bounded administrative Jobs. FileBelt deploys no HPA.
+runner Pods there. SMB, FTP/FTPS, and NFS are independent disabled-by-default
+mount flags. Any enabled protocol renders VFS. SMB or FTP/FTPS also renders
+Headscale sync and the selected gateway StatefulSet with an operator-provided
+RWO tailstate claim. NFS instead renders one single-active
+Ganesha/bridge/tailscaled StatefulSet, its own tailstate and recovery claims,
+and a NetworkPolicy-restricted ClusterIP Service on TCP 2049; it does not force
+Headscale sync. Rendering is rejected unless kernel tailnet networking, exact
+tailnet-control and ingress peers, and the selected protocol's fail-closed
+inputs are present. Separately licensed adapters remain production-gated on
+published images and protocol acceptance evidence. The tools image runs
+explicit bounded administrative Jobs. FileBelt deploys no HPA.
 
 `documents.enabled=true` additionally renders the Apache document coordinator
 Deployment and Service only after migration 000006, grants verification, the
@@ -408,7 +412,7 @@ or a UDP/WebTransport port.
 
 ## Phase 8 deployment and rollout
 
-Configuration version 7 retains disabled-by-default media, NFS, and collaboration
+Configuration version 8 retains disabled-by-default media, NFS, and collaboration
 WebTransport sections. Unknown fields, mutable image tags, missing Secret keys,
 unbounded resources, unsupported protocol modes, and incomplete network peers
 fail startup or Helm validation. Phase 8 uses one coordinated version, but
@@ -420,8 +424,15 @@ NFS-Ganesha `6.5-8` from the Ubuntu 26.04 snapshot dated 2026-08-09, a thin
 dynamic FileBelt FSAL, and an adapter-local Rust bridge over bounded Unix IPC.
 The current tree contains the generic schema/state model, opaque keyed handles,
 bounded bridge framing, and the portable C boundary check. It does not yet
-contain the ABI-specific Ganesha callback table or a qualified adapter image,
-so the chart exposes no NFS listener and operators must not deploy it.
+contain the ABI-specific Ganesha callback table or a qualified adapter image.
+The chart therefore requires an explicit published image digest, operator-owned
+Ganesha and bridge ConfigMaps, shell-free command/health/preStop argv, a static
+keytab, an exact `spiffe://filebelt/nfs-gateway/vfs` bridge identity, a VFS-only
+handle keyring, and distinct RWO tailstate/recovery claims before it renders the
+NFS listener. Ganesha and the bridge use the same pinned FileBelt image; the
+only Service is ClusterIP TCP 2049, and policy provides no KDC egress. Until
+that image ABI and protocol evidence are qualified, operators must leave NFS
+disabled.
 
 The media release target is one isolated Job per fenced attempt in a
 pre-created namespace, with no service-account token, database credential,
@@ -473,14 +484,17 @@ acknowledge an update from an event or in-memory replica state.
 
 Phase 6 mount rollout remains gated. Apply migrations `000004` and `000005`
 and reviewed VFS/Headscale grants first, provision `mount-storage` signing and
-mount-vault secrets, render the chart with `mounts.enabled=false`, and verify
+mount-vault secrets, render the chart with all protocol flags false, and verify
 that API/I/O have no new payload or database authority. Do not enable the
 preview until separately reviewed GPL image builds, corresponding-source
 offers, Samba authentication/session IPC, explicit-FTPS listener integration,
 two-user Virtual ACL/revocation tests, tailnet device fencing, and live
-Calico/Cilium policy tests all pass. Rollback disables gateway admission first,
-advances gateway epochs, closes sessions/handles/locks, then scales VFS and
-Headscale sync to zero. Keep the additive schemas, KEKs, and every admitted
+Calico/Cilium policy tests all pass. NFS additionally requires the qualified
+single-active image ABI, stable-handle/reclaim evidence, automatic preStop
+drain, recovery-state restoration, and exact gateway attestation tests.
+Rollback disables gateway admission first, advances gateway epochs, closes
+sessions/handles/locks, then scales the selected gateways, VFS, and (when
+present) Headscale sync to zero. Keep the additive schemas, KEKs, and every admitted
 `mount-storage` public key while retained state or recovery evidence references
 them.
 

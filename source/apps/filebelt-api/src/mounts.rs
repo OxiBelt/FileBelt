@@ -108,7 +108,7 @@ struct GenerationQuery {
 }
 
 pub(crate) fn initialize(config: &Config) -> Result<Option<Arc<MountApiState>>> {
-    if !config.mounts.enabled {
+    if !config.mounts.any_protocol_enabled() {
         return Ok(None);
     }
     let credential_url = config
@@ -301,7 +301,7 @@ async fn require_nfs_admin(
     headers: &HeaderMap,
     mutation: bool,
 ) -> Result<AuthenticatedSession, ApiError> {
-    if !state.config.mounts.enabled || !state.config.mounts.nfs.enabled {
+    if !state.config.mounts.nfs.enabled {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "mount.nfs.disabled",
@@ -383,7 +383,7 @@ async fn put_policy(
 ) -> Result<Json<MountPolicyRecord>, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    validate_protocol(&protocol)?;
+    validate_protocol(&state.config, &protocol)?;
     require_read_only(input.read_only)?;
     validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
     if input.enabled && input.allowed_drive_ids.is_empty() {
@@ -414,7 +414,7 @@ async fn create_credential(
 ) -> Result<(StatusCode, Json<CreateCredentialResponse>), ApiError> {
     let mounts = require_enabled(&state)?;
     let session = require_recent_mutation(&state, &headers).await?;
-    validate_protocol(&input.protocol)?;
+    validate_protocol(&state.config, &input.protocol)?;
     require_read_only(input.read_only)?;
     validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
     if input.allowed_drive_ids.is_empty() {
@@ -500,14 +500,20 @@ async fn require_recent_mutation(
     Ok(session)
 }
 
-fn validate_protocol(protocol: &str) -> Result<(), ApiError> {
-    if !matches!(protocol, "smb" | "ftps") {
-        return Err(ApiError::bad_request(
+fn validate_protocol(config: &Config, protocol: &str) -> Result<(), ApiError> {
+    match protocol {
+        "smb" if config.mounts.smb.enabled => Ok(()),
+        "ftps" if config.mounts.ftp_ftps.enabled => Ok(()),
+        "smb" | "ftps" => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "mount.protocol_disabled",
+            "The requested mount protocol is not enabled for this deployment",
+        )),
+        _ => Err(ApiError::bad_request(
             "mount.protocol_invalid",
             "The mount protocol must be smb or ftps",
-        ));
+        )),
     }
-    Ok(())
 }
 
 fn require_read_only(read_only: bool) -> Result<(), ApiError> {

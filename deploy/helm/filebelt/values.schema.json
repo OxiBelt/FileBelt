@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "FileBelt Phase 6 Kubernetes deployment",
+  "title": "FileBelt Phase 8 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
   "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "documents", "mounts", "networkPolicy", "monitoring", "operation"],
@@ -27,7 +27,7 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "tailscaled"],
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "filebelt-nfs-gateway", "tailscaled"],
       "properties": {
         "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
         "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
@@ -43,6 +43,7 @@
         "filebelt-document": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-document"}}}]},
         "filebelt-smb-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-smb-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
         "filebelt-ftp-ftps-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-ftp-ftps-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
+        "filebelt-nfs-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-nfs-gateway"}, "license": {"const": "LGPL-3.0-or-later"}}}]},
         "tailscaled": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "tailscale/tailscale"}}}]}
       }
     },
@@ -101,7 +102,7 @@
     },
     "secrets": {
       "type": "object", "additionalProperties": false,
-      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls"],
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "nfsGaneshaKeytab", "nfsBridgeVfsClientTls", "nfsHandleKeyring", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls"],
       "properties": {
         "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
@@ -154,6 +155,9 @@
         "vfsIoClientTls": {"$ref": "#/definitions/tlsSecret"},
         "headscaleApiToken": {"$ref": "#/definitions/singleKeySecret"},
         "headscaleServerCa": {"$ref": "#/definitions/singleKeySecret"},
+        "nfsGaneshaKeytab": {"$ref": "#/definitions/singleKeySecret"},
+        "nfsBridgeVfsClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "nfsHandleKeyring": {"$ref": "#/definitions/singleKeySecret"},
         "documentDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "documentApiServerTls": {"$ref": "#/definitions/tlsSecret"},
         "documentAdapterServerTls": {"$ref": "#/definitions/tlsSecret"},
@@ -219,15 +223,32 @@
     },
     "mounts": {
       "type": "object", "additionalProperties": false,
-      "required": ["enabled", "tailnet", "headscale", "vfs", "headscaleSync", "smb", "ftpFtps"],
+      "required": ["tailnet", "headscale", "vfs", "headscaleSync", "smb", "ftpFtps", "nfs"],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "tailnet": {"type": "object", "additionalProperties": false, "required": ["kernelNetworking"], "properties": {"kernelNetworking": {"const": true, "description": "Direct tailnet listeners require kernel networking; userspace mode needs a separately designed proxy."}}},
-        "headscale": {"type": "object", "additionalProperties": false, "required": ["address", "apiUrl", "oidcIssuer", "syncSeconds", "authKeySecret"], "properties": {"address": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "apiUrl": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "oidcIssuer": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "syncSeconds": {"type": "integer", "minimum": 5, "maximum": 300}, "authKeySecret": {"$ref": "#/definitions/singleKeySecret"}}},
+        "tailnet": {"type": "object", "additionalProperties": false, "required": ["kernelNetworking", "address", "authKeySecret"], "properties": {"kernelNetworking": {"const": true, "description": "Direct tailnet listeners require kernel networking; userspace mode needs a separately designed proxy."}, "address": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "authKeySecret": {"$ref": "#/definitions/singleKeySecret"}}},
+        "headscale": {"type": "object", "additionalProperties": false, "required": ["apiUrl", "oidcIssuer", "syncSeconds"], "properties": {"apiUrl": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "oidcIssuer": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "syncSeconds": {"type": "integer", "minimum": 5, "maximum": 300}}},
         "vfs": {"$ref": "#/definitions/mountDeployment"},
         "headscaleSync": {"$ref": "#/definitions/mountDeployment"},
         "smb": {"$ref": "#/definitions/tailnetStatefulSet"},
-        "ftpFtps": {"type": "object", "additionalProperties": false, "required": ["tailstateClaim", "resources", "passivePorts"], "properties": {"tailstateClaim": {"$ref": "#/definitions/dnsLabel"}, "resources": {"$ref": "#/definitions/resources"}, "passivePorts": {"type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": {"type": "integer", "minimum": 1024, "maximum": 65535}}}}
+        "ftpFtps": {"type": "object", "additionalProperties": false, "required": ["enabled", "previousGatewayUriSan", "tailstateClaim", "resources", "passivePorts"], "properties": {"enabled": {"type": "boolean"}, "previousGatewayUriSan": {"$ref": "#/definitions/optionalSpiffeUri"}, "tailstateClaim": {"$ref": "#/definitions/dnsLabel"}, "resources": {"$ref": "#/definitions/resources"}, "passivePorts": {"type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": {"type": "integer", "minimum": 1024, "maximum": 65535}}}},
+        "nfs": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "previousGatewayUriSan", "realm", "idmapDomain", "handleKeyGeneration", "graceSeconds", "tailstateClaim", "recoveryClaim", "terminationGracePeriodSeconds", "ganesha", "bridge", "tailscaled"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "previousGatewayUriSan": {"$ref": "#/definitions/optionalSpiffeUri"},
+            "realm": {"type": "string", "maxLength": 255, "pattern": "^(?:|[A-Z0-9][A-Z0-9.-]*)$"},
+            "idmapDomain": {"type": "string", "maxLength": 253, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?)$"},
+            "handleKeyGeneration": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+            "graceSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
+            "tailstateClaim": {"$ref": "#/definitions/optionalDnsLabel"},
+            "recoveryClaim": {"$ref": "#/definitions/optionalDnsLabel"},
+            "terminationGracePeriodSeconds": {"type": "integer", "minimum": 120, "maximum": 600},
+            "ganesha": {"$ref": "#/definitions/nfsProcess"},
+            "bridge": {"$ref": "#/definitions/nfsProcess"},
+            "tailscaled": {"type": "object", "additionalProperties": false, "required": ["resources"], "properties": {"resources": {"$ref": "#/definitions/resources"}}}
+          }
+        }
       }
     },
     "networkPolicy": {
@@ -318,13 +339,15 @@
   "allOf": [
     {"if": {"properties": {"mcp": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"mcpGateway": {"properties": {"enabled": {"const": true}}}}}}}},
     {"if": {"properties": {"mcp": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"kubernetesApi": {"properties": {"enabled": {"const": true}}}}}}}},
-    {"if": {"properties": {"mounts": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"headscale": {"properties": {"to": {"minItems": 1}}}, "mountIngress": {"properties": {"from": {"minItems": 1}}}}}}}}
+    {"if": {"properties": {"mounts": {"anyOf": [{"properties": {"smb": {"properties": {"enabled": {"const": true}}}}}, {"properties": {"ftpFtps": {"properties": {"enabled": {"const": true}}}}}, {"properties": {"nfs": {"properties": {"enabled": {"const": true}}}}}]}}}, "then": {"properties": {"networkPolicy": {"properties": {"headscale": {"properties": {"to": {"minItems": 1}}}, "mountIngress": {"properties": {"from": {"minItems": 1}}}}}}}}
   ],
   "definitions": {
     "registry": {"type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$"},
     "optionalRegistry": {"type": "string", "pattern": "^(?:|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?)$"},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "dnsLabel": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"},
+    "optionalDnsLabel": {"type": "string", "maxLength": 63, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"},
+    "optionalSpiffeUri": {"type": "string", "maxLength": 512, "pattern": "^(?:|spiffe://[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?/[^?#]+)$"},
     "image": {
       "type": "object", "additionalProperties": false, "required": ["repository", "registryMirror", "digest"],
       "properties": {
@@ -359,8 +382,17 @@
       "properties": {"replicas": {"type": "integer", "minimum": 1, "maximum": 10}, "resources": {"$ref": "#/definitions/resources"}}
     },
     "tailnetStatefulSet": {
-      "type": "object", "additionalProperties": false, "required": ["tailstateClaim", "resources"],
-      "properties": {"tailstateClaim": {"$ref": "#/definitions/dnsLabel"}, "resources": {"$ref": "#/definitions/resources"}}
+      "type": "object", "additionalProperties": false, "required": ["enabled", "previousGatewayUriSan", "tailstateClaim", "resources"],
+      "properties": {"enabled": {"type": "boolean"}, "previousGatewayUriSan": {"$ref": "#/definitions/optionalSpiffeUri"}, "tailstateClaim": {"$ref": "#/definitions/dnsLabel"}, "resources": {"$ref": "#/definitions/resources"}}
+    },
+    "argv": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "configMapRef": {
+      "type": "object", "additionalProperties": false, "required": ["name", "key"],
+      "properties": {"name": {"$ref": "#/definitions/optionalDnsLabel"}, "key": {"$ref": "#/definitions/secretKey"}}
+    },
+    "nfsProcess": {
+      "type": "object", "additionalProperties": false, "required": ["command", "args", "healthCommand", "preStopCommand", "configMap", "resources"],
+      "properties": {"command": {"$ref": "#/definitions/argv"}, "args": {"$ref": "#/definitions/argv"}, "healthCommand": {"$ref": "#/definitions/argv"}, "preStopCommand": {"$ref": "#/definitions/argv"}, "configMap": {"$ref": "#/definitions/configMapRef"}, "resources": {"$ref": "#/definitions/resources"}}
     },
     "generation": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
     "secretKey": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9._-]+$"},

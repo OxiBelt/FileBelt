@@ -2,7 +2,7 @@
 
 # FileBelt Helm chart
 
-This chart deploys the supported Phase 6 FileBelt application boundary on
+This chart deploys the supported Phase 8 FileBelt application boundary on
 Kubernetes `1.34` through `1.36`. It deliberately does not install PostgreSQL,
 Iggy, an OIDC provider, an OIDC egress gateway, an ingress controller, storage,
 cert-manager, an MCP egress gateway, or a monitoring stack. Install it in a
@@ -25,14 +25,23 @@ dynamically rather than as a Deployment. They use a digest-pinned trusted relay
 sidecar, a verified catalog server image, no service-account token, no payload
 mount, and a runner-namespace default-deny policy.
 
-`mounts.enabled=true` renders the disabled-preview VFS and Headscale-sync
-Deployments plus SMB and explicit-FTPS gateway StatefulSets. Each gateway has a
-tailscaled sidecar, its own operator-provided RWO tailstate claim, kernel
-networking, and an exact default-deny policy path. VFS and Headscale sync do not
-receive tailscaled, TUN, tailstate, or payload mounts. Do not enable this
-preview in production from this revision: the copyleft adapter images are not
-part of the Apache release and the Samba authentication/session IPC path is
-still fail-closed.
+Mount protocols are independently disabled by default. Enabling any of
+`mounts.smb.enabled`, `mounts.ftpFtps.enabled`, or `mounts.nfs.enabled` renders
+VFS. SMB or FTP/FTPS additionally renders Headscale sync and the selected
+gateway StatefulSet; each selected gateway has tailscaled and a distinct
+operator-provided RWO tailstate claim. NFS does not render Headscale sync. It
+renders one single-active StatefulSet with Ganesha, its FileBelt bridge, and
+tailscaled, plus a NetworkPolicy-restricted ClusterIP Service on TCP 2049. VFS
+and Headscale sync never receive tailscaled, TUN, tailstate, or payload mounts.
+
+The NFS topology fails closed until the operator supplies published non-zero
+NFS and tailscaled image digests, exact realm and idmap values, distinct
+tailstate and recovery claims, separate Ganesha and bridge ConfigMaps, and
+shell-free command, health, and automatic preStop-drain argv matching the
+published adapter image ABI. The current repository does not publish that ABI
+image, so the chart does not invent executable paths or credentials. SMB and
+FTP/FTPS remain preview-only until their separately licensed adapter images and
+protocol acceptance evidence are qualified.
 
 It never renders an HPA, Secret, PVC, dependency fixture, media
 controller, cluster-scoped RBAC, ClusterRole, or ClusterRoleBinding. The API,
@@ -66,7 +75,7 @@ and the generated edge configuration can use stable Service DNS names.
 
 Every production image is selected by a lower-case `sha256:` digest. The
 all-zero values are static-validation sentinels, not installable artifacts;
-replace all eleven deployable Apache workload digests before live installation.
+replace every deployable Apache workload digest before live installation.
 The adapter all-zero digests are additionally non-published sentinels and
 cannot be made production-ready by changing only a value.
 
@@ -82,7 +91,7 @@ all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
 
-The default `filebelt.toml` is version 7 in Kubernetes mode and configures the
+The default `filebelt.toml` is version 8 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
 logs, Prometheus, and the OIDC egress proxy. Replace the example origin,
 issuer, tenant, administrator, backend UUID, certificate identities, and edge
@@ -153,6 +162,9 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | `mountVaultKeyring` | `keyring.json` | VFS verifier vault only |
 | VFS server, management, and I/O client TLS | certificate, key, and exact CA keys | Gateways, API, VFS, and I/O |
 | `headscaleApiToken` and `headscaleServerCa` | `token` and `ca.crt` | Headscale synchronization only |
+| `nfsGaneshaKeytab` | `ganesha.keytab` | Ganesha only; static keytab, with no KDC NetworkPolicy path |
+| `nfsBridgeVfsClientTls` | `tls.crt`, `tls.key`, `server-ca.crt` | NFS bridge only; certificate URI SAN is exactly `spiffe://filebelt/nfs-gateway/vfs` |
+| `nfsHandleKeyring` | `keyring.json` | VFS only; never projected into the NFS gateway Pod |
 
 Secret names are not rollouts by themselves. Generations make an in-place
 Secret rotation explicit and auditable. Rotate backend certificates by first
@@ -182,9 +194,12 @@ The chart permits only these application paths:
   runner relay sidecars to broker and the exact MCP gateway, with no DNS
   egress from runner Pods;
 - an administrative Job to DNS and PostgreSQL.
-- when mount preview is rendered, API to VFS management; gateways to VFS;
-  VFS to PostgreSQL and I/O; I/O ingress from VFS; Headscale sync to PostgreSQL
-  and the exact Headscale peer; and exact tailnet ingress to gateway ports.
+- when any mount protocol is rendered, API to VFS management, selected gateways
+  to VFS, VFS to PostgreSQL and I/O, and I/O ingress from VFS; SMB/FTP also
+  render Headscale sync to PostgreSQL; every tailscaled sidecar reaches only
+  DNS and the exact HTTPS tailnet-control peer. Exact tailnet ingress reaches
+  only selected gateway ports. NFS has no KDC egress and exposes only a
+  ClusterIP Service on TCP 2049.
 
 `networkPolicy` peers accept Kubernetes namespace/Pod selectors or bounded
 `ipBlock` CIDRs. The chart rejects `0.0.0.0/0` and `::/0`. Set every external
@@ -219,7 +234,7 @@ For a fresh installation:
 
 For an upgrade, run `migrate` without changing the existing workload images or
 configuration, apply `grants.sql`, run `verify-grants`, and run `keys-audit`
-against the complete candidate version-7 public keyset inventory. Only after
+against the complete candidate version-8 public keyset inventory. Only after
 all three steps pass should a separate release roll out new image/config
 digests. The
 chart gives no database-owner credential to a Job, never runs migrations from
@@ -266,7 +281,7 @@ reopens direct-share or MCP data-grant admission.
 
 Keyset audit, recovery checkpoint, and recovery verification require quiesced
 workloads. `keys-audit` receives all configured public keysets and no private
-key or database credential; its success is required before any version-7
+key or database credential; its success is required before any version-8
 traffic admission. Capture the
 checkpoint Job's stdout. To verify it, store that sensitive operational JSON in
 an operator-owned Secret and set `operation.checkpoint.secretName`; the chart
@@ -301,7 +316,8 @@ tests/scripts/check-helm-chart.sh
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
 negative schema/helper cases, proves core and MCP workload/RBAC/mount
-boundaries, renders the disabled mount preview and rejects unsafe TUN/tailstate
+boundaries, renders independent SMB/FTP and NFS profiles, verifies NFS Secret
+separation and drain wiring, and rejects unsafe TUN/tailstate, image, ABI, KDC,
 or peer combinations, validates
 quiescing and administrative Jobs, and rejects unexpected resource kinds. A
 connected test cluster must additionally run server-side dry-run under the

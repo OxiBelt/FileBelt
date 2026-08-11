@@ -54,8 +54,12 @@ spec:
   selector:
     matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: controller}
 {{- end }}
-{{- if .Values.mounts.enabled }}
-{{- range $component := list "vfs" "smb-gateway" "ftp-ftps-gateway" }}
+{{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
+{{- $mountComponents := list "vfs" -}}
+{{- if .Values.mounts.smb.enabled }}{{- $mountComponents = append $mountComponents "smb-gateway" -}}{{- end }}
+{{- if .Values.mounts.ftpFtps.enabled }}{{- $mountComponents = append $mountComponents "ftp-ftps-gateway" -}}{{- end }}
+{{- if .Values.mounts.nfs.enabled }}{{- $mountComponents = append $mountComponents "nfs-gateway" -}}{{- end }}
+{{- range $component := $mountComponents }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -64,7 +68,11 @@ metadata:
   labels:
 {{ include "filebelt.componentLabels" (dict "root" $ "component" $component) | indent 4 }}
 spec:
+  {{- if eq $component "nfs-gateway" }}
+  maxUnavailable: 1
+  {{- else }}
   minAvailable: 1
+  {{- end }}
   selector:
     matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
 {{- end }}

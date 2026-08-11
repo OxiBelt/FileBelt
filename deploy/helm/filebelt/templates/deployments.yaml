@@ -182,7 +182,7 @@ spec:
         checksum/api-mcp-delegation: {{ printf "%s:%s" .Values.secrets.apiMcpDelegationCapabilityPrivateKey.generation .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.generation | sha256sum | quote }}
         checksum/mcp-client-tls: {{ .Values.secrets.apiMcpClientTls.generation | sha256sum | quote }}
         {{- end }}
-        {{- if .Values.mounts.enabled }}
+        {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         checksum/vfs-management-client-tls: {{ .Values.secrets.vfsManagementClientTls.generation | sha256sum | quote }}
         {{- end }}
         {{- if .Values.documents.enabled }}
@@ -243,7 +243,7 @@ spec:
             {{- if .Values.mcp.enabled }}
             - {name: mcp-client-tls, mountPath: /run/secrets/mcp-broker-client-tls, readOnly: true}
             {{- end }}
-            {{- if .Values.mounts.enabled }}
+            {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
             - {name: vfs-management-client-tls, mountPath: /run/secrets/vfs-management-client-tls, readOnly: true}
             {{- end }}
             {{- if .Values.documents.enabled }}
@@ -294,7 +294,7 @@ spec:
               - {key: {{ .Values.secrets.apiMcpClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.apiMcpClientTls.caKey }}, path: server-ca.crt}
         {{- end }}
-        {{- if .Values.mounts.enabled }}
+        {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         - name: vfs-management-client-tls
           secret:
             secretName: {{ .Values.secrets.vfsManagementClientTls.name }}
@@ -344,7 +344,7 @@ spec:
         {{- if .Values.documents.enabled }}
         checksum/document-storage: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
         {{- end }}
-        {{- if .Values.mounts.enabled }}
+        {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         checksum/mount-storage: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
         {{- end }}
     spec:
@@ -391,7 +391,7 @@ spec:
             {{- if .Values.documents.enabled }}
             - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
-            {{- if .Values.mounts.enabled }}
+            {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
             - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
             - {name: backend-tls, mountPath: /run/secrets/backend-tls, readOnly: true}
@@ -411,7 +411,7 @@ spec:
         - name: document-storage-capability-public
           secret: {secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
         {{- end }}
-        {{- if .Values.mounts.enabled }}
+        {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         - name: mount-storage-capability-public
           secret: {secretName: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
         {{- end }}

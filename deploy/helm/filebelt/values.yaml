@@ -71,6 +71,12 @@ images:
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
     license: GPL-3.0-or-later
     source: https://github.com/OxiBelt/FileBelt/tree/main/adapters/ftp-ftps
+  filebelt-nfs-gateway:
+    repository: oxibelt/filebelt-nfs-gateway
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    license: LGPL-3.0-or-later
+    source: https://github.com/OxiBelt/FileBelt/tree/main/adapters/nfs
   tailscaled:
     repository: tailscale/tailscale
     registryMirror: ""
@@ -85,7 +91,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 7
+    version = 8
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -156,18 +162,6 @@ configuration:
     client_ca_file = "/run/secrets/collaboration-server-tls/client-ca.crt"
     allowed_client_uri_sans = ["spiffe://filebelt/web/collaboration"]
 
-    [backend_tls.vfs]
-    certificate_chain_file = "/run/secrets/vfs-server-tls/tls.crt"
-    private_key_file = "/run/secrets/vfs-server-tls/tls.key"
-    client_ca_file = "/run/secrets/vfs-server-tls/client-ca.crt"
-    allowed_client_uri_sans = ["spiffe://filebelt/smb-gateway/vfs", "spiffe://filebelt/ftp-ftps-gateway/vfs"]
-
-    [backend_tls.vfs_management]
-    certificate_chain_file = "/run/secrets/vfs-management-server-tls/tls.crt"
-    private_key_file = "/run/secrets/vfs-management-server-tls/tls.key"
-    client_ca_file = "/run/secrets/vfs-management-server-tls/client-ca.crt"
-    allowed_client_uri_sans = ["spiffe://filebelt/api/vfs-management"]
-
     [collaboration]
     enabled = false
     database_url_file = "/run/secrets/collaboration-database-url"
@@ -189,7 +183,6 @@ configuration:
     current_generation = 1
 
     [mounts]
-    enabled = false
     database_url_file = "/run/secrets/mount-database-url"
     vault_keyring_file = "/run/secrets/mount-vault-keyring.json"
     vault_key_generation = 1
@@ -210,8 +203,18 @@ configuration:
     oidc_issuer = "https://issuer.example.invalid/"
     sync_seconds = 15
 
+    [mounts.smb]
+    enabled = false
+    gateway_uri_san = "spiffe://filebelt/smb-gateway/vfs"
+
+    [mounts.ftp_ftps]
+    enabled = false
+    gateway_uri_san = "spiffe://filebelt/ftp-ftps-gateway/vfs"
+
     [mounts.nfs]
     enabled = false
+    gateway_uri_san = "spiffe://filebelt/nfs-gateway/vfs"
+    grace_seconds = 90
 
     [telemetry]
     log_format = "json"
@@ -822,6 +825,9 @@ secrets:
   vfsIoClientTls: {name: filebelt-vfs-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   headscaleApiToken: {name: filebelt-headscale-api-token, key: token, generation: "1"}
   headscaleServerCa: {name: filebelt-headscale-server-ca, key: ca.crt, generation: "1"}
+  nfsGaneshaKeytab: {name: filebelt-nfs-ganesha-keytab, key: ganesha.keytab, generation: "1"}
+  nfsBridgeVfsClientTls: {name: filebelt-nfs-bridge-vfs-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  nfsHandleKeyring: {name: filebelt-nfs-handle-keyring, key: keyring.json, generation: "1"}
   documentDatabase: {name: filebelt-document-database, key: database-url, generation: "1"}
   documentApiServerTls: {name: filebelt-document-api-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   documentAdapterServerTls: {name: filebelt-document-adapter-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
@@ -859,20 +865,19 @@ documents:
   launchAction: https://filebelt-editor.example.invalid/onlyoffice/launch
   providerOrigin: https://documentserver.example.invalid
 
-# Mount delivery is opt-in. FileBelt never creates gateway tailstate storage:
-# each protocol gateway receives a distinct, operator-provisioned RWO claim.
+# Mount delivery is independently opt-in per protocol. FileBelt never creates
+# gateway tailstate or NFS recovery storage; every claim is operator-owned RWO.
 mounts:
-  enabled: false
-  # Direct SMB/FTPS tailnet listeners require the node TUN device and NET_ADMIN;
+  # Direct tailnet listeners require the node TUN device and NET_ADMIN;
   # userspace mode is intentionally unavailable because no proxy is configured.
   tailnet:
     kernelNetworking: true
-  headscale:
     address: https://headscale.example.invalid:443
+    authKeySecret: {name: filebelt-tailnet-auth, key: authkey, generation: "1"}
+  headscale:
     apiUrl: https://headscale.example.invalid/
     oidcIssuer: https://issuer.example.invalid/
     syncSeconds: 15
-    authKeySecret: {name: filebelt-tailnet-auth, key: authkey, generation: "1"}
   vfs:
     replicas: 2
     resources:
@@ -884,16 +889,54 @@ mounts:
       requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
       limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
   smb:
+    enabled: false
+    previousGatewayUriSan: ""
     tailstateClaim: filebelt-smb-tailstate
     resources:
       requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
       limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
   ftpFtps:
+    enabled: false
+    previousGatewayUriSan: ""
     tailstateClaim: filebelt-ftp-ftps-tailstate
     passivePorts: [30000, 30001]
     resources:
       requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
       limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+  nfs:
+    enabled: false
+    previousGatewayUriSan: ""
+    realm: ""
+    idmapDomain: ""
+    handleKeyGeneration: 1
+    graceSeconds: 90
+    tailstateClaim: ""
+    recoveryClaim: ""
+    terminationGracePeriodSeconds: 180
+    ganesha:
+      # The pinned adapter image ABI is not yet published. Enabling NFS requires
+      # explicit shell-free argv and an operator-owned configuration projection.
+      command: []
+      args: []
+      healthCommand: []
+      preStopCommand: []
+      configMap: {name: "", key: ganesha.conf}
+      resources:
+        requests: {cpu: 500m, memory: 512Mi, ephemeral-storage: 256Mi}
+        limits: {cpu: "4", memory: 2Gi, ephemeral-storage: 1Gi}
+    bridge:
+      command: []
+      args: []
+      healthCommand: []
+      preStopCommand: []
+      configMap: {name: "", key: bridge.toml}
+      resources:
+        requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+        limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+    tailscaled:
+      resources:
+        requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
+        limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
 
 networkPolicy:
   publicIngress:

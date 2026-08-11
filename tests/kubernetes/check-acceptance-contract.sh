@@ -8,7 +8,7 @@ workflow="${repo_root}/.github/workflows/check-filebelt.yml"
 kind_script="${repo_root}/tests/scripts/run-kubernetes-kind-compatibility.sh"
 network_script="${repo_root}/tests/scripts/run-kubernetes-network-policy.sh"
 chart_helpers="${repo_root}/deploy/helm/filebelt/templates/_helpers.tpl"
-readonly FILEBELT_CONFIGURATION_VERSION="7"
+readonly FILEBELT_CONFIGURATION_VERSION="8"
 
 die() {
   echo "Kubernetes acceptance contract: $*" >&2
@@ -63,7 +63,8 @@ done
 
 for mount_boundary in \
   "server_validate mounts" \
-  "mounts.enabled=true" \
+  "mounts.smb.enabled=true" \
+  "mounts.ftpFtps.enabled=true" \
   "networkPolicy.headscale.to" \
   "networkPolicy.mountIngress.from" \
   "StatefulSet, sidecars"; do

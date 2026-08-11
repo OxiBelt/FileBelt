@@ -10,10 +10,12 @@ The chart deploys web, API, I/O, and maintenance Deployments and explicit
 administrative Jobs. MCP broker and runner-controller Deployments are separate
 opt-ins and disabled by default; the controller creates bounded one-shot runner
 Pods. The chart does not deploy PostgreSQL, OIDC, Iggy, either egress gateway,
-certificate issuer, monitoring stack, or persistent volume. The disabled mount
-preview renders two gateway StatefulSets only when `mounts.enabled=true`; this
-revision is not production-admissible because its copyleft adapter images and
-SMB IPC acceptance are incomplete.
+certificate issuer, monitoring stack, or persistent volume. SMB, FTP/FTPS, and
+NFS are independent opt-ins and all default off. Any selected protocol renders
+VFS; only SMB or FTP/FTPS renders Headscale sync. NFS renders a single-active
+Ganesha/bridge/tailscaled StatefulSet and a NetworkPolicy-restricted ClusterIP
+Service on TCP 2049. Separately licensed adapter delivery remains gated on its
+published image and protocol acceptance evidence.
 
 Operators provide:
 
@@ -32,11 +34,14 @@ Operators provide:
   digest-pinned runner image, a schema-v1 runner catalog, offline Sigstore
   trusted root/bundles, an exact Kubernetes API NetworkPolicy peer, and a
   pre-created exclusive runner namespace separate from the release namespace;
-- before any future mount enablement, external Headscale `0.29.3`, API token and
-  CA, VFS/Headscale database logins, a distinct mount-vault keyring,
-  `mount-storage` purpose private/public material, VFS/API/I/O
-  mTLS identities, gateway tailnet auth, node `/dev/net/tun`, and one distinct
-  operator-owned RWO tailstate claim per gateway;
+- before mount enablement, a distinct mount-vault keyring, `mount-storage`
+  purpose private/public material, VFS/API/I/O mTLS identities, gateway tailnet
+  auth, node `/dev/net/tun`, and one distinct operator-owned RWO tailstate claim
+  per gateway. SMB or FTP/FTPS also requires external Headscale `0.29.3`, its
+  API token and CA, and the Headscale-sync database login. NFS additionally
+  requires an operator-owned RWO recovery claim, static Ganesha keytab, exact
+  bridge identity, VFS-only handle keyring, and separate Ganesha/bridge
+  ConfigMaps and executable argv matching the published pinned image ABI;
 - a public L4/TCP path to the web ClusterIP Service; and
 - optional Prometheus and OTLP endpoints.
 
@@ -62,13 +67,16 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 6. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Confirm `filebelt.toml` uses format 7. If MCP is enabled, validate the
+7. Confirm `filebelt.toml` uses format 8. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
    `mcp.runners.namespace` and must not equal the release namespace.
-   Keep `mounts.enabled=false`; a render that enables it is preview evidence,
-   not authorization to expose SMB or FTPS.
+   Keep every protocol flag false unless that protocol's evidence is approved.
+   For NFS, verify the exact `spiffe://filebelt/nfs-gateway/vfs` bridge
+   certificate, Secret separation, static keytab, no-KDC egress policy,
+   single-active recovery claim, and automatic preStop drain before exposing
+   TCP 2049.
 8. While workloads remain quiesced, run the chart's `keys-audit` operation with
    all configured purpose public keysets projected. Require successful proof
    that every current generation is present and no public key bytes occur in

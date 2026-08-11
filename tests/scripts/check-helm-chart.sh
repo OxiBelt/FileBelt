@@ -71,6 +71,45 @@ assert_document_not_contains() {
   fi
 }
 
+assert_container_match() {
+  local file="$1" kind="$2" name="$3" container="$4" expected="$5" mode="$6"
+  python3 - "${file}" "${kind}" "${name}" "${container}" "${expected}" "${mode}" <<'PY'
+import sys
+
+manifest_path, kind, name, container, expected, mode = sys.argv[1:]
+for document in open(manifest_path, encoding="utf-8").read().split("\n---\n"):
+    if f"kind: {kind}" not in document or f"  name: {name}" not in document:
+        continue
+    lines = document.splitlines()
+    marker = f"        - name: {container}"
+    try:
+        start = lines.index(marker)
+    except ValueError as error:
+        raise SystemExit(f"{kind}/{name} has no container {container}") from error
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("        - name: ") or lines[index].startswith("      volumes:"):
+            end = index
+            break
+    block = "\n".join(lines[start:end])
+    found = expected in block
+    if (mode == "present" and not found) or (mode == "absent" and found):
+        qualifier = "missing" if mode == "present" else "unexpectedly contains"
+        raise SystemExit(f"{kind}/{name} container {container} {qualifier}: {expected}")
+    raise SystemExit(0)
+
+raise SystemExit(f"missing {kind}/{name}")
+PY
+}
+
+assert_container_contains() {
+  assert_container_match "$1" "$2" "$3" "$4" "$5" present
+}
+
+assert_container_not_contains() {
+  assert_container_match "$1" "$2" "$3" "$4" "$5" absent
+}
+
 assert_rendered_toml() {
   local file="$1" key="$2"
   python3 - "${file}" "${key}" <<'PY'
@@ -615,18 +654,22 @@ assert_document_contains "${temporary}/mcp-without-collaboration.yaml" Deploymen
 assert_document_contains "${temporary}/mcp-without-collaboration.yaml" Deployment filebelt-mcp-broker 'mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset'
 
 helm template phase6 "${chart}" --kube-version 1.36.0 \
-  --set mounts.enabled=true \
+  --set mounts.smb.enabled=true \
+  --set mounts.ftpFtps.enabled=true \
   --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
   --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]' \
   >"${temporary}/mounts.yaml"
 helm template phase6-recovery "${chart}" --kube-version 1.36.0 \
   --set deployment.quiesced=true \
-  --set mounts.enabled=true \
+  --set mounts.smb.enabled=true \
+  --set mounts.ftpFtps.enabled=true \
   --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
   --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]' \
   --set-string operation.type=recovery-checkpoint \
   --set-string operation.operationId="${OPERATION_ID}" \
   >"${temporary}/recovery-mounts.yaml"
+assert_rendered_toml "${temporary}/mounts.yaml" filebelt.toml
+assert_rendered_toml "${temporary}/recovery-mounts.yaml" filebelt.toml
 assert_count "${temporary}/mounts.yaml" '^kind: Deployment$' 6
 assert_count "${temporary}/mounts.yaml" '^kind: StatefulSet$' 2
 assert_count "${temporary}/mounts.yaml" '^kind: PodDisruptionBudget$' 6
@@ -657,6 +700,100 @@ assert_document_contains "${temporary}/mounts.yaml" NetworkPolicy filebelt-vfs-i
 assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-smb-gateway 'hostPath: {path: /dev/net/tun, type: CharDevice}'
 assert_document_contains "${temporary}/mounts.yaml" StatefulSet filebelt-ftp-ftps-gateway 'add: ["NET_ADMIN"]'
 assert_not_contains "${temporary}/mounts.yaml" 'TS_USERSPACE'
+
+nfs_values=(
+  --set mounts.nfs.enabled=true
+  --set-string images.filebelt-nfs-gateway.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+  --set-string images.tailscaled.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
+  --set-string mounts.nfs.realm=EXAMPLE.TEST
+  --set-string mounts.nfs.idmapDomain=example.test
+  --set-string mounts.nfs.tailstateClaim=filebelt-nfs-tailstate
+  --set-string mounts.nfs.recoveryClaim=filebelt-nfs-recovery
+  --set-json 'mounts.nfs.ganesha.command=["/contract/ganesha"]'
+  --set-json 'mounts.nfs.ganesha.healthCommand=["/contract/ganesha-health"]'
+  --set-json 'mounts.nfs.ganesha.preStopCommand=["/contract/ganesha-drain"]'
+  --set-string mounts.nfs.ganesha.configMap.name=filebelt-nfs-ganesha-config
+  --set-json 'mounts.nfs.bridge.command=["/contract/bridge"]'
+  --set-json 'mounts.nfs.bridge.healthCommand=["/contract/bridge-health"]'
+  --set-json 'mounts.nfs.bridge.preStopCommand=["/contract/bridge-drain"]'
+  --set-string mounts.nfs.bridge.configMap.name=filebelt-nfs-bridge-config
+  --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]'
+  --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"tailnet"}}}]'
+)
+helm template phase8-nfs "${chart}" --kube-version 1.36.0 \
+  "${nfs_values[@]}" >"${temporary}/nfs.yaml"
+assert_rendered_toml "${temporary}/nfs.yaml" filebelt.toml
+assert_count "${temporary}/nfs.yaml" '^kind: Deployment$' 5
+assert_count "${temporary}/nfs.yaml" '^kind: StatefulSet$' 1
+assert_count "${temporary}/nfs.yaml" '^kind: PodDisruptionBudget$' 5
+assert_count "${temporary}/nfs.yaml" '^kind: NetworkPolicy$' 13
+assert_count "${temporary}/nfs.yaml" '^          image: ghcr.io/oxibelt/filebelt-nfs-gateway@sha256:1111111111111111111111111111111111111111111111111111111111111111$' 2
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'replicas: 1'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'filebelt.dev/gateway-uri-san: "spiffe://filebelt/nfs-gateway/vfs"'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'claimName: filebelt-nfs-recovery'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'claimName: filebelt-nfs-tailstate'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'KRB5_KTNAME'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'nfs-handle-keyring'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'name: ganesha-keytab'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'name: recovery'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha '/contract/ganesha-drain'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'drop: ["ALL"]'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'add: ["NET_BIND_SERVICE"]'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'bridge-vfs-client-tls'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'name: bridge-vfs-client-tls'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge '/contract/bridge-drain'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'drop: ["ALL"]'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'ganesha-keytab'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'name: recovery'
+assert_document_contains "${temporary}/nfs.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/nfs-handle-keyring.json'
+assert_document_not_contains "${temporary}/nfs.yaml" Deployment filebelt-headscale-sync 'name: filebelt-headscale-sync'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-smb-gateway 'name: filebelt-smb-gateway'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-ftp-ftps-gateway 'name: filebelt-ftp-ftps-gateway'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'type: ClusterIP'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'port: 2049'
+assert_document_not_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'clusterIP: None'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-ingress 'port: nfs'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 443'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'app.kubernetes.io/component: vfs'
+assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 88'
+assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 464'
+assert_not_contains "${temporary}/nfs.yaml" 'kind: PersistentVolumeClaim'
+python3 - "${temporary}/nfs.yaml" <<'PY'
+import sys
+import tomllib
+
+for document in open(sys.argv[1], encoding="utf-8").read().split("\n---\n"):
+    lines = document.splitlines()
+    if "kind: ConfigMap" not in lines or "  filebelt.toml: |" not in lines:
+        continue
+    start = lines.index("  filebelt.toml: |") + 1
+    rendered = []
+    for line in lines[start:]:
+        if line.startswith("    "):
+            rendered.append(line[4:])
+        elif not line:
+            rendered.append("")
+        else:
+            break
+    config = tomllib.loads("\n".join(rendered))
+    assert config["version"] == 8
+    nfs = config["mounts"]["nfs"]
+    assert nfs["enabled"] is True
+    assert nfs["realm"] == "EXAMPLE.TEST"
+    assert nfs["idmap_domain"] == "example.test"
+    assert nfs["handle_keyring_file"] == "/run/secrets/nfs-handle-keyring.json"
+    assert nfs["handle_key_generation"] == 1
+    assert nfs["grace_seconds"] == 90
+    assert config["mounts"]["smb"]["enabled"] is False
+    assert config["mounts"]["ftp_ftps"]["enabled"] is False
+    assert config["mounts"]["headscale"]["enabled"] is False
+    assert config["backend_tls"]["vfs"]["allowed_client_uri_sans"] == [
+        "spiffe://filebelt/nfs-gateway/vfs"
+    ]
+    break
+else:
+    raise AssertionError("missing rendered FileBelt configuration")
+PY
 
 helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set mcp.enabled=true \
@@ -761,7 +898,13 @@ expect_failure old_config --skip-schema-validation \
   --set-string 'configuration.filebelt=version = 1'
 expect_failure monitoring_crd_absent --set monitoring.serviceMonitor.enabled=true
 expect_failure mcp_without_gateway --set mcp.enabled=true
-expect_failure mounts_without_headscale --set mounts.enabled=true
+expect_failure legacy_mount_enabled --set mounts.enabled=true
+expect_failure mounts_without_headscale --set mounts.smb.enabled=true
+expect_failure disabled_smb_previous_identity \
+  --set-string mounts.smb.previousGatewayUriSan=spiffe://filebelt/smb-gateway/vfs-previous
+expect_failure disabled_nfs_authority --set-string mounts.nfs.realm=EXAMPLE.TEST
+expect_failure nfs_without_runtime_contract --set mounts.nfs.enabled=true
+expect_failure nfs_kdc_egress "${nfs_values[@]}" --set networkPolicy.headscale.port=88
 expect_failure runners_without_kubernetes_api \
   --set mcp.enabled=true \
   --set mcp.runners.enabled=true \

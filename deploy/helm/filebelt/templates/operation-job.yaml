@@ -185,7 +185,7 @@ spec:
             {{- if .Values.documents.enabled }}
             - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
-            {{- if .Values.mounts.enabled }}
+            {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
             - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
             {{- end }}
@@ -247,7 +247,7 @@ spec:
             defaultMode: 0440
             items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
         {{- end }}
-        {{- if .Values.mounts.enabled }}
+        {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         - name: mount-storage-capability-public
           secret:
             secretName: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.name }}

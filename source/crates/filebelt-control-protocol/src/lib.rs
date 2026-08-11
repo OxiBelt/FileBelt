@@ -14,7 +14,10 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 7;
+pub const CONFIG_VERSION: u32 = 8;
+pub const SMB_GATEWAY_URI_SAN: &str = "spiffe://filebelt/smb-gateway/vfs";
+pub const FTP_FTPS_GATEWAY_URI_SAN: &str = "spiffe://filebelt/ftp-ftps-gateway/vfs";
+pub const NFS_GATEWAY_URI_SAN: &str = "spiffe://filebelt/nfs-gateway/vfs";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -367,8 +370,6 @@ impl Default for MediaConfig {
 #[serde(deny_unknown_fields)]
 pub struct MountConfig {
     #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
     pub database_url_file: Option<PathBuf>,
     #[serde(default)]
     pub vault_keyring_file: Option<PathBuf>,
@@ -395,13 +396,16 @@ pub struct MountConfig {
     #[serde(default)]
     pub headscale: HeadscaleSyncConfig,
     #[serde(default)]
+    pub smb: SmbMountConfig,
+    #[serde(default)]
+    pub ftp_ftps: FtpFtpsMountConfig,
+    #[serde(default)]
     pub nfs: NfsMountConfig,
 }
 
 impl Default for MountConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             database_url_file: None,
             vault_keyring_file: None,
             vault_key_generation: default_key_generation(),
@@ -415,7 +419,63 @@ impl Default for MountConfig {
             management_client_private_key_file: None,
             management_server_ca_file: None,
             headscale: HeadscaleSyncConfig::default(),
+            smb: SmbMountConfig::default(),
+            ftp_ftps: FtpFtpsMountConfig::default(),
             nfs: NfsMountConfig::default(),
+        }
+    }
+}
+
+impl MountConfig {
+    #[must_use]
+    pub fn any_protocol_enabled(&self) -> bool {
+        self.smb.enabled || self.ftp_ftps.enabled || self.nfs.enabled
+    }
+
+    #[must_use]
+    pub fn headscale_required(&self) -> bool {
+        self.headscale.enabled && (self.smb.enabled || self.ftp_ftps.enabled)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SmbMountConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_smb_gateway_uri_san")]
+    pub gateway_uri_san: String,
+    #[serde(default)]
+    pub previous_gateway_uri_san: Option<String>,
+}
+
+impl Default for SmbMountConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gateway_uri_san: default_smb_gateway_uri_san(),
+            previous_gateway_uri_san: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FtpFtpsMountConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ftp_ftps_gateway_uri_san")]
+    pub gateway_uri_san: String,
+    #[serde(default)]
+    pub previous_gateway_uri_san: Option<String>,
+}
+
+impl Default for FtpFtpsMountConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gateway_uri_san: default_ftp_ftps_gateway_uri_san(),
+            previous_gateway_uri_san: None,
         }
     }
 }
@@ -425,22 +485,18 @@ impl Default for MountConfig {
 pub struct NfsMountConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_nfs_gateway_uri_san")]
+    pub gateway_uri_san: String,
+    #[serde(default)]
+    pub previous_gateway_uri_san: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
     #[serde(default)]
-    pub server_principal: Option<String>,
-    #[serde(default)]
-    pub keytab_file: Option<PathBuf>,
+    pub idmap_domain: Option<String>,
     #[serde(default)]
     pub handle_keyring_file: Option<PathBuf>,
     #[serde(default = "default_key_generation")]
     pub handle_key_generation: u32,
-    #[serde(default)]
-    pub recovery_root: Option<PathBuf>,
-    #[serde(default = "default_nfs_bridge_socket")]
-    pub bridge_socket: PathBuf,
-    #[serde(default = "default_nfs_export_root")]
-    pub export_root: String,
     #[serde(default = "default_nfs_grace_seconds")]
     pub grace_seconds: u64,
 }
@@ -449,14 +505,12 @@ impl Default for NfsMountConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            gateway_uri_san: default_nfs_gateway_uri_san(),
+            previous_gateway_uri_san: None,
             realm: None,
-            server_principal: None,
-            keytab_file: None,
+            idmap_domain: None,
             handle_keyring_file: None,
             handle_key_generation: default_key_generation(),
-            recovery_root: None,
-            bridge_socket: default_nfs_bridge_socket(),
-            export_root: default_nfs_export_root(),
             grace_seconds: default_nfs_grace_seconds(),
         }
     }
@@ -996,8 +1050,9 @@ impl Config {
                 || (self.documents.enabled && self.listeners.document.ip().is_unspecified())
                 || (self.documents.enabled
                     && self.listeners.document_adapter.ip().is_unspecified())
-                || (self.mounts.enabled && self.listeners.vfs.ip().is_unspecified())
-                || (self.mounts.enabled && self.listeners.vfs_management.ip().is_unspecified()))
+                || (self.mounts.any_protocol_enabled() && self.listeners.vfs.ip().is_unspecified())
+                || (self.mounts.any_protocol_enabled()
+                    && self.listeners.vfs_management.ip().is_unspecified()))
         {
             return Err(invalid(
                 "backend wildcard listeners require allow_container_wildcard",
@@ -1398,13 +1453,35 @@ impl Config {
 
     fn validate_mounts(&self) -> Result<(), ConfigError> {
         let mounts = &self.mounts;
-        if !mounts.enabled {
-            if mounts.headscale.enabled || mounts.nfs.enabled || mounts.capability_signing.is_some()
-            {
-                return Err(invalid(
-                    "Headscale synchronization and NFS require mounts.enabled=true",
-                ));
-            }
+        validate_mount_gateway_identity(
+            "SMB",
+            mounts.smb.enabled,
+            &mounts.smb.gateway_uri_san,
+            SMB_GATEWAY_URI_SAN,
+            mounts.smb.previous_gateway_uri_san.as_deref(),
+        )?;
+        validate_mount_gateway_identity(
+            "FTP/FTPS",
+            mounts.ftp_ftps.enabled,
+            &mounts.ftp_ftps.gateway_uri_san,
+            FTP_FTPS_GATEWAY_URI_SAN,
+            mounts.ftp_ftps.previous_gateway_uri_san.as_deref(),
+        )?;
+        validate_mount_gateway_identity(
+            "NFS",
+            mounts.nfs.enabled,
+            &mounts.nfs.gateway_uri_san,
+            NFS_GATEWAY_URI_SAN,
+            mounts.nfs.previous_gateway_uri_san.as_deref(),
+        )?;
+        validate_disjoint_mount_gateway_identities(mounts)?;
+        self.validate_nfs()?;
+        if mounts.headscale.enabled != (mounts.smb.enabled || mounts.ftp_ftps.enabled) {
+            return Err(invalid(
+                "Headscale synchronization must be enabled exactly when SMB or FTP/FTPS is enabled",
+            ));
+        }
+        if !mounts.any_protocol_enabled() {
             return Ok(());
         }
         if mounts.vault_key_generation == 0
@@ -1416,13 +1493,13 @@ impl Config {
             .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
             return Err(invalid(
-                "enabled mounts require absolute database and vault paths plus a positive vault generation",
+                "an enabled mount protocol requires absolute database and vault paths plus a positive vault generation",
             ));
         }
         let signing = mounts
             .capability_signing
             .as_ref()
-            .ok_or_else(|| invalid("enabled mounts require capability signing"))?;
+            .ok_or_else(|| invalid("an enabled mount protocol requires capability signing"))?;
         validate_signing_key(signing, "mount storage")?;
         let expected_scheme = if self.deployment.mode == DeploymentMode::Kubernetes {
             "https"
@@ -1482,12 +1559,18 @@ impl Config {
                 .any(|path| path.is_none_or(|path| !path.is_absolute())))
         {
             return Err(invalid(
-                "Kubernetes mounts require separate VFS I/O and management mTLS identities",
+                "Kubernetes mount protocols require separate VFS I/O and management mTLS identities",
             ));
         }
-        self.validate_nfs()?;
+        if let Some(vfs_tls) = self
+            .backend_tls
+            .as_ref()
+            .and_then(|backend_tls| backend_tls.vfs.as_ref())
+        {
+            validate_vfs_mount_gateway_identities(mounts, vfs_tls)?;
+        }
         let headscale = &mounts.headscale;
-        if !headscale.enabled {
+        if !mounts.headscale_required() {
             return Ok(());
         }
         if !(5..=300).contains(&headscale.sync_seconds)
@@ -1536,51 +1619,47 @@ impl Config {
         let nfs = &self.mounts.nfs;
         if !nfs.enabled {
             if nfs.realm.is_some()
-                || nfs.server_principal.is_some()
-                || nfs.keytab_file.is_some()
+                || nfs.idmap_domain.is_some()
                 || nfs.handle_keyring_file.is_some()
-                || nfs.recovery_root.is_some()
                 || nfs.handle_key_generation != default_key_generation()
             {
                 return Err(invalid(
-                    "disabled NFS must not configure Kerberos, handle-key, or recovery authority",
+                    "disabled NFS must not configure realm, idmap, or handle-key authority",
                 ));
             }
             return Ok(());
+        }
+        if self.deployment.mode != DeploymentMode::Kubernetes {
+            return Err(invalid(
+                "NFS requires Kubernetes deployment with verified gateway mTLS",
+            ));
         }
         let realm = nfs
             .realm
             .as_deref()
             .ok_or_else(|| invalid("enabled NFS requires an external Kerberos realm"))?;
-        let principal = nfs
-            .server_principal
+        let idmap_domain = nfs
+            .idmap_domain
             .as_deref()
-            .ok_or_else(|| invalid("enabled NFS requires a server principal"))?;
+            .ok_or_else(|| invalid("enabled NFS requires an NFSv4 idmap domain"))?;
         if realm.is_empty()
             || realm.len() > 255
             || !realm.bytes().all(|byte| {
                 byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
             })
-            || !principal.starts_with("nfs/")
-            || !principal.ends_with(&format!("@{realm}"))
-            || principal.len() > 512
+            || !valid_dns_policy_name(idmap_domain)
         {
-            return Err(invalid("NFS Kerberos realm or server principal is invalid"));
+            return Err(invalid("NFS Kerberos realm or idmap domain is invalid"));
         }
-        if [
-            nfs.keytab_file.as_ref(),
-            nfs.handle_keyring_file.as_ref(),
-            nfs.recovery_root.as_ref(),
-        ]
-        .into_iter()
-        .any(|path| path.is_none_or(|path| !path.is_absolute()))
-            || !nfs.bridge_socket.is_absolute()
-            || nfs.export_root != "/filebelt"
+        if nfs
+            .handle_keyring_file
+            .as_ref()
+            .is_none_or(|path| !path.is_absolute())
             || !(30..=300).contains(&nfs.grace_seconds)
             || nfs.handle_key_generation == 0
         {
             return Err(invalid(
-                "NFS requires absolute keytab, handle-key, recovery and bridge paths, /filebelt export root, a 30 to 300 second grace period, and a positive handle-key generation",
+                "NFS requires an absolute handle-key path, a 30 to 300 second grace period, and a positive handle-key generation",
             ));
         }
         Ok(())
@@ -1966,17 +2045,7 @@ fn validate_backend_tls(tls: &BackendServerTlsConfig) -> Result<(), ConfigError>
     }
     let mut unique = std::collections::BTreeSet::new();
     for identity in &tls.allowed_client_uri_sans {
-        let uri = Url::parse(identity).map_err(|_| invalid("client URI SAN is invalid"))?;
-        if uri.scheme() != "spiffe"
-            || uri.host_str().is_none()
-            || !uri.username().is_empty()
-            || uri.password().is_some()
-            || uri.port().is_some()
-            || uri.path() == "/"
-            || uri.query().is_some()
-            || uri.fragment().is_some()
-            || !unique.insert(identity)
-        {
+        if !valid_exact_spiffe_uri_san(identity) || !unique.insert(identity) {
             return Err(invalid(
                 "client URI SAN must be a unique absolute spiffe URI",
             ));
@@ -1986,6 +2055,101 @@ fn validate_backend_tls(tls: &BackendServerTlsConfig) -> Result<(), ConfigError>
         if !valid_dns_policy_name(domain) {
             return Err(invalid("backend TLS trust domain is invalid"));
         }
+    }
+    Ok(())
+}
+
+fn valid_exact_spiffe_uri_san(identity: &str) -> bool {
+    Url::parse(identity).is_ok_and(|uri| {
+        uri.scheme() == "spiffe"
+            && uri.host_str().is_some()
+            && uri.username().is_empty()
+            && uri.password().is_none()
+            && uri.port().is_none()
+            && !matches!(uri.path(), "" | "/")
+            && uri.query().is_none()
+            && uri.fragment().is_none()
+    })
+}
+
+fn validate_mount_gateway_identity(
+    protocol: &str,
+    enabled: bool,
+    current: &str,
+    expected_current: &str,
+    previous: Option<&str>,
+) -> Result<(), ConfigError> {
+    if current != expected_current || !valid_exact_spiffe_uri_san(current) {
+        return Err(invalid(&format!(
+            "{protocol} current gateway URI SAN must match the fixed deployment identity"
+        )));
+    }
+    if !enabled && previous.is_some() {
+        return Err(invalid(&format!(
+            "disabled {protocol} must not configure a previous gateway URI SAN"
+        )));
+    }
+    if previous.is_some_and(|identity| !valid_exact_spiffe_uri_san(identity)) {
+        return Err(invalid(&format!(
+            "{protocol} previous gateway URI SAN must be an exact spiffe URI"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_disjoint_mount_gateway_identities(mounts: &MountConfig) -> Result<(), ConfigError> {
+    let mut identities = std::collections::BTreeSet::new();
+    for identity in [
+        Some(mounts.smb.gateway_uri_san.as_str()),
+        mounts.smb.previous_gateway_uri_san.as_deref(),
+        Some(mounts.ftp_ftps.gateway_uri_san.as_str()),
+        mounts.ftp_ftps.previous_gateway_uri_san.as_deref(),
+        Some(mounts.nfs.gateway_uri_san.as_str()),
+        mounts.nfs.previous_gateway_uri_san.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !identities.insert(identity) {
+            return Err(invalid(
+                "mount gateway current and previous URI SANs must be disjoint",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_vfs_mount_gateway_identities(
+    mounts: &MountConfig,
+    tls: &BackendServerTlsConfig,
+) -> Result<(), ConfigError> {
+    if !tls.allowed_client_trust_domains.is_empty() {
+        return Err(invalid(
+            "VFS backend TLS must authorize mount gateways by exact URI SAN only",
+        ));
+    }
+    let mut expected = std::collections::BTreeSet::new();
+    if mounts.smb.enabled {
+        expected.insert(mounts.smb.gateway_uri_san.as_str());
+        expected.extend(mounts.smb.previous_gateway_uri_san.as_deref());
+    }
+    if mounts.ftp_ftps.enabled {
+        expected.insert(mounts.ftp_ftps.gateway_uri_san.as_str());
+        expected.extend(mounts.ftp_ftps.previous_gateway_uri_san.as_deref());
+    }
+    if mounts.nfs.enabled {
+        expected.insert(mounts.nfs.gateway_uri_san.as_str());
+        expected.extend(mounts.nfs.previous_gateway_uri_san.as_deref());
+    }
+    let configured = tls
+        .allowed_client_uri_sans
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    if configured != expected {
+        return Err(invalid(
+            "VFS backend TLS exact URI SAN allowlist must match enabled mount gateways",
+        ));
     }
     Ok(())
 }
@@ -2365,11 +2529,14 @@ const fn default_media_cache_high_watermark_percent() -> u8 {
 const fn default_media_cache_low_watermark_percent() -> u8 {
     70
 }
-fn default_nfs_bridge_socket() -> PathBuf {
-    "/run/filebelt-nfs/bridge.sock".into()
+fn default_smb_gateway_uri_san() -> String {
+    SMB_GATEWAY_URI_SAN.into()
 }
-fn default_nfs_export_root() -> String {
-    "/filebelt".into()
+fn default_ftp_ftps_gateway_uri_san() -> String {
+    FTP_FTPS_GATEWAY_URI_SAN.into()
+}
+fn default_nfs_gateway_uri_san() -> String {
+    NFS_GATEWAY_URI_SAN.into()
 }
 const fn default_nfs_grace_seconds() -> u64 {
     90
@@ -2527,6 +2694,71 @@ mod tests {
         }
     }
 
+    fn configure_mount_authority(candidate: &mut Config) {
+        candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
+        candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
+        candidate.mounts.capability_signing = Some(signing(
+            "/run/secrets/mount-capability.pk8",
+            "/run/secrets/mount-capability.pub",
+            1,
+        ));
+        candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8088/").unwrap());
+    }
+
+    fn backend_server_tls(identity: &str) -> BackendServerTlsConfig {
+        BackendServerTlsConfig {
+            certificate_chain_file: "/run/secrets/tls.crt".into(),
+            private_key_file: "/run/secrets/tls.key".into(),
+            client_ca_file: "/run/secrets/client-ca.crt".into(),
+            allowed_client_uri_sans: vec![identity.into()],
+            allowed_client_trust_domains: Vec::new(),
+        }
+    }
+
+    fn configure_nfs_authority(candidate: &mut Config) {
+        candidate.mounts.nfs.enabled = true;
+        candidate.mounts.nfs.realm = Some("EXAMPLE.TEST".into());
+        candidate.mounts.nfs.idmap_domain = Some("example.test".into());
+        candidate.mounts.nfs.handle_keyring_file = Some("/run/secrets/nfs/handles.json".into());
+    }
+
+    fn configure_kubernetes_nfs(candidate: &mut Config) {
+        candidate.deployment.mode = DeploymentMode::Kubernetes;
+        candidate.oidc.egress_proxy_url = Some(Url::parse("http://oidc-egress:3128/").unwrap());
+        candidate.telemetry.log_format = LogFormat::Json;
+        candidate.telemetry.prometheus_enabled = true;
+        configure_mount_authority(candidate);
+        candidate.mounts.io_url = Some(Url::parse("https://filebelt-worker-io:8081/").unwrap());
+        candidate.mounts.management_url =
+            Some(Url::parse("https://filebelt-vfs-management:8088/").unwrap());
+        candidate.mounts.io_client_certificate_chain_file =
+            Some("/run/secrets/vfs-io-client/tls.crt".into());
+        candidate.mounts.io_client_private_key_file =
+            Some("/run/secrets/vfs-io-client/tls.key".into());
+        candidate.mounts.io_server_ca_file = Some("/run/secrets/vfs-io-client/ca.crt".into());
+        candidate.mounts.management_client_certificate_chain_file =
+            Some("/run/secrets/vfs-management-client/tls.crt".into());
+        candidate.mounts.management_client_private_key_file =
+            Some("/run/secrets/vfs-management-client/tls.key".into());
+        candidate.mounts.management_server_ca_file =
+            Some("/run/secrets/vfs-management-client/ca.crt".into());
+        configure_nfs_authority(candidate);
+        candidate.backend_tls = Some(BackendTlsConfig {
+            api: backend_server_tls("spiffe://filebelt.test/web-api"),
+            io: backend_server_tls("spiffe://filebelt.test/web-io"),
+            mcp_broker: None,
+            controller: None,
+            collaboration: None,
+            document: None,
+            document_adapter: None,
+            vfs: Some(backend_server_tls(NFS_GATEWAY_URI_SAN)),
+            vfs_management: Some(backend_server_tls(
+                "spiffe://filebelt.test/api-vfs-management",
+            )),
+        });
+    }
+
     fn config() -> Config {
         Config {
             version: CONFIG_VERSION,
@@ -2608,8 +2840,19 @@ mod tests {
     #[test]
     fn unsupported_configuration_version_is_rejected() {
         let mut candidate = config();
-        candidate.version = 0;
+        assert_eq!(CONFIG_VERSION, 8);
+        candidate.version = 7;
         assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_aggregate_mount_enabled_field_is_rejected_while_parsing() {
+        let source =
+            toml::to_string(&config())
+                .unwrap()
+                .replacen("[mounts]", "[mounts]\nenabled = true", 1);
+        let error = toml::from_str::<Config>(&source).unwrap_err();
+        assert!(error.to_string().contains("unknown field `enabled`"));
     }
     #[test]
     fn kubernetes_mode_fails_without_security_contract() {
@@ -2711,9 +2954,16 @@ mod tests {
         assert_eq!(media.cache_high_watermark_percent, 80);
         assert_eq!(media.cache_low_watermark_percent, 70);
 
-        let nfs = NfsMountConfig::default();
+        let mounts = MountConfig::default();
+        assert!(!mounts.any_protocol_enabled());
+        assert!(!mounts.headscale_required());
+        assert_eq!(mounts.smb.gateway_uri_san, SMB_GATEWAY_URI_SAN);
+        assert_eq!(mounts.ftp_ftps.gateway_uri_san, FTP_FTPS_GATEWAY_URI_SAN);
+
+        let nfs = mounts.nfs;
         assert!(!nfs.enabled);
-        assert_eq!(nfs.export_root, "/filebelt");
+        assert_eq!(nfs.gateway_uri_san, NFS_GATEWAY_URI_SAN);
+        assert!(nfs.previous_gateway_uri_san.is_none());
         assert_eq!(nfs.grace_seconds, 90);
 
         let collaboration = CollaborationConfig::default();
@@ -2739,28 +2989,73 @@ mod tests {
         assert!(candidate.validate().is_err());
     }
     #[test]
-    fn enabled_nfs_requires_explicit_kerberos_and_recovery_authority() {
+    fn independently_enabled_nfs_does_not_require_headscale() {
+        let mut development = config();
+        configure_mount_authority(&mut development);
+        configure_nfs_authority(&mut development);
+        assert!(development.validate().is_err());
+
         let mut candidate = config();
-        candidate.mounts.enabled = true;
-        candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
-        candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
-        candidate.mounts.capability_signing = Some(signing(
-            "/run/secrets/mount-capability.pk8",
-            "/run/secrets/mount-capability.pub",
-            1,
-        ));
-        candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
-        candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8088/").unwrap());
-        candidate.mounts.nfs.enabled = true;
-        candidate.mounts.nfs.realm = Some("EXAMPLE.TEST".into());
-        candidate.mounts.nfs.server_principal = Some("nfs/files.example.test@EXAMPLE.TEST".into());
-        candidate.mounts.nfs.keytab_file = Some("/run/secrets/nfs/keytab".into());
-        candidate.mounts.nfs.handle_keyring_file = Some("/run/secrets/nfs/handles.json".into());
+        configure_kubernetes_nfs(&mut candidate);
         candidate.mounts.nfs.handle_key_generation = 6;
-        candidate.mounts.nfs.recovery_root = Some("/var/lib/nfs-ganesha/recovery".into());
+        assert!(candidate.mounts.any_protocol_enabled());
+        assert!(!candidate.mounts.headscale_required());
         candidate.validate().unwrap();
 
-        candidate.mounts.nfs.server_principal = Some("root/files.example.test@EXAMPLE.TEST".into());
+        candidate.mounts.nfs.realm = Some("example.test".into());
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn disabled_protocol_rejects_rotation_and_nfs_authority() {
+        let mut candidate = config();
+        candidate.mounts.smb.previous_gateway_uri_san =
+            Some("spiffe://filebelt/smb-gateway/vfs-previous".into());
+        assert!(candidate.validate().is_err());
+
+        let mut candidate = config();
+        candidate.mounts.nfs.handle_keyring_file = Some("/run/secrets/nfs/handles.json".into());
+        assert!(candidate.validate().is_err());
+
+        let mut candidate = config();
+        candidate.mounts.nfs.handle_key_generation = 2;
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn mount_gateway_uri_sans_must_be_disjoint_across_protocols() {
+        let mut candidate = config();
+        configure_kubernetes_nfs(&mut candidate);
+        candidate.mounts.nfs.previous_gateway_uri_san = Some(SMB_GATEWAY_URI_SAN.into());
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn vfs_tls_allowlist_must_exactly_match_enabled_gateway_identities() {
+        const PREVIOUS_NFS_GATEWAY_URI_SAN: &str = "spiffe://filebelt/nfs-gateway-previous/vfs";
+        let mut candidate = config();
+        configure_kubernetes_nfs(&mut candidate);
+        candidate.mounts.nfs.previous_gateway_uri_san = Some(PREVIOUS_NFS_GATEWAY_URI_SAN.into());
+        candidate
+            .backend_tls
+            .as_mut()
+            .unwrap()
+            .vfs
+            .as_mut()
+            .unwrap()
+            .allowed_client_uri_sans
+            .push(PREVIOUS_NFS_GATEWAY_URI_SAN.into());
+        candidate.validate().unwrap();
+
+        candidate
+            .backend_tls
+            .as_mut()
+            .unwrap()
+            .vfs
+            .as_mut()
+            .unwrap()
+            .allowed_client_uri_sans
+            .pop();
         assert!(candidate.validate().is_err());
     }
     #[test]
@@ -2988,16 +3283,8 @@ mod tests {
     #[test]
     fn headscale_sync_requires_exact_https_issuer() {
         let mut candidate = config();
-        candidate.mounts.enabled = true;
-        candidate.mounts.database_url_file = Some("/run/secrets/mount-database-url".into());
-        candidate.mounts.vault_keyring_file = Some("/run/secrets/mount-vault-keyring".into());
-        candidate.mounts.capability_signing = Some(signing(
-            "/run/secrets/mount-capability.pk8",
-            "/run/secrets/mount-capability.pub",
-            1,
-        ));
-        candidate.mounts.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
-        candidate.mounts.management_url = Some(Url::parse("http://127.0.0.1:8091/").unwrap());
+        configure_mount_authority(&mut candidate);
+        candidate.mounts.smb.enabled = true;
         candidate.mounts.headscale.enabled = true;
         candidate.mounts.headscale.api_url =
             Some(Url::parse("https://headscale.example.test/").unwrap());
@@ -3010,6 +3297,23 @@ mod tests {
         candidate.mounts.headscale.oidc_issuer =
             Some(Url::parse("https://issuer.example.test/tenant?client=filebelt").unwrap());
         assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn smb_and_ftp_ftps_require_headscale_while_nfs_does_not() {
+        let mut candidate = config();
+        configure_mount_authority(&mut candidate);
+        candidate.mounts.smb.enabled = true;
+        assert!(candidate.validate().is_err());
+
+        let mut candidate = config();
+        configure_mount_authority(&mut candidate);
+        candidate.mounts.ftp_ftps.enabled = true;
+        assert!(candidate.validate().is_err());
+
+        let mut candidate = config();
+        configure_kubernetes_nfs(&mut candidate);
+        candidate.validate().unwrap();
     }
     #[test]
     fn backend_tls_rejects_role_identity_overlap() {

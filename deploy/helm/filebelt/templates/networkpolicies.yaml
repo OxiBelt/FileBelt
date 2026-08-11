@@ -55,7 +55,7 @@ spec:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: collaboration}
         {{- end }}
-        {{- if and $root.Values.mounts.enabled (eq $component "io") }}
+        {{- if and (or $root.Values.mounts.smb.enabled $root.Values.mounts.ftpFtps.enabled $root.Values.mounts.nfs.enabled) (eq $component "io") }}
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
         {{- end }}
@@ -167,7 +167,7 @@ spec:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: mcp-broker}
       ports: [{port: mcp, protocol: TCP}]
     {{- end }}
-    {{- if $root.Values.mounts.enabled }}
+    {{- if (or $root.Values.mounts.smb.enabled $root.Values.mounts.ftpFtps.enabled $root.Values.mounts.nfs.enabled) }}
     - to:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
@@ -410,9 +410,22 @@ spec:
       ports: [{port: {{ .Values.networkPolicy.postgres.port }}, protocol: TCP}]
   {{- end }}
 {{- end }}
-{{- if .Values.mounts.enabled }}
+{{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
 {{- $root := . -}}
-{{- range $component := list "vfs" "headscale-sync" "smb-gateway" "ftp-ftps-gateway" }}
+{{- $components := list "vfs" -}}
+{{- if or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled -}}
+{{- $components = append $components "headscale-sync" -}}
+{{- end -}}
+{{- if .Values.mounts.smb.enabled -}}
+{{- $components = append $components "smb-gateway" -}}
+{{- end -}}
+{{- if .Values.mounts.ftpFtps.enabled -}}
+{{- $components = append $components "ftp-ftps-gateway" -}}
+{{- end -}}
+{{- if .Values.mounts.nfs.enabled -}}
+{{- $components = append $components "nfs-gateway" -}}
+{{- end -}}
+{{- range $component := $components }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -444,7 +457,7 @@ spec:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: io}
       ports: [{port: io, protocol: TCP}]
 {{- end }}
-{{- if or (eq $component "smb-gateway") (eq $component "ftp-ftps-gateway") }}
+{{- if has $component (list "smb-gateway" "ftp-ftps-gateway" "nfs-gateway") }}
     - to:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
@@ -464,16 +477,34 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
+        {{- if $root.Values.mounts.smb.enabled }}
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: smb-gateway}
+        {{- end }}
+        {{- if $root.Values.mounts.ftpFtps.enabled }}
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: ftp-ftps-gateway}
+        {{- end }}
+        {{- if $root.Values.mounts.nfs.enabled }}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: nfs-gateway}
+        {{- end }}
       ports: [{port: vfs, protocol: TCP}]
     - from:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: api}
       ports: [{port: management, protocol: TCP}]
-{{- range $gateway := list "smb-gateway" "ftp-ftps-gateway" }}
+{{- $gateways := list -}}
+{{- if .Values.mounts.smb.enabled -}}
+{{- $gateways = append $gateways "smb-gateway" -}}
+{{- end -}}
+{{- if .Values.mounts.ftpFtps.enabled -}}
+{{- $gateways = append $gateways "ftp-ftps-gateway" -}}
+{{- end -}}
+{{- if .Values.mounts.nfs.enabled -}}
+{{- $gateways = append $gateways "nfs-gateway" -}}
+{{- end -}}
+{{- range $gateway := $gateways }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -491,11 +522,13 @@ spec:
       ports:
         {{- if eq $gateway "smb-gateway" }}
         - {port: smb, protocol: TCP}
-        {{- else }}
+        {{- else if eq $gateway "ftp-ftps-gateway" }}
         - {port: ftps, protocol: TCP}
         {{- range $index, $_ := $root.Values.mounts.ftpFtps.passivePorts }}
         - {port: {{ printf "passive-%d" $index }}, protocol: TCP}
         {{- end }}
+        {{- else }}
+        - {port: nfs, protocol: TCP}
         {{- end }}
 {{- end }}
 {{- end }}

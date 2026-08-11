@@ -4,6 +4,7 @@
 
 #![deny(unsafe_code)]
 
+mod gateway_identity;
 mod nfs;
 mod policy;
 
@@ -16,7 +17,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use aws_lc_rs::hmac;
 use aws_lc_rs::signature::Ed25519KeyPair;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware;
@@ -34,8 +35,8 @@ use filebelt_database::mount::{
 use filebelt_database::{Database, DatabaseError, NodeRecord};
 use filebelt_domain::Action;
 use filebelt_runtime::{
-    MtlsListener, OperationsState, init_telemetry, install_crypto_provider, operations_router,
-    trace_request, wait_for_shutdown,
+    MtlsListener, OperationsState, VerifiedMtlsPeer, init_telemetry, install_crypto_provider,
+    operations_router, trace_request, wait_for_shutdown,
 };
 use filebelt_secret_vault::{Keyring, SecretContext, SecretEnvelope, VaultProfile};
 use filebelt_storage_protocol::{
@@ -82,6 +83,7 @@ struct VfsState {
     key_generation: u32,
     io: MountIoClient,
     digest_key: [u8; 32],
+    gateway_identities: Arc<gateway_identity::GatewayIdentityMap>,
 }
 
 #[derive(Clone)]
@@ -135,7 +137,7 @@ async fn run() -> Result<()> {
         command: Command::Serve { config },
     } = Arguments::parse();
     let config = Config::load(&config)?;
-    if !config.mounts.enabled {
+    if !config.mounts.any_protocol_enabled() {
         bail!("mount service is disabled");
     }
     let _telemetry = init_telemetry(&config.telemetry, ROLE).map_err(|message| anyhow!(message))?;
@@ -196,10 +198,17 @@ async fn run() -> Result<()> {
         key_generation: config.mounts.vault_key_generation,
         io,
         digest_key,
+        gateway_identities: Arc::new(gateway_identity::GatewayIdentityMap::from_mounts(
+            &config.mounts,
+        )),
     };
 
+    let execute_route = match config.deployment.mode {
+        DeploymentMode::Development => post(execute_development),
+        DeploymentMode::Kubernetes => post(execute_mtls),
+    };
     let gateway = Router::new()
-        .route("/internal/v1/vfs/execute", post(execute))
+        .route("/internal/v1/vfs/execute", execute_route)
         .layer(DefaultBodyLimit::max(
             filebelt_vfs_protocol::MAX_REQUEST_BYTES,
         ))
@@ -246,9 +255,12 @@ async fn run() -> Result<()> {
                 .await
                 .map_err(|message| anyhow!(message))?;
             tokio::spawn(async move {
-                axum::serve(listener, gateway)
-                    .await
-                    .map_err(anyhow::Error::from)
+                axum::serve(
+                    listener,
+                    gateway.into_make_service_with_connect_info::<VerifiedMtlsPeer>(),
+                )
+                .await
+                .map_err(anyhow::Error::from)
             })
         }
     };
@@ -292,7 +304,29 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-async fn execute(State(state): State<VfsState>, headers: HeaderMap, body: Bytes) -> Response {
+async fn execute_development(
+    State(state): State<VfsState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    execute_inner(state, None, headers, body).await
+}
+
+async fn execute_mtls(
+    ConnectInfo(peer): ConnectInfo<VerifiedMtlsPeer>,
+    State(state): State<VfsState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    execute_inner(state, Some(peer), headers, body).await
+}
+
+async fn execute_inner(
+    state: VfsState,
+    peer: Option<VerifiedMtlsPeer>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if headers
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -310,6 +344,16 @@ async fn execute(State(state): State<VfsState>, headers: HeaderMap, body: Bytes)
             "vfs.invalid_request",
         ));
     };
+    if let Err(reason) = state
+        .gateway_identities
+        .authorize(peer.as_ref(), fence.protocol)
+    {
+        return protobuf(VfsResponse::failure(
+            fence.request_id,
+            VfsError::Unauthenticated,
+            reason,
+        ));
+    }
     let response = dispatch(&state, &request, &fence).await;
     if let Some(Operation::Authenticate(authentication)) = request.operation.as_mut() {
         authentication.exchange.zeroize();
@@ -1057,6 +1101,7 @@ async fn list_directory(
                 resource_id: child.id.to_string(),
                 display_name: child.display_name,
                 attributes: Some(attributes),
+                persistent_handle: Vec::new(),
             });
         }
     }
@@ -1146,6 +1191,11 @@ fn node_attributes(node: &NodeRecord, read_only: bool) -> Result<NodeAttributes,
         projected_gid: 0,
         link_count: if directory { 2 } else { 1 },
         sparse: false,
+        accessed_at_unix_seconds: 0,
+        created_at_unix_seconds: 0,
+        changed_at_unix_seconds: 0,
+        owner_name: String::new(),
+        group_name: String::new(),
     })
 }
 
@@ -1336,6 +1386,7 @@ mod tests {
             session_id: String::new(),
             credential_generation: 0,
             authorization_generation: 0,
+            nfs_context: None,
             operation: Some(operation),
         }
     }
@@ -1364,6 +1415,7 @@ mod tests {
             session_id: None,
             credential_generation: None,
             authorization_generation: None,
+            nfs_context: None,
             operation: filebelt_vfs_protocol::OperationKind::Authenticate,
         };
         let response = denied(&request, "vfs.authentication_failed");
@@ -1378,6 +1430,8 @@ mod tests {
                 kerberos_principal: "user@EXAMPLE.TEST".into(),
                 gss_binding_digest: vec![7; 32],
                 source_address: "192.0.2.10".into(),
+                protection: filebelt_vfs_protocol::RpcsecGssProtection::Privacy as i32,
+                context_expires_at_unix_seconds: 1_800_000_000,
             }),
             MountProtocol::Nfs,
             1,
@@ -1396,13 +1450,28 @@ mod tests {
 
     #[test]
     fn unsupported_bootstrap_filter_preserves_supported_routes() {
-        let hello = request(
+        let boot_id = Uuid::new_v4().to_string();
+        let mut hello = request(
             Operation::GatewayHello(filebelt_vfs_protocol::GatewayHelloRequest {
-                shard_key: "nfs".into(),
+                shard_key: String::new(),
+                tenant_slug: "tenant-one".into(),
+                boot_id: boot_id.clone(),
+                nfs_compatibility: Some(filebelt_vfs_protocol::NfsGatewayCompatibility {
+                    minimum_protocol_version: PROTOCOL_VERSION,
+                    maximum_protocol_version: PROTOCOL_VERSION,
+                    features: vec![
+                        filebelt_vfs_protocol::NfsGatewayFeature::RpcsecGssPrivacy as i32,
+                    ],
+                    release_revision: "abcdef1".into(),
+                    config_format: filebelt_vfs_protocol::NFS_CONFIG_FORMAT,
+                    authority_schema_revision: filebelt_vfs_protocol::NFS_AUTHORITY_SCHEMA_REVISION,
+                }),
             }),
             MountProtocol::Nfs,
             0,
         );
+        hello.gateway_id = boot_id;
+        hello.tenant_id.clear();
         let hello_fence = hello.validate().expect("valid gateway hello");
         assert!(
             unsupported_bootstrap_response(
@@ -1446,6 +1515,7 @@ mod tests {
             session_id: Some(session_id),
             credential_generation: Some(2),
             authorization_generation: Some(3),
+            nfs_context: None,
             operation: filebelt_vfs_protocol::OperationKind::Heartbeat,
         };
         assert_eq!(

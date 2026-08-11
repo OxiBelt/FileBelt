@@ -15,6 +15,19 @@ contract lives at `protocol/http/v1/openapi.yaml`. See
 [Interfaces and Capabilities](../docs/InterfacesAndCapabilities.md) for the
 transport, trust, compatibility, and key-rotation contract.
 
+The same VFS v1 package reserves an additive, protocol-neutral NFS callback
+surface. NFS bootstrap resolves a tenant slug and advertises compatibility;
+post-authentication callbacks carry an RPCSEC_GSS binding plus bounded
+client/session replay coordinates, and mutations additionally carry a fixed
+request digest. A distinct sessionless gateway-control call fences a draining
+gateway epoch. Persistent handles, export manifests, ACLs, filesystem
+information, sparse controls, and projected attributes remain FileBelt wire
+types rather than NFS-Ganesha ABI types. Schema availability alone does not
+activate NFS dispatch or an export. Successful NFS authentication returns the
+immutable POSIX session projection selected by Core, including its mapping and
+feature generations and allowed exports; those values construct a Ganesha
+credential but never become authorization authority.
+
 Schemas use FileBelt identifiers and stable wire enums. They never serialize a
 database row, physical path, Kubernetes object, OxiBelt or Iggy internal, or an
 adapter implementation type. Fields whose exact bytes are signed must be

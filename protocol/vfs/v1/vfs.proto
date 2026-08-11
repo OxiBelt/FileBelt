@@ -5,7 +5,8 @@ syntax = "proto3";
 package filebelt.vfs.v1;
 
 // Protocol-neutral request envelope shared by mount adapters. No field carries
-// a host path, POSIX identity, SMB object, FTP daemon type, or payload locator.
+// a host path, host POSIX authority, SMB object, FTP daemon type, or payload
+// locator; projected POSIX values remain compatibility metadata only.
 message VfsRequest {
   uint32 protocol_version = 1;
   string request_id = 2;
@@ -16,6 +17,7 @@ message VfsRequest {
   string session_id = 7;
   uint64 credential_generation = 8;
   uint64 authorization_generation = 9;
+  NfsRequestContext nfs_context = 10;
 
   oneof operation {
     AuthenticateRequest authenticate = 20;
@@ -49,6 +51,15 @@ message VfsRequest {
     SparseWriteRequest sparse_write = 48;
     ReclaimRequest reclaim = 49;
     OpenUnlinkedRequest open_unlinked = 50;
+    ResolveHandleRequest resolve_handle = 51;
+    ExportRootRequest export_root = 52;
+    LookupRequest lookup = 53;
+    AccessRequest access = 54;
+    FilesystemInfoRequest filesystem_info = 55;
+    GetAclRequest get_acl = 56;
+    SetAclRequest set_acl = 57;
+    SparseControlRequest sparse_control = 58;
+    GatewayDrainRequest gateway_drain = 59;
   }
 }
 
@@ -83,11 +94,13 @@ message ListRequest {
   string directory_id = 2;
   string cursor = 3;
   uint32 limit = 4;
+  bytes directory_handle = 5;
 }
 
 message StatRequest {
   string drive_id = 1;
   string resource_id = 2;
+  bytes persistent_handle = 3;
 }
 
 message OpenRequest {
@@ -98,6 +111,7 @@ message OpenRequest {
   bool share_read = 5;
   bool share_write = 6;
   bool share_delete = 7;
+  bytes persistent_handle = 8;
 }
 
 message ReadRequest {
@@ -137,6 +151,7 @@ message CreateRequest {
   string display_name = 3;
   uint64 expected_parent_generation = 4;
   repeated VfsAction requested_actions = 5;
+  bytes parent_handle = 6;
 }
 
 message MkdirRequest {
@@ -144,6 +159,7 @@ message MkdirRequest {
   string parent_id = 2;
   string display_name = 3;
   uint64 expected_parent_generation = 4;
+  bytes parent_handle = 5;
 }
 
 message RenameRequest {
@@ -152,6 +168,8 @@ message RenameRequest {
   string target_parent_id = 3;
   string target_display_name = 4;
   uint64 expected_namespace_generation = 5;
+  bytes resource_handle = 6;
+  bytes target_parent_handle = 7;
 }
 
 message RemoveRequest {
@@ -159,6 +177,7 @@ message RemoveRequest {
   string resource_id = 2;
   uint64 expected_namespace_generation = 3;
   bool recursive = 4;
+  bytes persistent_handle = 5;
 }
 
 message SetAttributesRequest {
@@ -167,6 +186,13 @@ message SetAttributesRequest {
   optional int64 modified_at_unix_seconds = 3;
   optional int64 accessed_at_unix_seconds = 4;
   optional bool read_only = 5;
+  optional uint64 size_bytes = 6;
+  optional uint32 mode = 7;
+  optional uint64 projected_uid = 8;
+  optional uint64 projected_gid = 9;
+  optional string owner_name = 10;
+  optional string group_name = 11;
+  bytes persistent_handle = 12;
 }
 
 message LockRequest {
@@ -202,6 +228,32 @@ message EndSessionRequest {
 
 message GatewayHelloRequest {
   string shard_key = 1;
+  string tenant_slug = 2;
+  string boot_id = 3;
+  NfsGatewayCompatibility nfs_compatibility = 4;
+}
+
+message GatewayDrainRequest {
+  string boot_id = 1;
+}
+
+message NfsGatewayCompatibility {
+  uint32 minimum_protocol_version = 1;
+  uint32 maximum_protocol_version = 2;
+  repeated NfsGatewayFeature features = 3;
+  string release_revision = 4;
+  uint32 config_format = 5;
+  uint32 authority_schema_revision = 6;
+}
+
+enum NfsGatewayFeature {
+  NFS_GATEWAY_FEATURE_UNSPECIFIED = 0;
+  NFS_GATEWAY_FEATURE_RPCSEC_GSS_PRIVACY = 1;
+  NFS_GATEWAY_FEATURE_PERSISTENT_HANDLES = 2;
+  NFS_GATEWAY_FEATURE_NFS4_ACL = 3;
+  NFS_GATEWAY_FEATURE_SPARSE_FILES = 4;
+  NFS_GATEWAY_FEATURE_XATTR = 5;
+  NFS_GATEWAY_FEATURE_SYMLINK = 6;
 }
 
 // RPCSEC_GSS is authenticated by NFS-Ganesha. The FSAL/bridge forwards only
@@ -211,12 +263,33 @@ message NfsAuthenticateRequest {
   string kerberos_principal = 1;
   bytes gss_binding_digest = 2;
   string source_address = 3;
+  RpcsecGssProtection protection = 4;
+  int64 context_expires_at_unix_seconds = 5;
+}
+
+enum RpcsecGssProtection {
+  RPCSEC_GSS_PROTECTION_UNSPECIFIED = 0;
+  RPCSEC_GSS_PROTECTION_PRIVACY = 1;
+}
+
+// Core consumes the NFSv4.1 slot/sequence tuple with the authenticated GSS
+// binding. Only mutation callbacks carry request_digest; read-only callbacks
+// must leave it empty.
+message NfsRequestContext {
+  bytes gss_binding_digest = 1;
+  string client_id = 2;
+  string nfs_session_id = 3;
+  uint32 slot_id = 4;
+  uint64 sequence_id = 5;
+  uint32 operation_index = 6;
+  bytes request_digest = 7;
 }
 
 message GetXattrRequest {
   string drive_id = 1;
   string resource_id = 2;
   string name = 3;
+  bytes persistent_handle = 4;
 }
 
 message SetXattrRequest {
@@ -226,22 +299,26 @@ message SetXattrRequest {
   bytes value = 4;
   bool create_only = 5;
   bool replace_only = 6;
+  bytes persistent_handle = 7;
 }
 
 message ListXattrRequest {
   string drive_id = 1;
   string resource_id = 2;
+  bytes persistent_handle = 3;
 }
 
 message RemoveXattrRequest {
   string drive_id = 1;
   string resource_id = 2;
   string name = 3;
+  bytes persistent_handle = 4;
 }
 
 message ReadlinkRequest {
   string drive_id = 1;
   string resource_id = 2;
+  bytes persistent_handle = 3;
 }
 
 message SymlinkRequest {
@@ -250,6 +327,7 @@ message SymlinkRequest {
   string display_name = 3;
   string target = 4;
   uint64 expected_parent_generation = 5;
+  bytes parent_handle = 6;
 }
 
 // Sparse extents are explicit so an all-zero range is never inferred from a
@@ -277,6 +355,53 @@ message OpenUnlinkedRequest {
   uint64 fencing_token = 3;
 }
 
+message ResolveHandleRequest {
+  bytes persistent_handle = 1;
+}
+
+message ExportRootRequest {
+  uint64 export_id = 1;
+}
+
+message LookupRequest {
+  bytes parent_handle = 1;
+  string display_name = 2;
+}
+
+message AccessRequest {
+  bytes persistent_handle = 1;
+  repeated VfsAction requested_actions = 2;
+}
+
+message FilesystemInfoRequest {
+  uint64 export_id = 1;
+}
+
+message GetAclRequest {
+  bytes persistent_handle = 1;
+}
+
+message SetAclRequest {
+  bytes persistent_handle = 1;
+  VfsAcl acl = 2;
+  uint64 expected_acl_generation = 3;
+}
+
+message SparseControlRequest {
+  string handle_id = 1;
+  SparseControlKind kind = 2;
+  uint64 offset = 3;
+  uint64 length = 4;
+}
+
+enum SparseControlKind {
+  SPARSE_CONTROL_KIND_UNSPECIFIED = 0;
+  SPARSE_CONTROL_KIND_SEEK_DATA = 1;
+  SPARSE_CONTROL_KIND_SEEK_HOLE = 2;
+  SPARSE_CONTROL_KIND_ALLOCATE = 3;
+  SPARSE_CONTROL_KIND_DEALLOCATE = 4;
+}
+
 enum VfsAction {
   VFS_ACTION_UNSPECIFIED = 0;
   VFS_ACTION_READ_METADATA = 1;
@@ -288,6 +413,9 @@ enum VfsAction {
   VFS_ACTION_MOVE = 7;
   VFS_ACTION_WRITE_METADATA = 8;
   VFS_ACTION_MANAGE_LOCK = 9;
+  VFS_ACTION_LIST_CHILDREN = 10;
+  VFS_ACTION_TRAVERSE = 11;
+  VFS_ACTION_MANAGE_ACL = 12;
 }
 
 enum LeaseState {
@@ -322,12 +450,23 @@ message VfsResponse {
   repeated string xattr_names = 21;
   string symlink_target = 22;
   string state_id = 23;
+  string resource_id = 24;
+  bytes persistent_handle = 25;
+  uint64 export_id = 26;
+  NfsGatewayHelloResponse nfs_gateway_hello = 27;
+  FilesystemInfo filesystem_info = 28;
+  VfsAcl acl = 29;
+  uint64 sparse_offset = 30;
+  bool end_of_file = 31;
+  repeated VfsAction allowed_actions = 32;
+  NfsSessionProjection nfs_session_projection = 33;
 }
 
 message DirectoryEntry {
   string resource_id = 1;
   string display_name = 2;
   NodeAttributes attributes = 3;
+  bytes persistent_handle = 4;
 }
 
 message NodeAttributes {
@@ -343,12 +482,106 @@ message NodeAttributes {
   uint64 projected_gid = 10;
   uint32 link_count = 11;
   bool sparse = 12;
+  int64 accessed_at_unix_seconds = 13;
+  int64 created_at_unix_seconds = 14;
+  int64 changed_at_unix_seconds = 15;
+  string owner_name = 16;
+  string group_name = 17;
 }
 
 enum NodeKind {
   NODE_KIND_UNSPECIFIED = 0;
   NODE_KIND_FILE = 1;
   NODE_KIND_DIRECTORY = 2;
+  NODE_KIND_SYMLINK = 3;
+}
+
+message NfsGatewayHelloResponse {
+  string tenant_id = 1;
+  uint64 feature_generation = 2;
+  uint64 export_generation = 3;
+  uint32 lease_seconds = 4;
+  repeated NfsExportManifestEntry active_exports = 5;
+}
+
+message NfsExportManifestEntry {
+  uint64 export_id = 1;
+  string drive_id = 2;
+  string export_path = 3;
+  uint64 generation = 4;
+  bytes root_handle = 5;
+  bool read_only = 6;
+}
+
+// Core selects this immutable projection while authenticating an NFS session.
+// The gateway uses it only to construct the Ganesha credential; numeric IDs
+// and POSIX names never replace the session fence or Virtual ACL checks.
+message NfsSessionProjection {
+  string posix_name = 1;
+  string primary_group_name = 2;
+  uint64 projected_uid = 3;
+  uint64 projected_gid = 4;
+  uint64 mapping_generation = 5;
+  uint64 feature_generation = 6;
+  int64 absolute_expires_at_unix_seconds = 7;
+  repeated uint64 allowed_export_ids = 8;
+}
+
+message FilesystemInfo {
+  uint64 total_bytes = 1;
+  uint64 free_bytes = 2;
+  uint64 available_bytes = 3;
+  uint64 total_files = 4;
+  uint64 free_files = 5;
+  uint64 maximum_file_size = 6;
+  uint32 maximum_name_bytes = 7;
+  uint32 preferred_io_bytes = 8;
+  bool supports_sparse_files = 9;
+  bool supports_acl = 10;
+  bool supports_xattr = 11;
+}
+
+message VfsAcl {
+  AclRepresentation representation = 1;
+  uint64 generation = 2;
+  repeated VfsAclEntry entries = 3;
+}
+
+enum AclRepresentation {
+  ACL_REPRESENTATION_UNSPECIFIED = 0;
+  ACL_REPRESENTATION_TAGGED = 1;
+  ACL_REPRESENTATION_SYNTHESIZED = 2;
+}
+
+message VfsAclEntry {
+  AclEntryType entry_type = 1;
+  AclPrincipalKind principal_kind = 2;
+  string principal = 3;
+  repeated VfsAction actions = 4;
+  AclInheritance inheritance = 5;
+  bool inherited = 6;
+}
+
+enum AclEntryType {
+  ACL_ENTRY_TYPE_UNSPECIFIED = 0;
+  ACL_ENTRY_TYPE_ALLOW = 1;
+  ACL_ENTRY_TYPE_DENY = 2;
+}
+
+enum AclPrincipalKind {
+  ACL_PRINCIPAL_KIND_UNSPECIFIED = 0;
+  ACL_PRINCIPAL_KIND_OWNER = 1;
+  ACL_PRINCIPAL_KIND_OWNER_GROUP = 2;
+  ACL_PRINCIPAL_KIND_EVERYONE = 3;
+  ACL_PRINCIPAL_KIND_NAMED_USER = 4;
+  ACL_PRINCIPAL_KIND_NAMED_GROUP = 5;
+}
+
+enum AclInheritance {
+  ACL_INHERITANCE_UNSPECIFIED = 0;
+  ACL_INHERITANCE_THIS_RESOURCE = 1;
+  ACL_INHERITANCE_CHILDREN = 2;
+  ACL_INHERITANCE_DESCENDANTS = 3;
 }
 
 // Stable errors are intentionally smaller than any adapter-native status set.

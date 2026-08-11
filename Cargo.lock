@@ -2172,6 +2172,7 @@ dependencies = [
  "blake3",
  "clap",
  "filebelt-authz",
+ "filebelt-build-identity",
  "filebelt-capability-keyset",
  "filebelt-control-protocol",
  "filebelt-database",

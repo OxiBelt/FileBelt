@@ -30,7 +30,8 @@ use clap::{Parser, Subcommand};
 use filebelt_capability_keyset::MountStorageKeyset;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::mount::{
-    MountAuthenticationMaterial, MountSecretEnvelopeInput, MountSessionFence,
+    CreateNfsMountSessionInput, MountAuthenticationMaterial, MountSecretEnvelopeInput,
+    MountSessionFence, ReconcileNfsExportManifestInput,
 };
 use filebelt_database::{Database, DatabaseError, NodeRecord};
 use filebelt_domain::Action;
@@ -45,8 +46,11 @@ use filebelt_storage_protocol::{
 };
 use filebelt_vfs_protocol::vfs_request::Operation;
 use filebelt_vfs_protocol::{
-    DirectoryEntry, MountProtocol, NodeAttributes, NodeKind, PROTOCOL_VERSION, RequestFence,
-    VfsAction, VfsError, VfsRequest, VfsResponse,
+    DirectoryEntry, GatewayDrainRequest, GatewayHelloRequest, GatewayReconcileRequest,
+    MountProtocol, NFS_GATEWAY_LEASE_SECONDS, NfsAuthenticateRequest, NfsExportManifestEntry,
+    NfsGatewayCompatibility, NfsGatewayFeature, NfsGatewayHelloResponse, NfsSessionProjection,
+    NodeAttributes, NodeKind, PROTOCOL_VERSION, RequestFence, VfsAction, VfsError, VfsRequest,
+    VfsResponse,
 };
 use getrandom::fill as random_fill;
 use md4::{Digest as _, Md4};
@@ -79,11 +83,19 @@ enum Command {
 struct VfsState {
     database: Database,
     tenant_id: Uuid,
+    tenant_slug: String,
     keyring: Arc<Keyring>,
     key_generation: u32,
     io: MountIoClient,
     digest_key: [u8; 32],
     gateway_identities: Arc<gateway_identity::GatewayIdentityMap>,
+    nfs: Option<Arc<NfsRuntime>>,
+}
+
+struct NfsRuntime {
+    realm: String,
+    handle_keyring: nfs::NfsHandleKeyring,
+    release_revision: &'static str,
 }
 
 #[derive(Clone)]
@@ -191,9 +203,37 @@ async fn run() -> Result<()> {
         .as_slice()
         .try_into()
         .map_err(|_| anyhow!("mount digest key must contain exactly 32 bytes"))?;
+    let nfs = if config.mounts.nfs.enabled {
+        let revision = filebelt_build_identity::CURRENT.revision;
+        if filebelt_build_identity::CURRENT.dirty || revision == "unknown" || revision.len() < 7 {
+            bail!("NFS requires a clean revision-bound FileBelt build");
+        }
+        let handle_keyring = nfs::NfsHandleKeyring::load(
+            config
+                .mounts
+                .nfs
+                .handle_keyring_file
+                .as_deref()
+                .ok_or_else(|| anyhow!("NFS handle keyset is absent"))?,
+            config.mounts.nfs.handle_key_generation,
+        )?;
+        Some(Arc::new(NfsRuntime {
+            realm: config
+                .mounts
+                .nfs
+                .realm
+                .clone()
+                .ok_or_else(|| anyhow!("NFS Kerberos realm is absent"))?,
+            handle_keyring,
+            release_revision: revision,
+        }))
+    } else {
+        None
+    };
     let state = VfsState {
         database: database.clone(),
         tenant_id,
+        tenant_slug: config.tenant.slug.clone(),
         keyring,
         key_generation: config.mounts.vault_key_generation,
         io,
@@ -201,6 +241,7 @@ async fn run() -> Result<()> {
         gateway_identities: Arc::new(gateway_identity::GatewayIdentityMap::from_mounts(
             &config.mounts,
         )),
+        nfs,
     };
 
     let execute_route = match config.deployment.mode {
@@ -359,16 +400,26 @@ async fn execute_inner(
         authentication.exchange.zeroize();
         authentication.channel_binding.zeroize();
     }
+    if let Some(Operation::NfsAuthenticate(authentication)) = request.operation.as_mut() {
+        authentication.gss_binding_digest.zeroize();
+    }
+    if let Some(context) = request.nfs_context.as_mut() {
+        context.gss_binding_digest.zeroize();
+        context.request_digest.zeroize();
+    }
     protobuf(response)
 }
 
 async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) -> VfsResponse {
-    if fence.tenant_id != state.tenant_id {
-        return denied(fence, "vfs.tenant_not_found");
-    }
     let protocol = protocol_name(fence.protocol);
     let operation = request.operation.as_ref().expect("validated operation");
     if let Operation::GatewayHello(hello) = operation {
+        if fence.protocol == MountProtocol::Nfs {
+            return nfs_gateway_hello(state, fence, hello).await;
+        }
+        if fence.tenant_id != state.tenant_id {
+            return denied(fence, "vfs.tenant_not_found");
+        }
         return match state
             .database
             .claim_mount_gateway_epoch(
@@ -389,11 +440,20 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
             Err(_) => unavailable(fence, "vfs.gateway_epoch_unavailable"),
         };
     }
+    if fence.tenant_id != state.tenant_id {
+        return denied(fence, "vfs.tenant_not_found");
+    }
+    if let Operation::NfsAuthenticate(authentication) = operation {
+        return nfs_authenticate(state, fence, authentication).await;
+    }
+    if let Operation::GatewayReconcile(reconcile) = operation {
+        return nfs_gateway_reconcile(state, fence, reconcile).await;
+    }
+    if let Operation::GatewayDrain(drain) = operation {
+        return nfs_gateway_drain(state, fence, drain).await;
+    }
     if let Operation::Authenticate(authentication) = operation {
         return authenticate(state, fence, authentication).await;
-    }
-    if let Some(response) = unsupported_bootstrap_response(fence, operation) {
-        return response;
     }
     let Some(session_fence) = session_admission_fence(fence) else {
         return invalid(fence);
@@ -408,12 +468,34 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
             fence.gateway_epoch,
             session_fence.credential_generation,
             session_fence.authorization_generation,
+            fence
+                .nfs_context
+                .as_ref()
+                .map(|context| &context.gss_binding_digest),
         )
         .await
     {
         Ok(session) => session,
         Err(_) => return denied(fence, "vfs.session_fence_stale"),
     };
+    if fence.protocol == MountProtocol::Nfs {
+        return match operation {
+            Operation::Heartbeat(_) => ok(fence),
+            Operation::EndSession(end) => match state
+                .database
+                .end_mount_session(&session, &end.reason_code)
+                .await
+            {
+                Ok(()) => ok(fence),
+                Err(_) => unavailable(fence, "vfs.session_close_failed"),
+            },
+            _ => VfsResponse::failure(
+                fence.request_id,
+                VfsError::NotSupported,
+                "vfs.nfs_operation_not_implemented",
+            ),
+        };
+    }
     match operation {
         Operation::List(list) if list.cursor.is_empty() => {
             list_directory(state, fence, &session, list).await
@@ -441,17 +523,366 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
     }
 }
 
-fn unsupported_bootstrap_response(
-    request: &RequestFence,
-    operation: &Operation,
-) -> Option<VfsResponse> {
-    matches!(operation, Operation::NfsAuthenticate(_)).then(|| {
-        VfsResponse::failure(
-            request.request_id,
+const NFS_GATEWAY_FEATURES: [i32; 6] = [
+    NfsGatewayFeature::RpcsecGssPrivacy as i32,
+    NfsGatewayFeature::PersistentHandles as i32,
+    NfsGatewayFeature::Nfs4Acl as i32,
+    NfsGatewayFeature::SparseFiles as i32,
+    NfsGatewayFeature::Xattr as i32,
+    NfsGatewayFeature::Symlink as i32,
+];
+
+fn nfs_gateway_compatible(compatibility: &NfsGatewayCompatibility, release_revision: &str) -> bool {
+    compatibility.minimum_protocol_version == PROTOCOL_VERSION
+        && compatibility.maximum_protocol_version == PROTOCOL_VERSION
+        && compatibility.features == NFS_GATEWAY_FEATURES
+        && compatibility.release_revision == release_revision
+}
+
+async fn nfs_gateway_hello(
+    state: &VfsState,
+    fence: &RequestFence,
+    request: &GatewayHelloRequest,
+) -> VfsResponse {
+    let Some(runtime) = state.nfs.as_deref() else {
+        return VfsResponse::failure(fence.request_id, VfsError::NotSupported, "vfs.nfs_disabled");
+    };
+    if request.tenant_slug != state.tenant_slug {
+        return denied(fence, "vfs.tenant_not_found");
+    }
+    if request
+        .nfs_compatibility
+        .as_ref()
+        .is_none_or(|compatibility| {
+            !nfs_gateway_compatible(compatibility, runtime.release_revision)
+        })
+    {
+        return VfsResponse::failure(
+            fence.request_id,
             VfsError::NotSupported,
-            "vfs.nfs_authentication_not_qualified",
+            "vfs.nfs_gateway_incompatible",
+        );
+    }
+    let epoch = match state
+        .database
+        .claim_mount_gateway_epoch(state.tenant_id, "nfs", "nfs", &fence.gateway_id)
+        .await
+    {
+        Ok(epoch) => epoch,
+        Err(_) => return unavailable(fence, "vfs.gateway_epoch_unavailable"),
+    };
+    let Some(gateway_epoch) = positive_u64(epoch) else {
+        return unavailable(fence, "vfs.gateway_epoch_unavailable");
+    };
+    let manifest = match state.database.nfs_export_manifest(state.tenant_id).await {
+        Ok(manifest) => manifest,
+        Err(DatabaseError::AdmissionLimited | DatabaseError::NotFound) => {
+            return denied(fence, "vfs.nfs_feature_inactive");
+        }
+        Err(_) => return unavailable(fence, "vfs.nfs_manifest_unavailable"),
+    };
+    let Some(feature_generation) = positive_u64(manifest.feature_generation) else {
+        return unavailable(fence, "vfs.nfs_manifest_invalid");
+    };
+    let Some(export_generation) = positive_u64(manifest.manifest_generation) else {
+        return unavailable(fence, "vfs.nfs_manifest_invalid");
+    };
+    let Some(restore_generation) = positive_u64(manifest.restore_generation) else {
+        return unavailable(fence, "vfs.nfs_manifest_invalid");
+    };
+    let mut active_exports = Vec::with_capacity(manifest.exports.len());
+    for export in manifest.exports {
+        let (Some(export_id), Some(export_generation), Some(root_node_generation)) = (
+            positive_u64(export.export_id),
+            positive_u64(export.export_generation),
+            positive_u64(export.root_node_generation),
+        ) else {
+            return unavailable(fence, "vfs.nfs_manifest_invalid");
+        };
+        let root_handle = nfs::issue_handle(
+            nfs::NfsHandleScope {
+                tenant_id: state.tenant_id,
+                export_id,
+                node_id: export.root_node_id,
+                export_generation,
+                node_generation: root_node_generation,
+                restore_generation,
+            },
+            runtime.handle_keyring.current(),
+        );
+        active_exports.push(NfsExportManifestEntry {
+            export_id,
+            drive_id: export.drive_id.to_string(),
+            export_path: export.export_path,
+            generation: export_generation,
+            root_handle: root_handle.to_vec(),
+            read_only: false,
+        });
+    }
+    VfsResponse {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: fence.request_id.to_string(),
+        error: VfsError::Ok as i32,
+        gateway_epoch,
+        nfs_gateway_hello: Some(NfsGatewayHelloResponse {
+            tenant_id: state.tenant_id.to_string(),
+            feature_generation,
+            export_generation,
+            lease_seconds: NFS_GATEWAY_LEASE_SECONDS,
+            active_exports,
+        }),
+        ..VfsResponse::default()
+    }
+}
+
+async fn nfs_gateway_reconcile(
+    state: &VfsState,
+    fence: &RequestFence,
+    request: &GatewayReconcileRequest,
+) -> VfsResponse {
+    let Some(runtime) = state.nfs.as_deref() else {
+        return VfsResponse::failure(fence.request_id, VfsError::NotSupported, "vfs.nfs_disabled");
+    };
+    let manifest = match state.database.nfs_export_manifest(state.tenant_id).await {
+        Ok(manifest) => manifest,
+        Err(DatabaseError::AdmissionLimited | DatabaseError::NotFound) => {
+            return denied(fence, "vfs.nfs_feature_inactive");
+        }
+        Err(_) => return unavailable(fence, "vfs.nfs_manifest_unavailable"),
+    };
+    let (Some(feature_generation), Some(export_generation), Some(restore_generation)) = (
+        positive_u64(manifest.feature_generation),
+        positive_u64(manifest.manifest_generation),
+        positive_u64(manifest.restore_generation),
+    ) else {
+        return unavailable(fence, "vfs.nfs_manifest_invalid");
+    };
+    let mut exports = Vec::with_capacity(manifest.exports.len());
+    for export in &manifest.exports {
+        let (Some(export_id), Some(generation), Some(node_generation)) = (
+            positive_u64(export.export_id),
+            positive_u64(export.export_generation),
+            positive_u64(export.root_node_generation),
+        ) else {
+            return unavailable(fence, "vfs.nfs_manifest_invalid");
+        };
+        exports.push(NfsExportManifestEntry {
+            export_id,
+            drive_id: export.drive_id.to_string(),
+            export_path: export.export_path.clone(),
+            generation,
+            root_handle: nfs::issue_handle(
+                nfs::NfsHandleScope {
+                    tenant_id: state.tenant_id,
+                    export_id,
+                    node_id: export.root_node_id,
+                    export_generation: generation,
+                    node_generation,
+                    restore_generation,
+                },
+                runtime.handle_keyring.current(),
+            )
+            .to_vec(),
+            read_only: false,
+        });
+    }
+    let expected_digest = nfs::manifest_digest(
+        state.tenant_id,
+        feature_generation,
+        export_generation,
+        &exports,
+    );
+    if request.feature_generation != feature_generation
+        || request.export_generation != export_generation
+        || request.manifest_digest != expected_digest
+        || request.applied_exports.len() != exports.len()
+        || request
+            .applied_exports
+            .iter()
+            .zip(&exports)
+            .any(|(applied, expected)| {
+                applied.export_id != expected.export_id
+                    || applied.generation != expected.generation
+                    || applied.root_handle_digest != nfs::root_handle_digest(&expected.root_handle)
+            })
+    {
+        return VfsResponse::failure(
+            fence.request_id,
+            VfsError::StaleGeneration,
+            "vfs.nfs_manifest_stale",
+        );
+    }
+    let export_ids = request
+        .applied_exports
+        .iter()
+        .map(|export| i64::try_from(export.export_id))
+        .collect::<Result<Vec<_>, _>>();
+    let export_generations = request
+        .applied_exports
+        .iter()
+        .map(|export| i64::try_from(export.generation))
+        .collect::<Result<Vec<_>, _>>();
+    let root_handle_digests = request
+        .applied_exports
+        .iter()
+        .map(|export| <[u8; 32]>::try_from(export.root_handle_digest.as_slice()))
+        .collect::<Result<Vec<_>, _>>();
+    let (Ok(export_ids), Ok(export_generations), Ok(root_handle_digests)) =
+        (export_ids, export_generations, root_handle_digests)
+    else {
+        return invalid(fence);
+    };
+    let result = state
+        .database
+        .reconcile_nfs_export_manifest(&ReconcileNfsExportManifestInput {
+            tenant_id: state.tenant_id,
+            gateway_id: &fence.gateway_id,
+            gateway_epoch: fence.gateway_epoch,
+            feature_generation: manifest.feature_generation,
+            manifest_generation: manifest.manifest_generation,
+            manifest_digest: &expected_digest,
+            export_ids: &export_ids,
+            export_generations: &export_generations,
+            root_handle_digests: &root_handle_digests,
+        })
+        .await;
+    match result {
+        Ok(applied)
+            if applied.manifest_generation == manifest.manifest_generation
+                && applied.manifest_digest == expected_digest
+                && applied.gateway_id == fence.gateway_id
+                && applied.gateway_epoch == fence.gateway_epoch =>
+        {
+            ok_with_gateway_epoch(fence)
+        }
+        Ok(_) | Err(DatabaseError::Conflict | DatabaseError::StaleGeneration) => {
+            VfsResponse::failure(
+                fence.request_id,
+                VfsError::StaleGeneration,
+                "vfs.nfs_manifest_stale",
+            )
+        }
+        Err(_) => unavailable(fence, "vfs.nfs_manifest_reconcile_failed"),
+    }
+}
+
+async fn nfs_gateway_drain(
+    state: &VfsState,
+    fence: &RequestFence,
+    _request: &GatewayDrainRequest,
+) -> VfsResponse {
+    if state.nfs.is_none() {
+        return VfsResponse::failure(fence.request_id, VfsError::NotSupported, "vfs.nfs_disabled");
+    }
+    match state
+        .database
+        .drain_mount_gateway_epoch(
+            state.tenant_id,
+            "nfs",
+            "nfs",
+            &fence.gateway_id,
+            fence.gateway_epoch,
+            "gateway_shutdown",
         )
-    })
+        .await
+    {
+        Ok(()) => ok_with_gateway_epoch(fence),
+        Err(DatabaseError::StaleGeneration) => VfsResponse::failure(
+            fence.request_id,
+            VfsError::StaleGeneration,
+            "vfs.gateway_epoch_stale",
+        ),
+        Err(_) => unavailable(fence, "vfs.gateway_drain_failed"),
+    }
+}
+
+async fn nfs_authenticate(
+    state: &VfsState,
+    fence: &RequestFence,
+    request: &NfsAuthenticateRequest,
+) -> VfsResponse {
+    let Some(runtime) = state.nfs.as_deref() else {
+        return VfsResponse::failure(fence.request_id, VfsError::NotSupported, "vfs.nfs_disabled");
+    };
+    if nfs::validate_authenticated_principal(&request.kerberos_principal, &runtime.realm).is_err() {
+        return denied(fence, "vfs.authentication_failed");
+    }
+    let Ok(gss_binding_digest) = <[u8; 32]>::try_from(request.gss_binding_digest.as_slice()) else {
+        return invalid(fence);
+    };
+    let projection = match state
+        .database
+        .create_nfs_mount_session(&CreateNfsMountSessionInput {
+            tenant_id: state.tenant_id,
+            kerberos_principal: &request.kerberos_principal,
+            gss_binding_digest: &gss_binding_digest,
+            gateway_id: &fence.gateway_id,
+            gateway_epoch: fence.gateway_epoch,
+            source_address: &request.source_address,
+            gss_expires_at_unix_seconds: request.context_expires_at_unix_seconds,
+        })
+        .await
+    {
+        Ok(projection) => projection,
+        Err(DatabaseError::NotFound | DatabaseError::AdmissionLimited) => {
+            return denied(fence, "vfs.authentication_failed");
+        }
+        Err(_) => return unavailable(fence, "vfs.authentication_state_unavailable"),
+    };
+    let (Some(credential_generation), Some(authorization_generation), Some(gateway_epoch)) = (
+        positive_u64(projection.session.credential_generation),
+        positive_u64(projection.session.authorization_generation),
+        positive_u64(projection.session.gateway_epoch),
+    ) else {
+        return unavailable(fence, "vfs.authentication_projection_invalid");
+    };
+    let (
+        Some(projected_uid),
+        Some(projected_gid),
+        Some(mapping_generation),
+        Some(feature_generation),
+    ) = (
+        positive_u64(projection.projected_uid),
+        positive_u64(projection.projected_gid),
+        positive_u64(projection.mapping_generation),
+        positive_u64(projection.feature_generation),
+    )
+    else {
+        return unavailable(fence, "vfs.authentication_projection_invalid");
+    };
+    let allowed_export_ids = projection
+        .allowed_export_ids
+        .iter()
+        .copied()
+        .map(positive_u64)
+        .collect::<Option<Vec<_>>>();
+    let Some(allowed_export_ids) = allowed_export_ids else {
+        return unavailable(fence, "vfs.authentication_projection_invalid");
+    };
+    VfsResponse {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: fence.request_id.to_string(),
+        error: VfsError::Ok as i32,
+        session_id: projection.session.session_id.to_string(),
+        credential_generation,
+        authorization_generation,
+        gateway_epoch,
+        nfs_session_projection: Some(NfsSessionProjection {
+            posix_name: projection.posix_name,
+            primary_group_name: projection.primary_group_name,
+            projected_uid,
+            projected_gid,
+            mapping_generation,
+            feature_generation,
+            absolute_expires_at_unix_seconds: projection.absolute_expires_at_unix_seconds,
+            allowed_export_ids,
+        }),
+        ..VfsResponse::default()
+    }
+}
+
+fn positive_u64(value: i64) -> Option<u64> {
+    u64::try_from(value).ok().filter(|value| *value > 0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1355,6 +1786,16 @@ fn ok(request: &RequestFence) -> VfsResponse {
     }
 }
 
+fn ok_with_gateway_epoch(request: &RequestFence) -> VfsResponse {
+    match positive_u64(request.gateway_epoch) {
+        Some(gateway_epoch) => VfsResponse {
+            gateway_epoch,
+            ..ok(request)
+        },
+        None => invalid(request),
+    }
+}
+
 fn invalid(request: &RequestFence) -> VfsResponse {
     VfsResponse::failure(
         request.request_id,
@@ -1374,22 +1815,6 @@ fn unavailable(request: &RequestFence, reason: &str) -> VfsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn request(operation: Operation, protocol: MountProtocol, gateway_epoch: u64) -> VfsRequest {
-        VfsRequest {
-            protocol_version: PROTOCOL_VERSION,
-            request_id: Uuid::new_v4().to_string(),
-            tenant_id: Uuid::new_v4().to_string(),
-            protocol: protocol as i32,
-            gateway_id: "gateway-0".into(),
-            gateway_epoch,
-            session_id: String::new(),
-            credential_generation: 0,
-            authorization_generation: 0,
-            nfs_context: None,
-            operation: Some(operation),
-        }
-    }
 
     #[test]
     fn ntlm_verifier_is_the_standard_utf16le_md4_digest() {
@@ -1424,83 +1849,24 @@ mod tests {
     }
 
     #[test]
-    fn nfs_authentication_bootstrap_returns_typed_not_supported() {
-        let request = request(
-            Operation::NfsAuthenticate(filebelt_vfs_protocol::NfsAuthenticateRequest {
-                kerberos_principal: "user@EXAMPLE.TEST".into(),
-                gss_binding_digest: vec![7; 32],
-                source_address: "192.0.2.10".into(),
-                protection: filebelt_vfs_protocol::RpcsecGssProtection::Privacy as i32,
-                context_expires_at_unix_seconds: 1_800_000_000,
-            }),
-            MountProtocol::Nfs,
-            1,
-        );
-        let fence = request
-            .validate()
-            .expect("valid NFS authentication request");
-        let response =
-            unsupported_bootstrap_response(&fence, request.operation.as_ref().expect("operation"))
-                .expect("NFS authentication remains unsupported");
-
-        assert_eq!(response.error, VfsError::NotSupported as i32);
-        assert_eq!(response.reason_code, "vfs.nfs_authentication_not_qualified");
-        assert!(response.validate_for(fence.request_id).is_ok());
-    }
-
-    #[test]
-    fn unsupported_bootstrap_filter_preserves_supported_routes() {
-        let boot_id = Uuid::new_v4().to_string();
-        let mut hello = request(
-            Operation::GatewayHello(filebelt_vfs_protocol::GatewayHelloRequest {
-                shard_key: String::new(),
-                tenant_slug: "tenant-one".into(),
-                boot_id: boot_id.clone(),
-                nfs_compatibility: Some(filebelt_vfs_protocol::NfsGatewayCompatibility {
-                    minimum_protocol_version: PROTOCOL_VERSION,
-                    maximum_protocol_version: PROTOCOL_VERSION,
-                    features: vec![
-                        filebelt_vfs_protocol::NfsGatewayFeature::RpcsecGssPrivacy as i32,
-                    ],
-                    release_revision: "abcdef1".into(),
-                    config_format: filebelt_vfs_protocol::NFS_CONFIG_FORMAT,
-                    authority_schema_revision: filebelt_vfs_protocol::NFS_AUTHORITY_SCHEMA_REVISION,
-                }),
-            }),
-            MountProtocol::Nfs,
-            0,
-        );
-        hello.gateway_id = boot_id;
-        hello.tenant_id.clear();
-        let hello_fence = hello.validate().expect("valid gateway hello");
-        assert!(
-            unsupported_bootstrap_response(
-                &hello_fence,
-                hello.operation.as_ref().expect("operation")
-            )
-            .is_none()
-        );
-
-        let authenticate = request(
-            Operation::Authenticate(filebelt_vfs_protocol::AuthenticateRequest {
-                username: "fb-abcdefghijklmnop".into(),
-                scheme: filebelt_vfs_protocol::AuthenticationScheme::PasswordHmacSha256 as i32,
-                exchange: vec![1; 32],
-                channel_binding: Vec::new(),
-                source_address: "192.0.2.11".into(),
-                device_id: String::new(),
-            }),
-            MountProtocol::Ftps,
-            1,
-        );
-        let authenticate_fence = authenticate.validate().expect("valid FTPS authentication");
-        assert!(
-            unsupported_bootstrap_response(
-                &authenticate_fence,
-                authenticate.operation.as_ref().expect("operation")
-            )
-            .is_none()
-        );
+    fn nfs_gateway_compatibility_is_an_exact_release_contract() {
+        let mut compatibility = NfsGatewayCompatibility {
+            minimum_protocol_version: PROTOCOL_VERSION,
+            maximum_protocol_version: PROTOCOL_VERSION,
+            features: NFS_GATEWAY_FEATURES.to_vec(),
+            release_revision: "abcdef1".into(),
+            config_format: filebelt_vfs_protocol::NFS_CONFIG_FORMAT,
+            authority_schema_revision: filebelt_vfs_protocol::NFS_AUTHORITY_SCHEMA_REVISION,
+        };
+        assert!(nfs_gateway_compatible(&compatibility, "abcdef1"));
+        compatibility.release_revision = "abcdef2".into();
+        assert!(!nfs_gateway_compatible(&compatibility, "abcdef1"));
+        compatibility.release_revision = "abcdef1".into();
+        compatibility.features.pop();
+        assert!(!nfs_gateway_compatible(&compatibility, "abcdef1"));
+        compatibility.features = NFS_GATEWAY_FEATURES.to_vec();
+        compatibility.maximum_protocol_version += 1;
+        assert!(!nfs_gateway_compatible(&compatibility, "abcdef1"));
     }
 
     #[test]

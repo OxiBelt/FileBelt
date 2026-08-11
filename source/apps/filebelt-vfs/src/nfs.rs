@@ -12,6 +12,7 @@ use anyhow::{Context as _, Result, bail};
 use aws_lc_rs::constant_time::verify_slices_are_equal;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use filebelt_vfs_protocol::NfsExportManifestEntry;
 use serde::Deserialize;
 use uuid::Uuid;
 use zeroize::{Zeroize as _, Zeroizing};
@@ -21,6 +22,57 @@ const KEYSET_FORMAT: &str = "filebelt-nfs-handle-keyset-v1";
 const TAG_BYTES: usize = 32;
 const BODY_BYTES: usize = 1 + 4 + 16 + 8 + 16 + 8 + 8 + 8;
 pub const HANDLE_BYTES: usize = BODY_BYTES + TAG_BYTES;
+const _: () = assert!(HANDLE_BYTES <= filebelt_vfs_protocol::MAX_PERSISTENT_HANDLE_BYTES);
+
+/// Computes the stable digest acknowledged for one root handle after the
+/// gateway has installed and read back its export.
+#[must_use]
+pub fn root_handle_digest(handle: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"filebelt.nfs.root-handle.v1\0");
+    hash_length_prefixed(&mut hasher, handle);
+    *hasher.finalize().as_bytes()
+}
+
+/// Computes the canonical desired-manifest digest. Entries must already be in
+/// strictly increasing export-ID order; the protocol validator and PostgreSQL
+/// authority enforce that ordering independently.
+#[must_use]
+pub fn manifest_digest(
+    tenant_id: Uuid,
+    feature_generation: u64,
+    export_generation: u64,
+    exports: &[NfsExportManifestEntry],
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"filebelt.nfs.export-manifest.v1\0");
+    hasher.update(tenant_id.as_bytes());
+    hasher.update(&feature_generation.to_be_bytes());
+    hasher.update(&export_generation.to_be_bytes());
+    hasher.update(
+        &u32::try_from(exports.len())
+            .expect("validated NFS manifest entry count is bounded")
+            .to_be_bytes(),
+    );
+    for export in exports {
+        hasher.update(&export.export_id.to_be_bytes());
+        hash_length_prefixed(&mut hasher, export.drive_id.as_bytes());
+        hasher.update(&export.generation.to_be_bytes());
+        hasher.update(&[u8::from(export.read_only)]);
+        hash_length_prefixed(&mut hasher, export.export_path.as_bytes());
+        hash_length_prefixed(&mut hasher, &export.root_handle);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn hash_length_prefixed(hasher: &mut blake3::Hasher, value: &[u8]) {
+    hasher.update(
+        &u32::try_from(value.len())
+            .expect("validated NFS manifest field is bounded")
+            .to_be_bytes(),
+    );
+    hasher.update(value);
+}
 
 /// Accepts only the canonical single-component user principal selected by the
 /// deployment. Service/instance principals, enterprise aliases, escapes,
@@ -274,11 +326,25 @@ fn tag(key: &[u8; 32], body: &[u8]) -> [u8; TAG_BYTES] {
 mod tests {
     use super::{
         HANDLE_BYTES, NfsHandleError, NfsHandleScope, NfsPrincipalError, issue_handle,
-        parse_keyring, validate_authenticated_principal, validate_handle,
+        manifest_digest, parse_keyring, root_handle_digest, validate_authenticated_principal,
+        validate_handle,
     };
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use filebelt_vfs_protocol::NfsExportManifestEntry;
     use uuid::Uuid;
+
+    fn manifest_entry(export_id: u64, generation: u64, handle: u8) -> NfsExportManifestEntry {
+        let drive_id = Uuid::from_u128(u128::from(export_id) + 100);
+        NfsExportManifestEntry {
+            export_id,
+            drive_id: drive_id.to_string(),
+            export_path: format!("/filebelt/{drive_id}"),
+            generation,
+            root_handle: vec![handle; HANDLE_BYTES],
+            read_only: false,
+        }
+    }
 
     fn keyring(current_generation: u32, current: u8, previous: Option<(u32, u8)>) -> String {
         let previous = previous.map_or_else(
@@ -309,7 +375,6 @@ mod tests {
 
     #[test]
     fn opaque_handle_round_trips_for_current_or_previous_key_only() {
-        assert!(HANDLE_BYTES <= 128);
         let old = parse_keyring(&keyring(2, 2, None), 2).unwrap();
         let expected = scope();
         let handle = issue_handle(expected, old.current());
@@ -381,5 +446,43 @@ mod tests {
                 Err(NfsPrincipalError::Invalid)
             );
         }
+    }
+
+    #[test]
+    fn reconciliation_digests_bind_order_generations_and_root_handles() {
+        let tenant_id = Uuid::from_u128(9);
+        let first = manifest_entry(7, 3, 1);
+        let second = manifest_entry(11, 4, 2);
+        let baseline = manifest_digest(tenant_id, 5, 6, &[first.clone(), second.clone()]);
+        assert_eq!(
+            baseline,
+            [
+                0x61, 0x49, 0xf3, 0x5f, 0x85, 0xdd, 0x9b, 0xe4, 0x56, 0x74, 0xc9, 0x27, 0xf0, 0x6e,
+                0x5b, 0xba, 0x7e, 0x34, 0xb7, 0x5e, 0x6b, 0x96, 0xa4, 0x13, 0x18, 0xc4, 0xc4, 0x1c,
+                0x3a, 0xc2, 0x90, 0x67,
+            ],
+            "the VFS and adapter must share one canonical manifest encoding"
+        );
+        assert_eq!(
+            root_handle_digest(&first.root_handle),
+            [
+                0xb9, 0xc5, 0x0a, 0xc8, 0xbc, 0xb3, 0x22, 0x61, 0x7c, 0xfb, 0x23, 0xd5, 0x29, 0xf2,
+                0xbb, 0xd8, 0xf1, 0x40, 0x3e, 0xab, 0x60, 0x0f, 0x0b, 0xb0, 0xad, 0x46, 0xeb, 0x61,
+                0x04, 0x52, 0x4f, 0x83,
+            ],
+            "the VFS and adapter must share one canonical root-handle encoding"
+        );
+        assert_ne!(
+            baseline,
+            manifest_digest(tenant_id, 5, 7, &[first.clone(), second.clone()])
+        );
+        assert_ne!(
+            baseline,
+            manifest_digest(tenant_id, 5, 6, &[second, first.clone()])
+        );
+        assert_ne!(
+            root_handle_digest(&first.root_handle),
+            root_handle_digest(&[9])
+        );
     }
 }

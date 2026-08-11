@@ -725,8 +725,9 @@ const fn request_class(operation: &vfs_request::Operation) -> RequestClass {
         vfs_request::Operation::Authenticate(_)
         | vfs_request::Operation::NfsAuthenticate(_)
         | vfs_request::Operation::GatewayHello(_) => RequestClass::Bootstrap,
-        vfs_request::Operation::GatewayDrain(_)
-        | vfs_request::Operation::GatewayReconcile(_) => RequestClass::GatewayControl,
+        vfs_request::Operation::GatewayDrain(_) | vfs_request::Operation::GatewayReconcile(_) => {
+            RequestClass::GatewayControl
+        }
         _ => RequestClass::Session,
     }
 }

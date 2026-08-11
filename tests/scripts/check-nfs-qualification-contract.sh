@@ -30,8 +30,8 @@ assert_contains "${workflow}" "contents: read"
 if grep -Eq 'packages: write|contents: write|id-token: write|attestations: write' "${workflow}"; then
   die "read-only qualification workflow requests publication authority"
 fi
-assert_contains "${workflow}" "runner: ubuntu-24.04"
-assert_contains "${workflow}" "runner: ubuntu-24.04-arm"
+assert_contains "${workflow}" "runner: ubuntu-26.04"
+assert_contains "${workflow}" "runner: ubuntu-26.04-arm"
 assert_contains "${workflow}" "runner: \${{ inputs.native_riscv64_runner }}"
 assert_contains "${native}" 'expected_machine=riscv64'
 assert_contains "${native}" 'QEMU binfmt registration is forbidden'

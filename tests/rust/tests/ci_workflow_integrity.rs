@@ -103,7 +103,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             );
         }
     }
-    assert!(checks.contains("ubuntu-24.04-arm"));
+    assert!(checks.contains("ubuntu-26.04-arm"));
     assert!(checks.contains("linux/amd64"));
     assert!(checks.contains("linux/arm64"));
     assert!(checks.contains("linux/riscv64"));

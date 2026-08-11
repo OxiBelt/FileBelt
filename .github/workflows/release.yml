@@ -17,15 +17,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/amd64
             artifact-arch: amd64
             qemu-arguments: ""
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux/arm64
             artifact-arch: arm64
             qemu-arguments: ""
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/riscv64
             artifact-arch: riscv64
             qemu-arguments: "--qemu-mode rootless"
@@ -75,7 +75,7 @@ jobs:
 
   normalized-rebuild:
     name: Verify normalized AMD64 rebuild
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 150
     steps:
       - name: Check out the signed tag
@@ -120,7 +120,7 @@ jobs:
 
   package-assets:
     name: Validate and package Helm/admin assets
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Check out the signed tag
@@ -150,7 +150,7 @@ jobs:
   phase3-acceptance:
     name: Exercise exact AMD64 release archives
     needs: image-platforms
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - name: Check out the signed tag
@@ -167,7 +167,7 @@ jobs:
 
   kubernetes-compatibility:
     name: Kubernetes ${{ matrix.kubernetes }} compatibility
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -206,7 +206,7 @@ jobs:
     name: Require every release check
     if: always()
     needs: [image-platforms, normalized-rebuild, package-assets, phase3-acceptance, kubernetes-compatibility]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require successful immutable inputs
@@ -226,7 +226,7 @@ jobs:
   promote:
     name: Promote validated immutable subjects
     needs: release-gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     environment: release
     permissions:

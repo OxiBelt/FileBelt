@@ -51,7 +51,7 @@ permissions:
 jobs:
   contract:
     name: Validate fail-closed qualification contract
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -68,10 +68,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/amd64
             artifact-arch: amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux/arm64
             artifact-arch: arm64
           - runner: ${{ inputs.native_riscv64_runner }}
@@ -181,7 +181,7 @@ jobs:
     name: Preserve the NFS publication boundary
     if: always() && github.event_name == 'workflow_dispatch'
     needs: [contract, native-builds, clients]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require every executable qualification tier

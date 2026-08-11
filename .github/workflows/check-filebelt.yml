@@ -17,7 +17,7 @@ permissions:
 jobs:
   source-structure:
     name: Source structure
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -53,7 +53,7 @@ jobs:
 
   rust:
     name: Rust workspace
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -69,7 +69,7 @@ jobs:
 
   rust-boundaries:
     name: Rust boundaries
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -96,7 +96,7 @@ jobs:
 
   supply-chain:
     name: Rust supply chain
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -115,7 +115,7 @@ jobs:
 
   node:
     name: Node workspace
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -146,7 +146,7 @@ jobs:
 
   protocol:
     name: Protocol policy
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -171,7 +171,7 @@ jobs:
   dco:
     name: DCO
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Check out full history
@@ -188,7 +188,7 @@ jobs:
     name: Bootstrap gate
     if: always()
     needs: [source-structure, rust, rust-boundaries, supply-chain, node, protocol, dco]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require every bootstrap job
@@ -215,10 +215,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-26.04
             platform: linux/amd64
             artifact-arch: amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-26.04-arm
             platform: linux/arm64
             artifact-arch: arm64
     runs-on: ${{ matrix.runner }}
@@ -265,7 +265,7 @@ jobs:
   phase1-images-riscv64:
     name: Phase 1 images (linux/riscv64)
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - name: Check out source
@@ -311,7 +311,7 @@ jobs:
     name: Phase 1 gate
     if: always()
     needs: [bootstrap-gate, phase1-images-native, phase1-images-riscv64]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require the complete Phase 1 matrix
@@ -333,7 +333,7 @@ jobs:
     name: Kubernetes v1.36.1 compatibility (PR)
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name == 'pull_request' }}
     needs: bootstrap-gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -367,7 +367,7 @@ jobs:
     name: Kubernetes ${{ matrix.kubernetes }} compatibility
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -414,7 +414,7 @@ jobs:
     name: Kubernetes NetworkPolicy (Calico)
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' }}
     needs: bootstrap-gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -451,7 +451,7 @@ jobs:
     name: Kubernetes NetworkPolicy (Cilium)
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -493,7 +493,7 @@ jobs:
       - phase3-kind-supported
       - phase3-network-calico
       - phase3-network-cilium
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require the event-appropriate Kubernetes matrix

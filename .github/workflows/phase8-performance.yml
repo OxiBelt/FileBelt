@@ -27,7 +27,7 @@ permissions:
 jobs:
   evidence-contract:
     name: Validate ${{ github.event.inputs.cadence || 'change-smoke' }} evidence contract
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Check out source

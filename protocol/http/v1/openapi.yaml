@@ -734,6 +734,12 @@ paths:
             type: integer
             format: int64
             minimum: 1
+        - name: confirm_tenant
+          in: query
+          required: true
+          description: Exact case-sensitive configured tenant slug typed by the administrator for this mutation.
+          schema:
+            $ref: "#/components/schemas/NfsTenantConfirmation"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/Csrf"
         - $ref: "#/components/parameters/Origin"
@@ -741,6 +747,67 @@ paths:
       responses:
         "204":
           description: Mapping and active NFS sessions were revoked and generation-fenced.
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/conflicts:
+    get:
+      operationId: listNfsWriteConflicts
+      description: Lists only the recently reauthenticated administrator's unresolved, unexpired retained NFS write conflicts. No payload locator or GSS material is exposed.
+      responses:
+        "200":
+          description: Current retained conflicts owned by the authenticated principal.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NfsWriteConflict"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy:
+    post:
+      operationId: copyNfsWriteConflict
+      description: Copies one retained conflict into a new file after exact CREATE_CHILD authorization and generation fencing on the selected parent.
+      parameters:
+        - $ref: "#/components/parameters/NfsConflictId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyNfsWriteConflict"
+      responses:
+        "201":
+          description: Retained bytes were published as a new immutable file version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsWriteConflictCopy"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/conflicts/{conflict_id}:
+    delete:
+      operationId: discardNfsWriteConflict
+      description: Discards one retained conflict owned by the authenticated principal. Its inventory row remains until the fixed retention deadline.
+      parameters:
+        - $ref: "#/components/parameters/NfsConflictId"
+        - name: confirm_tenant
+          in: query
+          required: true
+          description: Exact case-sensitive configured tenant slug typed by the administrator for this mutation.
+          schema:
+            $ref: "#/components/schemas/NfsTenantConfirmation"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Conflict discard and cleanup admission are durable.
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents:
@@ -2228,6 +2295,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/UuidV4"
+    NfsConflictId:
+      name: conflict_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
     VersionId:
       name: version_id
       in: path
@@ -3253,8 +3326,10 @@ components:
     UpsertNfsPrincipalMapping:
       type: object
       additionalProperties: false
-      required: [principal_id, kerberos_principal, projected_uid, projected_gid, allowed_drive_ids]
+      required: [confirm_tenant, principal_id, kerberos_principal, projected_uid, projected_gid, allowed_drive_ids]
       properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
         principal_id:
           $ref: "#/components/schemas/UuidV4"
         kerberos_principal:
@@ -3314,6 +3389,14 @@ components:
           maximum: 4294967294
           not:
             const: 65534
+        allowed_drive_ids:
+          description: Present on current responses; absent only when replaying an unexpired legacy idempotency receipt that predates this authority projection.
+          type: array
+          minItems: 1
+          maxItems: 256
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/UuidV4"
         generation:
           type: integer
           format: int64
@@ -3321,8 +3404,15 @@ components:
     NfsAdminOverview:
       type: object
       additionalProperties: false
-      required: [feature, exports, posix_groups, mappings]
+      required: [tenant_slug, realm, feature, exports, posix_groups, mappings]
       properties:
+        tenant_slug:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
+        realm:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[A-Z0-9][A-Z0-9.-]{0,254}$'
         feature:
           $ref: "#/components/schemas/NfsFeature"
         exports:
@@ -3340,11 +3430,19 @@ components:
     NfsFeatureState:
       type: string
       enum: [disabled, preflight, active, draining]
+    NfsTenantConfirmation:
+      type: string
+      minLength: 1
+      maxLength: 63
+      pattern: '^[a-z0-9-]+$'
+      description: Exact case-sensitive configured tenant slug. The server compares this value without trimming, normalization, or case folding before idempotency replay.
     NfsFeatureTransition:
       type: object
       additionalProperties: false
-      required: [target_state, expected_generation]
+      required: [confirm_tenant, target_state, expected_generation]
       properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
         target_state:
           $ref: "#/components/schemas/NfsFeatureState"
         expected_generation:
@@ -3399,8 +3497,10 @@ components:
     NfsExportRegistration:
       type: object
       additionalProperties: false
-      required: [drive_id, export_id]
+      required: [confirm_tenant, drive_id, export_id]
       properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
         drive_id:
           $ref: "#/components/schemas/UuidV4"
         export_id:
@@ -3410,8 +3510,10 @@ components:
     NfsExportTransition:
       type: object
       additionalProperties: false
-      required: [target_state, expected_generation]
+      required: [confirm_tenant, target_state, expected_generation]
       properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
         target_state:
           type: string
           enum: [disabled, active, draining]
@@ -3460,8 +3562,10 @@ components:
     NfsPosixGroupRegistration:
       type: object
       additionalProperties: false
-      required: [group_id, posix_name, projected_gid]
+      required: [confirm_tenant, group_id, posix_name, projected_gid]
       properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
         group_id:
           $ref: "#/components/schemas/UuidV4"
         posix_name:
@@ -3495,6 +3599,95 @@ components:
           maximum: 4294967294
           not:
             const: 65534
+    NfsWriteConflict:
+      type: object
+      additionalProperties: false
+      required: [id, write_session_id, drive_id, source_node_id, base_version_id, expected_head_version_id, observed_head_version_id, logical_size_bytes, state, conflict_copy_node_id, conflict_copy_version_id, created_at, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        write_session_id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        source_node_id:
+          $ref: "#/components/schemas/UuidV4"
+        base_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        expected_head_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        observed_head_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        logical_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        state:
+          type: string
+          const: retained
+        conflict_copy_node_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        conflict_copy_version_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    CopyNfsWriteConflict:
+      type: object
+      additionalProperties: false
+      required: [confirm_tenant, drive_id, parent_id, display_name, expected_parent_generation]
+      properties:
+        confirm_tenant:
+          $ref: "#/components/schemas/NfsTenantConfirmation"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        parent_id:
+          $ref: "#/components/schemas/UuidV4"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        expected_parent_generation:
+          type: integer
+          format: int64
+          minimum: 1
+    NfsWriteConflictCopy:
+      type: object
+      additionalProperties: false
+      required: [conflict_id, drive_id, node_id, version_id, display_name, size_bytes, blake3]
+      properties:
+        conflict_id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        node_id:
+          $ref: "#/components/schemas/UuidV4"
+        version_id:
+          $ref: "#/components/schemas/UuidV4"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        blake3:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
     CreateMarkdownImportIntent:
       type: object
       additionalProperties: false

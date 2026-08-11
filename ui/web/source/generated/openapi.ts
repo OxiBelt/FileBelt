@@ -171,6 +171,57 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/admin/mounts/nfs/conflicts": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists only the recently reauthenticated administrator's unresolved, unexpired retained NFS write conflicts. No payload locator or GSS material is exposed. */
+        readonly get: operations["listNfsWriteConflicts"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/conflicts/{conflict_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Discards one retained conflict owned by the authenticated principal. Its inventory row remains until the fixed retention deadline. */
+        readonly delete: operations["discardNfsWriteConflict"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Copies one retained conflict into a new file after exact CREATE_CHILD authorization and generation fencing on the selected parent. */
+        readonly post: operations["copyNfsWriteConflict"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/admin/mounts/nfs/exports": {
         readonly parameters: {
             readonly query?: never;
@@ -1505,6 +1556,14 @@ export interface components {
             readonly room_id: components["schemas"]["UuidV4"] | null;
             readonly warning_at: string | null;
         };
+        readonly CopyNfsWriteConflict: {
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
+            readonly display_name: string;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly expected_parent_generation: number;
+            readonly parent_id: components["schemas"]["UuidV4"];
+        };
         readonly CreateAdminMcpBlockRule: {
             /** @enum {string} */
             readonly kind: "origin" | "trust_profile" | "catalog_entry" | "registration" | "capability";
@@ -2144,6 +2203,8 @@ export interface components {
             readonly feature: components["schemas"]["NfsFeature"];
             readonly mappings: readonly components["schemas"]["NfsPrincipalMapping"][];
             readonly posix_groups: readonly components["schemas"]["NfsPosixGroup"][];
+            readonly realm: string;
+            readonly tenant_slug: components["schemas"]["NfsTenantConfirmation"];
         };
         readonly NfsExport: {
             /** Format: int64 */
@@ -2161,11 +2222,13 @@ export interface components {
             readonly in_sync: boolean;
         };
         readonly NfsExportRegistration: {
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
             readonly drive_id: components["schemas"]["UuidV4"];
             /** Format: int64 */
             readonly export_id: number;
         };
         readonly NfsExportTransition: {
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
             /** Format: int64 */
             readonly expected_generation: number;
             /** @enum {string} */
@@ -2188,6 +2251,7 @@ export interface components {
         /** @enum {string} */
         readonly NfsFeatureState: "disabled" | "preflight" | "active" | "draining";
         readonly NfsFeatureTransition: {
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
             /** Format: int64 */
             readonly expected_generation: number;
             readonly target_state: components["schemas"]["NfsFeatureState"];
@@ -2199,12 +2263,15 @@ export interface components {
             readonly projected_gid: number;
         };
         readonly NfsPosixGroupRegistration: {
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
             readonly group_id: components["schemas"]["UuidV4"];
             readonly posix_name: string;
             /** Format: int64 */
             readonly projected_gid: number;
         };
         readonly NfsPrincipalMapping: {
+            /** @description Present on current responses; absent only when replaying an unexpired legacy idempotency receipt that predates this authority projection. */
+            readonly allowed_drive_ids?: readonly components["schemas"]["UuidV4"][];
             readonly credential_id: components["schemas"]["UuidV4"];
             /** Format: int64 */
             readonly generation: number;
@@ -2214,6 +2281,37 @@ export interface components {
             readonly projected_gid: number;
             /** Format: int64 */
             readonly projected_uid: number;
+        };
+        /** @description Exact case-sensitive configured tenant slug. The server compares this value without trimming, normalization, or case folding before idempotency replay. */
+        readonly NfsTenantConfirmation: string;
+        readonly NfsWriteConflict: {
+            readonly base_version_id: components["schemas"]["UuidV4"] | null;
+            readonly conflict_copy_node_id: components["schemas"]["UuidV4"] | null;
+            readonly conflict_copy_version_id: components["schemas"]["UuidV4"] | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            readonly expected_head_version_id: components["schemas"]["UuidV4"] | null;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly logical_size_bytes: number;
+            readonly observed_head_version_id: components["schemas"]["UuidV4"] | null;
+            readonly source_node_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly state: "retained";
+            readonly write_session_id: components["schemas"]["UuidV4"];
+        };
+        readonly NfsWriteConflictCopy: {
+            readonly blake3: string;
+            readonly conflict_id: components["schemas"]["UuidV4"];
+            readonly display_name: string;
+            readonly drive_id: components["schemas"]["UuidV4"];
+            readonly node_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly size_bytes: number;
+            readonly version_id: components["schemas"]["UuidV4"];
         };
         readonly Node: {
             /** Format: int64 */
@@ -2356,6 +2454,7 @@ export interface components {
         };
         readonly UpsertNfsPrincipalMapping: {
             readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
             readonly expected_generation?: number | null;
             readonly kerberos_principal: string;
             readonly principal_id: components["schemas"]["UuidV4"];
@@ -2469,6 +2568,7 @@ export interface components {
         readonly McpGrantId: components["schemas"]["UuidV4"];
         readonly MountCredentialId: components["schemas"]["UuidV4"];
         readonly MountProtocol: "smb" | "ftps";
+        readonly NfsConflictId: components["schemas"]["UuidV4"];
         readonly NodeId: components["schemas"]["UuidV4"];
         readonly Origin: string;
         readonly ParentId: components["schemas"]["UuidV4"];
@@ -3008,6 +3108,88 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly listNfsWriteConflicts: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current retained conflicts owned by the authenticated principal. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["NfsWriteConflict"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly discardNfsWriteConflict: {
+        readonly parameters: {
+            readonly query: {
+                /** @description Exact case-sensitive configured tenant slug typed by the administrator for this mutation. */
+                readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
+            };
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly conflict_id: components["parameters"]["NfsConflictId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Conflict discard and cleanup admission are durable. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly copyNfsWriteConflict: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly conflict_id: components["parameters"]["NfsConflictId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CopyNfsWriteConflict"];
+            };
+        };
+        readonly responses: {
+            /** @description Retained bytes were published as a new immutable file version. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsWriteConflictCopy"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly registerNfsExport: {
         readonly parameters: {
             readonly query?: never;
@@ -3163,6 +3345,8 @@ export interface operations {
     readonly revokeNfsPrincipalMapping: {
         readonly parameters: {
             readonly query: {
+                /** @description Exact case-sensitive configured tenant slug typed by the administrator for this mutation. */
+                readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
                 readonly expected_generation: number;
             };
             readonly header: {

@@ -18,6 +18,8 @@ import type { components, paths } from "./generated/openapi.js";
 
 type SessionResponse = components["schemas"]["Session"];
 type NfsOverviewResponse = components["schemas"]["NfsAdminOverview"];
+type NfsConflictResponse = components["schemas"]["NfsWriteConflict"];
+type NfsConflictCopyInput = Parameters<NfsAdminClient["copyConflict"]>[1];
 
 export class NfsReauthenticationRequiredError extends Error {
   constructor() {
@@ -69,20 +71,26 @@ export class HttpNfsAdminClient implements NfsAdminClient {
   }
 
   async getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot> {
-    const Result = await this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal));
-    return Snapshot(RequireData<NfsOverviewResponse>(Result));
+    const [OverviewResult, ConflictsResult] = await Promise.all([
+      this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
+      this.#Api.GET("/api/v1/admin/mounts/nfs/conflicts", SignalInit(Signal)),
+    ]);
+    return Snapshot(
+      RequireData<NfsOverviewResponse>(OverviewResult),
+      RequireData<NfsConflictResponse[]>(ConflictsResult),
+    );
   }
 
-  async transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState): Promise<void> {
+  async transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void> {
     RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/feature", {
-      body: { expected_generation: ExpectedGeneration, target_state: TargetState },
+      body: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration, target_state: TargetState },
       params: { header: await this.#mutationHeaders() },
     }));
   }
 
-  async registerExport(Input: NfsExportRegistration): Promise<void> {
+  async registerExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void> {
     RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/exports", {
-      body: { drive_id: Input.DriveId, export_id: Input.ExportId },
+      body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
       params: { header: await this.#mutationHeaders() },
     }));
   }
@@ -91,9 +99,10 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     DriveId: string,
     ExpectedGeneration: number,
     TargetState: NfsExportState,
+    ConfirmTenant: string,
   ): Promise<void> {
     RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/exports/{drive_id}", {
-      body: { expected_generation: ExpectedGeneration, target_state: TargetState },
+      body: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration, target_state: TargetState },
       params: {
         header: await this.#mutationHeaders(),
         path: { drive_id: DriveId },
@@ -101,9 +110,10 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     }));
   }
 
-  async registerPosixGroup(Input: NfsPosixGroupRegistration): Promise<void> {
+  async registerPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void> {
     RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/posix-groups", {
       body: {
+        confirm_tenant: ConfirmTenant,
         group_id: Input.GroupId,
         posix_name: Input.PosixName,
         projected_gid: Input.ProjectedGid,
@@ -112,10 +122,11 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     }));
   }
 
-  async upsertMapping(Input: NfsMappingUpsert): Promise<void> {
+  async upsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void> {
     RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/mappings", {
       body: {
         allowed_drive_ids: Input.AllowedDriveIds,
+        confirm_tenant: ConfirmTenant,
         expected_generation: Input.ExpectedGeneration,
         kerberos_principal: Input.KerberosPrincipal,
         principal_id: Input.PrincipalId,
@@ -126,12 +137,38 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     }));
   }
 
-  async revokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void> {
+  async revokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
     RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mappings/{credential_id}", {
       params: {
         header: await this.#mutationHeaders(),
         path: { credential_id: CredentialId },
-        query: { expected_generation: ExpectedGeneration },
+        query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
+      },
+    }));
+  }
+
+  async copyConflict(ConflictId: string, Input: NfsConflictCopyInput, ConfirmTenant: string): Promise<void> {
+    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy", {
+      body: {
+        confirm_tenant: ConfirmTenant,
+        display_name: Input.DisplayName,
+        drive_id: Input.DriveId,
+        expected_parent_generation: Input.ExpectedParentGeneration,
+        parent_id: Input.ParentId,
+      },
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { conflict_id: ConflictId },
+      },
+    }));
+  }
+
+  async discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void> {
+    RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}", {
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { conflict_id: ConflictId },
+        query: { confirm_tenant: ConfirmTenant },
       },
     }));
   }
@@ -150,8 +187,23 @@ export class HttpNfsAdminClient implements NfsAdminClient {
   }
 }
 
-function Snapshot(Response: NfsOverviewResponse): NfsAdminSnapshot {
+function Snapshot(Response: NfsOverviewResponse, Conflicts: NfsConflictResponse[]): NfsAdminSnapshot {
   return {
+    Conflicts: Conflicts.map((Conflict) => ({
+      BaseVersionId: Conflict.base_version_id,
+      ConflictCopyNodeId: Conflict.conflict_copy_node_id,
+      ConflictCopyVersionId: Conflict.conflict_copy_version_id,
+      CreatedAt: Conflict.created_at,
+      DriveId: Conflict.drive_id,
+      ExpectedHeadVersionId: Conflict.expected_head_version_id,
+      ExpiresAt: Conflict.expires_at,
+      Id: Conflict.id,
+      LogicalSizeBytes: Conflict.logical_size_bytes,
+      ObservedHeadVersionId: Conflict.observed_head_version_id,
+      SourceNodeId: Conflict.source_node_id,
+      State: Conflict.state,
+      WriteSessionId: Conflict.write_session_id,
+    })),
     Exports: Response.exports.map((Export) => ({
       AppliedGeneration: Export.applied_generation,
       AppliedState: Export.applied_state,
@@ -173,6 +225,7 @@ function Snapshot(Response: NfsOverviewResponse): NfsAdminSnapshot {
       State: Response.feature.state,
     },
     Mappings: Response.mappings.map((Mapping) => ({
+      ...(Mapping.allowed_drive_ids === undefined ? {} : { AllowedDriveIds: Mapping.allowed_drive_ids }),
       CredentialId: Mapping.credential_id,
       Generation: Mapping.generation,
       KerberosPrincipal: Mapping.kerberos_principal,
@@ -185,6 +238,8 @@ function Snapshot(Response: NfsOverviewResponse): NfsAdminSnapshot {
       PosixName: Group.posix_name,
       ProjectedGid: Group.projected_gid,
     })),
+    Realm: Response.realm,
+    TenantSlug: Response.tenant_slug,
   };
 }
 

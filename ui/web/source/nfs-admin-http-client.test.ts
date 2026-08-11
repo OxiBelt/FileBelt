@@ -7,6 +7,7 @@ import { HttpNfsAdminClient, NfsReauthenticationRequiredError } from "./nfs-admi
 
 const DriveId = "00000000-0000-4000-8000-000000000111";
 const CredentialId = "00000000-0000-4000-8000-000000000112";
+const ConflictId = "00000000-0000-4000-8000-000000000118";
 
 const Session = {
   csrf_token: "csrf-memory-only",
@@ -41,6 +42,7 @@ const Overview = {
     state: "draining",
   },
   mappings: [{
+    allowed_drive_ids: [DriveId],
     credential_id: CredentialId,
     generation: 2,
     kerberos_principal: "alice@EXAMPLE.TEST",
@@ -53,11 +55,30 @@ const Overview = {
     posix_name: "engineering.platform",
     projected_gid: 2001,
   }],
+  realm: "EXAMPLE.TEST",
+  tenant_slug: "acme",
 } satisfies components["schemas"]["NfsAdminOverview"];
+
+const Conflicts = [{
+  base_version_id: null,
+  conflict_copy_node_id: null,
+  conflict_copy_version_id: null,
+  created_at: "2026-08-11T00:00:00Z",
+  drive_id: DriveId,
+  expected_head_version_id: null,
+  expires_at: "2026-08-18T00:00:00Z",
+  id: ConflictId,
+  logical_size_bytes: 17,
+  observed_head_version_id: null,
+  source_node_id: "00000000-0000-4000-8000-000000000119",
+  state: "retained",
+  write_session_id: "00000000-0000-4000-8000-000000000120",
+}] satisfies components["schemas"]["NfsWriteConflict"][];
 
 class ContractServer {
   readonly Requests: Request[] = [];
   ReauthenticationRequired = false;
+  OverviewResponse: components["schemas"]["NfsAdminOverview"] = Overview;
 
   readonly fetch: typeof fetch = async (Input, Init) => {
     const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
@@ -68,11 +89,21 @@ class ContractServer {
       if (this.ReauthenticationRequired) {
         return Problem({ code: "admin.reauthentication_required", status: 403, title: "Recent tenant administrator authentication is required", type: "https://filebelt.dev/problems/admin.reauthentication_required" }, 403);
       }
-      return Json(Overview);
+      return Json(this.OverviewResponse);
     }
+    if (Url.pathname === "/api/v1/admin/mounts/nfs/conflicts" && RequestValue.method === "GET") return Json(Conflicts);
     if (Url.pathname === `/api/v1/admin/mounts/nfs/exports/${DriveId}` && RequestValue.method === "PUT") {
       return Json(Overview.exports[0]);
     }
+    if (Url.pathname === "/api/v1/admin/mounts/nfs/feature" && RequestValue.method === "PUT") return Json(Overview.feature);
+    if (Url.pathname === "/api/v1/admin/mounts/nfs/exports" && RequestValue.method === "POST") return Json(Overview.exports[0], 201);
+    if (Url.pathname === "/api/v1/admin/mounts/nfs/posix-groups" && RequestValue.method === "POST") return Json(Overview.posix_groups[0], 201);
+    if (Url.pathname === "/api/v1/admin/mounts/nfs/mappings" && RequestValue.method === "POST") return Json(Overview.mappings[0], 201);
+    if (Url.pathname === `/api/v1/admin/mounts/nfs/mappings/${CredentialId}` && RequestValue.method === "DELETE") return new Response(null, { status: 204 });
+    if (Url.pathname === `/api/v1/admin/mounts/nfs/conflicts/${ConflictId}/copy` && RequestValue.method === "POST") {
+      return Json({ blake3: "00".repeat(32), conflict_id: ConflictId, display_name: "recovered.txt", drive_id: DriveId, node_id: "00000000-0000-4000-8000-000000000121", size_bytes: 17, version_id: "00000000-0000-4000-8000-000000000122" }, 201);
+    }
+    if (Url.pathname === `/api/v1/admin/mounts/nfs/conflicts/${ConflictId}` && RequestValue.method === "DELETE") return new Response(null, { status: 204 });
     return new Response(null, { status: 404 });
   };
 }
@@ -95,19 +126,62 @@ describe("HttpNfsAdminClient", () => {
     expect(Result.Feature.ManifestApplied).toBe(false);
     expect(Result.Exports[0]).toMatchObject({ AppliedGeneration: 1, DesiredGeneration: 2, InSync: false });
     expect(Result.Mappings[0]?.KerberosPrincipal).toBe("alice@EXAMPLE.TEST");
+    expect(Result.Mappings[0]?.AllowedDriveIds).toEqual([DriveId]);
+    expect(Result.Conflicts[0]).toMatchObject({ Id: ConflictId, LogicalSizeBytes: 17, State: "retained" });
+    expect(Result.Realm).toBe("EXAMPLE.TEST");
+    expect(Result.TenantSlug).toBe("acme");
+  });
+
+  it("preserves an absent legacy mapping drive projection as unknown", async () => {
+    const Server = new ContractServer();
+    Server.OverviewResponse = {
+      ...Overview,
+      mappings: [{
+        credential_id: CredentialId,
+        generation: 2,
+        kerberos_principal: "legacy@EXAMPLE.TEST",
+        principal_id: "00000000-0000-4000-8000-000000000116",
+        projected_gid: 2001,
+        projected_uid: 1001,
+      }],
+    };
+    const Client = new HttpNfsAdminClient(Server.fetch, "https://filebelt.example.test");
+
+    const Result = await Client.getOverview();
+
+    expect(Result.Mappings[0]?.AllowedDriveIds).toBeUndefined();
   });
 
   it("generation-fences an export transition with memory-only CSRF and idempotency headers", async () => {
     const Server = new ContractServer();
     const Client = new HttpNfsAdminClient(Server.fetch, "https://filebelt.example.test");
 
-    await Client.transitionExport(DriveId, 2, "draining");
+    await Client.transitionExport(DriveId, 2, "draining", "acme");
 
     const RequestValue = Server.Requests.at(-1);
     expect(RequestValue?.headers.get("X-FileBelt-Csrf")).toBe("csrf-memory-only");
     expect(RequestValue?.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(RequestValue?.url).not.toContain("csrf-memory-only");
-    expect(await RequestValue?.clone().json()).toEqual({ expected_generation: 2, target_state: "draining" });
+    expect(await RequestValue?.clone().json()).toEqual({ confirm_tenant: "acme", expected_generation: 2, target_state: "draining" });
+  });
+
+  it("carries the exact tenant confirmation on every NFS mutation", async () => {
+    const Server = new ContractServer();
+    const Client = new HttpNfsAdminClient(Server.fetch, "https://filebelt.example.test");
+
+    await Client.transitionFeature(3, "draining", "Acme");
+    await Client.registerExport({ DriveId, ExportId: 7 }, "Acme");
+    await Client.registerPosixGroup({ GroupId: "00000000-0000-4000-8000-000000000117", PosixName: "engineering.platform", ProjectedGid: 2001 }, "Acme");
+    await Client.upsertMapping({ AllowedDriveIds: [DriveId], ExpectedGeneration: null, KerberosPrincipal: "alice@EXAMPLE.TEST", PrincipalId: "00000000-0000-4000-8000-000000000116", ProjectedGid: 2001, ProjectedUid: 1001 }, "Acme");
+    await Client.revokeMapping(CredentialId, 2, "Acme");
+    await Client.copyConflict(ConflictId, { DisplayName: "recovered.txt", DriveId, ExpectedParentGeneration: 9, ParentId: "00000000-0000-4000-8000-000000000123" }, "Acme");
+    await Client.discardConflict(ConflictId, "Acme");
+
+    const Mutations = Server.Requests.filter((RequestValue) => !["GET"].includes(RequestValue.method));
+    const JsonBodies = await Promise.all(Mutations.filter((RequestValue) => RequestValue.method !== "DELETE").map((RequestValue) => RequestValue.clone().json()));
+    expect(JsonBodies.every((Body: unknown) => ExternalValue(Body, "confirm_tenant") === "Acme")).toBe(true);
+    const DeleteUrls = Mutations.filter((RequestValue) => RequestValue.method === "DELETE").map((RequestValue) => new URL(RequestValue.url));
+    expect(DeleteUrls.every((Url) => Url.searchParams.get("confirm_tenant") === "Acme")).toBe(true);
   });
 
   it("maps the stable tenant-admin recent-authentication problem", async () => {
@@ -118,3 +192,7 @@ describe("HttpNfsAdminClient", () => {
     await expect(Client.getOverview()).rejects.toBeInstanceOf(NfsReauthenticationRequiredError);
   });
 });
+
+function ExternalValue(Value: unknown, Key: string): unknown {
+  return typeof Value === "object" && Value !== null ? (Value as Record<string, unknown>)[Key] : undefined;
+}

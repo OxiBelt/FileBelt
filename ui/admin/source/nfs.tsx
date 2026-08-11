@@ -39,6 +39,7 @@ export interface NfsPosixGroupView {
 }
 
 export interface NfsMappingView {
+  AllowedDriveIds?: readonly string[];
   CredentialId: string;
   Generation: number;
   KerberosPrincipal: string;
@@ -47,11 +48,30 @@ export interface NfsMappingView {
   ProjectedUid: number;
 }
 
+export interface NfsConflictView {
+  BaseVersionId: string | null;
+  ConflictCopyNodeId: string | null;
+  ConflictCopyVersionId: string | null;
+  CreatedAt: string;
+  DriveId: string;
+  ExpectedHeadVersionId: string | null;
+  ExpiresAt: string;
+  Id: string;
+  LogicalSizeBytes: number;
+  ObservedHeadVersionId: string | null;
+  SourceNodeId: string;
+  State: "retained";
+  WriteSessionId: string;
+}
+
 export interface NfsAdminSnapshot {
+  Conflicts: readonly NfsConflictView[];
   Exports: readonly NfsExportView[];
   Feature: NfsFeatureView;
   Mappings: readonly NfsMappingView[];
   PosixGroups: readonly NfsPosixGroupView[];
+  Realm: string;
+  TenantSlug: string;
 }
 
 export interface NfsExportRegistration {
@@ -74,14 +94,23 @@ export interface NfsMappingUpsert {
   ProjectedUid: number;
 }
 
+export interface NfsConflictCopy {
+  DisplayName: string;
+  DriveId: string;
+  ExpectedParentGeneration: number;
+  ParentId: string;
+}
+
 export interface NfsAdminClient {
   getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot>;
-  registerExport(Input: NfsExportRegistration): Promise<void>;
-  registerPosixGroup(Input: NfsPosixGroupRegistration): Promise<void>;
-  revokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void>;
-  transitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState): Promise<void>;
-  transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState): Promise<void>;
-  upsertMapping(Input: NfsMappingUpsert): Promise<void>;
+  copyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
+  discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
+  registerExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void>;
+  registerPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void>;
+  revokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
+  transitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState, ConfirmTenant: string): Promise<void>;
+  transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void>;
+  upsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void>;
 }
 
 export class NfsReauthenticationRequiredError extends Error {
@@ -183,12 +212,14 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
       {ReauthenticationRequired ? <ReauthenticationNotice /> : null}
       <NfsAdminOverviewView
         Busy={Busy}
-        OnRegisterExport={(Input) => Mutate(() => Client.registerExport(Input), Strings.nfsExportRegistered)}
-        OnRegisterPosixGroup={(Input) => Mutate(() => Client.registerPosixGroup(Input), Strings.nfsGroupRegistered)}
-        OnRevokeMapping={(CredentialId, Generation) => Mutate(() => Client.revokeMapping(CredentialId, Generation), Strings.nfsMappingRevoked)}
-        OnTransitionExport={(DriveId, Generation, State) => Mutate(() => Client.transitionExport(DriveId, Generation, State), Strings.nfsExportTransitioned)}
-        OnTransitionFeature={(Generation, State) => Mutate(() => Client.transitionFeature(Generation, State), Strings.nfsFeatureTransitioned)}
-        OnUpsertMapping={(Input) => Mutate(() => Client.upsertMapping(Input), Strings.nfsMappingSaved)}
+        OnCopyConflict={(ConflictId, Input, ConfirmTenant) => Mutate(() => Client.copyConflict(ConflictId, Input, ConfirmTenant), Strings.nfsConflictCopied)}
+        OnDiscardConflict={(ConflictId, ConfirmTenant) => Mutate(() => Client.discardConflict(ConflictId, ConfirmTenant), Strings.nfsConflictDiscarded)}
+        OnRegisterExport={(Input, ConfirmTenant) => Mutate(() => Client.registerExport(Input, ConfirmTenant), Strings.nfsExportRegistered)}
+        OnRegisterPosixGroup={(Input, ConfirmTenant) => Mutate(() => Client.registerPosixGroup(Input, ConfirmTenant), Strings.nfsGroupRegistered)}
+        OnRevokeMapping={(CredentialId, Generation, ConfirmTenant) => Mutate(() => Client.revokeMapping(CredentialId, Generation, ConfirmTenant), Strings.nfsMappingRevoked)}
+        OnTransitionExport={(DriveId, Generation, State, ConfirmTenant) => Mutate(() => Client.transitionExport(DriveId, Generation, State, ConfirmTenant), Strings.nfsExportTransitioned)}
+        OnTransitionFeature={(Generation, State, ConfirmTenant) => Mutate(() => Client.transitionFeature(Generation, State, ConfirmTenant), Strings.nfsFeatureTransitioned)}
+        OnUpsertMapping={(Input, ConfirmTenant) => Mutate(() => Client.upsertMapping(Input, ConfirmTenant), Strings.nfsMappingSaved)}
         Snapshot={Snapshot}
       />
       <div aria-atomic="true" aria-live="polite" className="fb-sr-only">{Announcement}</div>
@@ -198,17 +229,21 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
 
 interface OverviewProps {
   Busy: boolean;
-  OnRegisterExport(Input: NfsExportRegistration): Promise<void>;
-  OnRegisterPosixGroup(Input: NfsPosixGroupRegistration): Promise<void>;
-  OnRevokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void>;
-  OnTransitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState): Promise<void>;
-  OnTransitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState): Promise<void>;
-  OnUpsertMapping(Input: NfsMappingUpsert): Promise<void>;
+  OnCopyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
+  OnDiscardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
+  OnRegisterExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void>;
+  OnRegisterPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void>;
+  OnRevokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
+  OnTransitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState, ConfirmTenant: string): Promise<void>;
+  OnTransitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void>;
+  OnUpsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void>;
   Snapshot: NfsAdminSnapshot;
 }
 
 export function NfsAdminOverviewView({
   Busy,
+  OnCopyConflict,
+  OnDiscardConflict,
   OnRegisterExport,
   OnRegisterPosixGroup,
   OnRevokeMapping,
@@ -217,7 +252,15 @@ export function NfsAdminOverviewView({
   OnUpsertMapping,
   Snapshot,
 }: OverviewProps): ReactNode {
+  const [TenantConfirmation, SetTenantConfirmation] = useState("");
   const Feature = Snapshot.Feature;
+  const TenantConfirmed = TenantConfirmation === Snapshot.TenantSlug;
+  const ConfirmedMutation = async (Operation: (Confirmation: string) => Promise<void>): Promise<void> => {
+    if (!TenantConfirmed) return;
+    const Confirmation = TenantConfirmation;
+    SetTenantConfirmation("");
+    await Operation(Confirmation);
+  };
   return (
     <section aria-labelledby="nfs-admin-heading" className="fb-nfs-admin">
       <header className="fb-nfs-heading">
@@ -231,6 +274,21 @@ export function NfsAdminOverviewView({
         </Badge>
       </header>
 
+      <section aria-labelledby="nfs-tenant-confirmation-heading" className="fb-nfs-card">
+        <h3 id="nfs-tenant-confirmation-heading">{Strings.nfsTenantConfirmation}</h3>
+        <label htmlFor="nfs-tenant-confirmation">{Strings.nfsTenantConfirmationLabel(Snapshot.TenantSlug)}</label>
+        <Input
+          aria-describedby="nfs-tenant-confirmation-help"
+          autoComplete="off"
+          disabled={Busy}
+          id="nfs-tenant-confirmation"
+          onChange={(Ignored, Data) => SetTenantConfirmation(Data.value)}
+          spellCheck={false}
+          value={TenantConfirmation}
+        />
+        <p className="fb-muted" id="nfs-tenant-confirmation-help">{Strings.nfsTenantConfirmationHelp}</p>
+      </section>
+
       <section aria-labelledby="nfs-feature-heading" className="fb-nfs-card">
         <div className="fb-nfs-card-heading">
           <div><h3 id="nfs-feature-heading">{Strings.nfsFeature}</h3><p className="fb-muted">{Strings.nfsFeatureHelp}</p></div>
@@ -243,12 +301,12 @@ export function NfsAdminOverviewView({
           <Generation Label={Strings.nfsRestoreGeneration} Value={Feature.RestoreGeneration} />
           <div><dt>{Strings.nfsAppliedGateway}</dt><dd><bdi dir="auto">{Feature.AppliedGatewayId ?? Strings.none}</bdi>{Feature.AppliedGatewayEpoch === null ? null : ` · ${Strings.nfsEpoch} ${Feature.AppliedGatewayEpoch}`}</dd></div>
         </dl>
-        <FeatureTransitionControls Busy={Busy} Feature={Feature} OnTransition={OnTransitionFeature} />
+        <FeatureTransitionControls Busy={Busy} Feature={Feature} MutationEnabled={TenantConfirmed} OnTransition={(Generation, State) => ConfirmedMutation((Confirmation) => OnTransitionFeature(Generation, State, Confirmation))} />
       </section>
 
       <div className="fb-nfs-grid">
-        <ExportRegistrationForm Busy={Busy} OnRegister={OnRegisterExport} />
-        <PosixGroupRegistrationForm Busy={Busy} OnRegister={OnRegisterPosixGroup} />
+        <ExportRegistrationForm Busy={Busy} MutationEnabled={TenantConfirmed} OnRegister={(Input) => ConfirmedMutation((Confirmation) => OnRegisterExport(Input, Confirmation))} />
+        <PosixGroupRegistrationForm Busy={Busy} MutationEnabled={TenantConfirmed} OnRegister={(Input) => ConfirmedMutation((Confirmation) => OnRegisterPosixGroup(Input, Confirmation))} />
       </div>
 
       <section aria-labelledby="nfs-exports-heading" className="fb-nfs-section">
@@ -266,7 +324,7 @@ export function NfsAdminOverviewView({
                 <div><dt>{Strings.nfsAppliedState}</dt><dd>{Export.AppliedState}</dd></div>
                 <Generation Label={Strings.nfsAppliedGeneration} Value={Export.AppliedGeneration} />
               </dl>
-              <ExportTransitionControls Busy={Busy} Export={Export} FeatureState={Feature.State} OnTransition={OnTransitionExport} />
+              <ExportTransitionControls Busy={Busy} Export={Export} FeatureState={Feature.State} MutationEnabled={TenantConfirmed} OnTransition={(DriveId, Generation, State) => ConfirmedMutation((Confirmation) => OnTransitionExport(DriveId, Generation, State, Confirmation))} />
             </article>
           ))}
           {Snapshot.Exports.length === 0 ? <p>{Strings.nfsNoExports}</p> : null}
@@ -281,15 +339,32 @@ export function NfsAdminOverviewView({
         </div>
       </section>
 
-      <MappingForm Busy={Busy} Exports={Snapshot.Exports} OnUpsert={OnUpsertMapping} />
+      <MappingForm Busy={Busy} Exports={Snapshot.Exports} MutationEnabled={TenantConfirmed} OnUpsert={(Input) => ConfirmedMutation((Confirmation) => OnUpsertMapping(Input, Confirmation))} Realm={Snapshot.Realm} />
 
       <section aria-labelledby="nfs-mappings-heading" className="fb-nfs-section">
         <div><h3 id="nfs-mappings-heading">{Strings.nfsMappings}</h3><p className="fb-muted">{Strings.nfsMappingsHelp}</p></div>
         <div className="fb-card-list" role="list">
           {Snapshot.Mappings.map((Mapping) => (
-            <MappingCard Busy={Busy} key={Mapping.CredentialId} Mapping={Mapping} OnRevoke={OnRevokeMapping} />
+            <MappingCard Busy={Busy} key={Mapping.CredentialId} Mapping={Mapping} MutationEnabled={TenantConfirmed} OnRevoke={(CredentialId, Generation) => ConfirmedMutation((Confirmation) => OnRevokeMapping(CredentialId, Generation, Confirmation))} />
           ))}
           {Snapshot.Mappings.length === 0 ? <p>{Strings.nfsNoMappings}</p> : null}
+        </div>
+      </section>
+
+      <section aria-labelledby="nfs-conflicts-heading" className="fb-nfs-section">
+        <div><h3 id="nfs-conflicts-heading">{Strings.nfsConflicts}</h3><p className="fb-muted">{Strings.nfsConflictsHelp}</p></div>
+        <div className="fb-card-list" role="list">
+          {Snapshot.Conflicts.map((Conflict) => (
+            <ConflictCard
+              Busy={Busy}
+              Conflict={Conflict}
+              key={Conflict.Id}
+              MutationEnabled={TenantConfirmed}
+              OnCopy={(Input) => ConfirmedMutation((Confirmation) => OnCopyConflict(Conflict.Id, Input, Confirmation))}
+              OnDiscard={() => ConfirmedMutation((Confirmation) => OnDiscardConflict(Conflict.Id, Confirmation))}
+            />
+          ))}
+          {Snapshot.Conflicts.length === 0 ? <p>{Strings.nfsNoConflicts}</p> : null}
         </div>
       </section>
     </section>
@@ -304,9 +379,10 @@ function Generation({ Label, Value }: { Label: string; Value: number }): ReactNo
   return <div><dt>{Label}</dt><dd>{Value}</dd></div>;
 }
 
-function FeatureTransitionControls({ Busy, Feature, OnTransition }: {
+function FeatureTransitionControls({ Busy, Feature, MutationEnabled, OnTransition }: {
   Busy: boolean;
   Feature: NfsFeatureView;
+  MutationEnabled: boolean;
   OnTransition(ExpectedGeneration: number, TargetState: NfsFeatureState): Promise<void>;
 }): ReactNode {
   const [Confirmed, SetConfirmed] = useState(false);
@@ -319,7 +395,7 @@ function FeatureTransitionControls({ Busy, Feature, OnTransition }: {
         {Transitions.map((State) => {
           const RequiresConfirmation = State !== "preflight";
           return (
-            <Button appearance={State === "active" ? "primary" : "secondary"} disabled={Busy || (RequiresConfirmation && !Confirmed)} key={State} onClick={() => { if (RequiresConfirmation) SetConfirmed(false); void OnTransition(Feature.Generation, State); }}>
+            <Button appearance={State === "active" ? "primary" : "secondary"} disabled={Busy || !MutationEnabled || (RequiresConfirmation && !Confirmed)} key={State} onClick={() => { if (RequiresConfirmation) SetConfirmed(false); void OnTransition(Feature.Generation, State); }}>
               {Strings.nfsTransitionTo(State)}
             </Button>
           );
@@ -329,10 +405,11 @@ function FeatureTransitionControls({ Busy, Feature, OnTransition }: {
   );
 }
 
-function ExportTransitionControls({ Busy, Export, FeatureState, OnTransition }: {
+function ExportTransitionControls({ Busy, Export, FeatureState, MutationEnabled, OnTransition }: {
   Busy: boolean;
   Export: NfsExportView;
   FeatureState: NfsFeatureState;
+  MutationEnabled: boolean;
   OnTransition(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState): Promise<void>;
 }): ReactNode {
   const [Confirmed, SetConfirmed] = useState(false);
@@ -346,7 +423,7 @@ function ExportTransitionControls({ Busy, Export, FeatureState, OnTransition }: 
         {Transitions.map((State) => {
           const RequiresConfirmation = State === "draining" || State === "disabled";
           return (
-            <Button appearance={State === "active" ? "primary" : "secondary"} disabled={Busy || (RequiresConfirmation && !Confirmed)} key={State} onClick={() => { if (RequiresConfirmation) SetConfirmed(false); void OnTransition(Export.DriveId, Export.DesiredGeneration, State); }}>
+            <Button appearance={State === "active" ? "primary" : "secondary"} disabled={Busy || !MutationEnabled || (RequiresConfirmation && !Confirmed)} key={State} onClick={() => { if (RequiresConfirmation) SetConfirmed(false); void OnTransition(Export.DriveId, Export.DesiredGeneration, State); }}>
               {Strings.nfsTransitionTo(State)}
             </Button>
           );
@@ -356,11 +433,12 @@ function ExportTransitionControls({ Busy, Export, FeatureState, OnTransition }: 
   );
 }
 
-function ExportRegistrationForm({ Busy, OnRegister }: { Busy: boolean; OnRegister(Input: NfsExportRegistration): Promise<void> }): ReactNode {
+function ExportRegistrationForm({ Busy, MutationEnabled, OnRegister }: { Busy: boolean; MutationEnabled: boolean; OnRegister(Input: NfsExportRegistration): Promise<void> }): ReactNode {
   const [DriveId, SetDriveId] = useState("");
   const [ExportId, SetExportId] = useState("");
   const Submit = (Event: FormEvent): void => {
     Event.preventDefault();
+    if (!MutationEnabled) return;
     const ParsedExportId = PositiveInteger(ExportId);
     if (ParsedExportId === null) return;
     void OnRegister({ DriveId: DriveId.trim(), ExportId: ParsedExportId });
@@ -370,17 +448,18 @@ function ExportRegistrationForm({ Busy, OnRegister }: { Busy: boolean; OnRegiste
       <div><h3 id="nfs-register-export-heading">{Strings.nfsRegisterExport}</h3><p className="fb-muted">{Strings.nfsRegisterExportHelp}</p></div>
       <label>{Strings.nfsDriveId}<Input disabled={Busy} onChange={(Ignored, Data) => SetDriveId(Data.value)} required value={DriveId} /></label>
       <label>{Strings.nfsExportId}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetExportId(Data.value)} required type="number" value={ExportId} /></label>
-      <Button appearance="primary" disabled={Busy || DriveId.trim().length === 0 || PositiveInteger(ExportId) === null} icon={<Plus aria-hidden="true" />} type="submit">{Strings.register}</Button>
+      <Button appearance="primary" disabled={Busy || !MutationEnabled || DriveId.trim().length === 0 || PositiveInteger(ExportId) === null} icon={<Plus aria-hidden="true" />} type="submit">{Strings.register}</Button>
     </form>
   );
 }
 
-function PosixGroupRegistrationForm({ Busy, OnRegister }: { Busy: boolean; OnRegister(Input: NfsPosixGroupRegistration): Promise<void> }): ReactNode {
+function PosixGroupRegistrationForm({ Busy, MutationEnabled, OnRegister }: { Busy: boolean; MutationEnabled: boolean; OnRegister(Input: NfsPosixGroupRegistration): Promise<void> }): ReactNode {
   const [GroupId, SetGroupId] = useState("");
   const [PosixName, SetPosixName] = useState("");
   const [ProjectedGid, SetProjectedGid] = useState("");
   const Submit = (Event: FormEvent): void => {
     Event.preventDefault();
+    if (!MutationEnabled) return;
     const ParsedGid = ProjectedId(ProjectedGid);
     if (ParsedGid === null) return;
     void OnRegister({ GroupId: GroupId.trim(), PosixName: PosixName.trim(), ProjectedGid: ParsedGid });
@@ -391,12 +470,12 @@ function PosixGroupRegistrationForm({ Busy, OnRegister }: { Busy: boolean; OnReg
       <label>{Strings.nfsGroupId}<Input disabled={Busy} onChange={(Ignored, Data) => SetGroupId(Data.value)} required value={GroupId} /></label>
       <label>{Strings.nfsPosixName}<Input disabled={Busy} maxLength={255} onChange={(Ignored, Data) => SetPosixName(Data.value)} pattern="[a-z_][a-z0-9_.-]{0,254}" required value={PosixName} /></label>
       <label>{Strings.nfsProjectedGid}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetProjectedGid(Data.value)} required type="number" value={ProjectedGid} /></label>
-      <Button appearance="primary" disabled={Busy || GroupId.trim().length === 0 || PosixName.trim().length === 0 || ProjectedId(ProjectedGid) === null} icon={<Plus aria-hidden="true" />} type="submit">{Strings.register}</Button>
+      <Button appearance="primary" disabled={Busy || !MutationEnabled || GroupId.trim().length === 0 || PosixName.trim().length === 0 || ProjectedId(ProjectedGid) === null} icon={<Plus aria-hidden="true" />} type="submit">{Strings.register}</Button>
     </form>
   );
 }
 
-function MappingForm({ Busy, Exports, OnUpsert }: { Busy: boolean; Exports: readonly NfsExportView[]; OnUpsert(Input: NfsMappingUpsert): Promise<void> }): ReactNode {
+function MappingForm({ Busy, Exports, MutationEnabled, OnUpsert, Realm }: { Busy: boolean; Exports: readonly NfsExportView[]; MutationEnabled: boolean; OnUpsert(Input: NfsMappingUpsert): Promise<void>; Realm: string }): ReactNode {
   const [PrincipalId, SetPrincipalId] = useState("");
   const [KerberosPrincipal, SetKerberosPrincipal] = useState("");
   const [ProjectedUid, SetProjectedUid] = useState("");
@@ -414,6 +493,7 @@ function MappingForm({ Busy, Exports, OnUpsert }: { Busy: boolean; Exports: read
   };
   const Submit = (Event: FormEvent): void => {
     Event.preventDefault();
+    if (!MutationEnabled) return;
     const Uid = ProjectedId(ProjectedUid);
     const Gid = ProjectedId(ProjectedGid);
     const Generation = ExpectedGeneration.length === 0 ? null : PositiveInteger(ExpectedGeneration);
@@ -431,10 +511,10 @@ function MappingForm({ Busy, Exports, OnUpsert }: { Busy: boolean; Exports: read
   };
   return (
     <section aria-labelledby="nfs-map-principal-heading" className="fb-nfs-section">
-      <div><h3 id="nfs-map-principal-heading">{Strings.nfsMapPrincipal}</h3><p className="fb-muted">{Strings.nfsExactRealmHelp}</p></div>
+      <div><h3 id="nfs-map-principal-heading">{Strings.nfsMapPrincipal}</h3><p className="fb-muted">{Strings.nfsExactRealmHelp} {Strings.nfsConfiguredRealm}: <bdi dir="auto">{Realm}</bdi>.</p></div>
       <form className="fb-nfs-card fb-nfs-form" onSubmit={Submit}>
         <label>{Strings.nfsPrincipalId}<Input disabled={Busy} onChange={(Ignored, Data) => SetPrincipalId(Data.value)} required value={PrincipalId} /></label>
-        <label>{Strings.nfsKerberosPrincipal}<Input aria-describedby="nfs-exact-realm-help" disabled={Busy} onChange={(Ignored, Data) => SetKerberosPrincipal(Data.value)} placeholder="user@CONFIGURED.REALM" required value={KerberosPrincipal} /></label>
+        <label>{Strings.nfsKerberosPrincipal}<Input aria-describedby="nfs-exact-realm-help" disabled={Busy} onChange={(Ignored, Data) => SetKerberosPrincipal(Data.value)} placeholder={`user@${Realm}`} required value={KerberosPrincipal} /></label>
         <p className="fb-muted" id="nfs-exact-realm-help">{Strings.nfsKerberosPrincipalHelp}</p>
         <div className="fb-nfs-form-row">
           <label>{Strings.nfsProjectedUid}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetProjectedUid(Data.value)} required type="number" value={ProjectedUid} /></label>
@@ -448,15 +528,16 @@ function MappingForm({ Busy, Exports, OnUpsert }: { Busy: boolean; Exports: read
         </fieldset>
         <p className="fb-muted" id="nfs-mapping-authority-help"><ShieldCheck aria-hidden="true" size={16} /> {Strings.nfsMappingUpdateHelp}</p>
         <Checkbox aria-describedby="nfs-mapping-authority-help" checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmMappingChange} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
-        <Button aria-describedby="nfs-mapping-authority-help" appearance="primary" disabled={Busy || !Confirmed || PrincipalId.trim().length === 0 || KerberosPrincipal.trim().length === 0 || ProjectedId(ProjectedUid) === null || ProjectedId(ProjectedGid) === null || AllowedDriveIds.size === 0} type="submit">{ExpectedGeneration.length === 0 ? Strings.nfsCreateMapping : Strings.nfsUpdateMapping}</Button>
+        <Button aria-describedby="nfs-mapping-authority-help" appearance="primary" disabled={Busy || !MutationEnabled || !Confirmed || PrincipalId.trim().length === 0 || KerberosPrincipal.trim().length === 0 || ProjectedId(ProjectedUid) === null || ProjectedId(ProjectedGid) === null || AllowedDriveIds.size === 0} type="submit">{ExpectedGeneration.length === 0 ? Strings.nfsCreateMapping : Strings.nfsUpdateMapping}</Button>
       </form>
     </section>
   );
 }
 
-function MappingCard({ Busy, Mapping, OnRevoke }: {
+function MappingCard({ Busy, Mapping, MutationEnabled, OnRevoke }: {
   Busy: boolean;
   Mapping: NfsMappingView;
+  MutationEnabled: boolean;
   OnRevoke(CredentialId: string, ExpectedGeneration: number): Promise<void>;
 }): ReactNode {
   const [Confirmed, SetConfirmed] = useState(false);
@@ -465,9 +546,59 @@ function MappingCard({ Busy, Mapping, OnRevoke }: {
     <article className="fb-nfs-card" role="listitem">
       <div className="fb-nfs-card-heading"><div><strong><bdi dir="auto">{Mapping.KerberosPrincipal}</bdi></strong><p className="fb-muted">{Strings.nfsPrincipalId} <bdi dir="auto">{Mapping.PrincipalId}</bdi></p></div><Badge appearance="tint">{Strings.nfsGeneration} {Mapping.Generation}</Badge></div>
       <span>{Strings.nfsProjectedUid} {Mapping.ProjectedUid} · {Strings.nfsProjectedGid} {Mapping.ProjectedGid}</span>
+      <span className="fb-muted">{Strings.nfsAllowedExports}: {Mapping.AllowedDriveIds === undefined ? Strings.nfsAllowedExportsUnknown : Mapping.AllowedDriveIds.map((DriveId) => <bdi dir="auto" key={DriveId}>{DriveId} </bdi>)}</span>
       <p className="fb-muted" id={HelpId}>{Strings.nfsRevokeMappingHelp}</p>
       <Checkbox aria-describedby={HelpId} checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmMappingRevoke} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
-      <Button aria-describedby={HelpId} appearance="secondary" disabled={Busy || !Confirmed} onClick={() => { SetConfirmed(false); void OnRevoke(Mapping.CredentialId, Mapping.Generation); }}>{Strings.revoke}</Button>
+      <Button aria-describedby={HelpId} appearance="secondary" disabled={Busy || !MutationEnabled || !Confirmed} onClick={() => { SetConfirmed(false); void OnRevoke(Mapping.CredentialId, Mapping.Generation); }}>{Strings.revoke}</Button>
+    </article>
+  );
+}
+
+function ConflictCard({ Busy, Conflict, MutationEnabled, OnCopy, OnDiscard }: {
+  Busy: boolean;
+  Conflict: NfsConflictView;
+  MutationEnabled: boolean;
+  OnCopy(Input: NfsConflictCopy): Promise<void>;
+  OnDiscard(): Promise<void>;
+}): ReactNode {
+  const [DisplayName, SetDisplayName] = useState("");
+  const [ExpectedParentGeneration, SetExpectedParentGeneration] = useState("");
+  const [ParentId, SetParentId] = useState("");
+  const [DiscardConfirmed, SetDiscardConfirmed] = useState(false);
+  const HelpId = `nfs-conflict-${Conflict.Id}-help`;
+  const Submit = (Event: FormEvent): void => {
+    Event.preventDefault();
+    if (!MutationEnabled) return;
+    const Generation = PositiveInteger(ExpectedParentGeneration);
+    if (Generation === null || ParentId.trim().length === 0 || DisplayName.trim().length === 0) return;
+    void OnCopy({
+      DisplayName,
+      DriveId: Conflict.DriveId,
+      ExpectedParentGeneration: Generation,
+      ParentId: ParentId.trim(),
+    });
+  };
+  return (
+    <article className="fb-nfs-card" role="listitem">
+      <div className="fb-nfs-card-heading">
+        <div><strong>{Strings.nfsConflict}</strong><p className="fb-muted"><bdi dir="auto">{Conflict.Id}</bdi></p></div>
+        <Badge appearance="tint" color="warning">{Strings.nfsRetained}</Badge>
+      </div>
+      <dl className="fb-nfs-generation-grid">
+        <div><dt>{Strings.nfsDriveId}</dt><dd><bdi dir="auto">{Conflict.DriveId}</bdi></dd></div>
+        <div><dt>{Strings.nfsSourceNodeId}</dt><dd><bdi dir="auto">{Conflict.SourceNodeId}</bdi></dd></div>
+        <div><dt>{Strings.nfsLogicalSize}</dt><dd>{Conflict.LogicalSizeBytes}</dd></div>
+        <div><dt>{Strings.nfsConflictExpires}</dt><dd><time dateTime={Conflict.ExpiresAt}>{Conflict.ExpiresAt}</time></dd></div>
+      </dl>
+      <form aria-describedby={HelpId} className="fb-nfs-form" onSubmit={Submit}>
+        <p className="fb-muted" id={HelpId}>{Strings.nfsConflictCopyHelp}</p>
+        <label>{Strings.nfsParentId}<Input disabled={Busy} onChange={(Ignored, Data) => SetParentId(Data.value)} required value={ParentId} /></label>
+        <label>{Strings.nfsConflictCopyName}<Input disabled={Busy} maxLength={255} onChange={(Ignored, Data) => SetDisplayName(Data.value)} required value={DisplayName} /></label>
+        <label>{Strings.nfsExpectedParentGeneration}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetExpectedParentGeneration(Data.value)} required type="number" value={ExpectedParentGeneration} /></label>
+        <Button appearance="primary" disabled={Busy || !MutationEnabled || ParentId.trim().length === 0 || DisplayName.trim().length === 0 || PositiveInteger(ExpectedParentGeneration) === null} type="submit">{Strings.nfsCopyConflict}</Button>
+      </form>
+      <Checkbox aria-describedby={HelpId} checked={DiscardConfirmed} disabled={Busy} label={Strings.nfsConfirmConflictDiscard} onChange={(Ignored, Data) => SetDiscardConfirmed(Data.checked === true)} />
+      <Button appearance="secondary" disabled={Busy || !MutationEnabled || !DiscardConfirmed} onClick={() => { SetDiscardConfirmed(false); void OnDiscard(); }}>{Strings.nfsDiscardConflict}</Button>
     </article>
   );
 }

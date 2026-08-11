@@ -431,10 +431,30 @@ durably verified its receipt.
 ## Phase 8 NFS and WebTransport contracts
 
 The mount protocol enum adds `NFS`; password-credential endpoints reject it.
-Tenant-administrator identity mapping endpoints live below
-`/api/v1/admin/mounts/nfs/`, require recent OIDC authentication, generation
-preconditions, idempotency keys, tenant uniqueness, and audit. Retained-write
-copy operations remain reserved until NFS write dispatch is qualified.
+Tenant-administrator feature, export, POSIX-group, and identity-mapping
+endpoints live below `/api/v1/admin/mounts/nfs/`. They require recent OIDC
+authentication, generation preconditions, idempotency keys, exact tenant
+confirmation for every mutation client, tenant uniqueness, and audit. The NFS
+overview returns the exact configured tenant slug; browsers require the
+administrator to type that value without trimming, normalization, or case
+folding and clear it after one mutation. The API validates the confirmation
+before idempotency replay and binds it into every new request fingerprint. For
+the bounded 24-hour rollout window, an existing receipt may replay only when
+the supplied confirmation is exact and the receipt fingerprint equals that
+route's exact pre-confirmation request projection; the legacy fingerprint is
+never written for a new request.
+
+`GET /api/v1/admin/mounts/nfs/conflicts` lists only the authenticated
+principal's unresolved, unexpired retained writes. `POST
+/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy` requires the exact
+conflict drive, an authorized target parent, a new display name, the expected
+parent namespace generation, `CREATE_CHILD`, tenant confirmation, and an
+idempotency key before publishing the retained bytes as a new immutable file.
+`DELETE /api/v1/admin/mounts/nfs/conflicts/{conflict_id}` requires the same
+recent administrator authentication, exact tenant confirmation, ownership,
+and idempotency, and admits fenced cleanup without erasing the retained
+inventory row before its fixed deadline. Neither route exposes a payload
+locator or GSS material.
 
 VFS v1 adds additive NFS-generic attribute, ACL, xattr, symlink, sparse-write,
 flush, commit, open-unlink, and reclaim messages. Existing field numbers remain
@@ -442,6 +462,22 @@ stable. Filehandles are opaque versioned values authenticated with a dedicated
 rotating key and include export, node, and generation scope without exposing a
 physical locator. Current and immediately previous handle keys may validate;
 capability signing keys are not reused.
+
+Create, mkdir, and symlink carry an optional mode containing only `0777`
+permission bits; omission selects `0644`, `0755`, and `0777` respectively,
+while Core always derives UID/GID from the authenticated NFS projection. Lock
+ranges distinguish a finite non-zero length from an explicit `to_eof` range.
+`TestLock` is a separate read-only conflict query and is never implemented as
+an acquire-and-release pair at one replay coordinate.
+
+The current VFS checkpoint qualifies only persistent-handle resolution,
+export-root and lookup traversal, metadata/access/list, immutable read-only
+open/read/close, xattr reads, readlink, heartbeat, and end-session handling.
+Create-like operations, writes, namespace and attribute mutations, ACLs,
+locks, reclaim, open-unlinked, sparse operations, flush, and commit return a
+stable pre-authority qualification sentinel. Their additive messages and
+database authority are contracts for later qualification, not an enabled
+write surface.
 
 Collaboration additionally advertises `/collaboration/v1/wt` when enabled.
 One WebTransport session and one client-created reliable bidirectional stream
@@ -454,7 +490,7 @@ the current editor continues to request WebSocket unless it explicitly opts in.
 
 ## Key rotation and configuration
 
-Configuration format 7 scopes signing material by purpose. `[keys]` contains
+Configuration format 8 scopes signing material by purpose. `[keys]` contains
 only `digest_key_file` and `digest_key_generation`; every signer has
 `private_key_file`, `public_keyset_file`, and `current_generation`. API storage
 is always `[keys.api_storage]`; API collaboration-grant and MCP-delegation are
@@ -463,7 +499,7 @@ signers occur only in enabled feature blocks; media storage is always
 provisioned for administrative preflight and recovery. Strict
 `filebelt-capability-keyset-v2` files contain `purpose=<name>`, a current key,
 and at most one retiring key. Public-key bytes are globally disjoint and every
-fresh v7 purpose begins at local generation 1.
+fresh v8 purpose begins at local generation 1.
 
 `filebeltctl` creates capability signing material and keyed-digest material as
 versioned generations. The current capability generation signs new envelopes;
@@ -477,7 +513,7 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 7; older versions are rejected. API `fbcap1`,
+The current format is version 8; older versions are rejected. API `fbcap1`,
 collaboration `fbcap1`, document, and mount `fbcap2` signing keys use distinct
 purpose-local private keys; I/O receives only API-storage and enabled
 storage-purpose public keysets. `mcp.enabled`

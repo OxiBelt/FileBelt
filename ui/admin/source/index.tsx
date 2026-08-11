@@ -19,6 +19,8 @@ export {
 export type {
   NfsAdminClient,
   NfsAdminSnapshot,
+  NfsConflictCopy,
+  NfsConflictView,
   NfsExportRegistration,
   NfsExportState,
   NfsExportView,

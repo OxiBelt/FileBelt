@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn, Sequence
+from urllib.parse import unquote, urlparse
 
 
 MAXIMUM_CARGO_OUTPUT_BYTES = 16 * 1024 * 1024
@@ -61,9 +62,60 @@ class CargoBoundaryPolicy:
 
 
 @dataclass(frozen=True)
+class PackageIdentity:
+    """A reviewed local Cargo package, bound to its metadata manifest."""
+
+    cargo_id: str
+    name: str
+    version: str
+    manifest: str
+    source_path: str
+
+    def display(self) -> str:
+        return f"{self.name} v{self.version} ({self.source_path})"
+
+
+@dataclass(frozen=True)
+class TreePackageIdentity:
+    """A Cargo tree package identity; local paths are repository-relative."""
+
+    name: str
+    version: str
+    source_path: str | None
+    source_annotation: str | None
+
+    def display(self) -> str:
+        if self.source_path is not None:
+            return f"{self.name} v{self.version} ({self.source_path})"
+        if self.source_annotation is not None:
+            return f"{self.name} v{self.version} ({self.source_annotation})"
+        return f"{self.name} v{self.version}"
+
+
+@dataclass(frozen=True)
 class ParsedCargoTree:
-    features_by_package: dict[str, frozenset[str]]
-    local_packages: frozenset[str]
+    features_by_identity: dict[TreePackageIdentity, frozenset[str]]
+
+
+@dataclass(frozen=True)
+class IdentityCatalog:
+    by_manifest: dict[str, PackageIdentity]
+    by_name: dict[str, PackageIdentity]
+
+    @property
+    def identities(self) -> frozenset[PackageIdentity]:
+        return frozenset(self.by_manifest.values())
+
+    def for_profile(self, profile: GraphProfile) -> PackageIdentity:
+        identity = self.by_manifest.get(profile.manifest)
+        if identity is None:
+            _fail(f"missing reviewed Cargo identity for {profile.manifest}")
+        if identity.name != profile.package:
+            _fail(
+                f"reviewed Cargo identity at {profile.manifest} is "
+                f"{identity.name}, expected {profile.package}"
+            )
+        return identity
 
 
 @dataclass(frozen=True)
@@ -74,8 +126,8 @@ class GraphSummary:
 
 @dataclass(frozen=True)
 class WorkspaceMetadata:
-    packages_by_name: dict[str, str]
-    workspace_packages: frozenset[str]
+    packages_by_id: dict[str, PackageIdentity]
+    workspace_members: frozenset[PackageIdentity]
 
 
 def _fail(message: str) -> NoReturn:
@@ -418,12 +470,52 @@ def _is_local_source(source: str) -> bool:
     ) or WINDOWS_PATH_RE.match(source) is not None
 
 
-def parse_cargo_tree(output: str) -> ParsedCargoTree:
+def _canonical_local_source(source: str, repo_root: Path, context: str) -> str:
+    """Turn a Cargo local-source annotation into a repository-relative path."""
+
+    windows_path = WINDOWS_PATH_RE.match(source) is not None or source.startswith("\\\\")
+    if windows_path and sys.platform != "win32":
+        _fail(f"{context} uses a non-native Windows path: {source!r}")
+
+    if windows_path:
+        path_text = source
+    elif source.startswith(("file://", "path+file://")):
+        parsed = urlparse(source)
+        if parsed.scheme not in {"file", "path+file"}:
+            _fail(f"{context} has an unsupported local source: {source!r}")
+        if parsed.netloc not in {"", "localhost"} or parsed.params or parsed.query:
+            _fail(f"{context} has an ambiguous local source URL: {source!r}")
+        if parsed.fragment:
+            _fail(f"{context} must not include a source fragment: {source!r}")
+        path_text = unquote(parsed.path)
+        if not path_text:
+            _fail(f"{context} has an empty local source path: {source!r}")
+        if sys.platform == "win32" and re.match(r"^/[A-Za-z]:/", path_text):
+            path_text = path_text[1:]
+    else:
+        path_text = source
+
+    path = Path(path_text)
+    if not path.is_absolute():
+        path = repo_root / path
+    return _relative(repo_root, path)
+
+
+def _tree_identity_matches(
+    tree_identity: TreePackageIdentity, expected: PackageIdentity
+) -> bool:
+    return (
+        tree_identity.name == expected.name
+        and tree_identity.version == expected.version
+        and tree_identity.source_path == expected.source_path
+    )
+
+
+def parse_cargo_tree(output: str, repo_root: Path) -> ParsedCargoTree:
     """Parse `cargo tree --prefix none --format {p}|{f}` output."""
 
     _bounded_output(output, "cargo tree")
-    packages: dict[str, set[str]] = {}
-    local_packages: set[str] = set()
+    packages: dict[TreePackageIdentity, set[str]] = {}
     for line_number, raw_line in enumerate(output.splitlines(), 1):
         line = raw_line.strip()
         if not line:
@@ -450,6 +542,8 @@ def parse_cargo_tree(output: str) -> ParsedCargoTree:
             _fail(
                 f"cargo tree line {line_number} has an invalid package version: {version!r}"
             )
+        source_path: str | None = None
+        source: str | None = None
         if separator:
             source_annotation = source_annotation.strip()
             if (
@@ -461,8 +555,18 @@ def parse_cargo_tree(output: str) -> ParsedCargoTree:
                     f"cargo tree line {line_number} has an invalid package source: "
                     f"{source_annotation!r}"
                 )
-            if _is_local_source(source_annotation[1:-1]):
-                local_packages.add(package)
+            source = source_annotation[1:-1]
+            if _is_local_source(source):
+                source_path = _canonical_local_source(
+                    source, repo_root, f"cargo tree line {line_number}"
+                )
+
+        identity = TreePackageIdentity(
+            name=package,
+            version=version,
+            source_path=source_path,
+            source_annotation=source,
+        )
 
         features: set[str] = set()
         if feature_text:
@@ -478,59 +582,106 @@ def parse_cargo_tree(output: str) -> ParsedCargoTree:
                     f"{feature_text!r}"
                 )
             features.update(feature_values)
-        packages.setdefault(package, set()).update(features)
+        packages.setdefault(identity, set()).update(features)
 
     if not packages:
         _fail("cargo tree output did not contain any package nodes")
     return ParsedCargoTree(
-        features_by_package={
-            package: frozenset(features)
-            for package, features in sorted(packages.items())
+        features_by_identity={
+            identity: frozenset(features)
+            for identity, features in sorted(
+                packages.items(), key=lambda item: item[0].display()
+            )
         },
-        local_packages=frozenset(local_packages),
     )
 
 
 def validate_profile_graph(
     profile: GraphProfile,
     output: str,
-    first_party_packages: frozenset[str],
+    catalog: IdentityCatalog,
+    repo_root: Path,
 ) -> GraphSummary:
-    parsed = parse_cargo_tree(output)
-    graph = parsed.features_by_package
+    parsed = parse_cargo_tree(output, repo_root)
+    graph = parsed.features_by_identity
+    expected_root = catalog.for_profile(profile)
+    expected_features = {
+        catalog.by_name[package]: features
+        for package, features in profile.first_party_features
+    }
+    expected_identities = frozenset(expected_features)
+    registered_identities = catalog.identities
     violations: list[str] = []
-    if profile.package not in graph:
+    if not any(_tree_identity_matches(identity, expected_root) for identity in graph):
         violations.append(f"root package {profile.package!r} is missing")
 
-    unknown_local = sorted(parsed.local_packages - first_party_packages)
+    unknown_local = sorted(
+        (
+            identity.display()
+            for identity in graph
+            if identity.source_path is not None
+            and not any(
+                _tree_identity_matches(identity, expected)
+                for expected in registered_identities
+            )
+        )
+    )
     if unknown_local:
         violations.append("unknown local/path packages: " + ", ".join(unknown_local))
 
-    expected_features = dict(profile.first_party_features)
-    actual_first_party = frozenset(graph).intersection(first_party_packages)
-    expected_first_party = frozenset(expected_features)
-    if actual_first_party != expected_first_party:
+    reserved_collisions = sorted(
+        identity.display()
+        for identity in graph
+        if identity.name in catalog.by_name
+        and not _tree_identity_matches(identity, catalog.by_name[identity.name])
+    )
+    if reserved_collisions:
         violations.append(
-            "first-party package closure differs: "
-            f"missing={sorted(expected_first_party - actual_first_party)}, "
-            f"unexpected={sorted(actual_first_party - expected_first_party)}"
+            "reserved first-party package identities differ: "
+            + ", ".join(reserved_collisions)
         )
 
-    for package, expected in sorted(expected_features.items()):
-        actual = graph.get(package)
-        if actual is None:
+    actual_first_party = frozenset(
+        expected
+        for expected in registered_identities
+        if any(_tree_identity_matches(identity, expected) for identity in graph)
+    )
+    expected_first_party = expected_identities
+    if actual_first_party != expected_first_party:
+        def display(identities: frozenset[PackageIdentity]) -> list[str]:
+            return sorted(identity.display() for identity in identities)
+
+        violations.append(
+            "first-party package closure differs: "
+            f"missing={display(expected_first_party - actual_first_party)}, "
+            f"unexpected={display(actual_first_party - expected_first_party)}"
+        )
+
+    for expected_identity, expected in sorted(
+        expected_features.items(), key=lambda item: item[0].display()
+    ):
+        actual = set()
+        for identity, enabled in graph.items():
+            if _tree_identity_matches(identity, expected_identity):
+                actual.update(enabled)
+        if not actual and not any(
+            _tree_identity_matches(identity, expected_identity) for identity in graph
+        ):
             continue
-        if actual != expected:
+        actual_features = frozenset(actual)
+        if actual_features != expected:
             violations.append(
-                f"{package} features are [{', '.join(sorted(actual))}] but "
+                f"{expected_identity.name} features are "
+                f"[{', '.join(sorted(actual_features))}] but "
                 f"must be [{', '.join(sorted(expected))}]"
             )
 
-    forbidden = sorted(set(graph).intersection(profile.forbidden_packages))
+    names = {identity.name for identity in graph}
+    forbidden = sorted(names.intersection(profile.forbidden_packages))
     forbidden.extend(
         sorted(
             package
-            for package in graph
+            for package in names
             if package not in profile.forbidden_packages
             and any(
                 package.startswith(prefix)
@@ -564,68 +715,149 @@ def parse_workspace_metadata(output: str, repo_root: Path) -> WorkspaceMetadata:
     if not isinstance(packages, list) or not isinstance(workspace_members, list):
         _fail("cargo metadata must contain package and workspace member arrays")
 
-    by_id: dict[str, tuple[str, str]] = {}
-    names: set[str] = set()
+    by_id: dict[str, PackageIdentity] = {}
     for index, package in enumerate(packages):
         if not isinstance(package, dict):
             _fail(f"cargo metadata package {index} must be an object")
         package_id = package.get("id")
         name = package.get("name")
+        version = package.get("version")
+        if "source" not in package:
+            _fail(f"cargo metadata package {index} is missing source")
+        source = package["source"]
         manifest_path = package.get("manifest_path")
-        if not all(isinstance(item, str) for item in (package_id, name, manifest_path)):
+        if not all(
+            isinstance(item, str) for item in (package_id, name, version, manifest_path)
+        ):
             _fail(
-                f"cargo metadata package {index} needs string id, name, and manifest_path"
+                "cargo metadata package "
+                f"{index} needs string id, name, version, and manifest_path"
             )
         assert isinstance(package_id, str)
         assert isinstance(name, str)
+        assert isinstance(version, str)
         assert isinstance(manifest_path, str)
-        if name in names:
-            _fail(f"Cargo workspace package name is duplicated: {name}")
-        names.add(name)
-        by_id[package_id] = (name, _relative(repo_root, Path(manifest_path)))
+        if package_id in by_id:
+            _fail(f"cargo metadata package id is duplicated: {package_id}")
+        if PACKAGE_NAME_RE.fullmatch(name) is None:
+            _fail(f"cargo metadata package {index} has invalid name: {name!r}")
+        if VERSION_RE.fullmatch(version) is None:
+            _fail(f"cargo metadata package {index} has invalid version: {version!r}")
+        if source is not None:
+            _fail(f"cargo metadata package {name} must be a local package")
+        manifest = _relative(repo_root, Path(manifest_path))
+        if not manifest.endswith("/Cargo.toml") and manifest != "Cargo.toml":
+            _fail(f"cargo metadata package {name} manifest is not Cargo.toml: {manifest}")
+        by_id[package_id] = PackageIdentity(
+            cargo_id=package_id,
+            name=name,
+            version=version,
+            manifest=manifest,
+            source_path=PurePosixPath(manifest).parent.as_posix(),
+        )
 
-    workspace_names: set[str] = set()
-    packages_by_name: dict[str, str] = {}
+    members: set[PackageIdentity] = set()
     for index, member in enumerate(workspace_members):
         if not isinstance(member, str):
             _fail(f"cargo metadata workspace member {index} must be a string")
         resolved = by_id.get(member)
         if resolved is None:
             _fail(f"cargo metadata workspace member is unresolved: {member}")
-        name, manifest = resolved
-        if name in workspace_names:
-            _fail(f"Cargo workspace package name is duplicated: {name}")
-        workspace_names.add(name)
-        packages_by_name[name] = manifest
-    if not workspace_names:
+        if resolved in members:
+            _fail(f"cargo metadata workspace member is duplicated: {resolved.cargo_id}")
+        members.add(resolved)
+    if not members:
         _fail("cargo metadata did not contain workspace packages")
     return WorkspaceMetadata(
-        packages_by_name=packages_by_name,
-        workspace_packages=frozenset(workspace_names),
+        packages_by_id=by_id,
+        workspace_members=frozenset(members),
     )
 
 
 def validate_metadata(
-    metadata: WorkspaceMetadata, policy: CargoBoundaryPolicy
-) -> None:
+    root_metadata: WorkspaceMetadata,
+    adapter_metadata: dict[str, WorkspaceMetadata],
+    policy: CargoBoundaryPolicy,
+) -> IdentityCatalog:
     adapter_manifests = policy.repository.registered_adapter_manifests
+    profiles_by_manifest = {profile.manifest: profile for profile in policy.profiles}
+    root_profiles = {
+        manifest: profile
+        for manifest, profile in profiles_by_manifest.items()
+        if manifest not in adapter_manifests
+    }
     violations: list[str] = []
-    for profile in policy.profiles:
-        actual_manifest = metadata.packages_by_name.get(profile.package)
-        if profile.manifest in adapter_manifests:
-            if actual_manifest is not None:
+    identities_by_manifest: dict[str, PackageIdentity] = {}
+
+    def is_excluded_manifest(manifest: str) -> bool:
+        path = PurePosixPath(manifest)
+        return any(
+            path == PurePosixPath(root)
+            or PurePosixPath(root) in path.parents
+            for root in policy.repository.excluded_source_roots
+        )
+
+    def collect(
+        metadata: WorkspaceMetadata,
+        expected: dict[str, GraphProfile],
+        context: str,
+    ) -> None:
+        actual_by_manifest = {
+            identity.manifest: identity for identity in metadata.workspace_members
+        }
+        if len(actual_by_manifest) != len(metadata.workspace_members):
+            violations.append(f"{context} has duplicate workspace manifest identities")
+        extras = set(actual_by_manifest) - set(expected)
+        if context == "root Cargo workspace":
+            extras = {manifest for manifest in extras if not is_excluded_manifest(manifest)}
+        for manifest in sorted(extras):
+            violations.append(f"{context} has unregistered workspace manifest: {manifest}")
+        for manifest, profile in sorted(expected.items()):
+            identity = actual_by_manifest.get(manifest)
+            if identity is None:
                 violations.append(
-                    f"adapter package {profile.package} must stay outside the root workspace"
+                    f"{context} does not contain registered manifest: {manifest}"
                 )
+                continue
+            if identity.name != profile.package:
+                violations.append(
+                    f"{context} manifest {manifest} is package {identity.name}, "
+                    f"expected {profile.package}"
+                )
+                continue
+            identities_by_manifest[manifest] = identity
+
+    collect(root_metadata, root_profiles, "root Cargo workspace")
+    for manifest in sorted(adapter_manifests):
+        metadata = adapter_metadata.get(manifest)
+        if metadata is None:
+            violations.append(f"missing Cargo metadata for adapter manifest: {manifest}")
             continue
-        if actual_manifest is None:
-            violations.append(f"production package {profile.package} is not a workspace member")
-        elif actual_manifest != profile.manifest:
-            violations.append(
-                f"{profile.package} manifest is {actual_manifest}, expected {profile.manifest}"
-            )
+        collect(
+            metadata,
+            {manifest: profiles_by_manifest[manifest]},
+            f"adapter {manifest}",
+        )
+    for manifest in sorted(set(adapter_metadata) - adapter_manifests):
+        violations.append(f"Cargo metadata was collected for unregistered adapter: {manifest}")
     if violations:
         _fail("Cargo metadata boundary failed:\n  - " + "\n  - ".join(violations))
+
+    by_name: dict[str, PackageIdentity] = {}
+    for identity in sorted(
+        identities_by_manifest.values(), key=lambda item: item.manifest
+    ):
+        existing = by_name.get(identity.name)
+        if existing is not None:
+            _fail(
+                "Cargo metadata boundary failed:\n  - reserved first-party package name "
+                f"is ambiguous: {identity.name} at {existing.manifest} and {identity.manifest}"
+            )
+        by_name[identity.name] = identity
+    return IdentityCatalog(
+        by_manifest=dict(sorted(identities_by_manifest.items())),
+        by_name=dict(sorted(by_name.items())),
+    )
 
 
 def cargo_tree_command(profile: GraphProfile) -> tuple[str, ...]:
@@ -651,6 +883,20 @@ def cargo_tree_command(profile: GraphProfile) -> tuple[str, ...]:
     )
 
 
+def cargo_metadata_command(manifest: str | None = None) -> tuple[str, ...]:
+    command = (
+        "cargo",
+        "metadata",
+        "--locked",
+        "--no-deps",
+        "--format-version",
+        "1",
+    )
+    if manifest is None:
+        return command
+    return (*command, "--manifest-path", manifest)
+
+
 def _run(command: Sequence[str], repo_root: Path) -> str:
     print(f"+ {shlex.join(command)}", flush=True)
     result = subprocess.run(
@@ -673,24 +919,21 @@ def validate_repository(repo_root: Path, policy_path: Path) -> None:
     policy = load_policy(policy_path)
     validate_repository_layout(repo_root, policy)
 
-    metadata_output = _run(
-        (
-            "cargo",
-            "metadata",
-            "--locked",
-            "--no-deps",
-            "--format-version",
-            "1",
-        ),
-        repo_root,
+    root_metadata = parse_workspace_metadata(
+        _run(cargo_metadata_command(), repo_root), repo_root
     )
-    metadata = parse_workspace_metadata(metadata_output, repo_root)
-    validate_metadata(metadata, policy)
+    adapter_metadata = {
+        manifest: parse_workspace_metadata(
+            _run(cargo_metadata_command(manifest), repo_root), repo_root
+        )
+        for manifest in sorted(policy.repository.registered_adapter_manifests)
+    }
+    catalog = validate_metadata(root_metadata, adapter_metadata, policy)
 
     for profile in policy.profiles:
         graph = _run(cargo_tree_command(profile), repo_root)
         summary = validate_profile_graph(
-            profile, graph, policy.first_party_packages
+            profile, graph, catalog, repo_root
         )
         print(
             f"FileBelt {profile.label} Cargo boundary passed "

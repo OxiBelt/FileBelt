@@ -147,11 +147,15 @@ role use, image/mount contracts, and unsafe-code exceptions.
 
 The reviewed production graph and crate-root public surface live in
 `supply-chain/cargo-boundaries-v1.toml`. The policy records every production
-manifest, its allowed transitive first-party packages and activated features,
-narrow forbidden dependency families, public root modules, and wildcard
-re-exports. `tests/scripts/check-cargo-boundaries.sh` compares that policy with
-locked `cargo metadata` and package-scoped `cargo tree` results. Unknown local
-packages, path dependencies, features, or adapter manifests fail closed.
+package and manifest pair, its allowed transitive first-party packages and
+activated features, narrow forbidden dependency families, public root modules,
+and wildcard re-exports. The checker binds each registered pair to its resolved
+locked `cargo metadata` identity and package-scoped `cargo tree` nodes rather
+than trusting a package name alone. A reserved first-party name must resolve to
+its registered manifest; same-name registry, Git, or local substitutions and
+unknown local paths fail closed. Rust manifest contracts resolve direct,
+target-specific, and root-workspace-inherited production dependencies before
+enforcing the same identity and Apache-to-adapter direction.
 
 The source contract parses production Rust with `syn` so aliases, nested use
 trees, relative imports, and public re-exports cannot bypass the documented

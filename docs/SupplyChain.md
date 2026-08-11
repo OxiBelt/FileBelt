@@ -28,8 +28,12 @@ Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.0,
 layout rules without lifecycle scripts; its resolved license must remain
 admitted by `supply-chain/node-policy.toml`. Rust production-package closures
 and first-party features are independently reviewed in
-`supply-chain/cargo-boundaries-v1.toml`; this complements rather than replaces
-the exact lockfile, Cargo Vet, Cargo Deny, and advisory checks.
+`supply-chain/cargo-boundaries-v1.toml`; registered package and manifest pairs
+are resolved against metadata and the locked tree without duplicating versions
+in policy. This complements rather than replaces the exact lockfile, Cargo Vet,
+Cargo Deny, and advisory checks: those controls admit the resolved dependency
+graph, while the boundary policy verifies that first-party identity and license
+direction have not been substituted by name.
 
 Peer checks remain strict except for one exact compatibility admission:
 `openapi-typescript@7.13.0` declares TypeScript `^5.x`, while FileBelt pins

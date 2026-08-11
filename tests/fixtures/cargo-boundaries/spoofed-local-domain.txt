@@ -1,0 +1,4 @@
+filebelt-authz v0.1.0 (/workspace/source/crates/filebelt-authz)|
+filebelt-domain v0.1.0 (/workspace/source/crates/filebelt-domain)|
+filebelt-domain v9.9.9 (/workspace/tools/spoofed-domain)|
+uuid v1.24.0|

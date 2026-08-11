@@ -120,7 +120,7 @@ notes = "Reviewed complete checksum-matched generated prost messages and determi
 [[audits.opentelemetry_sdk]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
-version = "0.31.0"
+version = "0.32.1"
 notes = "Reviewed complete checksum-matched source. It uses OS-random identifiers and a dedicated bounded batch thread without unsafe code or a build script; FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
 
 [[audits.portable-atomic-util]]

@@ -8,18 +8,22 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::io::IoSlice;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use axum::Router;
+use axum::extract::connect_info::Connected;
 use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::{Router, serve::Listener};
+use axum::serve::{IncomingStream, Listener};
 use filebelt_control_protocol::{
     BackendServerTlsConfig, LogFormat, TelemetryConfig, read_secret_string,
 };
@@ -44,6 +48,7 @@ use rustls::{
     CertificateError, DigitallySignedStruct, DistinguishedName, Error, RootCertStore,
     SignatureScheme,
 };
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, mpsc};
 use tokio_rustls::TlsAcceptor;
@@ -278,8 +283,84 @@ async fn metrics(State(state): State<OperationsState>) -> Response {
         .into_response()
 }
 
+/// Authenticated peer metadata produced only after the mTLS handshake and
+/// URI-SAN policy both succeed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedMtlsPeer {
+    remote_address: SocketAddr,
+    uri_san: Arc<str>,
+}
+
+impl VerifiedMtlsPeer {
+    pub fn remote_address(&self) -> SocketAddr {
+        self.remote_address
+    }
+
+    pub fn uri_san(&self) -> &str {
+        &self.uri_san
+    }
+}
+
+/// An authenticated TLS stream accepted by [`MtlsListener`].
+pub struct MtlsStream {
+    inner: TlsStream<TcpStream>,
+    peer: VerifiedMtlsPeer,
+}
+
+impl MtlsStream {
+    pub fn verified_peer(&self) -> &VerifiedMtlsPeer {
+        &self.peer
+    }
+}
+
+impl AsyncRead for MtlsStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(context, buffer)
+    }
+}
+
+impl AsyncWrite for MtlsStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self.inner).poll_write(context, buffer)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffers: &[IoSlice<'_>],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self.inner).poll_write_vectored(context, buffers)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+}
+
 pub struct MtlsListener {
-    accepted: mpsc::Receiver<(TlsStream<TcpStream>, SocketAddr)>,
+    accepted: mpsc::Receiver<(MtlsStream, SocketAddr)>,
     local_address: SocketAddr,
 }
 
@@ -311,7 +392,7 @@ impl MtlsListener {
 async fn accept_mtls_connections(
     listener: TcpListener,
     acceptor: TlsAcceptor,
-    sender: mpsc::Sender<(TlsStream<TcpStream>, SocketAddr)>,
+    sender: mpsc::Sender<(MtlsStream, SocketAddr)>,
 ) {
     let pending = Arc::new(Semaphore::new(MAX_PENDING_TLS_HANDSHAKES));
     loop {
@@ -339,6 +420,14 @@ async fn accept_mtls_connections(
                 .await
             {
                 Ok(Ok(stream)) => {
+                    let Some(peer) = verified_mtls_peer(&stream, address) else {
+                        tracing::warn!(code = "tls_peer_identity_unavailable", %address);
+                        return;
+                    };
+                    let stream = MtlsStream {
+                        inner: stream,
+                        peer,
+                    };
                     let _ = connection_sender.send((stream, address)).await;
                 }
                 Ok(Err(error)) => tracing::warn!(code = "tls_handshake_rejected", %error),
@@ -349,7 +438,7 @@ async fn accept_mtls_connections(
 }
 
 impl Listener for MtlsListener {
-    type Io = TlsStream<TcpStream>;
+    type Io = MtlsStream;
     type Addr = SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
@@ -365,6 +454,24 @@ impl Listener for MtlsListener {
     fn local_addr(&self) -> io::Result<Self::Addr> {
         Ok(self.local_address)
     }
+}
+
+impl Connected<IncomingStream<'_, MtlsListener>> for VerifiedMtlsPeer {
+    fn connect_info(stream: IncomingStream<'_, MtlsListener>) -> Self {
+        stream.io().verified_peer().clone()
+    }
+}
+
+fn verified_mtls_peer(
+    stream: &TlsStream<TcpStream>,
+    remote_address: SocketAddr,
+) -> Option<VerifiedMtlsPeer> {
+    let certificate = stream.get_ref().1.peer_certificates()?.first()?;
+    let uri_san = certificate_single_uri_san(certificate.as_ref()).ok()??;
+    Some(VerifiedMtlsPeer {
+        remote_address,
+        uri_san: Arc::from(uri_san),
+    })
 }
 
 /// Builds the shared TLS 1.3 and URI-SAN client-auth policy for a backend
@@ -497,23 +604,33 @@ fn certificate_has_allowed_uri(
     allowed: &BTreeSet<String>,
     trust_domains: &BTreeSet<String>,
 ) -> Result<bool, ()> {
+    Ok(certificate_single_uri_san(certificate)?.is_some_and(|uri| {
+        allowed.contains(uri)
+            || spiffe_trust_domain(uri).is_some_and(|domain| trust_domains.contains(domain))
+    }))
+}
+
+fn certificate_single_uri_san(certificate: &[u8]) -> Result<Option<&str>, ()> {
     let (_, certificate) = parse_x509_certificate(certificate).map_err(|_| ())?;
     let san = certificate.subject_alternative_name().map_err(|_| ())?;
-    Ok(san.is_some_and(|extension| {
-        let uri_names = extension
-            .value
-            .general_names
-            .iter()
-            .filter_map(|name| match name {
-                GeneralName::URI(uri) => Some(*uri),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        uri_names.len() == 1
-            && (allowed.contains(uri_names[0])
-                || spiffe_trust_domain(uri_names[0])
-                    .is_some_and(|domain| trust_domains.contains(domain)))
-    }))
+    let Some(extension) = san else {
+        return Ok(None);
+    };
+    let mut uri_names = extension
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            GeneralName::URI(uri) => Some(*uri),
+            _ => None,
+        });
+    let Some(uri_san) = uri_names.next() else {
+        return Ok(None);
+    };
+    if uri_names.next().is_some() {
+        return Ok(None);
+    }
+    Ok(Some(uri_san))
 }
 
 fn spiffe_trust_domain(uri: &str) -> Option<&str> {
@@ -681,8 +798,12 @@ impl fmt::Debug for OperationsState {
 #[cfg(test)]
 mod tests {
     use super::{
-        MtlsListener, OperationsState, PolicyUriClientVerifier, certificate_has_allowed_uri,
+        MtlsListener, OperationsState, PolicyUriClientVerifier, VerifiedMtlsPeer,
+        certificate_has_allowed_uri,
     };
+    use axum::Router;
+    use axum::extract::ConnectInfo;
+    use axum::routing::get;
     use axum::serve::Listener as _;
     use filebelt_control_protocol::BackendServerTlsConfig;
     use rcgen::{
@@ -698,8 +819,9 @@ mod tests {
     use std::collections::BTreeSet;
     use std::fs;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime};
+    use tokio::io::AsyncWriteExt as _;
     use tokio::net::TcpStream;
     use tokio_rustls::TlsConnector;
 
@@ -720,6 +842,15 @@ mod tests {
         not_after_year: i32,
         purpose: ExtendedKeyUsagePurpose,
     ) -> (CertificateDer<'static>, RootCertStore) {
+        signed_client_certificate_with_uri_sans(&[uri], not_before_year, not_after_year, purpose)
+    }
+
+    fn signed_client_certificate_with_uri_sans(
+        uri_sans: &[&str],
+        not_before_year: i32,
+        not_after_year: i32,
+        purpose: ExtendedKeyUsagePurpose,
+    ) -> (CertificateDer<'static>, RootCertStore) {
         let mut ca_parameters = CertificateParams::new(Vec::<String>::new()).unwrap();
         ca_parameters.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_parameters.key_usages = vec![
@@ -735,7 +866,10 @@ mod tests {
 
         let mut client_parameters = CertificateParams::new(Vec::<String>::new()).unwrap();
         client_parameters.is_ca = IsCa::NoCa;
-        client_parameters.subject_alt_names = vec![SanType::URI(uri.try_into().unwrap())];
+        client_parameters.subject_alt_names = uri_sans
+            .iter()
+            .map(|uri| SanType::URI((*uri).try_into().unwrap()))
+            .collect();
         client_parameters.key_usages = vec![KeyUsagePurpose::DigitalSignature];
         client_parameters.extended_key_usages = vec![purpose];
         client_parameters.not_before = date_time_ymd(not_before_year, 1, 1);
@@ -871,8 +1005,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn client_verifier_rejects_missing_and_multiple_uri_sans() {
+        let allowed = "spiffe://filebelt.test/web-api";
+        let (missing, roots) = signed_client_certificate_with_uri_sans(
+            &[],
+            2025,
+            2030,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        );
+        assert!(
+            verifier(roots, allowed)
+                .verify_client_cert(&missing, &[], test_time())
+                .is_err()
+        );
+
+        let (multiple, roots) = signed_client_certificate_with_uri_sans(
+            &[allowed, "spiffe://filebelt.test/web-io"],
+            2025,
+            2030,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        );
+        assert!(
+            verifier(roots, allowed)
+                .verify_client_cert(&multiple, &[], test_time())
+                .is_err()
+        );
+    }
+
     #[tokio::test]
-    async fn stalled_handshake_does_not_block_a_valid_client() {
+    async fn stalled_handshake_does_not_block_verified_connect_info() {
         let mut ca_parameters = CertificateParams::new(Vec::<String>::new()).unwrap();
         ca_parameters.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_parameters.key_usages = vec![
@@ -919,7 +1081,7 @@ mod tests {
             allowed_client_uri_sans: vec![identity.into()],
             allowed_client_trust_domains: Vec::new(),
         };
-        let mut listener = MtlsListener::bind(
+        let listener = MtlsListener::bind(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
             &settings,
         )
@@ -927,6 +1089,27 @@ mod tests {
         .unwrap();
         let address = listener.local_addr().unwrap();
         let _stalled = TcpStream::connect(address).await.unwrap();
+        let (peer_sender, peer_receiver) = tokio::sync::oneshot::channel();
+        let peer_sender = Arc::new(Mutex::new(Some(peer_sender)));
+        let application = Router::new().route(
+            "/",
+            get({
+                let peer_sender = Arc::clone(&peer_sender);
+                move |ConnectInfo(peer): ConnectInfo<VerifiedMtlsPeer>| async move {
+                    if let Some(sender) = peer_sender.lock().unwrap().take() {
+                        let _ = sender.send(peer);
+                    }
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                application.into_make_service_with_connect_info::<VerifiedMtlsPeer>(),
+            )
+            .await
+            .unwrap();
+        });
 
         let mut roots = RootCertStore::empty();
         roots.add(ca_certificate.der().clone()).unwrap();
@@ -943,14 +1126,28 @@ mod tests {
         .unwrap();
         let connector = TlsConnector::from(Arc::new(client_config));
         let stream = TcpStream::connect(address).await.unwrap();
+        let client_address = stream.local_addr().unwrap();
         let server_name = ServerName::try_from("localhost").unwrap().to_owned();
-        let (connected, _) = tokio::time::timeout(Duration::from_secs(3), async {
-            tokio::join!(connector.connect(server_name, stream), listener.accept())
-        })
+        let mut connected = tokio::time::timeout(
+            Duration::from_secs(3),
+            connector.connect(server_name, stream),
+        )
         .await
-        .expect("valid handshake was blocked by the stalled connection");
-        connected.unwrap();
+        .expect("valid handshake was blocked by the stalled connection")
+        .unwrap();
+        connected
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let peer = tokio::time::timeout(Duration::from_secs(3), peer_receiver)
+            .await
+            .expect("request did not receive authenticated connection metadata")
+            .unwrap();
+        assert_eq!(peer.remote_address(), client_address);
+        assert_eq!(peer.uri_san(), identity);
 
+        server.abort();
+        let _ = server.await;
         fs::remove_dir_all(directory).unwrap();
     }
 }

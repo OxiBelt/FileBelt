@@ -53,6 +53,7 @@ GRANT USAGE ON SCHEMA filebelt_security TO filebelt_api, filebelt_recovery;
 GRANT SELECT, INSERT, UPDATE ON
   tenants, principals, users, external_identities, tenant_admin_bindings,
   groups, group_memberships, drives, nodes, node_ancestry, acl_entries,
+  node_xattrs,
   api_sessions, oidc_login_attempts, user_preferences, storage_backends,
   payload_objects, upload_sessions, upload_parts, file_versions,
   quota_reservations, share_links, direct_shares, capability_nonces,
@@ -85,8 +86,11 @@ GRANT SELECT (
 ) ON audit_events TO filebelt_audit_exporter;
 
 GRANT SELECT (id, slug) ON tenants TO filebelt_recovery;
-GRANT SELECT (tenant_id, id) ON principals, users, groups, nodes, drives
+GRANT SELECT (tenant_id, id) ON principals, users, groups, drives
   TO filebelt_recovery;
+GRANT SELECT (tenant_id,id,kind,handle_generation) ON nodes TO filebelt_recovery;
+GRANT SELECT (tenant_id,source) ON acl_entries TO filebelt_recovery;
+GRANT SELECT (tenant_id) ON node_xattrs TO filebelt_recovery;
 GRANT SELECT (tenant_id, id, kind) ON storage_backends TO filebelt_recovery;
 GRANT SELECT (
   tenant_id, id, drive_id, backend_id, locator, layout, state, size_bytes, blake3
@@ -274,7 +278,8 @@ GRANT SELECT (id,slug) ON tenants TO filebelt_vfs;
 GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals TO filebelt_vfs;
 GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_vfs;
 GRANT SELECT ON groups, group_memberships, drives, nodes, node_ancestry,
-  acl_entries, direct_shares, file_versions, authorization_generations TO filebelt_vfs;
+  acl_entries, node_xattrs, direct_shares, file_versions,
+  authorization_generations TO filebelt_vfs;
 GRANT SELECT, INSERT ON audit_events, outbox_events, capability_nonces TO filebelt_vfs;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   filebelt_mount.policies, filebelt_mount.credentials,
@@ -350,11 +355,17 @@ GRANT SELECT, INSERT, UPDATE ON filebelt_mount.headscale_devices
 -- The I/O worker handles immutable range reads and UUID-scoped mount staging
 -- only after fbcap2 admission. Lock and policy decisions remain in
 -- VFS/PostgreSQL; the I/O role receives no mount-vault access.
-GRANT SELECT, UPDATE ON filebelt_mount.write_sessions,
+GRANT SELECT ON filebelt_mount.write_sessions,
   filebelt_mount.write_chunks TO filebelt_io;
 GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
   filebelt_mount.headscale_devices, filebelt_mount.gateway_epochs,
   filebelt_mount.sessions, filebelt_mount.handles TO filebelt_io;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals TO filebelt_io;
+GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_io;
+GRANT SELECT (tenant_id,group_id,user_principal_id) ON group_memberships TO filebelt_io;
+GRANT SELECT (tenant_id,id,acl_generation) ON drives TO filebelt_io;
+GRANT SELECT (tenant_id,drive_id,id,kind,trash_root_id,acl_generation,namespace_generation)
+  ON nodes TO filebelt_io;
 
 GRANT SELECT, UPDATE, DELETE ON
   filebelt_mount.sessions, filebelt_mount.session_receipts,
@@ -382,7 +393,8 @@ GRANT SELECT, INSERT, UPDATE ON filebelt_mount.nfs_principal_mappings
 GRANT SELECT ON
   filebelt_mount.nfs_feature_state,
   filebelt_mount.nfs_exports,
-  filebelt_mount.nfs_posix_groups TO filebelt_api;
+  filebelt_mount.nfs_posix_groups,
+  filebelt_mount.nfs_posix_users TO filebelt_api;
 GRANT UPDATE (state,generation) ON filebelt_mount.nfs_feature_state
   TO filebelt_api;
 GRANT INSERT (tenant_id,drive_id,export_id),
@@ -390,31 +402,187 @@ GRANT INSERT (tenant_id,drive_id,export_id),
   TO filebelt_api;
 GRANT INSERT (tenant_id,group_id,posix_name,projected_gid)
   ON filebelt_mount.nfs_posix_groups TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.fence_nfs_mapping_sessions(
+  uuid,uuid,uuid,bigint,text
+) TO filebelt_api;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  filebelt_mount.nfs_reclaim_records,
-  filebelt_mount.nfs_write_extents TO filebelt_vfs;
+  filebelt_mount.nfs_reclaim_records TO filebelt_vfs;
+GRANT SELECT ON filebelt_mount.nfs_write_extents TO filebelt_vfs;
 GRANT SELECT, INSERT ON filebelt_mount.nfs_replay_receipts TO filebelt_vfs;
-GRANT SELECT ON
-  filebelt_mount.nfs_principal_mappings,
-  filebelt_mount.nfs_feature_state,
-  filebelt_mount.nfs_exports,
-  filebelt_mount.nfs_posix_groups TO filebelt_vfs;
-GRANT EXECUTE ON FUNCTION filebelt_mount.reconcile_nfs_export_manifest(
-  uuid,text,bigint,bigint,bigint,bytea,bigint[],bigint[],bytea[]
-) TO filebelt_vfs;
-GRANT SELECT, UPDATE ON filebelt_mount.nfs_write_extents TO filebelt_io;
-GRANT SELECT, UPDATE, DELETE ON
-  filebelt_mount.nfs_reclaim_records,
-  filebelt_mount.nfs_write_extents TO filebelt_maintenance;
-GRANT SELECT, DELETE ON filebelt_mount.nfs_replay_receipts TO filebelt_maintenance;
+GRANT SELECT, INSERT ON filebelt_mount.nfs_write_operations TO filebelt_vfs;
+GRANT SELECT ON filebelt_mount.nfs_io_receipts TO filebelt_vfs;
+GRANT SELECT ON filebelt_mount.nfs_write_conflicts TO filebelt_api;
+GRANT SELECT (tenant_id,id,reserved_bytes) ON filebelt_mount.write_sessions TO filebelt_api;
+GRANT SELECT ON filebelt_mount.nfs_write_conflicts,
+  filebelt_mount.nfs_feature_state, filebelt_mount.nfs_exports TO filebelt_io;
+GRANT SELECT (
+  tenant_id,credential_id,principal_id,posix_group_id,generation,revoked_at
+) ON filebelt_mount.nfs_principal_mappings TO filebelt_io;
 GRANT SELECT ON
   filebelt_mount.nfs_principal_mappings,
   filebelt_mount.nfs_feature_state,
   filebelt_mount.nfs_exports,
   filebelt_mount.nfs_posix_groups,
-  filebelt_mount.nfs_reclaim_records,
+  filebelt_mount.nfs_posix_users,
+  filebelt_mount.nfs_replay_slots,
+  filebelt_mount.nfs_managed_traversal,
+  filebelt_mount.nfs_managed_group_memberships TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.reconcile_nfs_export_manifest(
+  uuid,text,bigint,bigint,bigint,bytea,bigint[],bigint[],bytea[]
+) TO filebelt_vfs;
+GRANT SELECT ON filebelt_mount.nfs_write_extents TO filebelt_io;
+GRANT SELECT, UPDATE, DELETE ON
+  filebelt_mount.nfs_reclaim_records TO filebelt_maintenance;
+GRANT SELECT ON
+  filebelt_mount.nfs_write_conflicts,
+  filebelt_mount.nfs_write_extents,
   filebelt_mount.nfs_replay_receipts,
-  filebelt_mount.nfs_write_extents TO filebelt_recovery;
+  filebelt_mount.nfs_replay_slots,
+  filebelt_mount.nfs_write_operations,
+  filebelt_mount.nfs_io_receipts TO filebelt_maintenance;
+GRANT SELECT ON
+  filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_feature_state,
+  filebelt_mount.nfs_exports,
+  filebelt_mount.nfs_posix_groups,
+  filebelt_mount.nfs_posix_users,
+  filebelt_mount.nfs_reclaim_records,
+  filebelt_mount.nfs_replay_slots,
+  filebelt_mount.nfs_replay_receipts,
+  filebelt_mount.nfs_pending_protocol_operations,
+  filebelt_mount.nfs_io_admissions,
+  filebelt_mount.nfs_write_extents,
+  filebelt_mount.nfs_io_receipts,
+  filebelt_mount.nfs_staging_cleanup_jobs,
+  filebelt_mount.nfs_write_lock_cleanup_jobs,
+  filebelt_mount.nfs_write_operations,
+  filebelt_mount.nfs_write_conflicts,
+  filebelt_mount.nfs_managed_traversal,
+  filebelt_mount.nfs_managed_group_memberships TO filebelt_recovery;
+GRANT EXECUTE ON FUNCTION filebelt_mount.mutate_nfs_namespace(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,bytea,jsonb,bytea,bytea
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.commit_nfs_write(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,bytea,jsonb,
+  bytea,bytea,bytea,bytea
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.start_nfs_write_replayed(
+  uuid,uuid,bigint,bytea,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,
+  uuid,uuid,uuid,uuid,uuid,bigint,text,text,integer,bigint,integer,bytea,bytea,bytea
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.prepare_nfs_replay_sequence(
+  uuid,uuid,text,text,integer,bigint,integer,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.lock_nfs_replay_receipt(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.authorize_nfs_mutation(
+  uuid,uuid,bigint,bytea,uuid,uuid,bigint,bigint,bigint,bigint,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.authorize_nfs_handle_open(
+  uuid,uuid,bigint,bytea,uuid,uuid,bigint,bigint,bigint,bigint,bigint,text[]
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.preauthorize_nfs_io(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  text,text,integer,bigint,integer,text,bytea,
+  uuid,uuid,bytea,uuid,text,bytea,bytea,bigint,bigint,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.lookup_nfs_io_preauthorization(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,uuid,uuid,uuid,
+  bytea,bytea,text,uuid,bytea,bigint,bigint,bigint,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.inspect_nfs_pending_io(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.reissue_nfs_io(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  text,text,integer,bigint,integer,text,bytea,uuid,uuid,text,bytea,
+  bigint,bigint,uuid,bytea,bytea,bigint
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.read_nfs_io_receipt(
+  uuid,bytea,uuid,uuid,text,bytea,bytea
+) TO filebelt_io;
+GRANT EXECUTE ON FUNCTION filebelt_mount.read_nfs_write_operation(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  uuid,text,bigint,bigint
+) TO filebelt_io;
+GRANT EXECUTE ON FUNCTION filebelt_mount.begin_nfs_io_receipt(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  uuid,bytea,text,bytea,bytea,bigint,bigint
+) TO filebelt_io;
+GRANT EXECUTE ON FUNCTION filebelt_mount.complete_nfs_io_receipt(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  uuid,bytea,text,bytea,bytea,jsonb
+) TO filebelt_io;
+GRANT EXECUTE ON FUNCTION filebelt_mount.fence_pending_nfs_io_cleanup(
+  uuid,uuid,bigint,bytea,bytea,text,bytea
+) TO filebelt_io;
+GRANT EXECUTE ON FUNCTION filebelt_mount.reserve_nfs_write_bytes(uuid,uuid,bigint,bigint)
+  TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.replace_nfs_write_extents(
+  uuid,uuid,bigint,uuid,bigint[],bigint[],boolean[],bytea[]
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.apply_completed_nfs_write_operation(
+  uuid,uuid,bigint,uuid,text,bytea
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.finalize_nfs_internal_io_replay(
+  uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,
+  bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,
+  bytea,text,text,integer,bigint,integer,text,bytea,text,bytea,bytea
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.require_completed_nfs_internal_terminal(
+  uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,uuid
+) TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.enqueue_nfs_staging_cleanup(
+  uuid,uuid,text,bytea,text
+) TO filebelt_vfs,filebelt_io,filebelt_api,filebelt_maintenance,filebelt_recovery;
+GRANT EXECUTE ON FUNCTION filebelt_mount.claim_nfs_staging_cleanup(
+  uuid,uuid,uuid,uuid
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.mark_nfs_staging_cleanup_physical_deleted(
+  uuid,uuid,uuid,uuid,bigint
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.complete_nfs_staging_cleanup(
+  uuid,uuid,uuid,uuid,bigint
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.claim_next_nfs_staging_cleanup(
+  uuid,uuid,uuid
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.heartbeat_nfs_staging_cleanup(
+  uuid,uuid,uuid,uuid,bigint
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.sweep_expired_nfs_writers(
+  uuid,integer
+) TO filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.complete_nfs_write_conflict_copy(
+  uuid,uuid,uuid,uuid,uuid,text,text,uuid,uuid
+) TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.discard_nfs_write_conflict(
+  uuid,uuid,uuid,uuid
+) TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.sweep_expired_nfs_write_conflicts(
+  uuid,integer
+) TO filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.enqueue_nfs_write_lock_cleanup(
+  uuid,uuid
+) TO filebelt_vfs,filebelt_io,filebelt_maintenance,filebelt_recovery;
+GRANT EXECUTE ON FUNCTION filebelt_mount.claim_nfs_write_lock_cleanup(
+  uuid,uuid,uuid,uuid
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.claim_next_nfs_write_lock_cleanup(
+  uuid,uuid,uuid
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.heartbeat_nfs_write_lock_cleanup(
+  uuid,uuid,uuid,uuid,bigint
+) TO filebelt_io,filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.complete_nfs_write_lock_cleanup(
+  uuid,uuid,uuid,uuid,bigint
+) TO filebelt_io,filebelt_maintenance;
 GRANT EXECUTE ON FUNCTION filebelt_mount.advance_nfs_restore_generation(uuid,bigint)
   TO filebelt_recovery;
 

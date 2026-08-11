@@ -187,6 +187,86 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
         .fetch_one(&mut *transaction)
         .await
         .map_err(|error| error.to_string())?;
+    let nfs = sqlx::query(
+        "SELECT feature.state,feature.generation,feature.manifest_generation,\
+                feature.applied_manifest_generation,feature.applied_manifest_digest,\
+                feature.applied_gateway_id,feature.applied_gateway_epoch,\
+                feature.restore_generation,\
+                (SELECT count(*) FROM filebelt_mount.nfs_exports AS export \
+                  WHERE export.tenant_id=feature.tenant_id) AS exports,\
+                (SELECT count(*) FROM filebelt_mount.nfs_principal_mappings AS mapping \
+                  WHERE mapping.tenant_id=feature.tenant_id AND mapping.revoked_at IS NULL) AS active_mappings,\
+                (SELECT count(*) FROM filebelt_mount.nfs_posix_groups AS posix_group \
+                  WHERE posix_group.tenant_id=feature.tenant_id) AS posix_groups,\
+                (SELECT count(*) FROM filebelt_mount.nfs_posix_users AS posix_user \
+                  WHERE posix_user.tenant_id=feature.tenant_id) AS posix_users,\
+                (SELECT count(*) FROM public.nodes AS node \
+                  WHERE node.tenant_id=feature.tenant_id AND node.kind='symlink') AS symlinks,\
+                (SELECT count(*) FROM public.node_xattrs AS xattr \
+                  WHERE xattr.tenant_id=feature.tenant_id) AS xattrs,\
+                (SELECT count(*) FROM public.acl_entries AS acl \
+                  WHERE acl.tenant_id=feature.tenant_id AND acl.source='nfs') AS nfs_acl_entries,\
+                (SELECT count(*) FROM filebelt_mount.nfs_replay_receipts AS receipt \
+                  WHERE receipt.tenant_id=feature.tenant_id \
+                    AND receipt.expires_at>statement_timestamp()) AS live_replay_receipts,\
+                (SELECT count(*) FROM filebelt_mount.write_sessions AS write_session \
+                  JOIN filebelt_mount.sessions AS session \
+                    ON session.tenant_id=write_session.tenant_id \
+                   AND session.id=write_session.mount_session_id \
+                  WHERE write_session.tenant_id=feature.tenant_id AND session.protocol='nfs' \
+                    AND write_session.state IN ('open','flushing','committing','aborting')) AS unfinished_writes,\
+                (SELECT count(*) FROM filebelt_mount.nfs_write_conflicts AS conflict \
+                  WHERE conflict.tenant_id=feature.tenant_id \
+                    AND conflict.state='retained') AS retained_conflicts \
+         FROM filebelt_mount.nfs_feature_state AS feature WHERE feature.tenant_id=$1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| error.to_string())?;
+    let replay_slots = nfs_replay_slot_inventory(&mut transaction, tenant_id).await?;
+    let io_recovery = nfs_io_recovery_inventory(&mut transaction, tenant_id).await?;
+    let nfs_inventory = nfs.map_or_else(
+        || json!({"configured":false}),
+        |row| {
+            let manifest_digest = row
+                .get::<Option<Vec<u8>>, _>("applied_manifest_digest")
+                .map(|digest| encode_hex(&digest));
+            json!({
+                "configured": true,
+                "state": row.get::<String, _>("state"),
+                "generation": row.get::<i64, _>("generation"),
+                "manifest_generation": row.get::<i64, _>("manifest_generation"),
+                "applied_manifest_generation": row.get::<i64, _>("applied_manifest_generation"),
+                "applied_manifest_digest": manifest_digest,
+                "applied_gateway_id": row.get::<Option<String>, _>("applied_gateway_id"),
+                "applied_gateway_epoch": row.get::<Option<i64>, _>("applied_gateway_epoch"),
+                "restore_generation": row.get::<i64, _>("restore_generation"),
+                "exports": row.get::<i64, _>("exports"),
+                "active_mappings": row.get::<i64, _>("active_mappings"),
+                "posix_groups": row.get::<i64, _>("posix_groups"),
+                "posix_users": row.get::<i64, _>("posix_users"),
+                "symlinks": row.get::<i64, _>("symlinks"),
+                "xattrs": row.get::<i64, _>("xattrs"),
+                "nfs_acl_entries": row.get::<i64, _>("nfs_acl_entries"),
+                "live_replay_receipts": row.get::<i64, _>("live_replay_receipts"),
+                "replay_slots": replay_slots.get("count"),
+                "replay_slot_max_sequence": replay_slots.get("max_sequence"),
+                "replay_slot_manifest_sha256": replay_slots.get("manifest_sha256"),
+                "pending_protocol_operations": io_recovery.get("pending_protocol_operations"),
+                "live_io_admissions": io_recovery.get("live_io_admissions"),
+                "io_receipts": io_recovery.get("io_receipts"),
+                "pending_io_receipts": io_recovery.get("pending_io_receipts"),
+                "staging_cleanup_jobs": io_recovery.get("staging_cleanup_jobs"),
+                "active_staging_cleanup_jobs": io_recovery.get("active_staging_cleanup_jobs"),
+                "lock_cleanup_jobs": io_recovery.get("lock_cleanup_jobs"),
+                "active_lock_cleanup_jobs": io_recovery.get("active_lock_cleanup_jobs"),
+                "io_recovery_manifest_sha256": io_recovery.get("manifest_sha256"),
+                "unfinished_writes": row.get::<i64, _>("unfinished_writes"),
+                "retained_conflicts": row.get::<i64, _>("retained_conflicts"),
+            })
+        },
+    );
     let payload_manifest_sha256 = payload_manifest(
         &mut transaction,
         tenant_id,
@@ -234,6 +314,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "total_payload_bytes": counts.get::<i64, _>("total_payload_bytes"),
             "payload_manifest_sha256": payload_manifest_sha256,
             "descendant_share_security": descendant_share_security,
+            "nfs": nfs_inventory,
         },
     }))
 }
@@ -372,6 +453,502 @@ async fn payload_manifest(
         }
     }
     Ok(encode_hex(context.finish().as_ref()))
+}
+
+async fn nfs_replay_slot_inventory(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+) -> Result<Value, String> {
+    let mut context = Context::new(&SHA256);
+    let mut offset = 0_i64;
+    let mut count = 0_i64;
+    let mut max_sequence = 0_i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT slot.mount_session_id,slot.nfs_session_id,slot.slot_id,slot.client_id,\
+                    slot.current_sequence_id,slot.max_operation_index,slot.gateway_epoch,\
+                    (SELECT count(*)::bigint FROM filebelt_mount.nfs_replay_receipts AS receipt \
+                      WHERE receipt.tenant_id=slot.tenant_id \
+                        AND receipt.mount_session_id=slot.mount_session_id \
+                        AND receipt.nfs_session_id=slot.nfs_session_id \
+                        AND receipt.slot_id=slot.slot_id) AS receipt_count,\
+                    (SELECT max(receipt.operation_index) \
+                      FROM filebelt_mount.nfs_replay_receipts AS receipt \
+                      WHERE receipt.tenant_id=slot.tenant_id \
+                        AND receipt.mount_session_id=slot.mount_session_id \
+                        AND receipt.nfs_session_id=slot.nfs_session_id \
+                        AND receipt.slot_id=slot.slot_id) AS receipt_max_operation_index,\
+                    (SELECT count(*)::bigint FROM filebelt_mount.nfs_replay_receipts AS receipt \
+                      WHERE receipt.tenant_id=slot.tenant_id \
+                        AND receipt.mount_session_id=slot.mount_session_id \
+                        AND receipt.nfs_session_id=slot.nfs_session_id \
+                        AND receipt.slot_id=slot.slot_id AND (\
+                          receipt.sequence_id<>slot.current_sequence_id \
+                          OR receipt.operation_index>slot.max_operation_index \
+                          OR receipt.client_id<>slot.client_id \
+                          OR receipt.gateway_epoch<>slot.gateway_epoch)) AS invalid_receipts,\
+                    (SELECT count(*)::bigint \
+                      FROM filebelt_mount.nfs_pending_protocol_operations AS pending \
+                      WHERE pending.tenant_id=slot.tenant_id \
+                        AND pending.mount_session_id=slot.mount_session_id \
+                        AND pending.nfs_session_id=slot.nfs_session_id \
+                        AND pending.slot_id=slot.slot_id) AS pending_count,\
+                    (SELECT max(pending.operation_index) \
+                      FROM filebelt_mount.nfs_pending_protocol_operations AS pending \
+                      WHERE pending.tenant_id=slot.tenant_id \
+                        AND pending.mount_session_id=slot.mount_session_id \
+                        AND pending.nfs_session_id=slot.nfs_session_id \
+                        AND pending.slot_id=slot.slot_id) AS pending_operation_index,\
+                    (SELECT count(*)::bigint \
+                      FROM filebelt_mount.nfs_pending_protocol_operations AS pending \
+                      WHERE pending.tenant_id=slot.tenant_id \
+                        AND pending.mount_session_id=slot.mount_session_id \
+                        AND pending.nfs_session_id=slot.nfs_session_id \
+                        AND pending.slot_id=slot.slot_id AND (\
+                          pending.sequence_id<>slot.current_sequence_id \
+                          OR pending.operation_index<>slot.max_operation_index \
+                          OR pending.client_id<>slot.client_id \
+                          OR pending.gateway_epoch<>slot.gateway_epoch \
+                          OR EXISTS (SELECT 1 \
+                            FROM filebelt_mount.nfs_replay_receipts AS receipt \
+                            WHERE receipt.tenant_id=pending.tenant_id \
+                              AND receipt.mount_session_id=pending.mount_session_id \
+                              AND receipt.nfs_session_id=pending.nfs_session_id \
+                              AND receipt.slot_id=pending.slot_id \
+                              AND receipt.sequence_id=pending.sequence_id \
+                              AND receipt.operation_index=pending.operation_index))) \
+                      AS invalid_pending \
+             FROM filebelt_mount.nfs_replay_slots AS slot \
+             WHERE slot.tenant_id=$1 \
+             ORDER BY slot.mount_session_id,slot.nfs_session_id,slot.slot_id \
+             OFFSET $2 LIMIT $3",
+        )
+        .bind(tenant_id)
+        .bind(offset)
+        .bind(PAYLOAD_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in &rows {
+            let receipt_count = row.get::<i64, _>("receipt_count");
+            let max_operation_index = row.get::<i32, _>("max_operation_index");
+            let receipt_max = row.get::<Option<i32>, _>("receipt_max_operation_index");
+            let pending_count = row.get::<i64, _>("pending_count");
+            let pending_operation_index = row.get::<Option<i32>, _>("pending_operation_index");
+            let terminal_receipt_set =
+                pending_count == 0 && receipt_count > 0 && receipt_max == Some(max_operation_index);
+            let in_flight_set = pending_count == 1
+                && pending_operation_index == Some(max_operation_index)
+                && receipt_max.is_none_or(|index| index < max_operation_index);
+            if (!terminal_receipt_set && !in_flight_set)
+                || row.get::<i64, _>("invalid_receipts") != 0
+                || row.get::<i64, _>("invalid_pending") != 0
+            {
+                return Err(
+                    "NFS replay slot high-water has neither a coherent receipt set nor an explicit in-flight operation".into(),
+                );
+            }
+            let sequence = row.get::<i64, _>("current_sequence_id");
+            max_sequence = max_sequence.max(sequence);
+            count += 1;
+            let canonical = json!([
+                row.get::<Uuid, _>("mount_session_id"),
+                row.get::<String, _>("nfs_session_id"),
+                row.get::<i32, _>("slot_id"),
+                row.get::<String, _>("client_id"),
+                sequence,
+                max_operation_index,
+                row.get::<i64, _>("gateway_epoch"),
+                receipt_count,
+                pending_count,
+                pending_operation_index,
+            ]);
+            let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
+            context.update(&encoded);
+            context.update(b"\n");
+        }
+        offset += i64::try_from(rows.len()).map_err(|error| error.to_string())?;
+        if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+            break;
+        }
+    }
+    Ok(json!({
+        "count": count,
+        "max_sequence": max_sequence,
+        "manifest_sha256": encode_hex(context.finish().as_ref()),
+    }))
+}
+
+async fn nfs_io_recovery_inventory(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+) -> Result<Value, String> {
+    let mut context = Context::new(&SHA256);
+    let mut offset = 0_i64;
+    let mut pending_protocol_operations = 0_i64;
+    let mut live_io_admissions = 0_i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT pending.mount_session_id,pending.client_id,pending.nfs_session_id,\
+                    pending.slot_id,pending.sequence_id,pending.operation_index,\
+                    pending.protocol_operation,pending.request_digest,pending.gateway_epoch,\
+                    pending.protocol_operation_id,pending.write_session_id,\
+                    pending.capability_id,pending.nonce_digest,pending.claims_digest,\
+                    pending.io_operation,pending.operation_id,pending.content_blake3,\
+                    pending.range_start,pending.range_end,pending.fencing_token,\
+                    pending.capability_expires_at::text AS capability_expires_at,\
+                    pending.expires_at::text AS expires_at,\
+                    admission.capability_id AS admission_capability_id,\
+                    receipt.capability_id AS receipt_capability_id,\
+                    receipt.state AS receipt_state,receipt.outcome AS receipt_outcome \
+             FROM filebelt_mount.nfs_pending_protocol_operations AS pending \
+             LEFT JOIN filebelt_mount.nfs_io_admissions AS admission \
+               ON admission.tenant_id=pending.tenant_id \
+              AND admission.capability_id=pending.capability_id \
+              AND admission.nonce_digest=pending.nonce_digest \
+              AND admission.write_session_id=pending.write_session_id \
+              AND admission.operation_id IS NOT DISTINCT FROM pending.operation_id \
+              AND admission.operation=pending.io_operation \
+              AND admission.claims_digest=pending.claims_digest \
+              AND admission.content_blake3 IS NOT DISTINCT FROM pending.content_blake3 \
+             LEFT JOIN filebelt_mount.nfs_io_receipts AS receipt \
+               ON receipt.tenant_id=pending.tenant_id \
+              AND receipt.capability_id=pending.capability_id \
+              AND receipt.nonce_digest=pending.nonce_digest \
+              AND receipt.write_session_id=pending.write_session_id \
+              AND receipt.operation_id IS NOT DISTINCT FROM pending.operation_id \
+              AND receipt.operation=pending.io_operation \
+              AND receipt.claims_digest=pending.claims_digest \
+              AND receipt.content_blake3 IS NOT DISTINCT FROM pending.content_blake3 \
+             WHERE pending.tenant_id=$1 \
+             ORDER BY pending.mount_session_id,pending.nfs_session_id,pending.slot_id,\
+                      pending.sequence_id,pending.operation_index \
+             OFFSET $2 LIMIT $3",
+        )
+        .bind(tenant_id)
+        .bind(offset)
+        .bind(PAYLOAD_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in &rows {
+            let has_admission = row
+                .get::<Option<Uuid>, _>("admission_capability_id")
+                .is_some();
+            let has_receipt = row
+                .get::<Option<Uuid>, _>("receipt_capability_id")
+                .is_some();
+            if has_admission == has_receipt {
+                return Err(
+                    "NFS pending protocol operation must have exactly one admission or worker receipt"
+                        .into(),
+                );
+            }
+            pending_protocol_operations += 1;
+            if has_admission {
+                live_io_admissions += 1;
+            }
+            let canonical = json!([
+                row.get::<Uuid, _>("mount_session_id"),
+                row.get::<String, _>("client_id"),
+                row.get::<String, _>("nfs_session_id"),
+                row.get::<i32, _>("slot_id"),
+                row.get::<i64, _>("sequence_id"),
+                row.get::<i32, _>("operation_index"),
+                row.get::<String, _>("protocol_operation"),
+                encode_hex(&row.get::<Vec<u8>, _>("request_digest")),
+                row.get::<i64, _>("gateway_epoch"),
+                row.get::<Uuid, _>("protocol_operation_id"),
+                row.get::<Uuid, _>("write_session_id"),
+                row.get::<Uuid, _>("capability_id"),
+                encode_hex(&row.get::<Vec<u8>, _>("nonce_digest")),
+                encode_hex(&row.get::<Vec<u8>, _>("claims_digest")),
+                row.get::<String, _>("io_operation"),
+                row.get::<Option<Uuid>, _>("operation_id"),
+                row.get::<Option<Vec<u8>>, _>("content_blake3")
+                    .map(|digest| encode_hex(&digest)),
+                row.get::<Option<i64>, _>("range_start"),
+                row.get::<Option<i64>, _>("range_end"),
+                row.get::<i64, _>("fencing_token"),
+                row.get::<String, _>("capability_expires_at"),
+                row.get::<String, _>("expires_at"),
+                if has_admission {
+                    "admission"
+                } else {
+                    "receipt"
+                },
+                row.get::<Option<String>, _>("receipt_state"),
+                row.get::<Option<Value>, _>("receipt_outcome"),
+            ]);
+            let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
+            context.update(b"pending-protocol\0");
+            context.update(&encoded);
+            context.update(b"\n");
+        }
+        offset += i64::try_from(rows.len()).map_err(|error| error.to_string())?;
+        if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+            break;
+        }
+    }
+    let orphan_admissions: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM filebelt_mount.nfs_io_admissions AS admission \
+         LEFT JOIN filebelt_mount.nfs_pending_protocol_operations AS pending \
+           ON pending.tenant_id=admission.tenant_id \
+          AND pending.capability_id=admission.capability_id \
+          AND pending.nonce_digest=admission.nonce_digest \
+         WHERE admission.tenant_id=$1 AND pending.capability_id IS NULL",
+    )
+    .bind(tenant_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| error.to_string())?;
+    if orphan_admissions != 0 {
+        return Err("NFS I/O admission has no durable pending protocol identity".into());
+    }
+
+    offset = 0;
+    let mut io_receipts = 0_i64;
+    let mut pending_io_receipts = 0_i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT receipt.nonce_digest,receipt.write_session_id,receipt.operation_id,\
+                    receipt.operation,receipt.operation_ordinal,receipt.claims_digest,\
+                    receipt.content_blake3,receipt.state,receipt.outcome,\
+                    receipt.created_at::text AS created_at,\
+                    receipt.expires_at::text AS expires_at,\
+                    writer.state AS writer_state,\
+                    writer.expires_at>statement_timestamp() AS writer_live,\
+                    operation.state AS range_operation_state,\
+                    cleanup.state AS cleanup_state,\
+                    cleanup.source_nonce_digest AS cleanup_source_nonce_digest,\
+                    cleanup.completion_kind AS cleanup_completion_kind \
+             FROM filebelt_mount.nfs_io_receipts AS receipt \
+             JOIN filebelt_mount.write_sessions AS writer \
+               ON writer.tenant_id=receipt.tenant_id \
+              AND writer.id=receipt.write_session_id \
+             LEFT JOIN filebelt_mount.nfs_write_operations AS operation \
+               ON operation.tenant_id=receipt.tenant_id \
+              AND operation.write_session_id=receipt.write_session_id \
+              AND operation.operation_id=receipt.operation_id \
+             LEFT JOIN filebelt_mount.nfs_staging_cleanup_jobs AS cleanup \
+               ON cleanup.tenant_id=receipt.tenant_id \
+              AND cleanup.write_session_id=receipt.write_session_id \
+             WHERE receipt.tenant_id=$1 \
+             ORDER BY receipt.nonce_digest OFFSET $2 LIMIT $3",
+        )
+        .bind(tenant_id)
+        .bind(offset)
+        .bind(PAYLOAD_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in &rows {
+            let receipt_state = row.get::<String, _>("state");
+            let operation_id = row.get::<Option<Uuid>, _>("operation_id");
+            let range_state = row.get::<Option<String>, _>("range_operation_state");
+            let nonce_digest = row.get::<Vec<u8>, _>("nonce_digest");
+            let cleanup_state = row.get::<Option<String>, _>("cleanup_state");
+            let cleanup_source_nonce = row.get::<Option<Vec<u8>>, _>("cleanup_source_nonce_digest");
+            let exact_cleanup = cleanup_source_nonce.as_deref() == Some(nonce_digest.as_slice())
+                && matches!(
+                    cleanup_state.as_deref(),
+                    Some("pending" | "leased" | "physical_deleted")
+                );
+            if operation_id.is_some() {
+                let coherent = if receipt_state == "pending" {
+                    if exact_cleanup {
+                        if cleanup_state.as_deref() == Some("physical_deleted") {
+                            range_state.as_deref() == Some("cancelled")
+                        } else {
+                            matches!(
+                                range_state.as_deref(),
+                                Some("planned" | "executing" | "io_completed" | "cancelled")
+                            )
+                        }
+                    } else {
+                        range_state.as_deref() == Some("executing")
+                    }
+                } else {
+                    matches!(
+                        range_state.as_deref(),
+                        Some("io_completed" | "applied" | "cancelled")
+                    )
+                };
+                if !coherent {
+                    return Err(
+                        "NFS byte-plane receipt has an incoherent range-operation state".into(),
+                    );
+                }
+            }
+            if receipt_state == "pending" {
+                pending_io_receipts += 1;
+                if !row.get::<bool, _>("writer_live") && !exact_cleanup {
+                    return Err(
+                        "expired pending NFS byte-plane receipt has no cleanup authority".into(),
+                    );
+                }
+            } else if row.get::<Option<Value>, _>("outcome").is_none() {
+                return Err("completed NFS byte-plane receipt has no durable outcome".into());
+            }
+            io_receipts += 1;
+            let canonical = json!([
+                encode_hex(&nonce_digest),
+                row.get::<Uuid, _>("write_session_id"),
+                operation_id,
+                row.get::<String, _>("operation"),
+                row.get::<i64, _>("operation_ordinal"),
+                encode_hex(&row.get::<Vec<u8>, _>("claims_digest")),
+                row.get::<Option<Vec<u8>>, _>("content_blake3")
+                    .map(|digest| encode_hex(&digest)),
+                receipt_state,
+                row.get::<Option<Value>, _>("outcome"),
+                row.get::<String, _>("created_at"),
+                row.get::<String, _>("expires_at"),
+                row.get::<String, _>("writer_state"),
+                range_state,
+                cleanup_state,
+                cleanup_source_nonce.map(|digest| encode_hex(&digest)),
+                row.get::<Option<String>, _>("cleanup_completion_kind"),
+            ]);
+            let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
+            context.update(b"receipt\0");
+            context.update(&encoded);
+            context.update(b"\n");
+        }
+        offset += i64::try_from(rows.len()).map_err(|error| error.to_string())?;
+        if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+            break;
+        }
+    }
+
+    offset = 0;
+    let mut staging_cleanup_jobs = 0_i64;
+    let mut active_staging_cleanup_jobs = 0_i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT write_session_id,backend_id,payload_id,source_nonce_digest,reason,\
+                    completion_kind,state,\
+                    fencing_token,lease_owner,lease_expires_at::text AS lease_expires_at,\
+                    attempts,created_at::text AS created_at,completed_by,\
+                    completed_fencing_token,completed_at::text AS completed_at \
+             FROM filebelt_mount.nfs_staging_cleanup_jobs WHERE tenant_id=$1 \
+             ORDER BY write_session_id OFFSET $2 LIMIT $3",
+        )
+        .bind(tenant_id)
+        .bind(offset)
+        .bind(PAYLOAD_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in &rows {
+            staging_cleanup_jobs += 1;
+            let state = row.get::<String, _>("state");
+            if state != "completed" {
+                active_staging_cleanup_jobs += 1;
+            }
+            let canonical = json!([
+                row.get::<Uuid, _>("write_session_id"),
+                row.get::<Uuid, _>("backend_id"),
+                row.get::<Uuid, _>("payload_id"),
+                row.get::<Option<Vec<u8>>, _>("source_nonce_digest")
+                    .map(|digest| encode_hex(&digest)),
+                row.get::<String, _>("reason"),
+                row.get::<String, _>("completion_kind"),
+                state,
+                row.get::<i64, _>("fencing_token"),
+                row.get::<Option<Uuid>, _>("lease_owner"),
+                row.get::<Option<String>, _>("lease_expires_at"),
+                row.get::<i64, _>("attempts"),
+                row.get::<String, _>("created_at"),
+                row.get::<Option<Uuid>, _>("completed_by"),
+                row.get::<Option<i64>, _>("completed_fencing_token"),
+                row.get::<Option<String>, _>("completed_at"),
+            ]);
+            let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
+            context.update(b"cleanup\0");
+            context.update(&encoded);
+            context.update(b"\n");
+        }
+        offset += i64::try_from(rows.len()).map_err(|error| error.to_string())?;
+        if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+            break;
+        }
+    }
+
+    offset = 0;
+    let mut lock_cleanup_jobs = 0_i64;
+    let mut active_lock_cleanup_jobs = 0_i64;
+    loop {
+        let rows = sqlx::query(
+            "SELECT write_session_id,backend_id,staging_payload_id,state,fencing_token,\
+                    lease_owner,lease_expires_at::text AS lease_expires_at,attempts,\
+                    created_at::text AS created_at,completed_by,completed_fencing_token,\
+                    completed_at::text AS completed_at \
+             FROM filebelt_mount.nfs_write_lock_cleanup_jobs WHERE tenant_id=$1 \
+             ORDER BY write_session_id OFFSET $2 LIMIT $3",
+        )
+        .bind(tenant_id)
+        .bind(offset)
+        .bind(PAYLOAD_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in &rows {
+            lock_cleanup_jobs += 1;
+            let state = row.get::<String, _>("state");
+            if state != "completed" {
+                active_lock_cleanup_jobs += 1;
+            }
+            let canonical = json!([
+                row.get::<Uuid, _>("write_session_id"),
+                row.get::<Uuid, _>("backend_id"),
+                row.get::<Uuid, _>("staging_payload_id"),
+                state,
+                row.get::<i64, _>("fencing_token"),
+                row.get::<Option<Uuid>, _>("lease_owner"),
+                row.get::<Option<String>, _>("lease_expires_at"),
+                row.get::<i64, _>("attempts"),
+                row.get::<String, _>("created_at"),
+                row.get::<Option<Uuid>, _>("completed_by"),
+                row.get::<Option<i64>, _>("completed_fencing_token"),
+                row.get::<Option<String>, _>("completed_at"),
+            ]);
+            let encoded = serde_json::to_vec(&canonical).map_err(|error| error.to_string())?;
+            context.update(b"lock-cleanup\0");
+            context.update(&encoded);
+            context.update(b"\n");
+        }
+        offset += i64::try_from(rows.len()).map_err(|error| error.to_string())?;
+        if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+            break;
+        }
+    }
+    Ok(json!({
+        "pending_protocol_operations": pending_protocol_operations,
+        "live_io_admissions": live_io_admissions,
+        "io_receipts": io_receipts,
+        "pending_io_receipts": pending_io_receipts,
+        "staging_cleanup_jobs": staging_cleanup_jobs,
+        "active_staging_cleanup_jobs": active_staging_cleanup_jobs,
+        "lock_cleanup_jobs": lock_cleanup_jobs,
+        "active_lock_cleanup_jobs": active_lock_cleanup_jobs,
+        "manifest_sha256": encode_hex(context.finish().as_ref()),
+    }))
 }
 
 fn read_checkpoint(path: &Path) -> Result<Value, String> {

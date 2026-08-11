@@ -635,6 +635,7 @@ fn mapping_json(record: &NfsPrincipalMapping) -> Value {
         "credential_id": record.credential_id,
         "projected_uid": record.projected_uid,
         "projected_gid": record.projected_gid,
+        "allowed_drive_ids": record.allowed_drive_ids,
         "generation": record.generation,
     })
 }

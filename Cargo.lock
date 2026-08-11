@@ -2139,6 +2139,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "filebelt-database",
+ "rustix",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2151,6 +2152,7 @@ version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
+ "blake3",
  "filebelt-capability-keyset",
  "prost",
  "thiserror 2.0.18",
@@ -2200,6 +2202,7 @@ dependencies = [
 name = "filebelt-vfs-protocol"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "prost",
  "thiserror 2.0.18",
  "uuid",
@@ -2253,6 +2256,7 @@ dependencies = [
  "prost",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

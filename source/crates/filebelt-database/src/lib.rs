@@ -10,6 +10,8 @@ pub mod mcp;
 pub mod media;
 pub mod mount;
 
+mod idempotency;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use filebelt_domain::Action;
@@ -236,7 +238,10 @@ pub struct AuthorizationSnapshot {
     pub creator_facts: Vec<AuthorizationPrincipalFact>,
     pub membership_generation: i64,
     pub drive_acl_generation: i64,
+    /// Namespace generation of the drive containing `resource_id`.
     pub namespace_generation: i64,
+    /// Namespace generation of the exact node identified by `resource_id`.
+    pub resource_namespace_generation: i64,
     pub resource_acl_generation: i64,
 }
 
@@ -473,8 +478,8 @@ impl Database {
         sqlx::query("INSERT INTO drives (tenant_id,id,owner_principal_id,kind,display_name,quota_bytes) VALUES ($1,$2,$3,'private','My Drive',$4)")
             .bind(tenant_id).bind(drive_id).bind(principal_id).bind(PRIVATE_DRIVE_QUOTA_BYTES)
             .execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key) VALUES ($1,$2,$3,NULL,'directory','','')")
-            .bind(tenant_id).bind(drive_id).bind(root_id).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key,owner_principal_id) VALUES ($1,$2,$3,NULL,'directory','','',$4)")
+            .bind(tenant_id).bind(drive_id).bind(root_id).bind(principal_id).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO node_ancestry (tenant_id,drive_id,ancestor_id,descendant_id,depth) VALUES ($1,$2,$3,$3,0)")
             .bind(tenant_id).bind(drive_id).bind(root_id).execute(&mut *transaction).await?;
         let tenant_admin = is_admin(&mut transaction, tenant_id, issuer, subject).await?;
@@ -1613,7 +1618,7 @@ impl Database {
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             .execute(&mut *transaction)
             .await?;
-        let resource = sqlx::query("SELECT d.owner_principal_id,p.kind AS owner_kind,g.id AS owner_group_id,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.acl_generation AS resource_acl_generation,actor.generation AS membership_generation FROM drives d JOIN principals p ON p.tenant_id=d.tenant_id AND p.id=d.owner_principal_id LEFT JOIN groups g ON g.tenant_id=p.tenant_id AND g.principal_id=p.id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id JOIN principals actor ON actor.tenant_id=d.tenant_id AND actor.id=$4 AND actor.disabled_at IS NULL WHERE d.tenant_id=$1 AND d.id=$2 AND n.id=$3")
+        let resource = sqlx::query("SELECT d.owner_principal_id,p.kind AS owner_kind,g.id AS owner_group_id,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.namespace_generation AS resource_namespace_generation,n.acl_generation AS resource_acl_generation,actor.generation AS membership_generation FROM drives d JOIN principals p ON p.tenant_id=d.tenant_id AND p.id=d.owner_principal_id LEFT JOIN groups g ON g.tenant_id=p.tenant_id AND g.principal_id=p.id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id JOIN principals actor ON actor.tenant_id=d.tenant_id AND actor.id=$4 AND actor.disabled_at IS NULL WHERE d.tenant_id=$1 AND d.id=$2 AND n.id=$3")
             .bind(tenant_id).bind(drive_id).bind(resource_id).bind(actor_principal_id).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::NotFound)?;
         let groups = sqlx::query("SELECT g.id AS group_id,g.principal_id,m.role,m.generation FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2")
             .bind(tenant_id).bind(actor_principal_id).fetch_all(&mut *transaction).await?;
@@ -1745,6 +1750,7 @@ impl Database {
             membership_generation,
             drive_acl_generation: resource.get("drive_acl_generation"),
             namespace_generation: resource.get("namespace_generation"),
+            resource_namespace_generation: resource.get("resource_namespace_generation"),
             resource_acl_generation: resource.get("resource_acl_generation"),
         };
         transaction.commit().await?;
@@ -1821,8 +1827,8 @@ impl Database {
             return Err(DatabaseError::StaleGeneration);
         }
         let id = Uuid::new_v4();
-        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key) VALUES ($1,$2,$3,$4,'directory',$5,$6)")
-            .bind(tenant_id).bind(drive_id).bind(id).bind(parent_id).bind(display_name).bind(name_key).execute(&mut *transaction).await.map_err(map_conflict)?;
+        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key,owner_principal_id) VALUES ($1,$2,$3,$4,'directory',$5,$6,$7)")
+            .bind(tenant_id).bind(drive_id).bind(id).bind(parent_id).bind(display_name).bind(name_key).bind(actor).execute(&mut *transaction).await.map_err(map_conflict)?;
         sqlx::query("INSERT INTO node_ancestry (tenant_id,drive_id,ancestor_id,descendant_id,depth) SELECT tenant_id,drive_id,ancestor_id,$4,depth+1 FROM node_ancestry WHERE tenant_id=$1 AND drive_id=$2 AND descendant_id=$3 UNION ALL SELECT $1,$2,$4,$4,0")
             .bind(tenant_id).bind(drive_id).bind(parent_id).bind(id).execute(&mut *transaction).await?;
         sqlx::query("UPDATE nodes SET namespace_generation=namespace_generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND drive_id=$2 AND id=$3")
@@ -2374,8 +2380,8 @@ impl Database {
         } else {
             let created = Uuid::new_v4();
             let parent: Uuid = row.get("parent_id");
-            sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key) VALUES ($1,$2,$3,$4,'file',$5,$6)")
-                .bind(tenant_id).bind(drive_id).bind(created).bind(parent).bind(row.get::<String,_>("target_display_name")).bind(row.get::<String,_>("target_name_key")).execute(&mut *transaction).await.map_err(map_conflict)?;
+            sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key,owner_principal_id) VALUES ($1,$2,$3,$4,'file',$5,$6,$7)")
+                .bind(tenant_id).bind(drive_id).bind(created).bind(parent).bind(row.get::<String,_>("target_display_name")).bind(row.get::<String,_>("target_name_key")).bind(actor).execute(&mut *transaction).await.map_err(map_conflict)?;
             sqlx::query("INSERT INTO node_ancestry (tenant_id,drive_id,ancestor_id,descendant_id,depth) SELECT tenant_id,drive_id,ancestor_id,$4,depth+1 FROM node_ancestry WHERE tenant_id=$1 AND drive_id=$2 AND descendant_id=$3 UNION ALL SELECT $1,$2,$4,$4,0")
                 .bind(tenant_id).bind(drive_id).bind(parent).bind(created).execute(&mut *transaction).await?;
             node_id = Some(created);

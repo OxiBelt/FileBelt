@@ -1100,9 +1100,10 @@ impl Database {
         let media_type: String = revision.get("media_type");
         let reserved_bytes: i64 = revision.get("reserved_bytes");
         let node_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key) VALUES ($1,$2,$3,$4,'file',$5,$6)")
+        sqlx::query("INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key,owner_principal_id) VALUES ($1,$2,$3,$4,'file',$5,$6,$7)")
             .bind(tenant_id).bind(drive_id).bind(node_id).bind(target_parent_id)
-            .bind(normalized.display()).bind(normalized.comparison_key()).execute(&mut *transaction).await.map_err(map_conflict)?;
+            .bind(normalized.display()).bind(normalized.comparison_key()).bind(actor_principal_id)
+            .execute(&mut *transaction).await.map_err(map_conflict)?;
         sqlx::query("INSERT INTO node_ancestry (tenant_id,drive_id,ancestor_id,descendant_id,depth) SELECT tenant_id,drive_id,ancestor_id,$4,depth+1 FROM node_ancestry WHERE tenant_id=$1 AND drive_id=$2 AND descendant_id=$3 UNION ALL SELECT $1,$2,$4,$4,0")
             .bind(tenant_id).bind(drive_id).bind(target_parent_id).bind(node_id).execute(&mut *transaction).await?;
         let version_id = Uuid::new_v4();
@@ -2952,6 +2953,8 @@ mod tests {
             .0;
         assert!(copy.contains("document_operation_replay::<DocumentConflictCopyRecord>"));
         assert!(copy.contains("\"conflict_copy\""));
+        assert!(copy.contains("name_key,owner_principal_id"));
+        assert!(copy.contains("bind(actor_principal_id)"));
 
         let replay = source
             .split_once("async fn document_operation_replay")

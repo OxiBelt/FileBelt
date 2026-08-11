@@ -4,11 +4,13 @@
 
 #![deny(unsafe_code)]
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use filebelt_database::{Database, DatabaseError, JobRecord};
+use filebelt_database::mount::{MountStagingCleanupJobRecord, MountWriteLockCleanupJobRecord};
+use filebelt_database::{Database, DatabaseError, JobRecord, PayloadRecord};
 use filebelt_events_protocol::EventEnvelope;
 use filebelt_storage::{StorageError, StorageLayout};
 use iggy::prelude::{
@@ -48,8 +50,12 @@ pub struct Maintenance {
 pub struct ReconcileReport {
     pub reopened_finalizations: u64,
     pub expired_uploads: u64,
+    pub expired_nfs_writers_enqueued: u64,
+    pub expired_nfs_write_conflicts_enqueued: u64,
     pub orphan_jobs_created: u64,
     pub finalized_staging_sets_removed: u64,
+    pub mount_staging_sets_removed: u64,
+    pub mount_write_locks_removed: u64,
     pub writing_temporaries_removed: u64,
     pub finalizing_temporaries_removed: u64,
     pub scrub_jobs_created: u64,
@@ -115,15 +121,36 @@ impl Maintenance {
             expired_part_grace_seconds,
         }
     }
-
     pub async fn reconcile(&self) -> Result<ReconcileReport, MaintenanceError> {
         let reopened_finalizations = self
             .database
             .reopen_expired_upload_finalizations(self.tenant_id)
             .await?;
         let expired_uploads = self.database.expire_uploads(self.tenant_id).await?;
+        let expired_nfs_writers_enqueued = self
+            .database
+            .sweep_expired_nfs_writers(
+                self.tenant_id,
+                i32::try_from(RECONCILE_BATCH_SIZE).expect("reconcile batch fits i32"),
+            )
+            .await?
+            .len()
+            .try_into()
+            .map_err(|_| MaintenanceError::InvalidJob)?;
+        let expired_nfs_write_conflicts_enqueued = self
+            .database
+            .sweep_expired_nfs_write_conflicts(
+                self.tenant_id,
+                i32::try_from(RECONCILE_BATCH_SIZE).expect("reconcile batch fits i32"),
+            )
+            .await?
+            .len()
+            .try_into()
+            .map_err(|_| MaintenanceError::InvalidJob)?;
         let orphan_jobs_created = self.enqueue_finalized_orphans().await?;
         let finalized_staging_sets_removed = self.cleanup_finalized_staging().await?;
+        let mount_staging_sets_removed = self.cleanup_mount_staging().await?;
+        let mount_write_locks_removed = self.cleanup_mount_write_locks().await?;
         let storage = self.storage.clone();
         let temporary_cleanup = tokio::task::spawn_blocking(move || {
             storage.cleanup_operation_temporaries(
@@ -153,8 +180,12 @@ impl Maintenance {
         Ok(ReconcileReport {
             reopened_finalizations,
             expired_uploads,
+            expired_nfs_writers_enqueued,
+            expired_nfs_write_conflicts_enqueued,
             orphan_jobs_created,
             finalized_staging_sets_removed,
+            mount_staging_sets_removed,
+            mount_write_locks_removed,
             writing_temporaries_removed: temporary_cleanup.writing_removed,
             finalizing_temporaries_removed: temporary_cleanup.finalizing_removed,
             scrub_jobs_created,
@@ -589,6 +620,136 @@ impl Maintenance {
         Ok(cleaned)
     }
 
+    async fn cleanup_mount_staging(&self) -> Result<u64, MaintenanceError> {
+        let mut cleaned = 0_u64;
+        for _ in 0..RECONCILE_BATCH_SIZE {
+            let Some(cleanup) = self
+                .database
+                .claim_next_mount_staging_cleanup(self.tenant_id, self.backend_id, self.worker_id)
+                .await?
+            else {
+                break;
+            };
+            self.cleanup_mount_staging_job(cleanup).await?;
+            cleaned = cleaned.checked_add(1).ok_or(MaintenanceError::InvalidJob)?;
+        }
+        Ok(cleaned)
+    }
+
+    async fn cleanup_mount_staging_job(
+        &self,
+        cleanup: MountStagingCleanupJobRecord,
+    ) -> Result<(), MaintenanceError> {
+        validate_mount_staging_cleanup(&cleanup, self.tenant_id, self.backend_id, self.worker_id)?;
+        let (storage, guard) = acquire_revalidated_mount_cow_lock(
+            self.storage.clone(),
+            cleanup.write_session_id,
+            || async {
+                self.database
+                    .heartbeat_mount_staging_cleanup(&cleanup)
+                    .await
+                    .map_err(MaintenanceError::from)
+            },
+        )
+        .await?;
+
+        let write_session_id = cleanup.write_session_id;
+        let payload = cleanup.payload.clone();
+        let deletion = tokio::task::spawn_blocking(move || {
+            storage.delete_cow_staging(write_session_id, &payload)?;
+            Ok::<_, StorageError>((storage, guard))
+        });
+        tokio::pin!(deletion);
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(JOB_HEARTBEAT_SECONDS));
+        heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        heartbeat.tick().await;
+        let (storage, guard) = loop {
+            tokio::select! {
+                result = &mut deletion => {
+                    break result.map_err(|_| StorageError::Join)??;
+                }
+                _ = heartbeat.tick() => {
+                    if let Err(error) = self.database.heartbeat_mount_staging_cleanup(&cleanup).await {
+                        // The blocking deletion cannot be cancelled safely. Wait for it to
+                        // finish under the session flock, but do not complete the stale DB
+                        // lease or unlink its lock inode.
+                        let _ = (&mut deletion).await;
+                        return Err(error.into());
+                    }
+                }
+            }
+        };
+
+        // Revalidate after a potentially long deletion. A stale cleanup must
+        // never acknowledge or unlink another worker's current lock domain.
+        self.database
+            .heartbeat_mount_staging_cleanup(&cleanup)
+            .await?;
+        self.database
+            .mark_mount_staging_cleanup_physical_deleted(&cleanup)
+            .await?;
+        tokio::task::spawn_blocking(move || storage.remove_cow_lock(guard))
+            .await
+            .map_err(|_| StorageError::Join)??;
+        self.database
+            .complete_mount_staging_cleanup(&cleanup)
+            .await?;
+        Ok(())
+    }
+
+    async fn cleanup_mount_write_locks(&self) -> Result<u64, MaintenanceError> {
+        let mut cleaned = 0_u64;
+        for _ in 0..RECONCILE_BATCH_SIZE {
+            let Some(cleanup) = self
+                .database
+                .claim_next_mount_write_lock_cleanup(
+                    self.tenant_id,
+                    self.backend_id,
+                    self.worker_id,
+                )
+                .await?
+            else {
+                break;
+            };
+            self.cleanup_mount_write_lock_job(cleanup).await?;
+            cleaned = cleaned.checked_add(1).ok_or(MaintenanceError::InvalidJob)?;
+        }
+        Ok(cleaned)
+    }
+
+    async fn cleanup_mount_write_lock_job(
+        &self,
+        cleanup: MountWriteLockCleanupJobRecord,
+    ) -> Result<(), MaintenanceError> {
+        validate_mount_write_lock_cleanup(
+            &cleanup,
+            self.tenant_id,
+            self.backend_id,
+            self.worker_id,
+        )?;
+        if cleanup.job_state == "completed" {
+            return Ok(());
+        }
+        let (storage, guard) = acquire_revalidated_mount_cow_lock(
+            self.storage.clone(),
+            cleanup.write_session_id,
+            || async {
+                self.database
+                    .heartbeat_mount_write_lock_cleanup(&cleanup)
+                    .await
+                    .map_err(MaintenanceError::from)
+            },
+        )
+        .await?;
+        tokio::task::spawn_blocking(move || storage.remove_cow_lock(guard))
+            .await
+            .map_err(|_| StorageError::Join)??;
+        self.database
+            .complete_mount_write_lock_cleanup(&cleanup)
+            .await?;
+        Ok(())
+    }
+
     async fn cleanup_document_finalized_staging(&self) -> Result<u64, MaintenanceError> {
         let locators = self
             .database
@@ -608,6 +769,84 @@ impl Maintenance {
         }
         Ok(cleaned)
     }
+}
+
+async fn acquire_revalidated_mount_cow_lock<F, Fut>(
+    storage: StorageLayout,
+    write_session_id: Uuid,
+    revalidate: F,
+) -> Result<(StorageLayout, filebelt_storage::CowLockGuard), MaintenanceError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), MaintenanceError>>,
+{
+    let (storage, mut guard) = tokio::task::spawn_blocking(move || {
+        let mut guard = storage.lock_cow(write_session_id)?;
+        // `spawn_blocking` outlives a cancelled async waiter. Keep cleanup
+        // armed while ownership is in the join result so a stale detached
+        // waiter cannot recreate an already completed terminal lock.
+        guard.arm_remove_on_drop();
+        Ok::<_, StorageError>((storage, guard))
+    })
+    .await
+    .map_err(|_| StorageError::Join)??;
+    // From this point the fenced cleanup lease, not task cancellation, owns
+    // terminal unlink. In particular, a failed heartbeat must retain the lock
+    // path for the next current lease holder.
+    guard.disarm_remove_on_drop();
+    revalidate().await?;
+    Ok((storage, guard))
+}
+
+fn validate_mount_staging_cleanup(
+    cleanup: &MountStagingCleanupJobRecord,
+    tenant_id: Uuid,
+    backend_id: Uuid,
+    worker_id: Uuid,
+) -> Result<(), MaintenanceError> {
+    let payload: &PayloadRecord = &cleanup.payload;
+    if cleanup.tenant_id != tenant_id
+        || cleanup.backend_id != backend_id
+        || cleanup.worker_id != worker_id
+        || cleanup.write_session_id.is_nil()
+        || cleanup.job_fencing_token <= 0
+        || !matches!(cleanup.job_state.as_str(), "leased" | "physical_deleted")
+        || !matches!(
+            cleanup.completion_kind.as_str(),
+            "cleanup" | "delete_staging"
+        )
+        || payload.tenant_id != tenant_id
+        || payload.backend_id != backend_id
+        || payload.payload_id.is_nil()
+        || payload.locator.is_nil()
+        || !matches!(payload.layout.as_str(), "whole" | "chunked")
+        || !matches!(
+            payload.state.as_str(),
+            "staging" | "finalized" | "abandoned" | "deleting" | "deleted"
+        )
+    {
+        return Err(MaintenanceError::InvalidJob);
+    }
+    Ok(())
+}
+
+fn validate_mount_write_lock_cleanup(
+    cleanup: &MountWriteLockCleanupJobRecord,
+    tenant_id: Uuid,
+    backend_id: Uuid,
+    worker_id: Uuid,
+) -> Result<(), MaintenanceError> {
+    if cleanup.tenant_id != tenant_id
+        || cleanup.backend_id != backend_id
+        || cleanup.worker_id != worker_id
+        || cleanup.write_session_id.is_nil()
+        || cleanup.staging_payload_id.is_nil()
+        || cleanup.job_fencing_token <= 0
+        || !matches!(cleanup.job_state.as_str(), "leased" | "completed")
+    {
+        return Err(MaintenanceError::InvalidJob);
+    }
+    Ok(())
 }
 
 pub struct IggyPublisher {
@@ -760,6 +999,7 @@ fn outbox_partition(tenant_id: Uuid, payload: &[u8], partitions: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
 
     #[test]
     fn event_partition_is_stable_and_inside_configured_topology() {
@@ -862,6 +1102,122 @@ mod tests {
             .0;
         assert!(deletion.contains("document_payload_deletion_pending"));
         assert!(deletion.contains("complete_document_payload_deletion"));
+    }
+
+    #[test]
+    fn mount_cleanup_uses_only_authoritative_cow_and_payload_paths() {
+        let source = include_str!("lib.rs");
+        let reconcile = source
+            .split_once("pub async fn reconcile")
+            .expect("reconcile exists")
+            .1
+            .split_once("pub async fn run_one_job")
+            .expect("job loop follows reconcile")
+            .0;
+        assert!(
+            reconcile.find("sweep_expired_nfs_writers").unwrap()
+                < reconcile.find("cleanup_mount_staging").unwrap(),
+            "expired writers must enter the authoritative job machine before it is drained"
+        );
+        assert!(
+            reconcile.find("sweep_expired_nfs_write_conflicts").unwrap()
+                < reconcile.find("cleanup_mount_staging").unwrap(),
+            "retained conflicts must expire into the common job machine before it is drained"
+        );
+        let cleanup = source
+            .split_once("async fn cleanup_mount_staging")
+            .expect("mount staging cleanup exists")
+            .1
+            .split_once("async fn cleanup_document_finalized_staging")
+            .expect("document cleanup follows mount cleanup")
+            .0;
+        assert!(cleanup.contains("claim_next_mount_staging_cleanup"));
+        assert!(cleanup.contains("heartbeat_mount_staging_cleanup"));
+        assert!(cleanup.contains("delete_cow_staging"));
+        assert!(cleanup.contains("mark_mount_staging_cleanup_physical_deleted"));
+        assert!(cleanup.contains("remove_cow_lock"));
+        assert!(cleanup.contains("complete_mount_staging_cleanup"));
+        assert!(!cleanup.contains("remove_staging_locator"));
+        let deleted = cleanup.find("delete_cow_staging").expect("physical delete");
+        let marked = cleanup
+            .find("mark_mount_staging_cleanup_physical_deleted")
+            .expect("physical marker");
+        let unlocked = cleanup.find("remove_cow_lock").expect("lock removal");
+        let completed = cleanup
+            .find("complete_mount_staging_cleanup")
+            .expect("terminal completion");
+        assert!(deleted < marked && marked < unlocked && unlocked < completed);
+    }
+
+    #[test]
+    fn finalized_mount_lock_cleanup_never_authorizes_payload_deletion() {
+        let source = include_str!("lib.rs");
+        let cleanup = source
+            .split_once("async fn cleanup_mount_write_locks")
+            .expect("mount lock cleanup exists")
+            .1
+            .split_once("async fn cleanup_document_finalized_staging")
+            .expect("document cleanup follows mount lock cleanup")
+            .0;
+        assert!(cleanup.contains("claim_next_mount_write_lock_cleanup"));
+        assert!(cleanup.contains("heartbeat_mount_write_lock_cleanup"));
+        assert!(cleanup.contains("remove_cow_lock"));
+        assert!(cleanup.contains("complete_mount_write_lock_cleanup"));
+        assert!(!cleanup.contains("delete_cow_staging"));
+        assert!(!cleanup.contains("delete_payload"));
+        assert!(!cleanup.contains("remove_staging_locator"));
+        let heartbeat = cleanup
+            .find("heartbeat_mount_write_lock_cleanup")
+            .expect("lease revalidation");
+        let removed = cleanup.find("remove_cow_lock").expect("verified unlink");
+        let completed = cleanup
+            .find("complete_mount_write_lock_cleanup")
+            .expect("fenced acknowledgement");
+        assert!(heartbeat < removed && removed < completed);
+    }
+
+    #[tokio::test]
+    async fn stale_cleanup_waiter_does_not_delete_or_unlink_after_lock_wait() {
+        let temporary = tempfile::tempdir().expect("temporary storage");
+        std::fs::set_permissions(temporary.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("secure temporary root");
+        let storage = StorageLayout::new(temporary.path().to_path_buf());
+        storage.prepare().expect("prepare storage");
+        let session_id = Uuid::new_v4();
+        let payload = PayloadRecord {
+            tenant_id: Uuid::new_v4(),
+            payload_id: Uuid::new_v4(),
+            drive_id: Uuid::new_v4(),
+            backend_id: Uuid::new_v4(),
+            locator: Uuid::new_v4(),
+            layout: "whole".to_owned(),
+            state: "finalized".to_owned(),
+            size_bytes: 4,
+            blake3: None,
+        };
+        let payload_path = storage.payload_path(&payload).expect("payload path");
+        std::fs::write(&payload_path, b"data").expect("payload bytes");
+        let owner = storage.lock_cow(session_id).expect("owner lock");
+        let waiting_storage = storage.clone();
+        let waiter = tokio::spawn(async move {
+            acquire_revalidated_mount_cow_lock(waiting_storage, session_id, || async {
+                Err(MaintenanceError::LeaseLost)
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(owner);
+        let error = waiter
+            .await
+            .expect("waiter task")
+            .expect_err("stale lease must fail");
+        assert!(matches!(error, MaintenanceError::LeaseLost));
+        assert_eq!(
+            std::fs::read(payload_path).expect("payload retained"),
+            b"data"
+        );
+        let retry = storage.lock_cow(session_id).expect("lock path retained");
+        drop(retry);
     }
 
     #[test]

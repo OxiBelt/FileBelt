@@ -437,6 +437,7 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
                     | "nodes"
                     | "node_ancestry"
                     | "acl_entries"
+                    | "node_xattrs"
                     | "file_versions"
                     | "authorization_generations"
                     | "direct_shares"
@@ -615,7 +616,6 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "authentication_throttles",
         "deletion_tombstones",
         "nfs_reclaim_records",
-        "nfs_write_extents",
     ];
     const VFS_READ_ONLY: &[&str] = &[
         "headscale_devices",
@@ -623,6 +623,11 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "nfs_feature_state",
         "nfs_exports",
         "nfs_posix_groups",
+        "nfs_posix_users",
+        "nfs_replay_slots",
+        "nfs_managed_traversal",
+        "nfs_managed_group_memberships",
+        "nfs_io_receipts",
     ];
     const MAINTENANCE: &[&str] = &[
         "sessions",
@@ -635,7 +640,6 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "passive_allocations",
         "authentication_throttles",
         "nfs_reclaim_records",
-        "nfs_write_extents",
     ];
     const RECOVERY: &[&str] = &[
         "policies",
@@ -653,9 +657,20 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "nfs_feature_state",
         "nfs_exports",
         "nfs_posix_groups",
+        "nfs_posix_users",
         "nfs_reclaim_records",
+        "nfs_replay_slots",
         "nfs_replay_receipts",
+        "nfs_pending_protocol_operations",
+        "nfs_io_admissions",
         "nfs_write_extents",
+        "nfs_io_receipts",
+        "nfs_staging_cleanup_jobs",
+        "nfs_write_lock_cleanup_jobs",
+        "nfs_write_operations",
+        "nfs_write_conflicts",
+        "nfs_managed_traversal",
+        "nfs_managed_group_memberships",
     ];
     match role {
         "filebelt_api" => {
@@ -668,29 +683,50 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
                     | "nfs_principal_mappings"
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
                 || matches!(table, "headscale_devices" | "sessions") && privilege == "SELECT"
+                || table == "nfs_write_conflicts" && privilege == "SELECT"
                 || matches!(
                     table,
-                    "nfs_feature_state" | "nfs_exports" | "nfs_posix_groups"
+                    "nfs_feature_state" | "nfs_exports" | "nfs_posix_groups" | "nfs_posix_users"
                 ) && privilege == "SELECT"
         }
         "filebelt_vfs" => {
             VFS_MUTABLE.contains(&table)
                 && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
                 || table == "nfs_replay_receipts" && matches!(privilege, "SELECT" | "INSERT")
+                || table == "nfs_write_operations" && matches!(privilege, "SELECT" | "INSERT")
+                || table == "nfs_write_extents" && privilege == "SELECT"
                 || VFS_READ_ONLY.contains(&table) && privilege == "SELECT"
         }
         "filebelt_headscale_sync" => {
             table == "headscale_devices" && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
         }
         "filebelt_io" => {
-            matches!(
-                table,
-                "write_sessions" | "write_chunks" | "nfs_write_extents"
-            ) && matches!(privilege, "SELECT" | "UPDATE")
+            matches!(table, "write_sessions" | "write_chunks") && privilege == "SELECT"
+                || table == "nfs_write_extents" && privilege == "SELECT"
+                || matches!(
+                    table,
+                    "policies"
+                        | "credentials"
+                        | "headscale_devices"
+                        | "gateway_epochs"
+                        | "sessions"
+                        | "handles"
+                        | "nfs_write_conflicts"
+                        | "nfs_feature_state"
+                        | "nfs_exports"
+                ) && privilege == "SELECT"
         }
         "filebelt_maintenance" => {
             MAINTENANCE.contains(&table) && matches!(privilege, "SELECT" | "UPDATE" | "DELETE")
-                || table == "nfs_replay_receipts" && matches!(privilege, "SELECT" | "DELETE")
+                || matches!(
+                    table,
+                    "nfs_write_conflicts"
+                        | "nfs_write_extents"
+                        | "nfs_replay_receipts"
+                        | "nfs_replay_slots"
+                        | "nfs_write_operations"
+                        | "nfs_io_receipts"
+                ) && privilege == "SELECT"
         }
         "filebelt_recovery" => RECOVERY.contains(&table) && privilege == "SELECT",
         _ => false,
@@ -852,6 +888,18 @@ fn expected_column_privilege(
                     "tenant_id" | "group_id" | "posix_name" | "projected_gid"
                 )
             }
+            ("filebelt_api", "write_sessions", "SELECT") => {
+                matches!(column, "tenant_id" | "id" | "reserved_bytes")
+            }
+            ("filebelt_io", "nfs_principal_mappings", "SELECT") => matches!(
+                column,
+                "tenant_id"
+                    | "credential_id"
+                    | "principal_id"
+                    | "posix_group_id"
+                    | "generation"
+                    | "revoked_at"
+            ),
             _ => false,
         };
     }
@@ -879,7 +927,15 @@ fn expected_column_privilege(
         if role == "filebelt_collaboration" && table == "invocations" && privilege == "SELECT" {
             return matches!(
                 column,
-                "tenant_id" | "id" | "principal_id" | "application_id" | "state"
+                "tenant_id"
+                    | "id"
+                    | "principal_id"
+                    | "application_id"
+                    | "state"
+                    | "semantic_node_id"
+                    | "semantic_base_version_id"
+                    | "semantic_input_digest"
+                    | "semantic_output_digest"
             );
         }
         if role == "filebelt_api" && table == "registrations" && privilege == "UPDATE" {
@@ -912,7 +968,11 @@ fn expected_column_privilege(
             && privilege == "UPDATE"
             && matches!(
                 column,
-                "state" | "response_bytes" | "reason_code" | "finished_at"
+                "state"
+                    | "response_bytes"
+                    | "reason_code"
+                    | "semantic_output_digest"
+                    | "finished_at"
             )
         {
             return true;
@@ -1063,6 +1123,33 @@ fn expected_column_privilege(
                         column,
                         "tenant_id" | "node_id" | "id" | "payload_id" | "size_bytes"
                     ))
+                || (table == "principals"
+                    && privilege == "SELECT"
+                    && matches!(
+                        column,
+                        "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                    ))
+                || (table == "users"
+                    && privilege == "SELECT"
+                    && matches!(column, "tenant_id" | "id" | "principal_id" | "status"))
+                || (table == "group_memberships"
+                    && privilege == "SELECT"
+                    && matches!(column, "tenant_id" | "group_id" | "user_principal_id"))
+                || (table == "drives"
+                    && privilege == "SELECT"
+                    && matches!(column, "tenant_id" | "id" | "acl_generation"))
+                || (table == "nodes"
+                    && privilege == "SELECT"
+                    && matches!(
+                        column,
+                        "tenant_id"
+                            | "drive_id"
+                            | "id"
+                            | "kind"
+                            | "trash_root_id"
+                            | "acl_generation"
+                            | "namespace_generation"
+                    ))
                 || (table == "storage_backends"
                     && privilege == "UPDATE"
                     && matches!(
@@ -1077,8 +1164,13 @@ fn expected_column_privilege(
             (table == "tenants" && privilege == "SELECT" && matches!(column, "id" | "slug"))
                 || (table == "drives"
                     && privilege == "SELECT"
-                    && matches!(column, "tenant_id" | "id" | "reserved_bytes"))
-                || (table == "drives" && privilege == "UPDATE" && column == "reserved_bytes")
+                    && matches!(
+                        column,
+                        "tenant_id" | "id" | "reserved_bytes" | "used_physical_bytes"
+                    ))
+                || (table == "drives"
+                    && privilege == "UPDATE"
+                    && matches!(column, "reserved_bytes" | "used_physical_bytes"))
         }
         "filebelt_audit_exporter" => privilege == "SELECT" && audit_column(table, column),
         "filebelt_recovery" => privilege == "SELECT" && recovery_column(table, column),
@@ -1130,11 +1222,13 @@ fn expected_column_privilege(
                         column,
                         "tenant_id"
                             | "id"
+                            | "user_id"
                             | "principal_id"
                             | "idle_expires_at"
                             | "absolute_expires_at"
                             | "revoked_at"
                     ),
+                    "users" => matches!(column, "tenant_id" | "id" | "status"),
                     "nodes" => matches!(
                         column,
                         "tenant_id"
@@ -1171,6 +1265,16 @@ fn expected_column_privilege(
                         "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
                     ),
                     "users" => matches!(column, "tenant_id" | "id" | "principal_id" | "status"),
+                    "node_xattrs" => matches!(
+                        column,
+                        "tenant_id"
+                            | "drive_id"
+                            | "node_id"
+                            | "name"
+                            | "value"
+                            | "created_at"
+                            | "updated_at"
+                    ),
                     _ => false,
                 }
         }
@@ -1260,12 +1364,119 @@ fn expected_function_privilege(role: &str, function: &str) -> bool {
             && role == "filebelt_document")
         || (function == "filebelt_mount.create_session_principal(uuid,uuid)"
             && role == "filebelt_vfs")
+        || (function == "filebelt_mount.fence_nfs_mapping_sessions(uuid,uuid,uuid,bigint,text)"
+            && role == "filebelt_api")
         || (function
             == "filebelt_mount.create_nfs_session(uuid,text,bytea,text,bigint,inet,timestamp with time zone,uuid,uuid)"
             && role == "filebelt_vfs")
         || (function
             == "filebelt_mount.reconcile_nfs_export_manifest(uuid,text,bigint,bigint,bigint,bytea,bigint[],bigint[],bytea[])"
             && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.mutate_nfs_namespace(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,bytea,jsonb,bytea,bytea)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.commit_nfs_write(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,bytea,jsonb,bytea,bytea,bytea,bytea)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.start_nfs_write_replayed(uuid,uuid,bigint,bytea,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,uuid,uuid,uuid,uuid,uuid,bigint,text,text,integer,bigint,integer,bytea,bytea,bytea)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.prepare_nfs_replay_sequence(uuid,uuid,text,text,integer,bigint,integer,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.lock_nfs_replay_receipt(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.authorize_nfs_mutation(uuid,uuid,bigint,bytea,uuid,uuid,bigint,bigint,bigint,bigint,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.authorize_nfs_handle_open(uuid,uuid,bigint,bytea,uuid,uuid,bigint,bigint,bigint,bigint,bigint,text[])"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.preauthorize_nfs_io(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,text,text,integer,bigint,integer,text,bytea,uuid,uuid,bytea,uuid,text,bytea,bytea,bigint,bigint,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.lookup_nfs_io_preauthorization(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,uuid,uuid,uuid,bytea,bytea,text,uuid,bytea,bigint,bigint,bigint,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.inspect_nfs_pending_io(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.reissue_nfs_io(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,text,text,integer,bigint,integer,text,bytea,uuid,uuid,text,bytea,bigint,bigint,uuid,bytea,bytea,bigint)"
+            && role == "filebelt_vfs")
+        || (function == "filebelt_mount.read_nfs_io_receipt(uuid,bytea,uuid,uuid,text,bytea,bytea)"
+            && role == "filebelt_io")
+        || (function
+            == "filebelt_mount.read_nfs_write_operation(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,uuid,text,bigint,bigint)"
+            && role == "filebelt_io")
+        || (function
+            == "filebelt_mount.begin_nfs_io_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,uuid,bytea,text,bytea,bytea,bigint,bigint)"
+            && role == "filebelt_io")
+        || (function
+            == "filebelt_mount.complete_nfs_io_receipt(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,uuid,bytea,text,bytea,bytea,jsonb)"
+            && role == "filebelt_io")
+        || (function
+            == "filebelt_mount.fence_pending_nfs_io_cleanup(uuid,uuid,bigint,bytea,bytea,text,bytea)"
+            && role == "filebelt_io")
+        || (function == "filebelt_mount.reserve_nfs_write_bytes(uuid,uuid,bigint,bigint)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.replace_nfs_write_extents(uuid,uuid,bigint,uuid,bigint[],bigint[],boolean[],bytea[])"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.apply_completed_nfs_write_operation(uuid,uuid,bigint,uuid,text,bytea)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.finalize_nfs_internal_io_replay(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bytea,text,text,integer,bigint,integer,text,bytea,text,bytea,bytea)"
+            && role == "filebelt_vfs")
+        || (function
+            == "filebelt_mount.require_completed_nfs_internal_terminal(uuid,uuid,text,text,integer,bigint,integer,text,bytea,bigint,uuid)"
+            && role == "filebelt_vfs")
+        || (function == "filebelt_mount.enqueue_nfs_staging_cleanup(uuid,uuid,text,bytea,text)"
+            && matches!(
+                role,
+                "filebelt_vfs"
+                    | "filebelt_io"
+                    | "filebelt_api"
+                    | "filebelt_maintenance"
+                    | "filebelt_recovery"
+            ))
+        || (function == "filebelt_mount.claim_nfs_staging_cleanup(uuid,uuid,uuid,uuid)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function == "filebelt_mount.claim_next_nfs_staging_cleanup(uuid,uuid,uuid)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function
+            == "filebelt_mount.mark_nfs_staging_cleanup_physical_deleted(uuid,uuid,uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function == "filebelt_mount.complete_nfs_staging_cleanup(uuid,uuid,uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function == "filebelt_mount.heartbeat_nfs_staging_cleanup(uuid,uuid,uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function == "filebelt_mount.sweep_expired_nfs_writers(uuid,integer)"
+            && role == "filebelt_maintenance")
+        || (function
+            == "filebelt_mount.complete_nfs_write_conflict_copy(uuid,uuid,uuid,uuid,uuid,text,text,uuid,uuid)"
+            && role == "filebelt_api")
+        || (function == "filebelt_mount.discard_nfs_write_conflict(uuid,uuid,uuid,uuid)"
+            && role == "filebelt_api")
+        || (function == "filebelt_mount.sweep_expired_nfs_write_conflicts(uuid,integer)"
+            && role == "filebelt_maintenance")
+        || (function == "filebelt_mount.enqueue_nfs_write_lock_cleanup(uuid,uuid)"
+            && matches!(
+                role,
+                "filebelt_vfs" | "filebelt_io" | "filebelt_maintenance" | "filebelt_recovery"
+            ))
+        || (function == "filebelt_mount.claim_nfs_write_lock_cleanup(uuid,uuid,uuid,uuid)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function == "filebelt_mount.claim_next_nfs_write_lock_cleanup(uuid,uuid,uuid)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function
+            == "filebelt_mount.heartbeat_nfs_write_lock_cleanup(uuid,uuid,uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
+        || (function
+            == "filebelt_mount.complete_nfs_write_lock_cleanup(uuid,uuid,uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_maintenance"))
         || (function == "filebelt_mount.advance_nfs_restore_generation(uuid,bigint)"
             && role == "filebelt_recovery")
         || (function == "filebelt_security.descendant_share_admission_open(uuid)"
@@ -1303,9 +1514,12 @@ fn audit_column(table: &str, column: &str) -> bool {
 fn recovery_column(table: &str, column: &str) -> bool {
     match table {
         "tenants" => matches!(column, "id" | "slug"),
-        "principals" | "users" | "groups" | "nodes" => {
+        "principals" | "users" | "groups" => {
             matches!(column, "tenant_id" | "id")
         }
+        "nodes" => matches!(column, "tenant_id" | "id" | "kind" | "handle_generation"),
+        "acl_entries" => matches!(column, "tenant_id" | "source"),
+        "node_xattrs" => column == "tenant_id",
         "drives" => matches!(column, "tenant_id" | "id"),
         "storage_backends" => matches!(column, "tenant_id" | "id" | "kind"),
         "payload_objects" => matches!(
@@ -1705,6 +1919,25 @@ mod tests {
             "filebelt_vfs",
             "nfs_replay_receipts",
             "UPDATE"
+        ));
+        for role in ["filebelt_api", "filebelt_vfs", "filebelt_recovery"] {
+            assert!(expected_mount_table_privilege(
+                role,
+                "nfs_posix_users",
+                "SELECT"
+            ));
+            for privilege in ["INSERT", "UPDATE", "DELETE"] {
+                assert!(!expected_mount_table_privilege(
+                    role,
+                    "nfs_posix_users",
+                    privilege
+                ));
+            }
+        }
+        assert!(!expected_mount_table_privilege(
+            "filebelt_io",
+            "nfs_posix_users",
+            "SELECT"
         ));
     }
 

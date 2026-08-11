@@ -85,16 +85,27 @@ message MountCapabilityClaims {
   int64 issued_at_unix_seconds = 23;
   int64 expires_at_unix_seconds = 24;
   string grant_id = 25;
+  // Exact BLAKE3 digest of the WriteData request body. This is present only
+  // for WRITE_DATA so a retried capability cannot authorize different bytes.
+  bytes content_blake3 = 26;
 }
 
 enum MountCapabilityOperation {
   MOUNT_CAPABILITY_OPERATION_UNSPECIFIED = 0;
   MOUNT_CAPABILITY_OPERATION_READ = 1;
-  MOUNT_CAPABILITY_OPERATION_WRITE = 2;
+  // Legacy multiplexed write authority. New issuers and workers must reject
+  // this value because its unsigned HTTP mode could substitute sparse
+  // operations after signing.
+  MOUNT_CAPABILITY_OPERATION_WRITE = 2 [deprecated = true];
   MOUNT_CAPABILITY_OPERATION_FLUSH = 3;
   MOUNT_CAPABILITY_OPERATION_FINALIZE = 4;
   MOUNT_CAPABILITY_OPERATION_ABORT = 5;
   MOUNT_CAPABILITY_OPERATION_DELETE_STAGING = 6;
+  MOUNT_CAPABILITY_OPERATION_WRITE_DATA = 7;
+  MOUNT_CAPABILITY_OPERATION_DEALLOCATE = 8;
+  MOUNT_CAPABILITY_OPERATION_ALLOCATE = 9;
+  MOUNT_CAPABILITY_OPERATION_SEEK_DATA = 10;
+  MOUNT_CAPABILITY_OPERATION_SEEK_HOLE = 11;
 }
 
 message SignedMountCapability {

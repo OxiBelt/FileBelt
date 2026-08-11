@@ -61,6 +61,7 @@ message VfsRequest {
     SparseControlRequest sparse_control = 58;
     GatewayDrainRequest gateway_drain = 59;
     GatewayReconcileRequest gateway_reconcile = 60;
+    TestLockRequest test_lock = 61;
   }
 }
 
@@ -153,6 +154,9 @@ message CreateRequest {
   uint64 expected_parent_generation = 4;
   repeated VfsAction requested_actions = 5;
   bytes parent_handle = 6;
+  // Core applies 0644 when omitted. Special bits and client-supplied
+  // ownership are never part of this operation.
+  optional uint32 mode = 7;
 }
 
 message MkdirRequest {
@@ -161,6 +165,9 @@ message MkdirRequest {
   string display_name = 3;
   uint64 expected_parent_generation = 4;
   bytes parent_handle = 5;
+  // Core applies 0755 when omitted. Special bits and client-supplied
+  // ownership are never part of this operation.
+  optional uint32 mode = 6;
 }
 
 message RenameRequest {
@@ -202,6 +209,20 @@ message LockRequest {
   uint64 offset = 3;
   uint64 length = 4;
   bool exclusive = 5;
+  // A range extending through the current and every future EOF has no finite
+  // length. Exactly one of `to_eof` or a non-zero finite `length` is valid.
+  bool to_eof = 6;
+}
+
+// A read-only conflict query. It never acquires or releases a lock and must
+// not be implemented as a Lock/Unlock pair.
+message TestLockRequest {
+  string handle_id = 1;
+  string owner_key = 2;
+  uint64 offset = 3;
+  uint64 length = 4;
+  bool exclusive = 5;
+  bool to_eof = 6;
 }
 
 message UnlockRequest {
@@ -347,6 +368,9 @@ message SymlinkRequest {
   string target = 4;
   uint64 expected_parent_generation = 5;
   bytes parent_handle = 6;
+  // Core applies 0777 when omitted. Special bits and client-supplied
+  // ownership are never part of this operation.
+  optional uint32 mode = 7;
 }
 
 // Sparse extents are explicit so an all-zero range is never inferred from a
@@ -479,6 +503,16 @@ message VfsResponse {
   bool end_of_file = 31;
   repeated VfsAction allowed_actions = 32;
   NfsSessionProjection nfs_session_projection = 33;
+  // A successful TestLock sets this only when a conflict exists. A mutating
+  // Lock may also include it with VFS_ERROR_LOCK_CONFLICT.
+  LockConflict lock_conflict = 34;
+}
+
+message LockConflict {
+  uint64 offset = 1;
+  uint64 length = 2;
+  bool exclusive = 3;
+  bool to_eof = 4;
 }
 
 message DirectoryEntry {

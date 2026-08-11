@@ -31,7 +31,7 @@ pub struct VfsRequest {
     pub authorization_generation: u64,
     #[prost(message, optional, tag="10")]
     pub nfs_context: ::core::option::Option<NfsRequestContext>,
-    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60")]
+    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61")]
     pub operation: ::core::option::Option<vfs_request::Operation>,
 }
 /// Nested message and enum types in `VfsRequest`.
@@ -120,6 +120,8 @@ pub mod vfs_request {
         GatewayDrain(super::GatewayDrainRequest),
         #[prost(message, tag="60")]
         GatewayReconcile(super::GatewayReconcileRequest),
+        #[prost(message, tag="61")]
+        TestLock(super::TestLockRequest),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -239,6 +241,10 @@ pub struct CreateRequest {
     pub requested_actions: ::prost::alloc::vec::Vec<i32>,
     #[prost(bytes="vec", tag="6")]
     pub parent_handle: ::prost::alloc::vec::Vec<u8>,
+    /// Core applies 0644 when omitted. Special bits and client-supplied
+    /// ownership are never part of this operation.
+    #[prost(uint32, optional, tag="7")]
+    pub mode: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct MkdirRequest {
@@ -252,6 +258,10 @@ pub struct MkdirRequest {
     pub expected_parent_generation: u64,
     #[prost(bytes="vec", tag="5")]
     pub parent_handle: ::prost::alloc::vec::Vec<u8>,
+    /// Core applies 0755 when omitted. Special bits and client-supplied
+    /// ownership are never part of this operation.
+    #[prost(uint32, optional, tag="6")]
+    pub mode: ::core::option::Option<u32>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RenameRequest {
@@ -322,6 +332,27 @@ pub struct LockRequest {
     pub length: u64,
     #[prost(bool, tag="5")]
     pub exclusive: bool,
+    /// A range extending through the current and every future EOF has no finite
+    /// length. Exactly one of `to_eof` or a non-zero finite `length` is valid.
+    #[prost(bool, tag="6")]
+    pub to_eof: bool,
+}
+/// A read-only conflict query. It never acquires or releases a lock and must
+/// not be implemented as a Lock/Unlock pair.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TestLockRequest {
+    #[prost(string, tag="1")]
+    pub handle_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub owner_key: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub offset: u64,
+    #[prost(uint64, tag="4")]
+    pub length: u64,
+    #[prost(bool, tag="5")]
+    pub exclusive: bool,
+    #[prost(bool, tag="6")]
+    pub to_eof: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UnlockRequest {
@@ -520,6 +551,10 @@ pub struct SymlinkRequest {
     pub expected_parent_generation: u64,
     #[prost(bytes="vec", tag="6")]
     pub parent_handle: ::prost::alloc::vec::Vec<u8>,
+    /// Core applies 0777 when omitted. Special bits and client-supplied
+    /// ownership are never part of this operation.
+    #[prost(uint32, optional, tag="7")]
+    pub mode: ::core::option::Option<u32>,
 }
 /// Sparse extents are explicit so an all-zero range is never inferred from a
 /// transport truncation. The final `CommitRequest` remains the only version
@@ -681,6 +716,21 @@ pub struct VfsResponse {
     pub allowed_actions: ::prost::alloc::vec::Vec<i32>,
     #[prost(message, optional, tag="33")]
     pub nfs_session_projection: ::core::option::Option<NfsSessionProjection>,
+    /// A successful TestLock sets this only when a conflict exists. A mutating
+    /// Lock may also include it with VFS_ERROR_LOCK_CONFLICT.
+    #[prost(message, optional, tag="34")]
+    pub lock_conflict: ::core::option::Option<LockConflict>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LockConflict {
+    #[prost(uint64, tag="1")]
+    pub offset: u64,
+    #[prost(uint64, tag="2")]
+    pub length: u64,
+    #[prost(bool, tag="3")]
+    pub exclusive: bool,
+    #[prost(bool, tag="4")]
+    pub to_eof: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DirectoryEntry {

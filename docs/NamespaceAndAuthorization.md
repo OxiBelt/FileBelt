@@ -352,9 +352,13 @@ weaken an existing deny or disclose an otherwise hidden sibling.
 
 NFS authenticates with RPCSEC_GSS `krb5p` against an operator-managed external
 KDC. A tenant administrator explicitly maps each Kerberos principal to one
-FileBelt user and assigns tenant-unique, non-zero projected UID/GID values and
-flat local groups. `AUTH_SYS`, host ownership, Kerberos root, and numeric ID
-zero confer no authority. The immutable NFS `other` projection contains all
+FileBelt user. One user may retain multiple Kerberos aliases, but all aliases
+share one append-only tenant-unique POSIX name, non-zero UID, primary group,
+and GID; revoking an alias does not release or reassign that identity. The
+forward migration rejects an existing user's inconsistent alias identities
+with an actionable inventory instead of choosing one silently. Flat local
+groups remain explicit. `AUTH_SYS`, host ownership, Kerberos root, and numeric
+ID zero confer no authority. The immutable NFS `other` projection contains all
 mapped NFS users in the tenant. Mapping mutations require recent OIDC
 authentication, advance their generation, audit the exact change, and close
 affected sessions.
@@ -369,6 +373,12 @@ and sticky bits are unsupported. Logical symlinks and `user.*` attributes are
 stored as metadata; other `system.*`, `security.*`, and `trusted.*` attributes
 are rejected except synthesized POSIX ACL views.
 
+Create, mkdir, and symlink requests may carry ordinary permission bits only;
+Core applies `0644`, `0755`, and `0777` respectively when mode is omitted.
+Ownership always comes from the authenticated mapped session. Client-supplied
+owner/group attributes, special bits, and any unsupported initial attribute
+are rejected rather than ignored.
+
 NFS holds at most one active staged writer per node, but it never blocks a Web,
 MCP, Markdown, document, SMB, or FTPS version commit. `COMMIT` and final dirty
 `CLOSE` attempt an immutable version with the head captured when staging began.
@@ -376,6 +386,10 @@ A changed head yields a retained seven-day conflict rather than overwrite.
 Dirty state abandoned without COMMIT or final CLOSE never becomes a version.
 Open-unlinked objects remain readable through existing handles; a dirty final
 close is retained as conflict data and cannot resurrect the removed name.
+The owning principal may list an unexpired retained conflict, copy its bytes
+to a newly authorized parent as a new immutable file, or discard it into the
+fenced cleanup state machine. Copy requires current `CREATE_CHILD` and exact
+parent generations; neither operation exposes a physical locator.
 
 Media cache access never grants content authority. A READY cache hit requires
 current `READ_CONTENT`; creating a missing derivative also requires

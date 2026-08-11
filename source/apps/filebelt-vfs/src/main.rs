@@ -6,6 +6,7 @@
 
 mod gateway_identity;
 mod nfs;
+mod nfs_dispatch;
 mod policy;
 
 use std::path::PathBuf;
@@ -14,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use aws_lc_rs::constant_time::verify_slices_are_equal;
 use aws_lc_rs::hmac;
 use aws_lc_rs::signature::Ed25519KeyPair;
 use axum::body::Bytes;
@@ -31,7 +33,8 @@ use filebelt_capability_keyset::MountStorageKeyset;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::mount::{
     CreateNfsMountSessionInput, MountAuthenticationMaterial, MountSecretEnvelopeInput,
-    MountSessionFence, ReconcileNfsExportManifestInput,
+    MountSessionFence, NfsReplayContext, ReconcileNfsExportManifestInput,
+    RecordNfsReplayReceiptInput,
 };
 use filebelt_database::{Database, DatabaseError, NodeRecord};
 use filebelt_domain::Action;
@@ -50,7 +53,7 @@ use filebelt_vfs_protocol::{
     MountProtocol, NFS_GATEWAY_LEASE_SECONDS, NfsAuthenticateRequest, NfsExportManifestEntry,
     NfsGatewayCompatibility, NfsGatewayFeature, NfsGatewayHelloResponse, NfsSessionProjection,
     NodeAttributes, NodeKind, PROTOCOL_VERSION, RequestFence, VfsAction, VfsError, VfsRequest,
-    VfsResponse,
+    VfsResponse, canonical_nfs_request_digest,
 };
 use getrandom::fill as random_fill;
 use md4::{Digest as _, Md4};
@@ -96,6 +99,9 @@ struct NfsRuntime {
     realm: String,
     handle_keyring: nfs::NfsHandleKeyring,
     release_revision: &'static str,
+    backend_id: Uuid,
+    chunk_size_bytes: u64,
+    max_file_bytes: u64,
 }
 
 #[derive(Clone)]
@@ -226,6 +232,9 @@ async fn run() -> Result<()> {
                 .ok_or_else(|| anyhow!("NFS Kerberos realm is absent"))?,
             handle_keyring,
             release_revision: revision,
+            backend_id: config.storage.backend_id,
+            chunk_size_bytes: config.limits.chunk_size_bytes,
+            max_file_bytes: config.limits.max_file_bytes,
         }))
     } else {
         None
@@ -455,6 +464,15 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
     if let Operation::Authenticate(authentication) = operation {
         return authenticate(state, fence, authentication).await;
     }
+    // NFS exact replay is resolved before live-session admission so a stored
+    // terminal outcome (notably EndSession) remains recoverable after the
+    // original mutation has deliberately closed or otherwise advanced the
+    // live authority that produced it. The canonical request digest binds the
+    // original GSS/session/gateway context; a non-replay still performs the
+    // complete current admission below.
+    if fence.protocol == MountProtocol::Nfs {
+        return dispatch_nfs(state, request, fence, operation).await;
+    }
     let Some(session_fence) = session_admission_fence(fence) else {
         return invalid(fence);
     };
@@ -478,24 +496,6 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
         Ok(session) => session,
         Err(_) => return denied(fence, "vfs.session_fence_stale"),
     };
-    if fence.protocol == MountProtocol::Nfs {
-        return match operation {
-            Operation::Heartbeat(_) => ok(fence),
-            Operation::EndSession(end) => match state
-                .database
-                .end_mount_session(&session, &end.reason_code)
-                .await
-            {
-                Ok(()) => ok(fence),
-                Err(_) => unavailable(fence, "vfs.session_close_failed"),
-            },
-            _ => VfsResponse::failure(
-                fence.request_id,
-                VfsError::NotSupported,
-                "vfs.nfs_operation_not_implemented",
-            ),
-        };
-    }
     match operation {
         Operation::List(list) if list.cursor.is_empty() => {
             list_directory(state, fence, &session, list).await
@@ -520,6 +520,244 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
             VfsError::NotSupported,
             "vfs.operation_not_supported",
         ),
+    }
+}
+
+async fn dispatch_nfs(
+    state: &VfsState,
+    request: &VfsRequest,
+    fence: &RequestFence,
+    operation: &Operation,
+) -> VfsResponse {
+    let canonical_digest = canonical_nfs_request_digest(request);
+    let Some(context) = nfs_replay_context(fence, &canonical_digest) else {
+        return invalid(fence);
+    };
+    match state.database.lookup_nfs_replay_receipt(&context).await {
+        Ok(Some(receipt)) => return decode_nfs_replay(fence, &receipt),
+        Ok(None) => {}
+        Err(DatabaseError::Conflict) => {
+            return VfsResponse::failure(
+                fence.request_id,
+                VfsError::Conflict,
+                "vfs.nfs_replay_mismatch",
+            );
+        }
+        Err(DatabaseError::StaleGeneration) => {
+            return VfsResponse::failure(
+                fence.request_id,
+                VfsError::StaleGeneration,
+                "vfs.nfs_replay_stale",
+            );
+        }
+        Err(_) => return unavailable(fence, "vfs.nfs_replay_unavailable"),
+    }
+
+    let Some(session_fence) = session_admission_fence(fence) else {
+        return invalid(fence);
+    };
+    let session = match state
+        .database
+        .admit_mount_session(
+            fence.tenant_id,
+            session_fence.session_id,
+            protocol_name(MountProtocol::Nfs),
+            &fence.gateway_id,
+            fence.gateway_epoch,
+            session_fence.credential_generation,
+            session_fence.authorization_generation,
+            fence
+                .nfs_context
+                .as_ref()
+                .map(|context| &context.gss_binding_digest),
+        )
+        .await
+    {
+        Ok(session) => session,
+        Err(_) => return denied(fence, "vfs.session_fence_stale"),
+    };
+
+    match nfs_dispatch::dispatch(state, fence, &session, &context, operation).await {
+        nfs_dispatch::DispatchResult::Atomic(response) => response,
+        nfs_dispatch::DispatchResult::Retryable(response) => response,
+        nfs_dispatch::DispatchResult::ReadOnly(response) => {
+            persist_nfs_read_only_receipt(state, fence, context, response).await
+        }
+    }
+}
+
+fn nfs_not_qualified(fence: &RequestFence, operation: &str) -> VfsResponse {
+    let reason = match operation {
+        "list" => "vfs.nfs_list_not_qualified",
+        "stat" => "vfs.nfs_stat_not_qualified",
+        "open" => "vfs.nfs_open_not_qualified",
+        "read" => "vfs.nfs_read_not_qualified",
+        "write" => "vfs.nfs_write_not_qualified",
+        "flush" => "vfs.nfs_flush_not_qualified",
+        "commit" => "vfs.nfs_commit_not_qualified",
+        "close" => "vfs.nfs_close_not_qualified",
+        "create" => "vfs.nfs_create_not_qualified",
+        "mkdir" => "vfs.nfs_mkdir_not_qualified",
+        "rename" => "vfs.nfs_rename_not_qualified",
+        "remove" => "vfs.nfs_remove_not_qualified",
+        "set_attributes" => "vfs.nfs_set_attributes_not_qualified",
+        "lock" => "vfs.nfs_lock_not_qualified",
+        "unlock" => "vfs.nfs_unlock_not_qualified",
+        "end_session" => "vfs.nfs_end_session_not_qualified",
+        "get_xattr" => "vfs.nfs_get_xattr_not_qualified",
+        "set_xattr" => "vfs.nfs_set_xattr_not_qualified",
+        "list_xattr" => "vfs.nfs_list_xattr_not_qualified",
+        "remove_xattr" => "vfs.nfs_remove_xattr_not_qualified",
+        "readlink" => "vfs.nfs_readlink_not_qualified",
+        "symlink" => "vfs.nfs_symlink_not_qualified",
+        "sparse_write" => "vfs.nfs_sparse_write_not_qualified",
+        "reclaim" => "vfs.nfs_reclaim_not_qualified",
+        "open_unlinked" => "vfs.nfs_open_unlinked_not_qualified",
+        "resolve_handle" => "vfs.nfs_resolve_handle_not_qualified",
+        "export_root" => "vfs.nfs_export_root_not_qualified",
+        "lookup" => "vfs.nfs_lookup_not_qualified",
+        "access" => "vfs.nfs_access_not_qualified",
+        "filesystem_info" => "vfs.nfs_filesystem_info_not_qualified",
+        "get_acl" => "vfs.nfs_get_acl_not_qualified",
+        "set_acl" => "vfs.nfs_set_acl_not_qualified",
+        "sparse_control" => "vfs.nfs_sparse_control_not_qualified",
+        _ => "vfs.nfs_operation_not_qualified",
+    };
+    VfsResponse::failure(fence.request_id, VfsError::NotSupported, reason)
+}
+
+fn nfs_not_supported(fence: &RequestFence, operation: &str) -> VfsResponse {
+    let reason = match operation {
+        "lease_acknowledge" => "vfs.nfs_delegations_not_supported",
+        _ => "vfs.nfs_advanced_operation_not_supported",
+    };
+    VfsResponse::failure(fence.request_id, VfsError::NotSupported, reason)
+}
+
+fn nfs_replay_context<'a>(
+    fence: &'a RequestFence,
+    canonical_digest: &'a [u8; 32],
+) -> Option<NfsReplayContext<'a>> {
+    let session_id = fence.session_id?;
+    let nfs = fence.nfs_context.as_ref()?;
+    if let Some(supplied_digest) = nfs.request_digest.as_ref()
+        && verify_slices_are_equal(supplied_digest, canonical_digest).is_err()
+    {
+        return None;
+    }
+    Some(NfsReplayContext {
+        tenant_id: fence.tenant_id,
+        mount_session_id: session_id,
+        client_id: &nfs.client_id,
+        nfs_session_id: &nfs.nfs_session_id,
+        slot_id: i32::from(nfs.slot_id),
+        sequence_id: nfs.sequence_id,
+        operation_index: i32::from(nfs.operation_index),
+        operation: nfs_operation_name(fence.operation),
+        request_digest: canonical_digest,
+        gateway_epoch: fence.gateway_epoch,
+    })
+}
+
+const fn nfs_operation_name(operation: filebelt_vfs_protocol::OperationKind) -> &'static str {
+    use filebelt_vfs_protocol::OperationKind;
+    match operation {
+        OperationKind::Authenticate => "authenticate",
+        OperationKind::NfsAuthenticate => "nfs_authenticate",
+        OperationKind::List => "list",
+        OperationKind::Stat => "stat",
+        OperationKind::Open => "open",
+        OperationKind::Read => "read",
+        OperationKind::Write => "write",
+        OperationKind::Flush => "flush",
+        OperationKind::Commit => "commit",
+        OperationKind::Close => "close",
+        OperationKind::Create => "create",
+        OperationKind::Mkdir => "mkdir",
+        OperationKind::Rename => "rename",
+        OperationKind::Remove => "remove",
+        OperationKind::SetAttributes => "set_attributes",
+        OperationKind::Lock => "lock",
+        OperationKind::TestLock => "test_lock",
+        OperationKind::Unlock => "unlock",
+        OperationKind::LeaseAcknowledge => "lease_acknowledge",
+        OperationKind::AllocatePassivePort => "allocate_passive_port",
+        OperationKind::Heartbeat => "heartbeat",
+        OperationKind::EndSession => "end_session",
+        OperationKind::GatewayHello => "gateway_hello",
+        OperationKind::GetXattr => "get_xattr",
+        OperationKind::SetXattr => "set_xattr",
+        OperationKind::ListXattr => "list_xattr",
+        OperationKind::RemoveXattr => "remove_xattr",
+        OperationKind::Readlink => "readlink",
+        OperationKind::Symlink => "symlink",
+        OperationKind::SparseWrite => "sparse_write",
+        OperationKind::Reclaim => "reclaim",
+        OperationKind::OpenUnlinked => "open_unlinked",
+        OperationKind::ResolveHandle => "resolve_handle",
+        OperationKind::ExportRoot => "export_root",
+        OperationKind::Lookup => "lookup",
+        OperationKind::Access => "access",
+        OperationKind::FilesystemInfo => "filesystem_info",
+        OperationKind::GetAcl => "get_acl",
+        OperationKind::SetAcl => "set_acl",
+        OperationKind::SparseControl => "sparse_control",
+        OperationKind::GatewayDrain => "gateway_drain",
+        OperationKind::GatewayReconcile => "gateway_reconcile",
+    }
+}
+
+fn decode_nfs_replay(
+    fence: &RequestFence,
+    receipt: &filebelt_database::mount::NfsReplayReceipt,
+) -> VfsResponse {
+    if blake3::hash(&receipt.response_bytes).as_bytes() != &receipt.response_digest {
+        return unavailable(fence, "vfs.nfs_replay_corrupt");
+    }
+    match VfsResponse::decode(receipt.response_bytes.as_slice()) {
+        Ok(mut response) if response.request_id.is_empty() => {
+            response.request_id = fence.request_id.to_string();
+            if response.validate_for(fence.request_id).is_ok() {
+                response
+            } else {
+                unavailable(fence, "vfs.nfs_replay_corrupt")
+            }
+        }
+        _ => unavailable(fence, "vfs.nfs_replay_corrupt"),
+    }
+}
+
+async fn persist_nfs_read_only_receipt(
+    state: &VfsState,
+    fence: &RequestFence,
+    context: NfsReplayContext<'_>,
+    response: VfsResponse,
+) -> VfsResponse {
+    let mut response_template = response;
+    response_template.request_id.clear();
+    let response_bytes = response_template.encode_to_vec();
+    let response_digest = *blake3::hash(&response_bytes).as_bytes();
+    match state
+        .database
+        .record_nfs_replay_receipt(&RecordNfsReplayReceiptInput {
+            context,
+            response_bytes: &response_bytes,
+            response_digest: &response_digest,
+        })
+        .await
+    {
+        Ok(receipt) => decode_nfs_replay(fence, &receipt),
+        Err(DatabaseError::Conflict) => VfsResponse::failure(
+            fence.request_id,
+            VfsError::Conflict,
+            "vfs.nfs_replay_mismatch",
+        ),
+        Err(DatabaseError::StaleGeneration) => VfsResponse::failure(
+            fence.request_id,
+            VfsError::StaleGeneration,
+            "vfs.nfs_replay_stale",
+        ),
+        Err(_) => unavailable(fence, "vfs.nfs_replay_unavailable"),
     }
 }
 
@@ -1078,6 +1316,7 @@ async fn read_handle(
         issued_at_unix_seconds: now,
         expires_at_unix_seconds: now + 15,
         grant_id: handle.id.to_string(),
+        content_blake3: Vec::new(),
     };
     let capability = match sign_mount_storage_read_capability(
         &claims,
@@ -1602,6 +1841,12 @@ fn node_attributes(node: &NodeRecord, read_only: bool) -> Result<NodeAttributes,
         kind: match node.kind.as_str() {
             "file" => NodeKind::File as i32,
             "directory" => NodeKind::Directory as i32,
+            // The common namespace may contain NFS-created symlinks. Generic
+            // directory/stat projection must preserve their type instead of
+            // treating valid persisted state as corruption. It does not grant
+            // traversal: non-NFS Readlink/Symlink requests fail protocol
+            // validation, and the generic handle-open SQL admits files only.
+            "symlink" => NodeKind::Symlink as i32,
             _ => return Err(()),
         },
         size_bytes: u64::try_from(node.size_bytes.unwrap_or_default()).map_err(|_| ())?,
@@ -1816,6 +2061,58 @@ fn unavailable(request: &RequestFence, reason: &str) -> VfsResponse {
 mod tests {
     use super::*;
 
+    fn nfs_fence(operation: filebelt_vfs_protocol::OperationKind) -> RequestFence {
+        RequestFence {
+            request_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            protocol: MountProtocol::Nfs,
+            gateway_id: Uuid::new_v4().to_string(),
+            gateway_epoch: 7,
+            session_id: Some(Uuid::new_v4()),
+            credential_generation: Some(2),
+            authorization_generation: Some(3),
+            nfs_context: Some(filebelt_vfs_protocol::ValidatedNfsContext {
+                gss_binding_digest: [4; 32],
+                client_id: "client-1".into(),
+                nfs_session_id: "nfs-session-1".into(),
+                slot_id: 5,
+                sequence_id: 6,
+                operation_index: 7,
+                request_digest: Some([8; 32]),
+            }),
+            operation,
+        }
+    }
+
+    fn nfs_request(operation: Operation, mutation: bool) -> VfsRequest {
+        let mut request = VfsRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4().to_string(),
+            tenant_id: Uuid::new_v4().to_string(),
+            protocol: MountProtocol::Nfs as i32,
+            gateway_id: Uuid::new_v4().to_string(),
+            gateway_epoch: 7,
+            session_id: Uuid::new_v4().to_string(),
+            credential_generation: 2,
+            authorization_generation: 3,
+            nfs_context: Some(filebelt_vfs_protocol::NfsRequestContext {
+                gss_binding_digest: vec![4; 32],
+                client_id: "client-1".into(),
+                nfs_session_id: "nfs-session-1".into(),
+                slot_id: 5,
+                sequence_id: 6,
+                operation_index: 7,
+                request_digest: Vec::new(),
+            }),
+            operation: Some(operation),
+        };
+        if mutation {
+            let digest = canonical_nfs_request_digest(&request);
+            request.nfs_context.as_mut().unwrap().request_digest = digest.to_vec();
+        }
+        request
+    }
+
     #[test]
     fn ntlm_verifier_is_the_standard_utf16le_md4_digest() {
         let password = "Password";
@@ -1907,5 +2204,213 @@ mod tests {
             directory_listing_actions(),
             [Action::ReadMetadata, Action::ListChildren]
         );
+    }
+
+    #[test]
+    fn generic_metadata_projection_preserves_symlink_kind_without_traversing_it() {
+        let node = NodeRecord {
+            id: Uuid::new_v4(),
+            drive_id: Uuid::new_v4(),
+            parent_id: Some(Uuid::new_v4()),
+            kind: "symlink".into(),
+            display_name: "shortcut".into(),
+            name_key: "shortcut".into(),
+            head_version_id: None,
+            namespace_generation: 4,
+            acl_generation: 5,
+            trashed: false,
+            updated_at: "2026-08-11T00:00:00Z".into(),
+            size_bytes: None,
+            version_ordinal: None,
+            head_media_type: None,
+        };
+
+        let attributes = node_attributes(&node, true).expect("valid symlink projection");
+        assert_eq!(attributes.kind, NodeKind::Symlink as i32);
+        assert_eq!(attributes.mode, 0o444);
+        assert_eq!(attributes.link_count, 1);
+        assert!(attributes.head_version_id.is_empty());
+    }
+
+    #[test]
+    fn nfs_replay_context_binds_every_slot_and_operation_field() {
+        let fence = nfs_fence(filebelt_vfs_protocol::OperationKind::Write);
+        let digest = [8; 32];
+        let context = nfs_replay_context(&fence, &digest).expect("complete NFS context");
+        let nfs = fence.nfs_context.as_ref().unwrap();
+        assert_eq!(context.tenant_id, fence.tenant_id);
+        assert_eq!(context.mount_session_id, fence.session_id.unwrap());
+        assert_eq!(context.client_id, nfs.client_id);
+        assert_eq!(context.nfs_session_id, nfs.nfs_session_id);
+        assert_eq!(context.slot_id, i32::from(nfs.slot_id));
+        assert_eq!(context.sequence_id, nfs.sequence_id);
+        assert_eq!(context.operation_index, i32::from(nfs.operation_index));
+        assert_eq!(context.operation, "write");
+        assert_eq!(context.request_digest, &[8; 32]);
+        assert_eq!(context.gateway_epoch, fence.gateway_epoch);
+
+        let mut read = nfs_fence(filebelt_vfs_protocol::OperationKind::Read);
+        read.nfs_context.as_mut().unwrap().request_digest = None;
+        let read_digest = [9; 32];
+        assert_eq!(
+            nfs_replay_context(&read, &read_digest)
+                .unwrap()
+                .request_digest,
+            &read_digest,
+            "read-only requests use their computed full-request digest"
+        );
+    }
+
+    #[test]
+    fn changed_nfs_read_arguments_produce_a_replay_mismatch_identity() {
+        let request = nfs_request(
+            Operation::Read(filebelt_vfs_protocol::ReadRequest {
+                handle_id: Uuid::new_v4().to_string(),
+                offset: 0,
+                length: 64,
+            }),
+            false,
+        );
+        let fence = request.validate().expect("valid NFS read");
+        let digest = canonical_nfs_request_digest(&request);
+        let context = nfs_replay_context(&fence, &digest).expect("complete NFS replay context");
+
+        let mut changed = request;
+        let Some(Operation::Read(read)) = changed.operation.as_mut() else {
+            unreachable!();
+        };
+        read.offset = 1;
+        let changed_fence = changed.validate().expect("valid changed NFS read");
+        let changed_digest = canonical_nfs_request_digest(&changed);
+        let changed_context = nfs_replay_context(&changed_fence, &changed_digest)
+            .expect("complete changed NFS replay context");
+
+        assert_eq!(context.slot_id, changed_context.slot_id);
+        assert_eq!(context.sequence_id, changed_context.sequence_id);
+        assert_eq!(context.operation_index, changed_context.operation_index);
+        assert_eq!(context.operation, changed_context.operation);
+        assert_ne!(context.request_digest, changed_context.request_digest);
+    }
+
+    #[test]
+    fn mutation_supplied_digest_must_match_the_canonical_request() {
+        let request = nfs_request(
+            Operation::Close(filebelt_vfs_protocol::CloseRequest {
+                handle_id: Uuid::new_v4().to_string(),
+            }),
+            true,
+        );
+        let mut fence = request.validate().expect("valid NFS mutation");
+        let canonical_digest = canonical_nfs_request_digest(&request);
+        assert!(nfs_replay_context(&fence, &canonical_digest).is_some());
+
+        fence.nfs_context.as_mut().unwrap().request_digest = Some([99; 32]);
+        assert!(nfs_replay_context(&fence, &canonical_digest).is_none());
+        let response = invalid(&fence);
+        assert_eq!(response.error, VfsError::InvalidRequest as i32);
+        assert_eq!(response.reason_code, "vfs.invalid_request");
+    }
+
+    #[test]
+    fn nfs_exact_replay_uses_the_current_transport_uuid_and_rejects_corruption() {
+        let fence = nfs_fence(filebelt_vfs_protocol::OperationKind::Heartbeat);
+        let response = ok(&fence);
+        let mut response_template = response.clone();
+        response_template.request_id.clear();
+        let response_bytes = response_template.encode_to_vec();
+        let mut receipt = filebelt_database::mount::NfsReplayReceipt {
+            response_digest: *blake3::hash(&response_bytes).as_bytes(),
+            response_bytes,
+            gateway_epoch: fence.gateway_epoch,
+            expires_at_unix_seconds: 100,
+            mutation_outcome: None,
+        };
+        assert_eq!(decode_nfs_replay(&fence, &receipt), response);
+
+        receipt.response_digest[0] ^= 1;
+        let corrupt = decode_nfs_replay(&fence, &receipt);
+        assert_eq!(corrupt.error, VfsError::Unavailable as i32);
+        assert_eq!(corrupt.reason_code, "vfs.nfs_replay_corrupt");
+
+        receipt.response_digest = *blake3::hash(&receipt.response_bytes).as_bytes();
+        let mut substituted = fence;
+        substituted.request_id = Uuid::new_v4();
+        let replay = decode_nfs_replay(&substituted, &receipt);
+        assert_eq!(replay.error, response.error);
+        assert_eq!(replay.reason_code, response.reason_code);
+        assert_eq!(replay.request_id, substituted.request_id.to_string());
+
+        receipt.response_bytes = response.encode_to_vec();
+        receipt.response_digest = *blake3::hash(&receipt.response_bytes).as_bytes();
+        let noncanonical = decode_nfs_replay(&substituted, &receipt);
+        assert_eq!(noncanonical.error, VfsError::Unavailable as i32);
+        assert_eq!(noncanonical.reason_code, "vfs.nfs_replay_corrupt");
+    }
+
+    #[test]
+    fn nfs_terminal_replay_precedes_live_session_readmission() {
+        let dispatch = include_str!("main.rs")
+            .split_once("async fn dispatch_nfs(")
+            .unwrap()
+            .1
+            .split_once("fn nfs_not_qualified(")
+            .unwrap()
+            .0;
+        let replay = dispatch.find("lookup_nfs_replay_receipt").unwrap();
+        let live_session = dispatch.find("admit_mount_session").unwrap();
+        assert!(replay < live_session);
+    }
+
+    #[test]
+    fn every_nfs_operation_has_an_exact_replay_identity_and_no_legacy_catch_all() {
+        use filebelt_vfs_protocol::OperationKind;
+        let operations = [
+            (OperationKind::List, "list"),
+            (OperationKind::Stat, "stat"),
+            (OperationKind::Open, "open"),
+            (OperationKind::Read, "read"),
+            (OperationKind::Write, "write"),
+            (OperationKind::Flush, "flush"),
+            (OperationKind::Commit, "commit"),
+            (OperationKind::Close, "close"),
+            (OperationKind::Create, "create"),
+            (OperationKind::Mkdir, "mkdir"),
+            (OperationKind::Rename, "rename"),
+            (OperationKind::Remove, "remove"),
+            (OperationKind::SetAttributes, "set_attributes"),
+            (OperationKind::Lock, "lock"),
+            (OperationKind::Unlock, "unlock"),
+            (OperationKind::LeaseAcknowledge, "lease_acknowledge"),
+            (OperationKind::Heartbeat, "heartbeat"),
+            (OperationKind::EndSession, "end_session"),
+            (OperationKind::GetXattr, "get_xattr"),
+            (OperationKind::SetXattr, "set_xattr"),
+            (OperationKind::ListXattr, "list_xattr"),
+            (OperationKind::RemoveXattr, "remove_xattr"),
+            (OperationKind::Readlink, "readlink"),
+            (OperationKind::Symlink, "symlink"),
+            (OperationKind::SparseWrite, "sparse_write"),
+            (OperationKind::Reclaim, "reclaim"),
+            (OperationKind::OpenUnlinked, "open_unlinked"),
+            (OperationKind::ResolveHandle, "resolve_handle"),
+            (OperationKind::ExportRoot, "export_root"),
+            (OperationKind::Lookup, "lookup"),
+            (OperationKind::Access, "access"),
+            (OperationKind::FilesystemInfo, "filesystem_info"),
+            (OperationKind::GetAcl, "get_acl"),
+            (OperationKind::SetAcl, "set_acl"),
+            (OperationKind::SparseControl, "sparse_control"),
+        ];
+        for (operation, name) in operations {
+            assert_eq!(nfs_operation_name(operation), name);
+        }
+        let dispatch = include_str!("main.rs")
+            .split_once("async fn dispatch_nfs(")
+            .unwrap()
+            .1
+            .split_once("fn nfs_not_qualified(")
+            .unwrap()
+            .0;
+        assert!(!dispatch.contains("vfs.nfs_operation_not_implemented"));
     }
 }

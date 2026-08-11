@@ -8,7 +8,9 @@ use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write as _};
 use std::os::unix::fs::symlink;
-use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+use std::os::unix::fs::{
+    DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _,
+};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -18,7 +20,7 @@ use uuid::Uuid;
 
 mod cow;
 
-pub use cow::{CowChunkDigest, CowManifest, CowWriteResult};
+pub use cow::{CowBaseChunk, CowChunkDigest, CowLockGuard, CowManifest, CowWriteResult};
 
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
@@ -40,11 +42,13 @@ pub enum StorageError {
     InvalidContent,
     #[error("storage operation is inconsistent with persisted state")]
     StateConflict,
+    #[error("backing filesystem does not support required sparse-file operations")]
+    UnsupportedFilesystem,
     #[error("blocking storage task failed")]
     Join,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinalizedObject {
     pub digest: [u8; 32],
     pub size: u64,
@@ -385,6 +389,64 @@ impl StorageLayout {
             offset: start,
             length: end_inclusive - start + 1,
         }])
+    }
+
+    pub fn verified_chunked_object_segments(
+        &self,
+        payload: &PayloadRecord,
+        chunks: &[CowBaseChunk],
+        start: u64,
+        end_inclusive: u64,
+    ) -> Result<Vec<DownloadSegment>, StorageError> {
+        if payload.layout != "chunked" {
+            return Err(StorageError::StateConflict);
+        }
+        let size = u64::try_from(payload.size_bytes).map_err(|_| StorageError::StateConflict)?;
+        if size == 0 {
+            return chunks
+                .is_empty()
+                .then(Vec::new)
+                .ok_or(StorageError::CorruptObject);
+        }
+        if start > end_inclusive || end_inclusive >= size {
+            return Err(StorageError::StateConflict);
+        }
+        let directory = self.payload_path(payload)?;
+        verify_directory(&directory)?;
+        let mut logical_offset = 0_u64;
+        let mut result = Vec::new();
+        for (index, chunk) in chunks.iter().enumerate() {
+            if chunk.chunk_number
+                != u64::try_from(index).map_err(|_| StorageError::StateConflict)?
+                || chunk.chunk_number > 99_999_999
+            {
+                return Err(StorageError::CorruptObject);
+            }
+            let chunk_end = logical_offset
+                .checked_add(chunk.size)
+                .ok_or(StorageError::StateConflict)?;
+            if chunk.size == 0 || chunk_end > size {
+                return Err(StorageError::CorruptObject);
+            }
+            let overlap_start = start.max(logical_offset);
+            let overlap_end_exclusive = end_inclusive.saturating_add(1).min(chunk_end);
+            if overlap_start < overlap_end_exclusive {
+                let path = directory.join(format!("{:08}.part", chunk.chunk_number));
+                verify_file(&path, chunk.size, &chunk.digest)?;
+                result.push(DownloadSegment {
+                    path,
+                    offset: overlap_start - logical_offset,
+                    length: overlap_end_exclusive - overlap_start,
+                });
+            }
+            logical_offset = chunk_end;
+        }
+        if logical_offset != size
+            || result.iter().map(|segment| segment.length).sum::<u64>() != end_inclusive - start + 1
+        {
+            return Err(StorageError::CorruptObject);
+        }
+        Ok(result)
     }
 
     pub fn remove_staging_locator(&self, locator: Uuid) -> Result<(), StorageError> {
@@ -732,7 +794,14 @@ pub struct DownloadSegment {
 }
 
 pub fn create_new_file(path: &Path) -> Result<File, StorageError> {
-    let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    // Apply the owner-only mode in the creating syscall. A restrictive umask
+    // may remove owner bits, but a crash can no longer expose the default
+    // 0666 mode before the exact-mode repair below.
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(path)?;
     file.set_permissions(fs::Permissions::from_mode(FILE_MODE))?;
     Ok(file)
 }
@@ -829,7 +898,9 @@ fn create_secure_directory(path: &Path) -> Result<(), StorageError> {
     match fs::symlink_metadata(path) {
         Ok(_) => verify_directory(path),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)?;
+            // Apply the closed owner-only mode in mkdir itself. The follow-up
+            // chmod only repairs bits removed by a restrictive umask.
+            fs::DirBuilder::new().mode(DIRECTORY_MODE).create(path)?;
             fs::set_permissions(path, fs::Permissions::from_mode(DIRECTORY_MODE))?;
             verify_directory(path)?;
             sync_directory(path)?;
@@ -1029,6 +1100,39 @@ mod tests {
             segments.iter().map(|segment| segment.length).sum::<u64>(),
             4
         );
+    }
+
+    #[test]
+    fn mount_chunk_manifest_preserves_inclusive_one_byte_and_cross_chunk_ranges() {
+        let temporary = tempfile::tempdir().expect("temporary storage root");
+        let layout = StorageLayout::new(temporary.path().join("payloads"));
+        layout.prepare().expect("prepare storage");
+        let upload = upload(Uuid::new_v4(), Uuid::new_v4(), 8, 2);
+        let payload = payload(&upload, "chunked");
+        let parts = vec![stage(&layout, 0, b"abcd"), stage(&layout, 1, b"efgh")];
+        layout
+            .finalize(&upload, &payload, &parts, Uuid::new_v4())
+            .expect("finalize chunked payload");
+        let chunks = parts
+            .iter()
+            .map(|part| CowBaseChunk {
+                chunk_number: u64::try_from(part.part_number).unwrap(),
+                size: u64::try_from(part.size_bytes).unwrap(),
+                digest: part.blake3.as_deref().unwrap().try_into().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        let one = layout
+            .verified_chunked_object_segments(&payload, &chunks, 4, 4)
+            .expect("inclusive one-byte mount range");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].offset, 0);
+        assert_eq!(one[0].length, 1);
+        let cross = layout
+            .verified_chunked_object_segments(&payload, &chunks, 3, 4)
+            .expect("cross-chunk mount range");
+        assert_eq!(cross.len(), 2);
+        assert_eq!(cross.iter().map(|segment| segment.length).sum::<u64>(), 2);
     }
 
     #[test]

@@ -3,13 +3,13 @@
 //! Transactional idempotency for MCP authority-creating writes.
 
 use serde_json::Value;
-use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use super::invocation::{NewMcpApprovalRule, insert_approval_rule};
 use super::operations::{NewMcpServiceGrant, insert_service_grant};
 use super::{Database, DatabaseError, NewMcpDataGrant, insert_data_grant};
 use crate::IdempotencyRecord;
+use crate::idempotency::{IdempotencyInput, IdempotencyReservation, finalize, reserve};
 
 #[derive(Clone, Debug)]
 pub struct McpIdempotency<'a> {
@@ -35,6 +35,7 @@ impl Database {
         idempotency: &McpIdempotency<'_>,
     ) -> Result<McpIdempotentWrite, DatabaseError> {
         if idempotency.principal_id != input.principal_id
+            || !(100..=599).contains(&idempotency.response_status)
             || !(1..=3_600).contains(&input.lifetime_seconds)
             || !matches!(
                 input.primitive,
@@ -44,17 +45,26 @@ impl Database {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool.begin().await?;
-        match reserve(&mut transaction, input.tenant_id, idempotency).await? {
-            Reservation::Replay(record) => {
+        let reservation = idempotency.reservation_input();
+        match reserve(&mut transaction, input.tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Replayed(record))
             }
-            Reservation::KeyReused => {
+            IdempotencyReservation::KeyReused => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::KeyReused)
             }
-            Reservation::Created(record) => {
+            IdempotencyReservation::Created => {
                 insert_approval_rule(&mut transaction, input).await?;
+                let record = finalize(
+                    &mut transaction,
+                    input.tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    idempotency.response_body,
+                )
+                .await?;
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Created(record))
             }
@@ -67,23 +77,33 @@ impl Database {
         idempotency: &McpIdempotency<'_>,
     ) -> Result<McpIdempotentWrite, DatabaseError> {
         if idempotency.principal_id != input.principal_id
+            || !(100..=599).contains(&idempotency.response_status)
             || !(1..=2_592_000).contains(&input.lifetime_seconds)
             || !(input.allow_metadata || input.allow_content)
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool.begin().await?;
-        match reserve(&mut transaction, input.tenant_id, idempotency).await? {
-            Reservation::Replay(record) => {
+        let reservation = idempotency.reservation_input();
+        match reserve(&mut transaction, input.tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Replayed(record))
             }
-            Reservation::KeyReused => {
+            IdempotencyReservation::KeyReused => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::KeyReused)
             }
-            Reservation::Created(record) => {
+            IdempotencyReservation::Created => {
                 insert_data_grant(&mut transaction, input).await?;
+                let record = finalize(
+                    &mut transaction,
+                    input.tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    idempotency.response_body,
+                )
+                .await?;
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Created(record))
             }
@@ -96,6 +116,7 @@ impl Database {
         idempotency: &McpIdempotency<'_>,
     ) -> Result<McpIdempotentWrite, DatabaseError> {
         if idempotency.principal_id != input.created_by
+            || !(100..=599).contains(&idempotency.response_status)
             || !(1..=2_592_000).contains(&input.lifetime_seconds)
             || !matches!(
                 input.primitive,
@@ -109,17 +130,26 @@ impl Database {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool.begin().await?;
-        match reserve(&mut transaction, input.tenant_id, idempotency).await? {
-            Reservation::Replay(record) => {
+        let reservation = idempotency.reservation_input();
+        match reserve(&mut transaction, input.tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Replayed(record))
             }
-            Reservation::KeyReused => {
+            IdempotencyReservation::KeyReused => {
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::KeyReused)
             }
-            Reservation::Created(record) => {
+            IdempotencyReservation::Created => {
                 insert_service_grant(&mut transaction, input).await?;
+                let record = finalize(
+                    &mut transaction,
+                    input.tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    idempotency.response_body,
+                )
+                .await?;
                 transaction.commit().await?;
                 Ok(McpIdempotentWrite::Created(record))
             }
@@ -127,63 +157,14 @@ impl Database {
     }
 }
 
-enum Reservation {
-    Created(IdempotencyRecord),
-    Replay(IdempotencyRecord),
-    KeyReused,
-}
-
-async fn reserve(
-    transaction: &mut Transaction<'_, Postgres>,
-    tenant_id: Uuid,
-    input: &McpIdempotency<'_>,
-) -> Result<Reservation, DatabaseError> {
-    if input.route.is_empty()
-        || input.route.len() > 255
-        || input.key.is_empty()
-        || input.key.len() > 128
-        || !input.key.bytes().all(|byte| byte.is_ascii_graphic())
-        || !(100..=599).contains(&input.response_status)
-    {
-        return Err(DatabaseError::InvalidPersistedValue);
-    }
-    sqlx::query("DELETE FROM public.idempotency_records WHERE tenant_id=$1 AND principal_id=$2 AND route=$3 AND key=$4 AND expires_at<=statement_timestamp()")
-        .bind(tenant_id)
-        .bind(input.principal_id)
-        .bind(input.route)
-        .bind(input.key)
-        .execute(&mut **transaction)
-        .await?;
-    let inserted = sqlx::query("INSERT INTO public.idempotency_records (tenant_id,principal_id,route,key,request_fingerprint,response_status,response_body) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING")
-        .bind(tenant_id)
-        .bind(input.principal_id)
-        .bind(input.route)
-        .bind(input.key)
-        .bind(input.request_fingerprint.as_slice())
-        .bind(input.response_status)
-        .bind(input.response_body)
-        .execute(&mut **transaction)
-        .await?
-        .rows_affected()
-        == 1;
-    let row = sqlx::query("SELECT request_fingerprint,response_status,response_body FROM public.idempotency_records WHERE tenant_id=$1 AND principal_id=$2 AND route=$3 AND key=$4 FOR UPDATE")
-        .bind(tenant_id)
-        .bind(input.principal_id)
-        .bind(input.route)
-        .bind(input.key)
-        .fetch_one(&mut **transaction)
-        .await?;
-    let record = IdempotencyRecord {
-        request_fingerprint: row.get("request_fingerprint"),
-        response_status: row.get("response_status"),
-        response_body: row.get("response_body"),
-    };
-    if record.request_fingerprint.as_slice() != input.request_fingerprint {
-        return Ok(Reservation::KeyReused);
-    }
-    if inserted {
-        Ok(Reservation::Created(record))
-    } else {
-        Ok(Reservation::Replay(record))
+impl McpIdempotency<'_> {
+    fn reservation_input(&self) -> IdempotencyInput<'_> {
+        IdempotencyInput {
+            principal_id: self.principal_id,
+            route: self.route,
+            key: self.key,
+            request_fingerprint: self.request_fingerprint,
+            legacy_request_fingerprint: None,
+        }
     }
 }

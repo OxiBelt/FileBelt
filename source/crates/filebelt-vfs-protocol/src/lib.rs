@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+use prost::Message as _;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,10 +27,34 @@ pub const MAX_XATTR_BYTES: usize = 65_536;
 pub const NFS_GATEWAY_LEASE_SECONDS: u32 = 30;
 pub const NFS_CONFIG_FORMAT: u32 = 8;
 pub const NFS_AUTHORITY_SCHEMA_REVISION: u32 = 1;
+pub const DEFAULT_FILE_MODE: u32 = 0o644;
+pub const DEFAULT_DIRECTORY_MODE: u32 = 0o755;
+pub const DEFAULT_SYMLINK_MODE: u32 = 0o777;
 
 const MAX_ACL_ENTRIES: usize = 256;
 const MAX_PROJECTED_ID: u64 = 4_294_967_294;
 const NFS_NOBODY_PROJECTED_ID: u64 = 65_534;
+const NFS_REQUEST_DIGEST_DOMAIN: &[u8] = b"filebelt.nfs.vfs-mutation.v1\0";
+
+/// Computes the replay identity of an NFS VFS request.
+///
+/// The transport correlation UUID and the bridge-supplied digest field are
+/// deliberately excluded. Every other protobuf field, including read-only
+/// operation arguments and replay coordinates, remains bound. The historical
+/// domain says `mutation` for wire compatibility with the NFS bridge, but this
+/// digest is also the internal replay identity for read-only operations.
+#[must_use]
+pub fn canonical_nfs_request_digest(request: &VfsRequest) -> [u8; 32] {
+    let mut canonical = request.clone();
+    canonical.request_id.clear();
+    if let Some(context) = canonical.nfs_context.as_mut() {
+        context.request_digest.clear();
+    }
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(NFS_REQUEST_DIGEST_DOMAIN);
+    hasher.update(&canonical.encode_to_vec());
+    *hasher.finalize().as_bytes()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationKind {
@@ -49,6 +74,7 @@ pub enum OperationKind {
     Remove,
     SetAttributes,
     Lock,
+    TestLock,
     Unlock,
     LeaseAcknowledge,
     AllocatePassivePort,
@@ -198,6 +224,30 @@ impl VfsRequest {
     }
 }
 
+impl CreateRequest {
+    /// Returns the client-selected permission bits or the protocol default.
+    #[must_use]
+    pub fn effective_mode(&self) -> u32 {
+        self.mode.unwrap_or(DEFAULT_FILE_MODE)
+    }
+}
+
+impl MkdirRequest {
+    /// Returns the client-selected permission bits or the protocol default.
+    #[must_use]
+    pub fn effective_mode(&self) -> u32 {
+        self.mode.unwrap_or(DEFAULT_DIRECTORY_MODE)
+    }
+}
+
+impl SymlinkRequest {
+    /// Returns the client-selected permission bits or the protocol default.
+    #[must_use]
+    pub fn effective_mode(&self) -> u32 {
+        self.mode.unwrap_or(DEFAULT_SYMLINK_MODE)
+    }
+}
+
 impl VfsResponse {
     pub fn validate_for(&self, request_id: Uuid) -> Result<(), ValidationError> {
         if self.protocol_version != PROTOCOL_VERSION || uuid(&self.request_id)? != request_id {
@@ -262,6 +312,12 @@ impl VfsResponse {
                 return Err(ValidationError::Envelope);
             }
             validate_nfs_session_projection(projection)?;
+        }
+        if let Some(conflict) = &self.lock_conflict
+            && (!matches!(error, VfsError::Ok | VfsError::LockConflict)
+                || validate_lock_range(conflict.offset, conflict.length, conflict.to_eof).is_err())
+        {
+            return Err(ValidationError::Envelope);
         }
         if let Some(filesystem) = &self.filesystem_info {
             validate_filesystem_info(filesystem)?;
@@ -388,12 +444,14 @@ fn validate_operation(
             positive(request.expected_parent_generation)?;
             validate_actions(&request.requested_actions)?;
             optional_persistent_handle(&request.parent_handle, protocol)?;
+            validate_initial_mode(request.mode)?;
         }
         Operation::Mkdir(request) => {
             uuids(&[&request.drive_id, &request.parent_id])?;
             validate_display_name(&request.display_name)?;
             positive(request.expected_parent_generation)?;
             optional_persistent_handle(&request.parent_handle, protocol)?;
+            validate_initial_mode(request.mode)?;
         }
         Operation::Rename(request) => {
             uuids(&[
@@ -455,8 +513,15 @@ fn validate_operation(
         Operation::Lock(request) => {
             uuid(&request.handle_id)?;
             if !stable_key(&request.owner_key, 255)
-                || request.length == 0
-                || request.offset.checked_add(request.length).is_none()
+                || validate_lock_range(request.offset, request.length, request.to_eof).is_err()
+            {
+                return Err(ValidationError::Operation);
+            }
+        }
+        Operation::TestLock(request) => {
+            uuid(&request.handle_id)?;
+            if !stable_key(&request.owner_key, 255)
+                || validate_lock_range(request.offset, request.length, request.to_eof).is_err()
             {
                 return Err(ValidationError::Operation);
             }
@@ -546,6 +611,7 @@ fn validate_operation(
             }
             positive(request.expected_parent_generation)?;
             optional_persistent_handle(&request.parent_handle, protocol)?;
+            validate_initial_mode(request.mode)?;
         }
         Operation::SparseWrite(request) => {
             uuids(&[&request.handle_id, &request.write_session_id])?;
@@ -692,6 +758,7 @@ const fn operation_kind(operation: &vfs_request::Operation) -> OperationKind {
         Operation::Remove(_) => OperationKind::Remove,
         Operation::SetAttributes(_) => OperationKind::SetAttributes,
         Operation::Lock(_) => OperationKind::Lock,
+        Operation::TestLock(_) => OperationKind::TestLock,
         Operation::Unlock(_) => OperationKind::Unlock,
         Operation::LeaseAcknowledge(_) => OperationKind::LeaseAcknowledge,
         Operation::AllocatePassivePort(_) => OperationKind::AllocatePassivePort,
@@ -821,9 +888,32 @@ fn nfs_operation_requires_digest(
         | Operation::Access(_)
         | Operation::FilesystemInfo(_)
         | Operation::GetAcl(_)
+        | Operation::TestLock(_)
         | Operation::GatewayDrain(_)
         | Operation::GatewayReconcile(_) => false,
     })
+}
+
+fn validate_initial_mode(mode: Option<u32>) -> Result<(), ValidationError> {
+    if mode.is_some_and(|value| value & !0o777 != 0) {
+        Err(ValidationError::Operation)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_lock_range(offset: u64, length: u64, to_eof: bool) -> Result<(), ValidationError> {
+    if to_eof {
+        if length == 0 {
+            Ok(())
+        } else {
+            Err(ValidationError::Operation)
+        }
+    } else if length != 0 && offset.checked_add(length).is_some() {
+        Ok(())
+    } else {
+        Err(ValidationError::Operation)
+    }
 }
 
 fn validate_nfs_compatibility(
@@ -1128,7 +1218,7 @@ fn valid_tenant_slug(value: &str) -> bool {
 
 fn validate_xattr_name(value: &str) -> Result<(), ValidationError> {
     if !value.starts_with("user.")
-        || value.len() > 255
+        || !(6..=255).contains(&value.len())
         || value.as_bytes().contains(&0)
         || value.chars().any(char::is_control)
     {
@@ -1244,6 +1334,7 @@ mod tests {
             expected_parent_generation: 1,
             requested_actions: vec![VfsAction::WriteContent as i32],
             parent_handle: Vec::new(),
+            mode: None,
         }));
         assert_eq!(request.validate(), Err(ValidationError::Name));
         request.operation = Some(vfs_request::Operation::Read(ReadRequest {
@@ -1252,6 +1343,157 @@ mod tests {
             length: 2,
         }));
         assert_eq!(request.validate(), Err(ValidationError::Limit));
+    }
+
+    #[test]
+    fn initial_modes_default_and_reject_special_bits() {
+        let drive_id = Uuid::new_v4().to_string();
+        let parent_id = Uuid::new_v4().to_string();
+        let mut create = nfs_request(
+            vfs_request::Operation::Create(CreateRequest {
+                drive_id: drive_id.clone(),
+                parent_id: parent_id.clone(),
+                display_name: "file".into(),
+                expected_parent_generation: 1,
+                requested_actions: vec![VfsAction::WriteContent as i32],
+                parent_handle: vec![1; 32],
+                mode: None,
+            }),
+            true,
+        );
+        let Some(vfs_request::Operation::Create(request)) = create.operation.as_mut() else {
+            unreachable!();
+        };
+        assert_eq!(request.effective_mode(), DEFAULT_FILE_MODE);
+        request.mode = Some(0o600);
+        assert_eq!(request.effective_mode(), 0o600);
+        assert!(create.validate().is_ok());
+        let Some(vfs_request::Operation::Create(request)) = create.operation.as_mut() else {
+            unreachable!();
+        };
+        request.mode = Some(0o4_600);
+        assert_eq!(create.validate(), Err(ValidationError::Operation));
+
+        let directory = MkdirRequest {
+            drive_id: drive_id.clone(),
+            parent_id: parent_id.clone(),
+            display_name: "directory".into(),
+            expected_parent_generation: 1,
+            parent_handle: vec![2; 32],
+            mode: None,
+        };
+        assert_eq!(directory.effective_mode(), DEFAULT_DIRECTORY_MODE);
+        assert!(
+            nfs_request(vfs_request::Operation::Mkdir(directory), true)
+                .validate()
+                .is_ok()
+        );
+
+        let symlink = SymlinkRequest {
+            drive_id,
+            parent_id,
+            display_name: "link".into(),
+            target: "target".into(),
+            expected_parent_generation: 1,
+            parent_handle: vec![3; 32],
+            mode: None,
+        };
+        assert_eq!(symlink.effective_mode(), DEFAULT_SYMLINK_MODE);
+        assert!(
+            nfs_request(vfs_request::Operation::Symlink(symlink), true)
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn lock_ranges_distinguish_finite_eof_and_read_only_queries() {
+        let handle_id = Uuid::new_v4().to_string();
+        let finite = nfs_request(
+            vfs_request::Operation::Lock(LockRequest {
+                handle_id: handle_id.clone(),
+                owner_key: "nfs-client-1:01".into(),
+                offset: 7,
+                length: 11,
+                exclusive: true,
+                to_eof: false,
+            }),
+            true,
+        );
+        assert!(finite.validate().is_ok());
+
+        let mut to_eof = nfs_request(
+            vfs_request::Operation::TestLock(TestLockRequest {
+                handle_id,
+                owner_key: "nfs-client-1:01".into(),
+                offset: 7,
+                length: 0,
+                exclusive: false,
+                to_eof: true,
+            }),
+            false,
+        );
+        let fence = to_eof.validate().expect("read-only EOF query");
+        assert_eq!(fence.operation, OperationKind::TestLock);
+        assert!(fence.nfs_context.unwrap().request_digest.is_none());
+
+        let Some(vfs_request::Operation::TestLock(request)) = to_eof.operation.as_mut() else {
+            unreachable!();
+        };
+        request.length = 1;
+        assert_eq!(to_eof.validate(), Err(ValidationError::Operation));
+
+        let request_id = Uuid::new_v4();
+        let conflict = VfsResponse {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: request_id.to_string(),
+            error: VfsError::LockConflict as i32,
+            lock_conflict: Some(LockConflict {
+                offset: 9,
+                length: 0,
+                exclusive: true,
+                to_eof: true,
+            }),
+            ..VfsResponse::default()
+        };
+        assert!(conflict.validate_for(request_id).is_ok());
+        let mut query_conflict = conflict.clone();
+        query_conflict.error = VfsError::Ok as i32;
+        assert!(query_conflict.validate_for(request_id).is_ok());
+        query_conflict.error = VfsError::AccessDenied as i32;
+        assert_eq!(
+            query_conflict.validate_for(request_id),
+            Err(ValidationError::Envelope)
+        );
+    }
+
+    #[test]
+    fn xattr_names_match_the_persisted_user_namespace_boundaries() {
+        let drive_id = Uuid::new_v4().to_string();
+        let resource_id = Uuid::new_v4().to_string();
+        let mut request = request(vfs_request::Operation::GetXattr(GetXattrRequest {
+            drive_id,
+            resource_id,
+            name: "user.a".into(),
+            persistent_handle: Vec::new(),
+        }));
+        assert!(request.validate().is_ok());
+
+        let Some(vfs_request::Operation::GetXattr(get)) = request.operation.as_mut() else {
+            unreachable!();
+        };
+        get.name = "user.".into();
+        assert_eq!(request.validate(), Err(ValidationError::Name));
+        let Some(vfs_request::Operation::GetXattr(get)) = request.operation.as_mut() else {
+            unreachable!();
+        };
+        get.name = format!("user.{}", "a".repeat(250));
+        assert!(request.validate().is_ok());
+        let Some(vfs_request::Operation::GetXattr(get)) = request.operation.as_mut() else {
+            unreachable!();
+        };
+        get.name.push('a');
+        assert_eq!(request.validate(), Err(ValidationError::Name));
     }
 
     #[test]
@@ -1466,6 +1708,59 @@ mod tests {
         request.nfs_context.as_mut().unwrap().request_digest.clear();
         request.nfs_context.as_mut().unwrap().slot_id = 1_024;
         assert_eq!(request.validate(), Err(ValidationError::Envelope));
+    }
+
+    #[test]
+    fn canonical_nfs_digest_excludes_only_transport_uuid_and_supplied_digest() {
+        let operation = vfs_request::Operation::Read(ReadRequest {
+            handle_id: Uuid::from_u128(7).to_string(),
+            offset: 8,
+            length: 16,
+        });
+        let mut request = nfs_request(operation, false);
+        request.request_id = Uuid::from_u128(11).to_string();
+        request.tenant_id = Uuid::from_u128(12).to_string();
+        request.session_id = Uuid::from_u128(13).to_string();
+        let baseline = canonical_nfs_request_digest(&request);
+
+        request.request_id = Uuid::from_u128(14).to_string();
+        assert_eq!(canonical_nfs_request_digest(&request), baseline);
+        request.nfs_context.as_mut().unwrap().request_digest = vec![17; 32];
+        assert_eq!(canonical_nfs_request_digest(&request), baseline);
+
+        if let Some(vfs_request::Operation::Read(read)) = request.operation.as_mut() {
+            read.offset += 1;
+        } else {
+            unreachable!();
+        }
+        assert_ne!(canonical_nfs_request_digest(&request), baseline);
+        if let Some(vfs_request::Operation::Read(read)) = request.operation.as_mut() {
+            read.offset -= 1;
+        } else {
+            unreachable!();
+        }
+        request.nfs_context.as_mut().unwrap().sequence_id += 1;
+        assert_ne!(canonical_nfs_request_digest(&request), baseline);
+    }
+
+    #[test]
+    fn canonical_nfs_digest_preserves_the_bridge_domain_contract() {
+        let operation = vfs_request::Operation::Close(CloseRequest {
+            handle_id: Uuid::from_u128(21).to_string(),
+        });
+        let mut request = nfs_request(operation, true);
+        request.request_id = Uuid::from_u128(22).to_string();
+        request.tenant_id = Uuid::from_u128(23).to_string();
+        request.session_id = Uuid::from_u128(24).to_string();
+
+        assert_eq!(
+            canonical_nfs_request_digest(&request),
+            [
+                0x00, 0x21, 0x3d, 0x0b, 0x6c, 0xc1, 0x74, 0x8c, 0x7e, 0xb5, 0xc9, 0x84, 0x7c, 0x69,
+                0xcb, 0x03, 0xb3, 0xa3, 0x5f, 0xd0, 0x4e, 0x2d, 0x91, 0x1b, 0x4b, 0x73, 0x7b, 0x78,
+                0x25, 0x02, 0x5c, 0x70,
+            ]
+        );
     }
 
     #[test]
@@ -1840,6 +2135,7 @@ mod tests {
                 target: "../sibling".into(),
                 expected_parent_generation: 3,
                 parent_handle: vec![5; 32],
+                mode: None,
             }),
             true,
         );

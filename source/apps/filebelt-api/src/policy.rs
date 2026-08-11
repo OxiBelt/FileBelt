@@ -335,6 +335,7 @@ mod tests {
             membership_generation: 1,
             drive_acl_generation: 1,
             namespace_generation: 1,
+            resource_namespace_generation: 1,
             resource_acl_generation: 1,
         }
     }

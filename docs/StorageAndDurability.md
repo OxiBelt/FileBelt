@@ -379,27 +379,50 @@ authenticate again after the isolated editor hostname is active.
 ## Phase 8 activation, NFS recovery, and media cache
 
 Migrations `000007_phase8_compatibility.sql`, `000008_phase8_media.sql`, and
-`000009_phase8_nfs.sql` are additive and dormant. Phase 8-capable roles publish
-a fresh compatibility advertisement in PostgreSQL. `filebeltctl phase8
-activate` takes an advisory activation lock, verifies every required role,
-creates managed NFS traversal/group projections, and advances one audited
-activation generation in a serializable transaction. Before activation, old
-behavior remains authoritative and no Phase 8 state may be emitted.
+`000009_phase8_nfs.sql` establish the additive dormant baseline. The later NFS
+authority migrations add feature-scoped activation, reconciled export
+manifests, common namespace metadata, immutable filehandle generations,
+protocol replay high-water, and staged-writer recovery without enabling a
+listener. NFS admission requires the tenant feature state and exact applied
+manifest; it does not depend on the legacy global Phase 8 activation snapshot.
+The namespace migration replaces mapping-local POSIX uniqueness with one
+append-only identity registry per FileBelt principal, allowing multiple
+Kerberos aliases only when their POSIX name, UID, primary group, and GID are
+identical. An upgrade from the preceding schema stops with a deterministic
+conflict inventory when existing aliases disagree; it never rewrites or
+chooses an identity during migration.
 
-`filebeltctl phase8 deactivate` stops new export, writer, preview, and
-WebTransport admission while retaining the expanded schema and readable state.
-It is not a down migration. Downgrading to a binary that cannot understand the
-expanded schema requires restoring the coordinated pre-activation checkpoint
-into fresh targets.
+`filebeltctl phase8 deactivate` retains the expanded schema and readable state;
+it is not a down migration. NFS uses its tenant-scoped feature state to stop new
+sessions and writers, drain the applied gateway, and reconcile exports to the
+disabled manifest independently of the global compatibility state. Downgrading
+to a binary that cannot understand the expanded schema requires restoring the
+coordinated pre-activation checkpoint into fresh targets.
 
-The NFS target requires write sessions to durably bind tenant, principal, API-independent NFS session,
-drive, node, base version, expected head, gateway epoch, owner/state identity,
-quota reservation, and staging generation. Sparse extents and chunk receipts
-remain invisible until COMMIT or final dirty CLOSE atomically creates an
-immutable version. A failed expected-head comparison retains the staged result
-for seven days. Reclaim records, replay receipts, and gateway fencing are
-PostgreSQL authority; Ganesha `fs_ng` recovery data on its RWO claim supplies
-protocol recovery only and cannot authorize a FileBelt commit.
+The NFS target requires write sessions to durably bind tenant, principal,
+API-independent NFS session, authenticated export manifest, drive, node, base
+version, expected head, gateway epoch, owner/state identity, quota reservation,
+and staging generation. VFS declares each signed byte-plane range before issuing
+its capability. The I/O worker records the exact physical result, while the
+operation remains blocking until VFS atomically applies the authoritative
+extent or seek result and protocol replay receipt. Sparse extents and chunk
+receipts remain invisible until COMMIT or final dirty CLOSE atomically creates
+an immutable version. A failed expected-head comparison retains the staged
+result for seven days. Expired and aborted writers are fenced into leased,
+two-phase cleanup jobs; physical deletion, lock removal, quota release, and
+receipt completion are crash-recoverable states rather than table-scanner side
+effects. A never-finalized staging object may reach terminal `deleted` without a
+whole-object digest because no trustworthy digest ever existed; every live,
+finalized, referenced, or deletion-in-progress payload state retains the common
+digest requirement. Reclaim records, replay receipts, cleanup jobs, and gateway
+fencing are PostgreSQL authority; Ganesha `fs_ng` recovery data on its RWO claim
+supplies protocol recovery only and cannot authorize a FileBelt commit.
+
+Retained-conflict copy publishes the already-finalized payload, converts its
+reservation exactly once, and records the new node/version, audit, outbox, and
+HTTP idempotency response in one transaction. Discard retains the inventory row
+through its fixed deadline while atomically fencing the payload into cleanup
+and releasing reservation only through the cleanup authority.
 
 The NFS gateway is single active. Restart advances its epoch and opens a
 90-second reclaim-only grace period, configurable from 30 through 300 seconds.
@@ -564,7 +587,7 @@ The current checkpoint and verification formats are
 `filebelt.recovery.checkpoint.v3` and `filebelt.recovery.verification.v3`.
 Version 3 records every purpose name, digest generation, and local signer
 generation in its `capability_keysets` inventory; version 2 remains offline-only
-and cannot admit a v7 deployment.
+and cannot admit a v8 deployment.
 It retains collaboration room/manifest/checkpoint inventory and dirty-room
 retention deadlines, plus MCP registration, deletion-tombstone, active
 runner-slot, secret-envelope, and OAuth attempt inventories. It records every
@@ -572,7 +595,7 @@ referenced MCP vault KEK generation without granting recovery access to
 ciphertext, nonce, issuer, or secret kind. The checkpoint remains bounded to 1
 MiB. Restore verification fails when a collaboration inventory or retention
 deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
-or payload manifest differs. Operators must restore purpose-specific v7 public
+or payload manifest differs. Operators must restore purpose-specific v8 public
 keysets, digest generation, and local signer generations before enabling I/O,
 collaboration, document, or mount reads, and must restore MCP and mount vault KEK
 generations before enabling the broker or any MCP or mount authentication flow.

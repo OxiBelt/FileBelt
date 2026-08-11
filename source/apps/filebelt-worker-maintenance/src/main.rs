@@ -204,6 +204,7 @@ async fn run_loop(
         expired_uploads = report.expired_uploads,
         orphan_jobs = report.orphan_jobs_created,
         finalized_staging_sets_removed = report.finalized_staging_sets_removed,
+        mount_staging_sets_removed = report.mount_staging_sets_removed,
         writing_temporaries_removed = report.writing_temporaries_removed,
         finalizing_temporaries_removed = report.finalizing_temporaries_removed,
         scrub_jobs_created = report.scrub_jobs_created,
@@ -247,7 +248,7 @@ async fn run_loop(
                 Ok(report) => {
                     metrics.reconciliations.inc();
                     metrics.scrub_jobs_created.inc_by(report.scrub_jobs_created);
-                    info!(reopened_finalizations = report.reopened_finalizations, expired_uploads = report.expired_uploads, orphan_jobs = report.orphan_jobs_created, finalized_staging_sets_removed = report.finalized_staging_sets_removed, writing_temporaries_removed = report.writing_temporaries_removed, finalizing_temporaries_removed = report.finalizing_temporaries_removed, scrub_jobs_created = report.scrub_jobs_created, expired_capability_nonces_removed = report.expired_capability_nonces_removed, retained_consumer_deduplications_removed = report.retained_consumer_deduplications_removed, retained_outbox_events_removed = report.retained_outbox_events_removed, collaboration_warnings_emitted = report.collaboration_warnings_emitted, collaboration_epochs_expired = report.collaboration_epochs_expired, collaboration_payload_deletions_enqueued = report.collaboration_payload_deletions_enqueued, collaboration_objects_abandoned = report.collaboration_objects_abandoned, "periodic reconciliation complete");
+                    info!(reopened_finalizations = report.reopened_finalizations, expired_uploads = report.expired_uploads, orphan_jobs = report.orphan_jobs_created, finalized_staging_sets_removed = report.finalized_staging_sets_removed, mount_staging_sets_removed = report.mount_staging_sets_removed, writing_temporaries_removed = report.writing_temporaries_removed, finalizing_temporaries_removed = report.finalizing_temporaries_removed, scrub_jobs_created = report.scrub_jobs_created, expired_capability_nonces_removed = report.expired_capability_nonces_removed, retained_consumer_deduplications_removed = report.retained_consumer_deduplications_removed, retained_outbox_events_removed = report.retained_outbox_events_removed, collaboration_warnings_emitted = report.collaboration_warnings_emitted, collaboration_epochs_expired = report.collaboration_epochs_expired, collaboration_payload_deletions_enqueued = report.collaboration_payload_deletions_enqueued, collaboration_objects_abandoned = report.collaboration_objects_abandoned, "periodic reconciliation complete");
                 }
                 Err(error) => {
                     metrics.reconciliation_failures.inc();

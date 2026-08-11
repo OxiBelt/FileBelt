@@ -7,6 +7,7 @@ use filebelt_authz::{
     RecursiveShareAuthorizationRequest, RecursiveShareResolvedAclEntry, ResolvedAclEntry,
     evaluate_recursive_direct_shares,
 };
+use filebelt_database::mount::MountSessionFence;
 use filebelt_database::{AuthorizationSnapshot, Database};
 use filebelt_domain::{
     AclEntryId, Action, DriveOwner, Generation, GenerationSnapshot, GroupId, GroupRole, NodeId,
@@ -36,6 +37,24 @@ pub struct AuthorizationGrant {
     pub drive_acl_generation: i64,
     pub namespace_generation: i64,
     pub resource_acl_generation: i64,
+    pub resource_namespace_generation: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuthorizationCommonFence {
+    pub membership_generation: i64,
+    pub drive_acl_generation: i64,
+    pub namespace_generation: i64,
+}
+
+impl AuthorizationGrant {
+    pub const fn common_fence(self) -> AuthorizationCommonFence {
+        AuthorizationCommonFence {
+            membership_generation: self.membership_generation,
+            drive_acl_generation: self.drive_acl_generation,
+            namespace_generation: self.namespace_generation,
+        }
+    }
 }
 
 pub async fn authorize(
@@ -53,32 +72,52 @@ pub async fn authorize(
     evaluate_snapshot(&snapshot, action)
 }
 
+/// Evaluates one NFS request against the common Virtual ACL snapshot plus the
+/// feature-generation-scoped managed traversal rows. The same evaluator keeps
+/// explicit common deny entries authoritative over synthetic traversal allows.
+pub async fn authorize_nfs(
+    database: &Database,
+    session: &MountSessionFence,
+    gss_binding_digest: &[u8; 32],
+    drive_id: Uuid,
+    resource_id: Uuid,
+    action: Action,
+) -> Result<AuthorizationGrant, ()> {
+    let snapshot = database
+        .nfs_authorization_snapshot(session, gss_binding_digest, drive_id, resource_id)
+        .await
+        .map_err(|_| ())?;
+    evaluate_snapshot(&snapshot.snapshot, action)
+}
+
 /// NFS lookup evaluates traversal separately from listing. This helper keeps
 /// the protocol adapter from treating directory visibility as traversal
 /// authority and preserves deny precedence through the common evaluator.
-#[allow(dead_code)]
 pub async fn authorize_traverse(
     database: &Database,
-    tenant_id: Uuid,
-    actor_principal_id: Uuid,
+    session: &MountSessionFence,
+    gss_binding_digest: &[u8; 32],
     drive_id: Uuid,
     ancestor_resource_ids: &[Uuid],
-) -> Result<(), ()> {
+) -> Result<Vec<AuthorizationGrant>, ()> {
     if ancestor_resource_ids.is_empty() || ancestor_resource_ids.len() > 128 {
         return Err(());
     }
+    let mut grants = Vec::with_capacity(ancestor_resource_ids.len());
     for resource_id in ancestor_resource_ids {
-        authorize(
-            database,
-            tenant_id,
-            actor_principal_id,
-            drive_id,
-            *resource_id,
-            Action::Traverse,
-        )
-        .await?;
+        grants.push(
+            authorize_nfs(
+                database,
+                session,
+                gss_binding_digest,
+                drive_id,
+                *resource_id,
+                Action::Traverse,
+            )
+            .await?,
+        );
     }
-    Ok(())
+    Ok(grants)
 }
 
 fn evaluate_snapshot(
@@ -131,6 +170,7 @@ fn evaluate_snapshot(
         drive_acl_generation: snapshot.drive_acl_generation,
         namespace_generation: snapshot.namespace_generation,
         resource_acl_generation: snapshot.resource_acl_generation,
+        resource_namespace_generation: snapshot.resource_namespace_generation,
     })
 }
 
@@ -316,6 +356,7 @@ mod tests {
             membership_generation: 1,
             drive_acl_generation: 1,
             namespace_generation: 1,
+            resource_namespace_generation: 1,
             resource_acl_generation: 1,
         }
     }

@@ -116,6 +116,10 @@ pub struct MountCapabilityClaims {
     pub expires_at_unix_seconds: i64,
     #[prost(string, tag="25")]
     pub grant_id: ::prost::alloc::string::String,
+    /// Exact BLAKE3 digest of the WriteData request body. This is present only
+    /// for WRITE_DATA so a retried capability cannot authorize different bytes.
+    #[prost(bytes="vec", tag="26")]
+    pub content_blake3: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SignedMountCapability {
@@ -193,11 +197,19 @@ impl CapabilityOperation {
 pub enum MountCapabilityOperation {
     Unspecified = 0,
     Read = 1,
+    /// Legacy multiplexed write authority. New issuers and workers must reject
+    /// this value because its unsigned HTTP mode could substitute sparse
+    /// operations after signing.
     Write = 2,
     Flush = 3,
     Finalize = 4,
     Abort = 5,
     DeleteStaging = 6,
+    WriteData = 7,
+    Deallocate = 8,
+    Allocate = 9,
+    SeekData = 10,
+    SeekHole = 11,
 }
 impl MountCapabilityOperation {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -213,6 +225,11 @@ impl MountCapabilityOperation {
             Self::Finalize => "MOUNT_CAPABILITY_OPERATION_FINALIZE",
             Self::Abort => "MOUNT_CAPABILITY_OPERATION_ABORT",
             Self::DeleteStaging => "MOUNT_CAPABILITY_OPERATION_DELETE_STAGING",
+            Self::WriteData => "MOUNT_CAPABILITY_OPERATION_WRITE_DATA",
+            Self::Deallocate => "MOUNT_CAPABILITY_OPERATION_DEALLOCATE",
+            Self::Allocate => "MOUNT_CAPABILITY_OPERATION_ALLOCATE",
+            Self::SeekData => "MOUNT_CAPABILITY_OPERATION_SEEK_DATA",
+            Self::SeekHole => "MOUNT_CAPABILITY_OPERATION_SEEK_HOLE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -225,6 +242,11 @@ impl MountCapabilityOperation {
             "MOUNT_CAPABILITY_OPERATION_FINALIZE" => Some(Self::Finalize),
             "MOUNT_CAPABILITY_OPERATION_ABORT" => Some(Self::Abort),
             "MOUNT_CAPABILITY_OPERATION_DELETE_STAGING" => Some(Self::DeleteStaging),
+            "MOUNT_CAPABILITY_OPERATION_WRITE_DATA" => Some(Self::WriteData),
+            "MOUNT_CAPABILITY_OPERATION_DEALLOCATE" => Some(Self::Deallocate),
+            "MOUNT_CAPABILITY_OPERATION_ALLOCATE" => Some(Self::Allocate),
+            "MOUNT_CAPABILITY_OPERATION_SEEK_DATA" => Some(Self::SeekData),
+            "MOUNT_CAPABILITY_OPERATION_SEEK_HOLE" => Some(Self::SeekHole),
             _ => None,
         }
     }

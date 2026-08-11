@@ -60,6 +60,7 @@ message VfsRequest {
     SetAclRequest set_acl = 57;
     SparseControlRequest sparse_control = 58;
     GatewayDrainRequest gateway_drain = 59;
+    GatewayReconcileRequest gateway_reconcile = 60;
   }
 }
 
@@ -235,6 +236,24 @@ message GatewayHelloRequest {
 
 message GatewayDrainRequest {
   string boot_id = 1;
+}
+
+// A gateway sends this only after it has atomically installed and read back
+// the complete desired export manifest returned by GatewayHello. Core accepts
+// the acknowledgement only for the same live boot, epoch, and authority
+// generations; partial application is never representable.
+message GatewayReconcileRequest {
+  string boot_id = 1;
+  uint64 feature_generation = 2;
+  uint64 export_generation = 3;
+  bytes manifest_digest = 4;
+  repeated NfsAppliedExport applied_exports = 5;
+}
+
+message NfsAppliedExport {
+  uint64 export_id = 1;
+  uint64 generation = 2;
+  bytes root_handle_digest = 3;
 }
 
 message NfsGatewayCompatibility {

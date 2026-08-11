@@ -19,8 +19,12 @@ The same VFS v1 package reserves an additive, protocol-neutral NFS callback
 surface. NFS bootstrap resolves a tenant slug and advertises compatibility;
 post-authentication callbacks carry an RPCSEC_GSS binding plus bounded
 client/session replay coordinates, and mutations additionally carry a fixed
-request digest. A distinct sessionless gateway-control call fences a draining
-gateway epoch. Persistent handles, export manifests, ACLs, filesystem
+request digest. Distinct sessionless gateway-control calls acknowledge an
+atomically applied desired export manifest and fence a draining gateway epoch.
+An acknowledgement is bound to the exact boot, epoch, authority generations,
+manifest digest, and sorted export/root-handle digests, so neither an operator
+nor a partially configured adapter can assert readiness. Persistent handles,
+export manifests, ACLs, filesystem
 information, sparse controls, and projected attributes remain FileBelt wire
 types rather than NFS-Ganesha ABI types. Schema availability alone does not
 activate NFS dispatch or an export. Successful NFS authentication returns the

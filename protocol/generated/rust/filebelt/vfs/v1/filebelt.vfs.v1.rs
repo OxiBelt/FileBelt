@@ -31,7 +31,7 @@ pub struct VfsRequest {
     pub authorization_generation: u64,
     #[prost(message, optional, tag="10")]
     pub nfs_context: ::core::option::Option<NfsRequestContext>,
-    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59")]
+    #[prost(oneof="vfs_request::Operation", tags="20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60")]
     pub operation: ::core::option::Option<vfs_request::Operation>,
 }
 /// Nested message and enum types in `VfsRequest`.
@@ -118,6 +118,8 @@ pub mod vfs_request {
         SparseControl(super::SparseControlRequest),
         #[prost(message, tag="59")]
         GatewayDrain(super::GatewayDrainRequest),
+        #[prost(message, tag="60")]
+        GatewayReconcile(super::GatewayReconcileRequest),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -369,6 +371,32 @@ pub struct GatewayHelloRequest {
 pub struct GatewayDrainRequest {
     #[prost(string, tag="1")]
     pub boot_id: ::prost::alloc::string::String,
+}
+/// A gateway sends this only after it has atomically installed and read back
+/// the complete desired export manifest returned by GatewayHello. Core accepts
+/// the acknowledgement only for the same live boot, epoch, and authority
+/// generations; partial application is never representable.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GatewayReconcileRequest {
+    #[prost(string, tag="1")]
+    pub boot_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
+    pub feature_generation: u64,
+    #[prost(uint64, tag="3")]
+    pub export_generation: u64,
+    #[prost(bytes="vec", tag="4")]
+    pub manifest_digest: ::prost::alloc::vec::Vec<u8>,
+    #[prost(message, repeated, tag="5")]
+    pub applied_exports: ::prost::alloc::vec::Vec<NfsAppliedExport>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NfsAppliedExport {
+    #[prost(uint64, tag="1")]
+    pub export_id: u64,
+    #[prost(uint64, tag="2")]
+    pub generation: u64,
+    #[prost(bytes="vec", tag="3")]
+    pub root_handle_digest: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NfsGatewayCompatibility {

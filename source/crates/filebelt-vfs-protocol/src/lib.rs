@@ -73,6 +73,7 @@ pub enum OperationKind {
     SetAcl,
     SparseControl,
     GatewayDrain,
+    GatewayReconcile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -643,6 +644,31 @@ fn validate_operation(
                 return Err(ValidationError::Operation);
             }
         }
+        Operation::GatewayReconcile(request) => {
+            nfs_only(protocol)?;
+            uuid(&request.boot_id)?;
+            positive(gateway_epoch)?;
+            positive(request.feature_generation)?;
+            positive(request.export_generation)?;
+            digest_32(&request.manifest_digest)?;
+            if gateway_id != request.boot_id
+                || request.applied_exports.len() > MAX_DIRECTORY_ENTRIES
+            {
+                return Err(ValidationError::Operation);
+            }
+            let mut previous_export_id = 0;
+            for export in &request.applied_exports {
+                positive(export.export_id)?;
+                positive(export.generation)?;
+                digest_32(&export.root_handle_digest)?;
+                if export.export_id <= previous_export_id
+                    || export.generation > request.export_generation
+                {
+                    return Err(ValidationError::Operation);
+                }
+                previous_export_id = export.export_id;
+            }
+        }
     }
     Ok(())
 }
@@ -690,6 +716,7 @@ const fn operation_kind(operation: &vfs_request::Operation) -> OperationKind {
         Operation::SetAcl(_) => OperationKind::SetAcl,
         Operation::SparseControl(_) => OperationKind::SparseControl,
         Operation::GatewayDrain(_) => OperationKind::GatewayDrain,
+        Operation::GatewayReconcile(_) => OperationKind::GatewayReconcile,
     }
 }
 
@@ -698,7 +725,8 @@ const fn request_class(operation: &vfs_request::Operation) -> RequestClass {
         vfs_request::Operation::Authenticate(_)
         | vfs_request::Operation::NfsAuthenticate(_)
         | vfs_request::Operation::GatewayHello(_) => RequestClass::Bootstrap,
-        vfs_request::Operation::GatewayDrain(_) => RequestClass::GatewayControl,
+        vfs_request::Operation::GatewayDrain(_)
+        | vfs_request::Operation::GatewayReconcile(_) => RequestClass::GatewayControl,
         _ => RequestClass::Session,
     }
 }
@@ -792,7 +820,8 @@ fn nfs_operation_requires_digest(
         | Operation::Access(_)
         | Operation::FilesystemInfo(_)
         | Operation::GetAcl(_)
-        | Operation::GatewayDrain(_) => false,
+        | Operation::GatewayDrain(_)
+        | Operation::GatewayReconcile(_) => false,
     })
 }
 
@@ -1364,6 +1393,54 @@ mod tests {
         request.tenant_id = Uuid::new_v4().to_string();
         request.gateway_id = Uuid::new_v4().to_string();
         assert_eq!(request.validate(), Err(ValidationError::Operation));
+    }
+
+    #[test]
+    fn nfs_gateway_reconcile_binds_the_complete_sorted_manifest() {
+        let boot_id = Uuid::new_v4().to_string();
+        let mut request = request(vfs_request::Operation::GatewayReconcile(
+            GatewayReconcileRequest {
+                boot_id: boot_id.clone(),
+                feature_generation: 4,
+                export_generation: 9,
+                manifest_digest: vec![3; 32],
+                applied_exports: vec![
+                    NfsAppliedExport {
+                        export_id: 7,
+                        generation: 8,
+                        root_handle_digest: vec![4; 32],
+                    },
+                    NfsAppliedExport {
+                        export_id: 11,
+                        generation: 9,
+                        root_handle_digest: vec![5; 32],
+                    },
+                ],
+            },
+        ));
+        request.protocol = MountProtocol::Nfs as i32;
+        request.gateway_id = boot_id;
+        request.session_id.clear();
+        request.credential_generation = 0;
+        request.authorization_generation = 0;
+        let fence = request.validate().expect("valid manifest acknowledgement");
+        assert_eq!(fence.operation, OperationKind::GatewayReconcile);
+        assert!(fence.session_id.is_none());
+        assert!(fence.nfs_context.is_none());
+
+        if let Some(vfs_request::Operation::GatewayReconcile(reconcile)) =
+            request.operation.as_mut()
+        {
+            reconcile.applied_exports.swap(0, 1);
+        }
+        assert_eq!(request.validate(), Err(ValidationError::Operation));
+        if let Some(vfs_request::Operation::GatewayReconcile(reconcile)) =
+            request.operation.as_mut()
+        {
+            reconcile.applied_exports.swap(0, 1);
+            reconcile.manifest_digest.pop();
+        }
+        assert_eq!(request.validate(), Err(ValidationError::Envelope));
     }
 
     #[test]

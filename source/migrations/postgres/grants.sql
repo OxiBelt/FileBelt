@@ -379,21 +379,44 @@ GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
 -- replay/reclaim/write-state mutations.
 GRANT SELECT, INSERT, UPDATE ON filebelt_mount.nfs_principal_mappings
   TO filebelt_api;
+GRANT SELECT ON
+  filebelt_mount.nfs_feature_state,
+  filebelt_mount.nfs_exports,
+  filebelt_mount.nfs_posix_groups TO filebelt_api;
+GRANT UPDATE (state,generation) ON filebelt_mount.nfs_feature_state
+  TO filebelt_api;
+GRANT INSERT (tenant_id,drive_id,export_id),
+  UPDATE (desired_state,desired_generation) ON filebelt_mount.nfs_exports
+  TO filebelt_api;
+GRANT INSERT (tenant_id,group_id,posix_name,projected_gid)
+  ON filebelt_mount.nfs_posix_groups TO filebelt_api;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  filebelt_mount.nfs_principal_mappings,
   filebelt_mount.nfs_reclaim_records,
-  filebelt_mount.nfs_replay_receipts,
   filebelt_mount.nfs_write_extents TO filebelt_vfs;
+GRANT SELECT, INSERT ON filebelt_mount.nfs_replay_receipts TO filebelt_vfs;
+GRANT SELECT ON
+  filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_feature_state,
+  filebelt_mount.nfs_exports,
+  filebelt_mount.nfs_posix_groups TO filebelt_vfs;
+GRANT EXECUTE ON FUNCTION filebelt_mount.reconcile_nfs_export_manifest(
+  uuid,text,bigint,bigint,bigint,bytea,bigint[],bigint[],bytea[]
+) TO filebelt_vfs;
 GRANT SELECT, UPDATE ON filebelt_mount.nfs_write_extents TO filebelt_io;
 GRANT SELECT, UPDATE, DELETE ON
   filebelt_mount.nfs_reclaim_records,
-  filebelt_mount.nfs_replay_receipts,
   filebelt_mount.nfs_write_extents TO filebelt_maintenance;
+GRANT SELECT, DELETE ON filebelt_mount.nfs_replay_receipts TO filebelt_maintenance;
 GRANT SELECT ON
   filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_feature_state,
+  filebelt_mount.nfs_exports,
+  filebelt_mount.nfs_posix_groups,
   filebelt_mount.nfs_reclaim_records,
   filebelt_mount.nfs_replay_receipts,
   filebelt_mount.nfs_write_extents TO filebelt_recovery;
+GRANT EXECUTE ON FUNCTION filebelt_mount.advance_nfs_restore_generation(uuid,bigint)
+  TO filebelt_recovery;
 
 -- Media bytes remain behind scoped I/O. These grants expose only durable job,
 -- receipt, manifest, and rebuildable-cache metadata.
@@ -468,6 +491,15 @@ GRANT EXECUTE ON FUNCTION filebelt_mcp.replace_registration_configuration_and_er
 ) TO filebelt_mcp_broker;
 REVOKE ALL ON FUNCTION filebelt_mount.erase_revoked_credential_secret() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.advance_authorization_generation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.create_session_principal(uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.create_nfs_session(
+  uuid,text,bytea,text,bigint,inet,timestamptz,uuid,uuid
+) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION filebelt_mount.create_session_principal(uuid,uuid),
+  filebelt_mount.create_nfs_session(
+    uuid,text,bytea,text,bigint,inet,timestamptz,uuid,uuid
+  )
+  TO filebelt_vfs;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA filebelt_security
   FROM PUBLIC, filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,

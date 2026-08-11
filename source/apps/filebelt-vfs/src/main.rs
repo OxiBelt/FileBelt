@@ -348,19 +348,22 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
     if let Operation::Authenticate(authentication) = operation {
         return authenticate(state, fence, authentication).await;
     }
-    let session_id = fence.session_id.expect("validated session");
+    if let Some(response) = unsupported_bootstrap_response(fence, operation) {
+        return response;
+    }
+    let Some(session_fence) = session_admission_fence(fence) else {
+        return invalid(fence);
+    };
     let session = match state
         .database
         .admit_mount_session(
             fence.tenant_id,
-            session_id,
+            session_fence.session_id,
             protocol,
             &fence.gateway_id,
             fence.gateway_epoch,
-            fence.credential_generation.expect("validated generation"),
-            fence
-                .authorization_generation
-                .expect("validated generation"),
+            session_fence.credential_generation,
+            session_fence.authorization_generation,
         )
         .await
     {
@@ -392,6 +395,41 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
             "vfs.operation_not_supported",
         ),
     }
+}
+
+fn unsupported_bootstrap_response(
+    request: &RequestFence,
+    operation: &Operation,
+) -> Option<VfsResponse> {
+    matches!(operation, Operation::NfsAuthenticate(_)).then(|| {
+        VfsResponse::failure(
+            request.request_id,
+            VfsError::NotSupported,
+            "vfs.nfs_authentication_not_qualified",
+        )
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SessionAdmissionFence {
+    session_id: Uuid,
+    credential_generation: i64,
+    authorization_generation: i64,
+}
+
+fn session_admission_fence(request: &RequestFence) -> Option<SessionAdmissionFence> {
+    let (Some(session_id), Some(credential_generation), Some(authorization_generation)) = (
+        request.session_id,
+        request.credential_generation,
+        request.authorization_generation,
+    ) else {
+        return None;
+    };
+    Some(SessionAdmissionFence {
+        session_id,
+        credential_generation,
+        authorization_generation,
+    })
 }
 
 async fn open_handle(
@@ -1287,6 +1325,21 @@ fn unavailable(request: &RequestFence, reason: &str) -> VfsResponse {
 mod tests {
     use super::*;
 
+    fn request(operation: Operation, protocol: MountProtocol, gateway_epoch: u64) -> VfsRequest {
+        VfsRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: Uuid::new_v4().to_string(),
+            tenant_id: Uuid::new_v4().to_string(),
+            protocol: protocol as i32,
+            gateway_id: "gateway-0".into(),
+            gateway_epoch,
+            session_id: String::new(),
+            credential_generation: 0,
+            authorization_generation: 0,
+            operation: Some(operation),
+        }
+    }
+
     #[test]
     fn ntlm_verifier_is_the_standard_utf16le_md4_digest() {
         let password = "Password";
@@ -1316,6 +1369,100 @@ mod tests {
         let response = denied(&request, "vfs.authentication_failed");
         assert_eq!(response.protocol_version, PROTOCOL_VERSION);
         assert_eq!(response.error, VfsError::NotFound as i32);
+    }
+
+    #[test]
+    fn nfs_authentication_bootstrap_returns_typed_not_supported() {
+        let request = request(
+            Operation::NfsAuthenticate(filebelt_vfs_protocol::NfsAuthenticateRequest {
+                kerberos_principal: "user@EXAMPLE.TEST".into(),
+                gss_binding_digest: vec![7; 32],
+                source_address: "192.0.2.10".into(),
+            }),
+            MountProtocol::Nfs,
+            1,
+        );
+        let fence = request
+            .validate()
+            .expect("valid NFS authentication request");
+        let response =
+            unsupported_bootstrap_response(&fence, request.operation.as_ref().expect("operation"))
+                .expect("NFS authentication remains unsupported");
+
+        assert_eq!(response.error, VfsError::NotSupported as i32);
+        assert_eq!(response.reason_code, "vfs.nfs_authentication_not_qualified");
+        assert!(response.validate_for(fence.request_id).is_ok());
+    }
+
+    #[test]
+    fn unsupported_bootstrap_filter_preserves_supported_routes() {
+        let hello = request(
+            Operation::GatewayHello(filebelt_vfs_protocol::GatewayHelloRequest {
+                shard_key: "nfs".into(),
+            }),
+            MountProtocol::Nfs,
+            0,
+        );
+        let hello_fence = hello.validate().expect("valid gateway hello");
+        assert!(
+            unsupported_bootstrap_response(
+                &hello_fence,
+                hello.operation.as_ref().expect("operation")
+            )
+            .is_none()
+        );
+
+        let authenticate = request(
+            Operation::Authenticate(filebelt_vfs_protocol::AuthenticateRequest {
+                username: "fb-abcdefghijklmnop".into(),
+                scheme: filebelt_vfs_protocol::AuthenticationScheme::PasswordHmacSha256 as i32,
+                exchange: vec![1; 32],
+                channel_binding: Vec::new(),
+                source_address: "192.0.2.11".into(),
+                device_id: String::new(),
+            }),
+            MountProtocol::Ftps,
+            1,
+        );
+        let authenticate_fence = authenticate.validate().expect("valid FTPS authentication");
+        assert!(
+            unsupported_bootstrap_response(
+                &authenticate_fence,
+                authenticate.operation.as_ref().expect("operation")
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn session_admission_requires_a_complete_fence_without_panicking() {
+        let session_id = Uuid::new_v4();
+        let valid = RequestFence {
+            request_id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            protocol: MountProtocol::Ftps,
+            gateway_id: "ftps-0".into(),
+            gateway_epoch: 1,
+            session_id: Some(session_id),
+            credential_generation: Some(2),
+            authorization_generation: Some(3),
+            operation: filebelt_vfs_protocol::OperationKind::Heartbeat,
+        };
+        assert_eq!(
+            session_admission_fence(&valid),
+            Some(SessionAdmissionFence {
+                session_id,
+                credential_generation: 2,
+                authorization_generation: 3,
+            })
+        );
+
+        let mut incomplete = valid;
+        incomplete.session_id = None;
+        assert_eq!(session_admission_fence(&incomplete), None);
+        let response = invalid(&incomplete);
+        assert_eq!(response.error, VfsError::InvalidRequest as i32);
+        assert_eq!(response.reason_code, "vfs.invalid_request");
     }
 
     #[test]

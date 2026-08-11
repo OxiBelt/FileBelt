@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+format = 1
+tenant_slug = "example-tenant"
+kerberos_realm = "EXAMPLE.COM"
+release_revision = "replace-with-filebelt-release-revision"
+vfs_url = "https://filebelt-vfs.filebelt.svc:8087/internal/v1/vfs/execute"
+ipc_socket = "/run/filebelt-nfs/bridge.sock"
+ganesha_control_socket = "/run/filebelt-nfs/ganesha-control.sock"
+state_file = "/run/filebelt-nfs/gateway.state"
+
+[tls]
+certificate_chain_file = "/run/secrets/nfs-bridge-vfs-client-tls/tls.crt"
+private_key_file = "/run/secrets/nfs-bridge-vfs-client-tls/tls.key"
+server_ca_file = "/run/secrets/nfs-bridge-vfs-client-tls/server-ca.crt"

@@ -1,0 +1,158 @@
+From 4c6e7a4b255ecf4bb19230ed98d0281a905ab112 Mon Sep 17 00:00:00 2001
+From: FileBelt contributors <contributors@filebelt.invalid>
+Date: Tue, 11 Aug 2026 00:00:00 +0000
+Subject: [PATCH] support: expose minimal verified RPCSEC_GSS identity
+
+FileBelt's dynamically loaded FSAL must bind each VFS request to the GSS
+security context that NFS-Ganesha has already authenticated.  Provide one
+narrow accessor which succeeds only for an established krb5p context with a
+canonical single-component principal and a numeric IP source address.
+
+Derive an opaque 32-byte context identity with RFC 4401 GSS PRF using the full
+context key and a fixed public domain label.  The derivation runs while the
+context lock is held and fails closed when the mechanism does not implement
+the PRF.  No ticket, context handle, PAC, session key, AUTH_SYS identity, or
+other credential material is exposed.
+---
+ src/include/nfs_creds.h | 17 +++++++++
+ src/support/nfs_creds.c | 95 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 112 insertions(+)
+
+diff --git a/src/include/nfs_creds.h b/src/include/nfs_creds.h
+index 58b745d2f..1af80c3da 100644
+--- a/src/include/nfs_creds.h
++++ b/src/include/nfs_creds.h
+@@ -45,6 +45,21 @@
+ #include "fsal_types.h"
+ #include "sal_data.h"
+ 
++#define FILEBELT_GSS_BINDING_BYTES 32
++#define FILEBELT_GSS_PRINCIPAL_BYTES 513
++#define FILEBELT_GSS_SOURCE_ADDRESS_BYTES INET6_ADDRSTRLEN
++
++struct filebelt_rpcsec_gss_identity {
++	char principal[FILEBELT_GSS_PRINCIPAL_BYTES];
++	uint8_t context_binding[FILEBELT_GSS_BINDING_BYTES];
++	char source_address[FILEBELT_GSS_SOURCE_ADDRESS_BYTES];
++	uint64_t expires_at_unix_seconds;
++};
++
++bool nfs_req_filebelt_rpcsec_gss_identity(
++	struct svc_req *req,
++	struct filebelt_rpcsec_gss_identity *identity);
++
+ void init_credentials(void);
+ void clean_credentials(void);
+ 
+diff --git a/src/support/nfs_creds.c b/src/support/nfs_creds.c
+index 1a30b12d2..b9bdcc45e 100644
+--- a/src/support/nfs_creds.c
++++ b/src/support/nfs_creds.c
+@@ -54,6 +54,105 @@ uint32_t root_op_export_set =
+ 	EXPORT_OPTION_AUTH_TYPES | EXPORT_OPTION_PROTOCOLS |
+ 	EXPORT_OPTION_TRANSPORTS;
+ 
++#ifdef _HAVE_GSSAPI
++static bool filebelt_principal_is_canonical(const uint8_t *value, size_t length)
++{
++	size_t separator = SIZE_MAX;
++
++	if (length == 0 || length >= FILEBELT_GSS_PRINCIPAL_BYTES)
++		return false;
++	for (size_t index = 0; index < length; index++) {
++		uint8_t byte = value[index];
++
++		if (byte == '@') {
++			if (separator != SIZE_MAX || index == 0 || index + 1 == length)
++				return false;
++			separator = index;
++			continue;
++		}
++		if (separator == SIZE_MAX) {
++			if (byte <= 0x20 || byte >= 0x7f || byte == '/' || byte == '\\')
++				return false;
++		} else if (!((byte >= 'A' && byte <= 'Z') ||
++			     (byte >= '0' && byte <= '9') || byte == '.' ||
++			     byte == '-')) {
++			return false;
++		}
++	}
++	if (separator == SIZE_MAX ||
++	    !isalnum((unsigned char)value[separator + 1]) ||
++	    !isalnum((unsigned char)value[length - 1]))
++		return false;
++	return true;
++}
++#endif
++
++bool nfs_req_filebelt_rpcsec_gss_identity(
++	struct svc_req *req,
++	struct filebelt_rpcsec_gss_identity *identity)
++{
++#ifdef _HAVE_GSSAPI
++	static const uint8_t prf_label[] = "filebelt-nfs-v1";
++	struct svc_rpc_gss_data *gd;
++	gss_buffer_desc prf_input = {
++		.length = sizeof(prf_label) - 1,
++		.value = (void *)prf_label,
++	};
++	gss_buffer_desc prf_output = GSS_C_EMPTY_BUFFER;
++	OM_uint32 major_status;
++	OM_uint32 minor_status;
++	bool valid = false;
++
++	if (identity == NULL || req == NULL || op_ctx == NULL ||
++	    op_ctx->caller_addr == NULL ||
++	    req->rq_msg.cb_cred.oa_flavor != RPCSEC_GSS)
++		return false;
++	memset(identity, 0, sizeof(*identity));
++	gd = SVCAUTH_PRIVATE(req->rq_auth);
++	if (gd == NULL)
++		return false;
++
++	mutex_lock(&gd->lock);
++	if (!gd->established || gd->ctx == GSS_C_NO_CONTEXT ||
++	    gd->sec.mech == GSS_C_NO_OID || !g_OID_equal(gd->sec.mech, &krb5oid) ||
++	    gd->sec.svc != RPCSEC_GSS_SVC_PRIVACY || gd->endtime == 0 ||
++	    !filebelt_principal_is_canonical(gd->cname.value, gd->cname.length))
++		goto unlock;
++	major_status = gss_pseudo_random(&minor_status, gd->ctx,
++					GSS_C_PRF_KEY_FULL, &prf_input,
++					FILEBELT_GSS_BINDING_BYTES, &prf_output);
++	if (major_status != GSS_S_COMPLETE ||
++	    prf_output.length != FILEBELT_GSS_BINDING_BYTES ||
++	    prf_output.value == NULL)
++		goto release;
++	memcpy(identity->principal, gd->cname.value, gd->cname.length);
++	identity->principal[gd->cname.length] = '\0';
++	memcpy(identity->context_binding, prf_output.value,
++	       FILEBELT_GSS_BINDING_BYTES);
++	identity->expires_at_unix_seconds = gd->endtime;
++	valid = true;
++release:
++	if (prf_output.value != NULL) {
++		memset(prf_output.value, 0, prf_output.length);
++		(void)gss_release_buffer(&minor_status, &prf_output);
++	}
++unlock:
++	mutex_unlock(&gd->lock);
++	if (valid && !sprint_sockip(op_ctx->caller_addr,
++				    identity->source_address,
++				    sizeof(identity->source_address)))
++		valid = false;
++	if (!valid)
++		memset(identity, 0, sizeof(*identity));
++	return valid;
++#else
++	(void)req;
++	if (identity != NULL)
++		memset(identity, 0, sizeof(*identity));
++	return false;
++#endif
++}
++
+ void squash_setattr(struct fsal_attrlist *attr)
+ {
+ 	if (attr->valid_mask & ATTR_OWNER &&
+-- 
+2.51.0

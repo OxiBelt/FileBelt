@@ -7,15 +7,24 @@
 
 #![deny(unsafe_code)]
 
+pub mod config;
+pub mod control;
+pub mod gateway;
+pub mod ipc;
+pub mod vfs;
+
 /// Matches the Apache VFS envelope bound without importing Core implementation
 /// types into the LGPL adapter workspace.
 pub const MAX_VFS_FRAME_BYTES: usize = 1_114_112;
 const PREFIX_BYTES: usize = 4;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum FrameError {
+    #[error("bridge frame exceeds its bound")]
     TooLarge,
+    #[error("bridge frame is truncated")]
     Truncated,
+    #[error("bridge frame has trailing bytes")]
     TrailingBytes,
 }
 

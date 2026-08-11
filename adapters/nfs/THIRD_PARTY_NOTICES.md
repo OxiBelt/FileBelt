@@ -2,8 +2,20 @@
 
 # NFS Adapter Third-Party Notices
 
-Phase 8 targets NFS-Ganesha 6.5-8 and its Ubuntu 26.04 package composition.
-The image build must generate the complete versioned third-party inventory,
-license texts, source archive, patches, and relinking/replacement instructions
-from the final resolved package set before publication. This file does not
-substitute for that generated evidence.
+This adapter targets these pinned primary components:
+
+- NFS-Ganesha 6.5-8 / upstream V6.5, LGPL-3.0-or-later;
+- libntirpc 6.3-4, BSD-style and other file-level terms supplied in its source;
+- Ubuntu 26.04 `resolute` packages from the pinned snapshot; and
+- Rust 1.97.1 plus the exact adapter-local dependency graph in `Cargo.lock`.
+
+The source URLs, revisions, and SHA-256 digests are recorded in
+`sources.lock.toml`. The image carries the Ganesha and libntirpc source archives,
+Debian packaging, FileBelt patches, and this adapter source. The FileBelt bridge
+and FSAL sources are licensed LGPL-3.0-or-later; the consumed generated VFS
+schema crate remains Apache-2.0 and crosses the documented adapter boundary.
+
+Before publication, release automation must generate and review a complete
+file-level/package-level inventory, include every applicable license and
+copyright notice, produce an SBOM for the resolved image, and bind all evidence
+to the image digest. This human-readable summary does not replace that evidence.

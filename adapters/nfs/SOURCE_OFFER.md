@@ -1,9 +1,23 @@
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
 
-# NFS adapter corresponding source
+# NFS adapter corresponding source and relinking contract
 
-Before publishing an adapter image, publish the exact FileBelt adapter source,
-the NFS-Ganesha `6.5-8` source/package provenance, every applied patch, build
-flags, ABI header set, generated notices, and dynamic-FSAL replacement/relink
-instructions for the image digest. This repository source alone is not a
-corresponding-source offer for an unbuilt adapter image.
+The adapter Dockerfile embeds the following materials under
+`/usr/share/filebelt-nfs/corresponding-source/`:
+
+- this adapter source, Cargo lockfile, Dockerfile, build scripts, and notices;
+- Ubuntu source artifacts for NFS-Ganesha `6.5-8` and libntirpc `6.3-4`; and
+- every FileBelt patch applied to NFS-Ganesha.
+
+`sources.lock.toml` pins the download URLs and SHA-256 digests, the Ubuntu
+snapshot and base-image manifest, the upstream Ganesha V6.5 tag/commit, FSAL
+ABI 13.0, and the Rust toolchains for each supported architecture. The
+Dockerfile records the complete CMake flags and rebuild process.
+
+For every published image digest, the release must also publish the exact
+FileBelt source revision, generated package and Rust dependency inventory,
+license texts, SBOM, compiler/linker inputs, and any build-time generated files
+not present here. Recipients must be able to rebuild and replace the dynamic
+`libfsalfilebelt.so` with a modified compatible module; see `RELINKING.md`.
+This repository source alone is not a written offer for an unbuilt image, and
+the current ABI-probe-only image is not publication-qualified.

@@ -1,0 +1,48 @@
+#!/bin/sh
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+set -eu
+
+name=${0##*/}
+case "$name" in
+  bridge-health) set -- bridge-health "$@" ;;
+  bridge-drain) set -- bridge-drain "$@" ;;
+  ganesha-health) set -- ganesha-health "$@" ;;
+  ganesha-drain) set -- ganesha-drain "$@" ;;
+esac
+
+mode=${1:-}
+if [ -n "$mode" ]; then
+  shift
+fi
+
+case "$mode" in
+  bridge)
+    exec /usr/local/bin/filebelt-nfs-bridge serve --config /etc/filebelt-nfs/bridge.toml "$@"
+    ;;
+  bridge-health)
+    exec /usr/local/bin/filebelt-nfs-bridge health --config /etc/filebelt-nfs/bridge.toml "$@"
+    ;;
+  bridge-drain)
+    exec /usr/local/bin/filebelt-nfs-bridge drain --config /etc/filebelt-nfs/bridge.toml "$@"
+    ;;
+  ganesha)
+    exec /usr/bin/ganesha.nfsd -F -L STDERR -p /run/filebelt-nfs/ganesha.pid -f /etc/ganesha/ganesha.conf "$@"
+    ;;
+  ganesha-health)
+    test -r /run/filebelt-nfs/ganesha.pid
+    pid=$(sed -n '1p' /run/filebelt-nfs/ganesha.pid)
+    case "$pid" in *[!0-9]*|'') exit 1 ;; esac
+    kill -0 "$pid"
+    ;;
+  ganesha-drain)
+    test -r /run/filebelt-nfs/ganesha.pid
+    pid=$(sed -n '1p' /run/filebelt-nfs/ganesha.pid)
+    case "$pid" in *[!0-9]*|'') exit 1 ;; esac
+    kill -TERM "$pid"
+    ;;
+  *)
+    echo "usage: filebelt-nfs {ganesha|bridge|ganesha-health|bridge-health|ganesha-drain|bridge-drain}" >&2
+    exit 64
+    ;;
+esac

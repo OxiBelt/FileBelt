@@ -1,0 +1,25 @@
+From 4ecb172591210793f46691024ea0f2c6c46e5099 Mon Sep 17 00:00:00 2001
+From: FileBelt contributors <contributors@filebelt.invalid>
+Date: Tue, 11 Aug 2026 00:00:00 +0000
+Subject: [PATCH] FSAL: build the replaceable FileBelt module
+
+The FileBelt image build copies the independently licensed FSAL source into
+src/FSAL/FSAL_FILEBELT before configuring NFS-Ganesha. Build it as a normal
+dynamically loaded FSAL; no FileBelt code is linked into Apache components.
+---
+ src/FSAL/CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/FSAL/CMakeLists.txt b/src/FSAL/CMakeLists.txt
+index e8ce5935e..1eb9ea3e5 100644
+--- a/src/FSAL/CMakeLists.txt
++++ b/src/FSAL/CMakeLists.txt
+@@ -70,3 +70,6 @@
+ if(USE_FSAL_MEM)
+   add_subdirectory(FSAL_MEM)
+ endif(USE_FSAL_MEM)
++
++# Copied into the corresponding-source tree by the FileBelt image build.
++add_subdirectory(FSAL_FILEBELT)
+-- 
+2.51.0

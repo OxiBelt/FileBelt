@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+# Keep the image context deterministic and exclude local build products and
+# repository-private planning material. The Dockerfile copies only the adapter,
+# the generated VFS Rust module, and the Apache protocol crate.
+.git
+.agents
+.codex
+artifacts
+target
+**/target
+**/node_modules
+**/dist
+tmp

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+Types: deb deb-src
+URIs: https://snapshot.ubuntu.com/ubuntu/20260809T000000Z/
+Suites: resolute
+Components: main universe
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+Check-Valid-Until: no

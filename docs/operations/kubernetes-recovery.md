@@ -105,5 +105,5 @@ unredacted logs in ordinary CI artifacts.
 Recovery v3 records each capability purpose, digest generation, and local
 generation. Recovery verification may wait up to 120 seconds for MCP quiesce
 and reconciliation. Version-2 evidence is offline-only: it can inform an
-investigation but cannot be used to admit a v7 runtime. After v7 admission,
-repair incompatibilities forward; never roll a running deployment back to v6.
+investigation but cannot be used to admit a v8 runtime. After v8 admission,
+repair incompatibilities forward; never roll a running deployment back to v7.

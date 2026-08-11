@@ -64,8 +64,8 @@ only the opt-in Job in the next Helm revision after evidence is retained.
    external-head freeze, and retained diff3 review state.
 6. Record the failed digest/config and prevent it from being selected again.
 
-Do not roll back a Secret in place. After v7 admission, configuration and
-keyset incompatibilities are forward-fix-only: keep the v7 purpose records and
+Do not roll back a Secret in place. After v8 admission, configuration and
+keyset incompatibilities are forward-fix-only: keep the v8 purpose records and
 replace only the affected immutable Secret/generation. Restore the previous versioned Secret name
 or contents, update the matching generation, and roll Pods deliberately.
 
@@ -105,8 +105,8 @@ To disable all MCP, revoke affected registrations/services, wait for active
 invocations to reach a terminal state, then set `mcp.enabled=false`. Restore the
 recorded previous API/web images and configuration together so the public
 contract and SPA do not diverge. Current binaries require configuration version
-7 and purpose-tagged version-2 keysets. After any version-7 admission, roll back
-only to a previously recorded fixed version-7 image, ConfigMap, and overlapping
+8 and purpose-tagged version-2 keysets. After any version-8 admission, roll back
+only to a previously recorded fixed version-8 image, ConfigMap, and overlapping
 same-purpose keyset set; never reintroduce a shared-key verifier. The expanded
 PostgreSQL schema and vault ciphertext remain in place.
 

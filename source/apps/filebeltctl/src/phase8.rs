@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use sqlx::Row as _;
 use uuid::Uuid;
 
-const CONFIG_VERSION: i32 = 7;
+const PHASE8_CONFIG_VERSION: i32 = filebelt_control_protocol::CONFIG_VERSION as i32;
 const SCHEMA_MAX: i32 = 9;
 const REQUIRED_ROLES: &[&str] = &[
     "filebelt-api",
@@ -44,7 +44,7 @@ pub async fn advertise(
         .bind(role)
         .bind(instance_id)
         .bind(source_revision.to_ascii_lowercase())
-        .bind(CONFIG_VERSION)
+        .bind(PHASE8_CONFIG_VERSION)
         .bind(SCHEMA_MAX)
         .bind(compatible)
         .execute(database.pool())
@@ -56,7 +56,7 @@ pub async fn advertise(
         "role": role,
         "instance_id": instance_id,
         "source_revision": source_revision.to_ascii_lowercase(),
-        "config_version": CONFIG_VERSION,
+        "config_version": PHASE8_CONFIG_VERSION,
         "schema_max": SCHEMA_MAX,
         "compatible": compatible,
     }))
@@ -281,7 +281,7 @@ async fn compatible_roles(
         let role = row.get::<String, _>("role");
         let candidate = row.get::<String, _>("source_revision");
         if !row.get::<bool, _>("compatible")
-            || row.get::<i32, _>("config_version") != CONFIG_VERSION
+            || row.get::<i32, _>("config_version") != PHASE8_CONFIG_VERSION
             || row.get::<i32, _>("schema_max") < SCHEMA_MAX
         {
             return Err(format!(
@@ -320,4 +320,18 @@ async fn record_event(
     sqlx::query("INSERT INTO audit_events (tenant_id,id,actor_principal_id,action,outcome,reason_code,privacy_visible,details) VALUES ($1,$2,$3,'phase8.activation','allowed',$4,false,$5)")
         .bind(tenant_id).bind(event_id).bind(actor).bind(if next=="active" {"phase8_activated"} else {"phase8_disabled"}).bind(json!({"previous_state":previous,"new_state":next,"generation":generation,"compatible_roles":roles})).execute(&mut **transaction).await.map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PHASE8_CONFIG_VERSION;
+
+    #[test]
+    fn compatibility_advertisement_tracks_the_runtime_config_version() {
+        assert_eq!(
+            PHASE8_CONFIG_VERSION,
+            filebelt_control_protocol::CONFIG_VERSION as i32
+        );
+        assert_eq!(PHASE8_CONFIG_VERSION, 8);
+    }
 }

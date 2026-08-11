@@ -10,7 +10,7 @@ pnpm = "11.20.0"
 # CI installers must update these exact versions and their checksums together.
 # Buf becomes a required download when the first .proto file is accepted.
 [repository]
-python = "3.14.4"
+python = "3.14.7"
 buf = "1.72.0"
 reuse = "6.2.0"
 cargo_audit = "0.22.2"

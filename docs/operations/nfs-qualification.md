@@ -130,6 +130,12 @@ required-case manifest, so the current scaffold fails rather than omitting
 them. A negative result is counted only
 after the fixture's positive `krb5p` path succeeds.
 
+Qualification must use the exact patched Ganesha 6.5 source and prove both
+MDCACHE delegation to FileBelt authorization and authoritative owner/group
+encoding without host idmapper substitution. Patch digest/application or
+warning-clean header compilation is only source evidence, not a substitute for
+the configured ABI/link and live `krb5p` cases above.
+
 Hard-mount execution is wrapped in a 40-minute external watchdog, followed by
 an independent five-minute, always-run reconciler. Before a stale-handle read,
 the disposable client drops its page cache so a cached byte cannot count as a

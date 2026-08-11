@@ -58,7 +58,7 @@ The current build matrix contains thirteen Apache-region images on
 | `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs `mount-storage` `fbcap2` reads to I/O. It has no payload mount. |
 | `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
 
-Format-7 deployment material is purpose-scoped and operator-created. API mounts
+Format-8 deployment material is purpose-scoped and operator-created. API mounts
 only its enabled API private/public pairs; I/O mounts API-storage plus enabled
 storage-purpose public keysets; collaboration additionally receives its own
 pair and API storage/grant public sets; broker receives API-MCP-delegation
@@ -66,7 +66,7 @@ public material only; document and VFS receive their own pairs. No runtime Pod
 mounts media signing material; recovery/admin Jobs receive the media public
 keyset. Helm values name every Secret separately and exact Secret generations
 are included in the relevant immutable-Secret rollout checksum. Before any
-format-7 admission, the public-only `keys-audit` Job must load the complete
+format-8 admission, the public-only `keys-audit` Job must load the complete
 configured inventory and prove that current generations are present and public
 key bytes are globally disjoint across purposes.
 
@@ -362,7 +362,7 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 7; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 8; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
 Prometheus metrics. Enabled collaboration additionally requires the
 collaboration database URL/TLS identity, purpose-specific API-storage and
@@ -423,8 +423,17 @@ The NFS release target is a single-active fenced StatefulSet containing
 NFS-Ganesha `6.5-8` from the Ubuntu 26.04 snapshot dated 2026-08-09, a thin
 dynamic FileBelt FSAL, and an adapter-local Rust bridge over bounded Unix IPC.
 The current tree contains the generic schema/state model, opaque keyed handles,
-bounded bridge framing, and the portable C boundary check. It does not yet
-contain the ABI-specific Ganesha callback table or a qualified adapter image.
+bounded bridge framing, an unqualified candidate FSAL callback/control surface,
+and portable C boundary checks. Exact-header syntax evidence is not an ABI/link
+result, and the export sentinel still rejects the callback surface by default;
+there is no qualified adapter image.
+
+The exact Ganesha source build also applies reviewed LGPL patches that make
+always-stacked MDCACHE delegate an overridden lower-FSAL `test_access` and let
+the lower FSAL project authoritative owner/group names through GETATTR and
+READDIR without host idmapper fallback. These patches are necessary security
+contracts, but patch application and header compilation alone do not establish
+ABI/link compatibility or live owner/group enforcement.
 The chart therefore requires an explicit published image digest, operator-owned
 Ganesha and bridge ConfigMaps, shell-free command/health/preStop argv, a static
 keytab, an exact `spiffe://filebelt/nfs-gateway/vfs` bridge identity, a VFS-only
@@ -545,7 +554,7 @@ Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate
-the current format-7 configuration with its independent API-MCP-delegation
+the current format-8 configuration with its independent API-MCP-delegation
 purpose, and take a coordinated recovery-v3 checkpoint. Enable the broker
 without runners, test one personal registration, discovery, explicit approval,
 version-pinned attachment, revocation, and cross-user denial, then admit normal
@@ -556,10 +565,10 @@ credential rotation, broker rollout, and runner activation.
 
 Rollback disables runner admission first, cancels active invocations, waits for
 the controller to remove one-shot Pods and bootstrap Secrets, and then disables
-the broker. After v7 admission, configuration and keyset repair is forward-only:
-retain purpose-specific immutable Secret generations and use a compatible v7
+the broker. After v8 admission, configuration and keyset repair is forward-only:
+retain purpose-specific immutable Secret generations and use a compatible v8
 ConfigMap revision only. Do not drop `filebelt_mcp` or `filebelt_mcp_vault`, run
-a down migration, roll back to a v6 configuration, or remove a KEK generation
+a down migration, roll back to a v7 configuration, or remove a KEK generation
 referenced by a `filebelt.recovery.checkpoint.v3` document.
 
 When compatibility cannot be proved, remain quiesced and restore the last

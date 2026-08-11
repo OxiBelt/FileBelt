@@ -1,0 +1,181 @@
+diff --git a/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_handle.c b/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_handle.c
+index 3b6dc7a..8454489 100644
+--- a/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_handle.c
++++ b/src/FSAL/Stackable_FSALs/FSAL_MDCACHE/mdcache_handle.c
+@@ -628,6 +628,19 @@ static fsal_status_t mdcache_test_access(struct fsal_obj_handle *obj_hdl,
+ 				owner_skip);
+ }
+ 
++static fsal_status_t mdcache_get_owner_group_names(
++	struct fsal_obj_handle *obj_hdl, uid_t owner, gid_t group,
++	struct gsh_buffdesc *owner_name, struct gsh_buffdesc *group_name)
++{
++	mdcache_entry_t *entry =
++		container_of(obj_hdl, mdcache_entry_t, obj_handle);
++	fsal_status_t status;
++
++	subcall(status = entry->sub_handle->obj_ops->get_owner_group_names(
++			entry->sub_handle, owner, group, owner_name, group_name));
++	return status;
++}
++
+ /**
+  * @brief Rename an object
+  *
+@@ -1536,6 +1549,7 @@ void mdcache_handle_ops_init(struct fsal_obj_ops *ops)
+ 	ops->symlink = mdcache_symlink;
+ 	ops->readlink = mdcache_readlink;
+ 	ops->test_access = mdcache_test_access;
++	ops->get_owner_group_names = mdcache_get_owner_group_names;
+ 	ops->getattrs = mdcache_getattrs;
+ 	ops->link = mdcache_link;
+ 	ops->rename = mdcache_rename;
+diff --git a/src/FSAL/default_methods.c b/src/FSAL/default_methods.c
+index 99a0393..4c19e2c 100644
+--- a/src/FSAL/default_methods.c
++++ b/src/FSAL/default_methods.c
+@@ -1431,6 +1431,18 @@ static bool is_referral(struct fsal_obj_handle *obj_hdl,
+ 	return false;
+ }
+ 
++static fsal_status_t get_owner_group_names(
++	struct fsal_obj_handle *obj_hdl, uid_t owner, gid_t group,
++	struct gsh_buffdesc *owner_name, struct gsh_buffdesc *group_name)
++{
++	(void)obj_hdl;
++	(void)owner;
++	(void)group;
++	(void)owner_name;
++	(void)group_name;
++	return fsalstat(ERR_FSAL_NOTSUPP, ENOTSUP);
++}
++
+ /* Default fsal handle object method vector.
+  * copied to allocated vector at register time
+  */
+@@ -1449,6 +1461,7 @@ struct fsal_obj_ops def_handle_ops = {
+ 	.symlink = makesymlink,
+ 	.readlink = readsymlink,
+ 	.test_access = fsal_test_access, /* default is use common test */
++	.get_owner_group_names = get_owner_group_names,
+ 	.getattrs = getattrs,
+ 	.link = linkfile,
+ 	.rename = renamefile,
+diff --git a/src/Protocols/NFS/nfs4_op_readdir.c b/src/Protocols/NFS/nfs4_op_readdir.c
+index 0906df6..a0c80e7 100644
+--- a/src/Protocols/NFS/nfs4_op_readdir.c
++++ b/src/Protocols/NFS/nfs4_op_readdir.c
+@@ -301,6 +301,7 @@ not_junction:
+ 		PTHREAD_RWLOCK_unlock(&obj->state_hdl->jct_lock);
+ 
+ 	args.attrs = (struct fsal_attrlist *)attr;
++	args.obj = obj;
+ 	args.data = data;
+ 	args.hdl4 = &entryFH;
+ 	args.mounted_on_fileid = mounted_on_fileid;
+diff --git a/src/Protocols/NFS/nfs_proto_tools.c b/src/Protocols/NFS/nfs_proto_tools.c
+index 3bae9b6..7a1d9d1 100644
+--- a/src/Protocols/NFS/nfs_proto_tools.c
++++ b/src/Protocols/NFS/nfs_proto_tools.c
+@@ -1643,8 +1643,38 @@ static fattr_xdr_result decode_numlinks(XDR *xdr, struct xdr_attrs_args *args)
+  * FATTR4_OWNER
+  */
+ 
++static fattr_xdr_result encode_projected_identity(
++	XDR *xdr, struct xdr_attrs_args *args, bool group)
++{
++	struct gsh_buffdesc owner_name = { 0 };
++	struct gsh_buffdesc group_name = { 0 };
++	struct gsh_buffdesc *selected = group ? &group_name : &owner_name;
++	fsal_status_t status;
++	char *name;
++	uint32_t length;
++
++	if (args->obj == NULL)
++		return FATTR_XDR_NOOP;
++	status = args->obj->obj_ops->get_owner_group_names(
++		args->obj, args->attrs->owner, args->attrs->group,
++		&owner_name, &group_name);
++	if (status.major == ERR_FSAL_NOTSUPP)
++		return FATTR_XDR_NOOP;
++	if (FSAL_IS_ERROR(status) || selected->addr == NULL ||
++	    selected->len == 0 || selected->len > 1024)
++		return FATTR_XDR_FAILED;
++	name = selected->addr;
++	length = (uint32_t)selected->len;
++	return inline_xdr_bytes(xdr, &name, &length, 1024) ?
++		FATTR_XDR_SUCCESS : FATTR_XDR_FAILED;
++}
++
+ static fattr_xdr_result encode_owner(XDR *xdr, struct xdr_attrs_args *args)
+ {
++	fattr_xdr_result result = encode_projected_identity(xdr, args, false);
++
++	if (result != FATTR_XDR_NOOP)
++		return result;
+ 	return xdr_encode_nfs4_owner(xdr, args->attrs->owner) ?
+ 		       FATTR_XDR_SUCCESS :
+ 		       FATTR_XDR_FAILED;
+@@ -1695,6 +1725,10 @@ static fattr_xdr_result decode_owner(XDR *xdr, struct xdr_attrs_args *args)
+ 
+ static fattr_xdr_result encode_group(XDR *xdr, struct xdr_attrs_args *args)
+ {
++	fattr_xdr_result result = encode_projected_identity(xdr, args, true);
++
++	if (result != FATTR_XDR_NOOP)
++		return result;
+ 	return xdr_encode_nfs4_group(xdr, args->attrs->group) ?
+ 		       FATTR_XDR_SUCCESS :
+ 		       FATTR_XDR_FAILED;
+@@ -3415,6 +3449,7 @@ nfsstat4 file_To_Fattr(compound_data_t *data, attrmask_t request_mask,
+ 	fsal_status_t status;
+ 	struct xdr_attrs_args args = {
+ 		.attrs = attr,
++		.obj = data->current_obj,
+ 		.data = data,
+ 		.hdl4 = &data->currentFH,
+ 	};
+diff --git a/src/include/fsal_api.h b/src/include/fsal_api.h
+index 5210db0..2ddf375 100644
+--- a/src/include/fsal_api.h
++++ b/src/include/fsal_api.h
+@@ -1939,6 +1939,27 @@ struct fsal_obj_ops {
+ 				     bool owner_skip);
+ 
+ 	/**
++	 * @brief Project authoritative NFSv4 owner and group names
++	 *
++	 * A FSAL that overrides this method may supply names from authority that
++	 * cannot be reconstructed by the host idmapper. The returned buffers must
++	 * remain valid until @a obj_hdl is released. Returning ERR_FSAL_NOTSUPP
++	 * selects the existing idmapper path; every other error fails encoding.
++	 *
++	 * @param[in]  obj_hdl    Object whose attributes are being encoded
++	 * @param[in]  owner      Numeric owner in the encoded attributes
++	 * @param[in]  group      Numeric group in the encoded attributes
++	 * @param[out] owner_name Authoritative NFSv4 owner string
++	 * @param[out] group_name Authoritative NFSv4 group string
++	 *
++	 * @return FSAL status.
++	 */
++	fsal_status_t (*get_owner_group_names)(
++		struct fsal_obj_handle *obj_hdl, uid_t owner, gid_t group,
++		struct gsh_buffdesc *owner_name,
++		struct gsh_buffdesc *group_name);
++
++	/**
+  * @brief Get attributes
+  *
+  * This function fetches the attributes for the object. The attributes
+diff --git a/src/include/nfs_proto_tools.h b/src/include/nfs_proto_tools.h
+index a9d09d4..6ae3fad 100644
+--- a/src/include/nfs_proto_tools.h
++++ b/src/include/nfs_proto_tools.h
+@@ -74,6 +74,7 @@ typedef enum {
+ 
+ struct xdr_attrs_args {
+ 	struct fsal_attrlist *attrs;
++	struct fsal_obj_handle *obj;
+ 	nfs_fh4 *hdl4;
+ 	uint32_t rdattr_error;
+ 	uint64_t mounted_on_fileid; /*< If this is the root directory

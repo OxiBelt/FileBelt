@@ -29,6 +29,8 @@ struct ApplyManifestRequest {
     manifest_digest: Vec<u8>,
     #[prost(message, repeated, tag = "7")]
     exports: Vec<ControlExport>,
+    #[prost(bool, tag = "8")]
+    drain: bool,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -66,7 +68,7 @@ struct ControlAppliedExport {
     #[prost(uint64, tag = "2")]
     generation: u64,
     #[prost(bytes = "vec", tag = "3")]
-    root_handle_digest: Vec<u8>,
+    root_handle: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +93,8 @@ pub trait ExportInstaller {
         tenant_id: Uuid,
         exports: &[NfsExportManifestEntry],
     ) -> Result<([u8; 32], Vec<NfsAppliedExport>), ControlError>;
+
+    fn drain(&self, boot_id: Uuid) -> Result<(), ControlError>;
 }
 
 impl GaneshaControlClient {
@@ -131,7 +135,57 @@ impl ExportInstaller for GaneshaControlClient {
                     read_only: export.read_only,
                 })
                 .collect(),
+            drain: false,
         };
+        let response = self.exchange(&request)?;
+        let applied = response
+            .exports
+            .into_iter()
+            .map(|export| NfsAppliedExport {
+                export_id: export.export_id,
+                generation: export.generation,
+                root_handle_digest: root_handle_digest(&export.root_handle).to_vec(),
+            })
+            .collect::<Vec<_>>();
+        if response.format != CONTROL_FORMAT
+            || response.request_id != request_id.to_string()
+            || !response.applied
+            || !applied_matches(exports, &applied)
+        {
+            return Err(ControlError::Rejected);
+        }
+        Ok((digest, applied))
+    }
+
+    fn drain(&self, boot_id: Uuid) -> Result<(), ControlError> {
+        let request_id = Uuid::new_v4();
+        let request = ApplyManifestRequest {
+            format: CONTROL_FORMAT,
+            request_id: request_id.to_string(),
+            boot_id: boot_id.to_string(),
+            feature_generation: 0,
+            export_generation: 0,
+            manifest_digest: Vec::new(),
+            exports: Vec::new(),
+            drain: true,
+        };
+        let response = self.exchange(&request)?;
+        if response.format != CONTROL_FORMAT
+            || response.request_id != request_id.to_string()
+            || !response.applied
+            || !response.exports.is_empty()
+        {
+            return Err(ControlError::Rejected);
+        }
+        Ok(())
+    }
+}
+
+impl GaneshaControlClient {
+    fn exchange(
+        &self,
+        request: &ApplyManifestRequest,
+    ) -> Result<ApplyManifestResponse, ControlError> {
         let payload = request.encode_to_vec();
         let mut delay = Duration::from_millis(25);
         for attempt in 0..5 {
@@ -140,25 +194,7 @@ impl ExportInstaller for GaneshaControlClient {
                 packet.receive()
             });
             if let Ok(response) = response {
-                let response = ApplyManifestResponse::decode(response.as_slice())
-                    .map_err(|_| ControlError::Rejected)?;
-                let applied = response
-                    .exports
-                    .into_iter()
-                    .map(|export| NfsAppliedExport {
-                        export_id: export.export_id,
-                        generation: export.generation,
-                        root_handle_digest: export.root_handle_digest,
-                    })
-                    .collect::<Vec<_>>();
-                if response.format != CONTROL_FORMAT
-                    || response.request_id != request_id.to_string()
-                    || !response.applied
-                    || !applied_matches(exports, &applied)
-                {
-                    return Err(ControlError::Rejected);
-                }
-                return Ok((digest, applied));
+                return decode_response_exact(&response);
             }
             if attempt != 4 {
                 thread::sleep(delay);
@@ -167,6 +203,14 @@ impl ExportInstaller for GaneshaControlClient {
         }
         Err(ControlError::Unavailable)
     }
+}
+
+fn decode_response_exact(encoded: &[u8]) -> Result<ApplyManifestResponse, ControlError> {
+    let decoded = ApplyManifestResponse::decode(encoded).map_err(|_| ControlError::Rejected)?;
+    if decoded.encode_to_vec() != encoded {
+        return Err(ControlError::Rejected);
+    }
+    Ok(decoded)
 }
 
 #[must_use]
@@ -264,6 +308,29 @@ mod tests {
             manifest_digest(tenant, 5, 7, &[first.clone(), second.clone()])
         );
         assert_ne!(baseline, manifest_digest(tenant, 5, 6, &[second, first]));
+    }
+
+    #[test]
+    fn control_response_rejects_unknown_or_noncanonical_wire_data() {
+        let response = ApplyManifestResponse {
+            format: CONTROL_FORMAT,
+            request_id: Uuid::from_u128(7).to_string(),
+            applied: true,
+            exports: Vec::new(),
+        };
+        let canonical = response.encode_to_vec();
+        assert!(decode_response_exact(&canonical).is_ok());
+
+        let mut unknown = canonical.clone();
+        unknown.extend_from_slice(&[0x28, 0x01]);
+        assert_eq!(decode_response_exact(&unknown), Err(ControlError::Rejected));
+
+        let mut overlong = vec![0x08, 0x81, 0x00];
+        overlong.extend_from_slice(&canonical[2..]);
+        assert_eq!(
+            decode_response_exact(&overlong),
+            Err(ControlError::Rejected)
+        );
     }
 
     #[test]

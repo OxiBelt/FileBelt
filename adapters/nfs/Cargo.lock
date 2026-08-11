@@ -257,6 +257,7 @@ dependencies = [
 name = "filebelt-vfs-protocol"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "prost",
  "thiserror",
  "uuid",

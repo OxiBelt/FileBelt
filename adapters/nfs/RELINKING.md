@@ -18,6 +18,10 @@ NFS-Ganesha 6.5 / FSAL 13.0 header and library set, and replace
 5. Retain the LGPL source, notices, patches, relinking instructions, and the
    exact source/build evidence for the derived image.
 
+The lock file also pins each FileBelt patch digest. Apply the patches in numeric
+order: the owner/group projection patch is intentionally based on the MDCACHE
+access-delegation patch so the configured tree has both authority paths.
+
 A replacement is compatible only when the ABI probe passes against the pinned
 FSAL 13.0 header set. FileBelt readiness is intentionally fail closed: the
 current source contains an unqualified callback sentinel and cannot serve an

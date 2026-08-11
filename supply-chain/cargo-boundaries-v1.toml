@@ -217,6 +217,7 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-nfs-bridge = []
+filebelt-vfs-protocol = []
 
 [[graph_profiles]]
 label = "GPL media transcoder wrapper"
@@ -856,7 +857,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-nfs-bridge"
 crate_root = "adapters/nfs/bridge/src/lib.rs"
-public_modules = []
+public_modules = ["config", "control", "gateway", "ipc", "vfs", "wire"]
 wildcard_reexports = []
 
 [[public_surfaces]]

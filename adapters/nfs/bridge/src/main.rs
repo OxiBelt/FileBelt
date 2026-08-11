@@ -5,9 +5,11 @@ use filebelt_nfs_bridge::control::GaneshaControlClient;
 use filebelt_nfs_bridge::gateway::{Gateway, drain, healthy};
 use filebelt_nfs_bridge::ipc::SeqPacketListener;
 use filebelt_nfs_bridge::vfs::VfsClient;
-use filebelt_vfs_protocol::VfsRequest;
 use prost::Message;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use zeroize::Zeroize;
 
 fn main() {
@@ -29,7 +31,8 @@ fn run() -> Result<(), String> {
             BridgeConfig::reject_forbidden_authority_environment()
                 .map_err(|error| error.to_string())?;
             let vfs = VfsClient::new(&config).map_err(|error| error.to_string())?;
-            drain(&config, &vfs).map_err(|error| error.to_string())
+            let control = GaneshaControlClient::new(&config.ganesha_control_socket);
+            drain(&config, &vfs, &control).map_err(|error| error.to_string())
         }
         "serve" => serve(config),
         _ => Err("expected serve, drain, health, or check-config".into()),
@@ -42,6 +45,61 @@ fn serve(config: BridgeConfig) -> Result<(), String> {
     let control = GaneshaControlClient::new(&config.ganesha_control_socket);
     let mut gateway = Gateway::new(config.clone(), vfs, control);
     gateway.bootstrap().map_err(|error| error.to_string())?;
+    let maintenance_worker = gateway.maintenance_worker();
+    let gateway = Arc::new(Mutex::new(gateway));
+    let maintenance_gateway = Arc::clone(&gateway);
+    thread::Builder::new()
+        .name("nfs-lease-renewal".into())
+        .spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                let fence = match maintenance_gateway.lock() {
+                    Ok(gateway) => gateway.renewal_fence(),
+                    Err(_) => return,
+                };
+                let Some(fence) = fence else {
+                    continue;
+                };
+                let offer = match maintenance_worker.offer() {
+                    Ok(offer) => offer,
+                    Err(_) => {
+                        let Ok(mut gateway) = maintenance_gateway.lock() else {
+                            return;
+                        };
+                        gateway.fail_renewal(fence);
+                        continue;
+                    }
+                };
+                let proceed = {
+                    let Ok(mut gateway) = maintenance_gateway.lock() else {
+                        return;
+                    };
+                    match gateway.prepare_renewal(fence, offer.fence()) {
+                        Ok(proceed) => proceed,
+                        Err(_) => {
+                            gateway.fail_renewal(fence);
+                            false
+                        }
+                    }
+                };
+                if !proceed {
+                    continue;
+                }
+                let refreshed = maintenance_worker.apply(&offer);
+                let Ok(mut gateway) = maintenance_gateway.lock() else {
+                    return;
+                };
+                match refreshed {
+                    Ok(candidate) => {
+                        if gateway.apply_renewal(Some(fence), candidate).is_err() {
+                            gateway.fail_renewal(fence);
+                        }
+                    }
+                    Err(_) => gateway.fail_renewal(fence),
+                }
+            }
+        })
+        .map_err(|_| "failed to start gateway lease renewal".to_owned())?;
     let listener =
         SeqPacketListener::bind(&config.ipc_socket).map_err(|error| error.to_string())?;
     loop {
@@ -53,12 +111,13 @@ fn serve(config: BridgeConfig) -> Result<(), String> {
             Ok(encoded) => encoded,
             Err(_) => continue,
         };
-        let request = VfsRequest::decode(encoded.as_slice());
-        encoded.zeroize();
-        let Ok(request) = request else {
-            continue;
+        let response = match gateway.lock() {
+            Ok(mut gateway) => {
+                filebelt_nfs_bridge::wire::execute(&mut gateway, &encoded).encode_to_vec()
+            }
+            Err(_) => return Err("gateway state lock is poisoned".into()),
         };
-        let response = gateway.handle(request).encode_to_vec();
+        encoded.zeroize();
         let _ = packet.send(&response);
     }
 }

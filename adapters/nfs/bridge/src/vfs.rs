@@ -24,6 +24,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 const MAX_ATTEMPTS: usize = 5;
+const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(5);
 static TLS_PROVIDER: OnceLock<Result<(), ()>> = OnceLock::new();
 
 #[derive(Clone)]
@@ -107,16 +108,32 @@ impl VfsClient {
     }
 
     pub fn execute(&self, request: &VfsRequest) -> Result<VfsResponse, VfsClientError> {
+        self.execute_with_policy(request, MAX_ATTEMPTS, Duration::from_secs(20))
+    }
+
+    /// Gateway lease work runs outside the callback lock, but still uses one
+    /// bounded attempt so stale lifecycle work cannot accumulate indefinitely.
+    pub fn execute_lifecycle(&self, request: &VfsRequest) -> Result<VfsResponse, VfsClientError> {
+        self.execute_with_policy(request, 1, LIFECYCLE_TIMEOUT)
+    }
+
+    fn execute_with_policy(
+        &self,
+        request: &VfsRequest,
+        attempts: usize,
+        timeout: Duration,
+    ) -> Result<VfsResponse, VfsClientError> {
         let fence = request.validate().map_err(|_| VfsClientError::Request)?;
         let request_id = fence.request_id;
         let encoded = Zeroizing::new(request.encode_to_vec());
         let mut delay = Duration::from_millis(50);
-        for attempt in 0..MAX_ATTEMPTS {
+        for attempt in 0..attempts {
             let response = self
                 .client
                 .post(self.endpoint.clone())
                 .header(CONTENT_TYPE, PROTOBUF_CONTENT_TYPE)
                 .body(encoded.as_slice().to_vec())
+                .timeout(timeout)
                 .send();
             match response {
                 Ok(response) if response.status().is_success() => {
@@ -133,7 +150,7 @@ impl VfsClient {
                 Ok(response) if !response.status().is_server_error() => {
                     return Err(VfsClientError::Unavailable);
                 }
-                Ok(_) | Err(_) if attempt + 1 < MAX_ATTEMPTS => {
+                Ok(_) | Err(_) if attempt + 1 < attempts => {
                     thread::sleep(delay);
                     delay = delay.saturating_mul(2);
                 }

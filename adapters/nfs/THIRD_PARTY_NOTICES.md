@@ -11,7 +11,9 @@ This adapter targets these pinned primary components:
 
 The source URLs, revisions, and SHA-256 digests are recorded in
 `sources.lock.toml`. The image carries the Ganesha and libntirpc source archives,
-Debian packaging, FileBelt patches, and this adapter source. The FileBelt bridge
+Debian packaging, exact-digest FileBelt patches, and this adapter source. The
+patches preserve lower-FSAL authorization through MDCACHE and add an optional
+FSAL owner/group-name projection hook to the NFSv4 encoder. The FileBelt bridge
 and FSAL sources are licensed LGPL-3.0-or-later; the consumed generated VFS
 schema crate remains Apache-2.0 and crosses the documented adapter boundary.
 

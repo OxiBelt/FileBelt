@@ -44,6 +44,7 @@ int filebelt_fsal_frame_length(
 #include "nfs_creds.h"
 #include "nfs_proto_data.h"
 #include "sal_data.h"
+#include "filebelt_internal.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -56,6 +57,7 @@ static const char filebelt_fsal_name[] = "FILEBELT";
 
 struct filebelt_fsal_module {
 	struct fsal_module module;
+	struct fsal_obj_ops handle_ops;
 };
 
 static struct filebelt_fsal_module FILEBELT = {
@@ -88,6 +90,11 @@ static struct filebelt_fsal_module FILEBELT = {
 		}
 	}
 };
+
+struct fsal_obj_ops *filebelt_module_handle_ops(void)
+{
+	return &FILEBELT.handle_ops;
+}
 
 static bool hex_encode(const void *raw, size_t raw_length, char *output,
 		       size_t output_length)
@@ -163,6 +170,8 @@ static fsal_status_t filebelt_init_config(
 MODULE_INIT void filebelt_fsal_init(void)
 {
 	struct fsal_module *module = &FILEBELT.module;
+
+	filebelt_handle_ops_init(&FILEBELT.handle_ops);
 
 	if (register_fsal(module, filebelt_fsal_name, FSAL_MAJOR_VERSION,
 			  FSAL_MINOR_VERSION, FSAL_ID_NO_PNFS) != 0) {

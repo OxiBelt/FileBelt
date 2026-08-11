@@ -47,8 +47,14 @@ RUN curl -fsSLO 'https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/nfs-
     echo '265ffa464b51819e8ab323230870937349acbdffedbf740a5f9520272cad4e18  nfs-ganesha_6.5-8.debian.tar.xz' | sha256sum -c - && \
     dpkg-source -x nfs-ganesha_6.5-8.dsc /build/nfs-ganesha-6.5
 COPY adapters/nfs/patches /build/filebelt-patches
-RUN patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch && \
-    patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0002-build-filebelt-dynamic-fsal.patch
+RUN echo '8ecc34f8b9e50d0e062f23c5d93045f13634b89265278a14e16b6dc8f0bf2aff  /build/filebelt-patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch' | sha256sum -c - && \
+    echo 'e199f4bfdee75180b40df1637b3315b88aa36c0b584c94669e4da76417570bd1  /build/filebelt-patches/0002-build-filebelt-dynamic-fsal.patch' | sha256sum -c - && \
+    echo '40bd37bb49dceeb173c879a77a1ccd82300d9683228c86150c10edb3e779588d  /build/filebelt-patches/0003-delegate-mdcache-test-access.patch' | sha256sum -c - && \
+    echo 'c5d71d0623045b6ce2be66fc68637730f5ba82b3e328d8b7ac045d2d90c2aed6  /build/filebelt-patches/0004-project-authoritative-owner-group-names.patch' | sha256sum -c - && \
+    patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch && \
+    patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0002-build-filebelt-dynamic-fsal.patch && \
+    patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0003-delegate-mdcache-test-access.patch && \
+    patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0004-project-authoritative-owner-group-names.patch
 COPY adapters/nfs/ganesha-fsal-filebelt /build/nfs-ganesha-6.5/src/FSAL/FSAL_FILEBELT
 RUN cmake -S /build/nfs-ganesha-6.5/src -B /build/ganesha \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \

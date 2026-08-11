@@ -25,6 +25,12 @@ orig_sha256 = "ece6cf138dd8602f33294eee75233051229867ea7fd1b3f7d6545e989303bfd9"
 debian_url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/nfs-ganesha/6.5-8/nfs-ganesha_6.5-8.debian.tar.xz"
 debian_sha256 = "265ffa464b51819e8ab323230870937349acbdffedbf740a5f9520272cad4e18"
 
+[filebelt_patches]
+rpcsec_gss_identity_sha256 = "8ecc34f8b9e50d0e062f23c5d93045f13634b89265278a14e16b6dc8f0bf2aff"
+dynamic_fsal_sha256 = "e199f4bfdee75180b40df1637b3315b88aa36c0b584c94669e4da76417570bd1"
+mdcache_test_access_sha256 = "40bd37bb49dceeb173c879a77a1ccd82300d9683228c86150c10edb3e779588d"
+owner_group_projection_sha256 = "c5d71d0623045b6ce2be66fc68637730f5ba82b3e328d8b7ac045d2d90c2aed6"
+
 [ntirpc]
 ubuntu_version = "6.3-4"
 upstream_repository = "https://github.com/nfs-ganesha/ntirpc"

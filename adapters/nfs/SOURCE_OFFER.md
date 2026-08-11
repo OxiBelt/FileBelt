@@ -10,9 +10,10 @@ The adapter Dockerfile embeds the following materials under
 - every FileBelt patch applied to NFS-Ganesha.
 
 `sources.lock.toml` pins the download URLs and SHA-256 digests, the Ubuntu
-snapshot and base-image manifest, the upstream Ganesha V6.5 tag/commit, FSAL
-ABI 13.0, and the Rust toolchains for each supported architecture. The
-Dockerfile records the complete CMake flags and rebuild process.
+snapshot and base-image manifest, the upstream Ganesha V6.5 tag/commit, every
+FileBelt patch digest, FSAL ABI 13.0, and the Rust toolchains for each supported
+architecture. The Dockerfile records the complete CMake flags and rebuild
+process.
 
 For every published image digest, the release must also publish the exact
 FileBelt source revision, generated package and Rust dependency inventory,

@@ -12,6 +12,7 @@ pub mod control;
 pub mod gateway;
 pub mod ipc;
 pub mod vfs;
+pub mod wire;
 
 /// Matches the Apache VFS envelope bound without importing Core implementation
 /// types into the LGPL adapter workspace.

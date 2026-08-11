@@ -4,19 +4,24 @@
 
 This independent LGPL-3.0-or-later workspace contains the NFS-Ganesha dynamic
 FSAL boundary and a Rust Unix-IPC bridge. It is excluded from the Apache Cargo
-workspace. The bridge consumes only the generated Apache VFS protocol over an
-HTTPS process boundary; Apache packages do not import or link adapter code.
+workspace. The bridge consumes the generated Apache VFS schema and the
+Apache-licensed VFS protocol validation/digest helper for its HTTPS process
+boundary; Apache packages do not import or link adapter code.
 
 The target is NFS-Ganesha `6.5-8` and libntirpc `6.3-4` from the approved
 Ubuntu 26.04 snapshot. The image builds the FSAL against the exact Ganesha
-FSAL 13.0 headers, applies the reviewed RPCSEC_GSS accessor patch, and records
-all source digests in `sources.lock.toml`. Neither process receives a
-PostgreSQL credential, payload mount, FileBelt capability signing key, browser
-session, or raw Kerberos ticket/keytab. The FSAL receives only the verified
-canonical principal, `krb5p` status, numeric source address, absolute context
-expiry, and a 32-byte opaque binding derived with `gss_pseudo_random` using
-`GSS_C_PRF_KEY_FULL` and the fixed label `filebelt-nfs-v1` while the context
-lock is held. PRF failure rejects authentication.
+FSAL 13.0 headers, applies the reviewed RPCSEC_GSS accessor, MDCACHE access,
+and authoritative owner/group projection patches, and records every source
+and patch digest in `sources.lock.toml`. Neither process receives a
+PostgreSQL credential, payload mount, FileBelt capability signing key, or
+browser session. Ganesha alone receives the static acceptor keytab at
+`/run/secrets/nfs-ganesha/ganesha.keytab`; the bridge never receives it, and
+the callback/IPC boundary never exports ticket or key material. The FSAL
+receives only the verified canonical principal, `krb5p` status, numeric source
+address, absolute context expiry, and a 32-byte opaque binding derived with
+`gss_pseudo_random` using `GSS_C_PRF_KEY_FULL` and the fixed label
+`filebelt-nfs-v1` while the context lock is held. PRF failure rejects
+authentication.
 
 The private bridge and FSAL channels are Unix `SOCK_SEQPACKET` sockets with
 length-prefixed frames bounded to 1,114,112 bytes. The bridge owns all VFS
@@ -43,6 +48,11 @@ same binding plus NFSv4.1 client, session, slot, sequence, and operation index.
 The bridge injects the authoritative session/generation fence and, for
 mutations, a deterministic BLAKE3 request digest. Unknown, expired, wrong-realm,
 multi-component, AUTH_SYS, non-privacy, or unbound requests fail closed.
+Every successful private callback reply also carries the exact immutable
+`NfsSessionProjection` cached for that GSS binding and NFS client/session. The
+FSAL rejects missing or malformed projections and overwrites Ganesha's current
+and saved request credentials with only the projected uid and primary gid;
+host supplementary groups and AUTH_SYS values are never retained.
 
 The cross-implementation digest vector uses tenant
 `00000000-0000-0000-0000-000000000009`, feature generation 5, export
@@ -75,15 +85,38 @@ and its fixed state file. `bridge.example.toml` documents the exact format.
 
 ## Qualification status
 
-The current callback translation unit is intentionally incomplete.
-`filebelt_export.c` returns `ERR_FSAL_NOTSUPP`, and the local Ganesha control
-server and filesystem callback marshalling are not yet implemented. Therefore
-the Dockerfile is an ABI/source-build probe only and the image must not be
-published, deployed, or advertised as NFS-ready. The OCI label
-`filebelt.dev.qualification=abi-probe-only` records this fail-closed state.
-Removing that sentinel requires the complete FSAL 13.0 callback set, atomic
-control-server implementation, live NFSv4.1/krb5p qualification, generated
-SBOM/notices, and release evidence.
+The tree contains the bounded control server, bridge marshalling, and a
+candidate FSAL 13.0 callback implementation, but `filebelt_export.c` still
+returns `ERR_FSAL_NOTSUPP` unless `FILEBELT_CALLBACKS_QUALIFIED` is deliberately
+defined. Create, mkdir, and symlink now carry optional permission bits with
+exact `0644`, `0755`, and `0777` defaults; the FSAL rejects special bits,
+client owner/group attributes, and every unsupported initial attribute rather
+than discarding them. NFS `OPEN(CREATE)` remains unsupported because separate
+Create and Open calls cannot provide its one atomic replay outcome. The
+read-only TestLock operation is distinct from Lock and Unlock, and EOF ranges
+are explicit, but Core still returns its pre-authority qualification sentinel
+until a database query/replay contract exists.
+
+The exact-source `0003` patch makes always-stacked MDCACHE delegate
+`test_access` whenever the lower FSAL overrides the generic evaluator. The
+`0004` patch carries the concrete object through GETATTR and READDIR encoding,
+adds a lower-FSAL owner/group-name hook, and delegates that hook through
+MDCACHE. FILEBELT initializes the Core-projected IDs and exact names before an
+object is published. Later attribute refreshes compare this immutable
+projection byte-for-byte and fail closed rather than rewriting its buffers;
+absence or mismatch fails encoding and never falls back to host idmapper data.
+Tagged named ACL principals still lack authoritative numeric projections.
+
+The provided development host does not constitute configured ABI/link or live
+protocol qualification. The Dockerfile therefore remains an ABI/source-build
+probe only and the image must not be published, deployed, or advertised as
+NFS-ready. The OCI label
+`filebelt.dev.qualification=abi-probe-only` records this state. Removing the
+sentinel also requires authenticated restart/reclaim reconstruction of the
+database-authoritative single staged-writer tuple used by FSAL `commit2`, then
+a complete exact-source configured ABI and link build, live owner/group and
+MDCACHE checks, live NFSv4.1/krb5p qualification, generated SBOM/notices, and
+release evidence.
 
 Run the local framing and C boundary checks with:
 

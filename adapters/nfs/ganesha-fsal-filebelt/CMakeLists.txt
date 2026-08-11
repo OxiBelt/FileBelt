@@ -2,6 +2,11 @@
 
 add_library(fsalfilebelt MODULE
   fsal_filebelt.c
+  filebelt_wire.c
+  filebelt_control.c
+  filebelt_protocol.c
+  filebelt_projection.c
+  filebelt_handle.c
   filebelt_export.c
 )
 

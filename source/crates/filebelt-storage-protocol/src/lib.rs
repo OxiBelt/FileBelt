@@ -63,6 +63,17 @@ pub enum DocumentStorageCapabilityUse {
     FinalizeRevision,
 }
 
+/// The closed set of mount-storage `fbcap2` operations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MountStorageCapabilityUse {
+    Read,
+    Write,
+    Flush,
+    Finalize,
+    Abort,
+    DeleteStaging,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CapabilityError {
     #[error("capability wire encoding is invalid")]
@@ -110,6 +121,36 @@ impl DocumentStorageCapabilityUse {
             Self::WriteRevision => CapabilityOperation::WriteDocumentRevision,
             Self::FinalizeRevision => CapabilityOperation::FinalizeDocumentRevision,
         }
+    }
+}
+
+impl MountStorageCapabilityUse {
+    /// Returns the exact Protobuf operation bound by this use.
+    #[must_use]
+    pub const fn operation(self) -> MountCapabilityOperation {
+        match self {
+            Self::Read => MountCapabilityOperation::Read,
+            Self::Write => MountCapabilityOperation::Write,
+            Self::Flush => MountCapabilityOperation::Flush,
+            Self::Finalize => MountCapabilityOperation::Finalize,
+            Self::Abort => MountCapabilityOperation::Abort,
+            Self::DeleteStaging => MountCapabilityOperation::DeleteStaging,
+        }
+    }
+
+    const fn requires_version(self) -> bool {
+        matches!(
+            self,
+            Self::Read | Self::Write | Self::Flush | Self::Finalize
+        )
+    }
+
+    const fn requires_write_session(self) -> bool {
+        !matches!(self, Self::Read)
+    }
+
+    const fn requires_range(self) -> bool {
+        matches!(self, Self::Read | Self::Write)
     }
 }
 
@@ -194,15 +235,22 @@ pub fn verify_document_storage_capability(
     )
 }
 
-/// Signs a mount-storage read capability.
-pub fn sign_mount_storage_read_capability(
+/// Signs one operation-specific mount-storage capability.
+pub fn sign_mount_storage_capability(
     claims: &MountCapabilityClaims,
+    purpose: MountStorageCapabilityUse,
     generation: u32,
     key_pair: &Ed25519KeyPair,
 ) -> Result<String, CapabilityError> {
-    if claims.operation != MountCapabilityOperation::Read as i32 || generation == 0 {
+    if claims.operation != purpose.operation() as i32 || generation == 0 {
         return Err(CapabilityError::InvalidClaims);
     }
+    validate_mount_claims(
+        claims,
+        &claims.audience,
+        purpose,
+        claims.issued_at_unix_seconds,
+    )?;
     let claims_bytes = claims.encode_to_vec();
     let input = [MOUNT_CAPABILITY_SIGNATURE_DOMAIN, claims_bytes.as_slice()].concat();
     let signed = SignedMountCapability {
@@ -216,11 +264,12 @@ pub fn sign_mount_storage_read_capability(
     ))
 }
 
-/// Verifies a mount-storage read capability with a mount-storage keyset.
-pub fn verify_mount_storage_read_capability(
+/// Verifies one operation-specific capability with a mount-storage keyset.
+pub fn verify_mount_storage_capability(
     wire: &str,
     keys: &MountStorageKeyset,
     expected_audience: &str,
+    purpose: MountStorageCapabilityUse,
     now_unix_seconds: i64,
 ) -> Result<Verified<MountCapabilityClaims>, CapabilityError> {
     let encoded = wire
@@ -236,11 +285,45 @@ pub fn verify_mount_storage_read_capability(
         .map_err(map_keyset_error)?;
     let claims = MountCapabilityClaims::decode(signed.claims.as_slice())
         .map_err(|_| CapabilityError::InvalidClaims)?;
-    validate_mount_claims(&claims, expected_audience, now_unix_seconds)?;
+    validate_mount_claims(&claims, expected_audience, purpose, now_unix_seconds)?;
     Ok(Verified {
         claims,
         generation: signed.key_generation,
     })
+}
+
+/// Signs a mount-storage read capability.
+///
+/// This compatibility wrapper preserves the existing read-only caller API.
+pub fn sign_mount_storage_read_capability(
+    claims: &MountCapabilityClaims,
+    generation: u32,
+    key_pair: &Ed25519KeyPair,
+) -> Result<String, CapabilityError> {
+    sign_mount_storage_capability(
+        claims,
+        MountStorageCapabilityUse::Read,
+        generation,
+        key_pair,
+    )
+}
+
+/// Verifies a mount-storage read capability with a mount-storage keyset.
+///
+/// This compatibility wrapper preserves the existing read-only caller API.
+pub fn verify_mount_storage_read_capability(
+    wire: &str,
+    keys: &MountStorageKeyset,
+    expected_audience: &str,
+    now_unix_seconds: i64,
+) -> Result<Verified<MountCapabilityClaims>, CapabilityError> {
+    verify_mount_storage_capability(
+        wire,
+        keys,
+        expected_audience,
+        MountStorageCapabilityUse::Read,
+        now_unix_seconds,
+    )
 }
 
 fn sign_capability(
@@ -361,6 +444,7 @@ fn validate_capability_claims(
 fn validate_mount_claims(
     claims: &MountCapabilityClaims,
     expected_audience: &str,
+    purpose: MountStorageCapabilityUse,
     now_unix_seconds: i64,
 ) -> Result<(), CapabilityError> {
     for identifier in [
@@ -372,15 +456,37 @@ fn validate_mount_claims(
         &claims.drive_id,
         &claims.resource_id,
         &claims.grant_id,
-        &claims.version_id,
     ] {
         Uuid::parse_str(identifier).map_err(|_| CapabilityError::InvalidClaims)?;
     }
-    if claims.audience != expected_audience {
+    if claims.audience.is_empty() || claims.audience != expected_audience {
         return Err(CapabilityError::WrongAudience);
     }
-    if claims.operation != MountCapabilityOperation::Read as i32 {
+    if claims.operation != purpose.operation() as i32 {
         return Err(CapabilityError::WrongOperation);
+    }
+    if purpose.requires_version() {
+        Uuid::parse_str(&claims.version_id).map_err(|_| CapabilityError::InvalidClaims)?;
+    } else if !claims.version_id.is_empty() {
+        return Err(CapabilityError::InvalidClaims);
+    }
+    if purpose.requires_write_session() {
+        Uuid::parse_str(&claims.write_session_id).map_err(|_| CapabilityError::InvalidClaims)?;
+    } else if !claims.write_session_id.is_empty() {
+        return Err(CapabilityError::InvalidClaims);
+    }
+    if purpose.requires_range() {
+        if claims.range_end < claims.range_start
+            || claims
+                .range_end
+                .checked_sub(claims.range_start)
+                .and_then(|difference| difference.checked_add(1))
+                .is_none()
+        {
+            return Err(CapabilityError::InvalidClaims);
+        }
+    } else if claims.range_start != 0 || claims.range_end != 0 {
+        return Err(CapabilityError::InvalidClaims);
     }
     validate_lifetime(
         claims.issued_at_unix_seconds,
@@ -389,7 +495,6 @@ fn validate_mount_claims(
         now_unix_seconds,
     )?;
     if !(16..=64).contains(&claims.nonce.len())
-        || claims.range_end < claims.range_start
         || claims.credential_generation == 0
         || claims.authorization_generation == 0
         || claims.membership_generation == 0
@@ -398,7 +503,6 @@ fn validate_mount_claims(
         || claims.resource_acl_generation == 0
         || claims.gateway_epoch == 0
         || claims.fencing_token == 0
-        || !claims.write_session_id.is_empty()
     {
         return Err(CapabilityError::InvalidClaims);
     }
@@ -411,7 +515,11 @@ fn validate_lifetime(
     maximum: i64,
     now: i64,
 ) -> Result<(), CapabilityError> {
-    if expires < issued || expires - issued > maximum {
+    if expires < issued
+        || expires
+            .checked_sub(issued)
+            .is_none_or(|lifetime| lifetime > maximum)
+    {
         return Err(CapabilityError::LifetimeTooLong);
     }
     if now < issued || now >= expires {
@@ -456,6 +564,13 @@ mod tests {
         ))
         .unwrap()
     }
+    fn mount_keyset(pair: &Ed25519KeyPair, generation: u32) -> MountStorageKeyset {
+        MountStorageKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=mount-storage\n{generation}:{}\n",
+            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+        ))
+        .unwrap()
+    }
     fn claims(operation: CapabilityOperation) -> CapabilityClaims {
         CapabilityClaims {
             capability_id: Uuid::new_v4().to_string(),
@@ -481,21 +596,38 @@ mod tests {
             grant_id: Uuid::new_v4().to_string(),
         }
     }
-    fn mount_claims() -> MountCapabilityClaims {
+    const MOUNT_USES: [MountStorageCapabilityUse; 6] = [
+        MountStorageCapabilityUse::Read,
+        MountStorageCapabilityUse::Write,
+        MountStorageCapabilityUse::Flush,
+        MountStorageCapabilityUse::Finalize,
+        MountStorageCapabilityUse::Abort,
+        MountStorageCapabilityUse::DeleteStaging,
+    ];
+
+    fn mount_claims(purpose: MountStorageCapabilityUse) -> MountCapabilityClaims {
         MountCapabilityClaims {
             capability_id: Uuid::new_v4().to_string(),
             audience: "filebelt-worker-io".into(),
-            operation: MountCapabilityOperation::Read as i32,
+            operation: purpose.operation() as i32,
             tenant_id: Uuid::new_v4().to_string(),
             principal_id: Uuid::new_v4().to_string(),
             mount_session_id: Uuid::new_v4().to_string(),
             credential_id: Uuid::new_v4().to_string(),
             drive_id: Uuid::new_v4().to_string(),
             resource_id: Uuid::new_v4().to_string(),
-            version_id: Uuid::new_v4().to_string(),
-            write_session_id: String::new(),
+            version_id: if purpose.requires_version() {
+                Uuid::new_v4().to_string()
+            } else {
+                String::new()
+            },
+            write_session_id: if purpose.requires_write_session() {
+                Uuid::new_v4().to_string()
+            } else {
+                String::new()
+            },
             range_start: 0,
-            range_end: 4095,
+            range_end: if purpose.requires_range() { 4095 } else { 0 },
             credential_generation: 2,
             authorization_generation: 3,
             membership_generation: 4,
@@ -603,25 +735,416 @@ mod tests {
     }
 
     #[test]
-    fn mount_read_is_separate_and_read_only() {
+    fn every_mount_operation_round_trips_and_read_wrappers_remain_compatible() {
         let pair = Ed25519KeyPair::generate().unwrap();
-        let wire = sign_mount_storage_read_capability(&mount_claims(), 3, &pair).unwrap();
+        let keys = mount_keyset(&pair, 3);
+        for purpose in MOUNT_USES {
+            let claims = mount_claims(purpose);
+            let wire = sign_mount_storage_capability(&claims, purpose, 3, &pair).unwrap();
+            assert_eq!(
+                verify_mount_storage_capability(&wire, &keys, "filebelt-worker-io", purpose, 110,)
+                    .unwrap(),
+                Verified {
+                    claims,
+                    generation: 3,
+                }
+            );
+        }
+
+        let read = mount_claims(MountStorageCapabilityUse::Read);
+        let generic =
+            sign_mount_storage_capability(&read, MountStorageCapabilityUse::Read, 3, &pair)
+                .unwrap();
+        assert_eq!(
+            sign_mount_storage_read_capability(&read, 3, &pair).unwrap(),
+            generic
+        );
+        assert_eq!(
+            verify_mount_storage_read_capability(&generic, &keys, "filebelt-worker-io", 110,)
+                .unwrap()
+                .claims,
+            read
+        );
+    }
+
+    #[test]
+    fn every_cross_operation_substitution_is_rejected() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let keys = mount_keyset(&pair, 3);
+        for signed_purpose in MOUNT_USES {
+            let claims = mount_claims(signed_purpose);
+            let wire = sign_mount_storage_capability(&claims, signed_purpose, 3, &pair).unwrap();
+            for expected_purpose in MOUNT_USES {
+                let result = verify_mount_storage_capability(
+                    &wire,
+                    &keys,
+                    "filebelt-worker-io",
+                    expected_purpose,
+                    110,
+                );
+                if signed_purpose == expected_purpose {
+                    assert!(result.is_ok());
+                } else {
+                    assert_eq!(result, Err(CapabilityError::WrongOperation));
+                }
+            }
+
+            let different_purpose = MOUNT_USES
+                .into_iter()
+                .find(|purpose| *purpose != signed_purpose)
+                .unwrap();
+            assert_eq!(
+                sign_mount_storage_capability(&claims, different_purpose, 3, &pair),
+                Err(CapabilityError::InvalidClaims)
+            );
+        }
+    }
+
+    #[test]
+    fn mount_operation_fields_are_required_or_forbidden_exactly() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        for purpose in MOUNT_USES {
+            let valid = mount_claims(purpose);
+
+            let mut version = valid.clone();
+            if purpose.requires_version() {
+                version.version_id.clear();
+                assert_eq!(
+                    sign_mount_storage_capability(&version, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+                version.version_id = "not-a-uuid".into();
+            } else {
+                version.version_id = Uuid::new_v4().to_string();
+            }
+            assert_eq!(
+                sign_mount_storage_capability(&version, purpose, 3, &pair),
+                Err(CapabilityError::InvalidClaims)
+            );
+
+            let mut write_session = valid.clone();
+            if purpose.requires_write_session() {
+                write_session.write_session_id.clear();
+                assert_eq!(
+                    sign_mount_storage_capability(&write_session, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+                write_session.write_session_id = "not-a-uuid".into();
+            } else {
+                write_session.write_session_id = Uuid::new_v4().to_string();
+            }
+            assert_eq!(
+                sign_mount_storage_capability(&write_session, purpose, 3, &pair),
+                Err(CapabilityError::InvalidClaims)
+            );
+
+            let mut range = valid.clone();
+            if purpose.requires_range() {
+                range.range_start = 9;
+                range.range_end = 8;
+                assert_eq!(
+                    sign_mount_storage_capability(&range, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+                range.range_start = 0;
+                range.range_end = u64::MAX;
+                assert_eq!(
+                    sign_mount_storage_capability(&range, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+                range.range_start = 42;
+                range.range_end = 42;
+                assert!(sign_mount_storage_capability(&range, purpose, 3, &pair).is_ok());
+            } else {
+                range.range_end = 1;
+                assert_eq!(
+                    sign_mount_storage_capability(&range, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mount_capabilities_require_every_common_uuid_for_every_operation() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        for purpose in MOUNT_USES {
+            for field in 0..8 {
+                let mut claims = mount_claims(purpose);
+                let invalid = "not-a-uuid".to_owned();
+                match field {
+                    0 => claims.capability_id = invalid,
+                    1 => claims.tenant_id = invalid,
+                    2 => claims.principal_id = invalid,
+                    3 => claims.mount_session_id = invalid,
+                    4 => claims.credential_id = invalid,
+                    5 => claims.drive_id = invalid,
+                    6 => claims.resource_id = invalid,
+                    7 => claims.grant_id = invalid,
+                    _ => unreachable!(),
+                }
+                assert_eq!(
+                    sign_mount_storage_capability(&claims, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims),
+                    "purpose={purpose:?} field={field}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mount_capabilities_require_every_generation_and_fence() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        for purpose in MOUNT_USES {
+            for field in 0..8 {
+                let mut claims = mount_claims(purpose);
+                match field {
+                    0 => claims.credential_generation = 0,
+                    1 => claims.authorization_generation = 0,
+                    2 => claims.membership_generation = 0,
+                    3 => claims.drive_acl_generation = 0,
+                    4 => claims.namespace_generation = 0,
+                    5 => claims.resource_acl_generation = 0,
+                    6 => claims.gateway_epoch = 0,
+                    7 => claims.fencing_token = 0,
+                    _ => unreachable!(),
+                }
+                assert_eq!(
+                    sign_mount_storage_capability(&claims, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims),
+                    "purpose={purpose:?} field={field}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mount_nonce_and_lifetime_bounds_are_enforced() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let keys = mount_keyset(&pair, 3);
+        for purpose in MOUNT_USES {
+            for length in [15, 65] {
+                let mut claims = mount_claims(purpose);
+                claims.nonce = vec![1; length];
+                assert_eq!(
+                    sign_mount_storage_capability(&claims, purpose, 3, &pair),
+                    Err(CapabilityError::InvalidClaims)
+                );
+            }
+            for length in [16, 64] {
+                let mut claims = mount_claims(purpose);
+                claims.nonce = vec![1; length];
+                assert!(sign_mount_storage_capability(&claims, purpose, 3, &pair).is_ok());
+            }
+
+            let mut too_long = mount_claims(purpose);
+            too_long.expires_at_unix_seconds =
+                too_long.issued_at_unix_seconds + MAX_MOUNT_CAPABILITY_LIFETIME_SECONDS + 1;
+            assert_eq!(
+                sign_mount_storage_capability(&too_long, purpose, 3, &pair),
+                Err(CapabilityError::LifetimeTooLong)
+            );
+            let mut reversed = mount_claims(purpose);
+            reversed.expires_at_unix_seconds = reversed.issued_at_unix_seconds - 1;
+            assert_eq!(
+                sign_mount_storage_capability(&reversed, purpose, 3, &pair),
+                Err(CapabilityError::LifetimeTooLong)
+            );
+            let mut overflowing = mount_claims(purpose);
+            overflowing.issued_at_unix_seconds = i64::MIN;
+            overflowing.expires_at_unix_seconds = i64::MAX;
+            assert_eq!(
+                sign_mount_storage_capability(&overflowing, purpose, 3, &pair),
+                Err(CapabilityError::LifetimeTooLong)
+            );
+
+            let claims = mount_claims(purpose);
+            let wire = sign_mount_storage_capability(&claims, purpose, 3, &pair).unwrap();
+            assert_eq!(
+                verify_mount_storage_capability(
+                    &wire,
+                    &keys,
+                    "filebelt-worker-io",
+                    purpose,
+                    claims.issued_at_unix_seconds - 1,
+                ),
+                Err(CapabilityError::Expired)
+            );
+            assert_eq!(
+                verify_mount_storage_capability(
+                    &wire,
+                    &keys,
+                    "filebelt-worker-io",
+                    purpose,
+                    claims.expires_at_unix_seconds,
+                ),
+                Err(CapabilityError::Expired)
+            );
+        }
+    }
+
+    #[test]
+    fn mount_generation_rotation_overlap_verifies_exact_generations() {
+        let old = Ed25519KeyPair::generate().unwrap();
+        let new = Ed25519KeyPair::generate().unwrap();
+        let old_claims = mount_claims(MountStorageCapabilityUse::Read);
+        let new_claims = mount_claims(MountStorageCapabilityUse::Write);
+        let old_wire =
+            sign_mount_storage_capability(&old_claims, MountStorageCapabilityUse::Read, 3, &old)
+                .unwrap();
+        let new_wire =
+            sign_mount_storage_capability(&new_claims, MountStorageCapabilityUse::Write, 4, &new)
+                .unwrap();
         let keys = MountStorageKeyset::parse(&format!(
-            "filebelt-capability-keyset-v2\npurpose=mount-storage\n3:{}\n",
-            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+            "filebelt-capability-keyset-v2\npurpose=mount-storage\n3:{}\n4:{}\n",
+            URL_SAFE_NO_PAD.encode(old.public_key().as_ref()),
+            URL_SAFE_NO_PAD.encode(new.public_key().as_ref()),
         ))
         .unwrap();
         assert_eq!(
-            verify_mount_storage_read_capability(&wire, &keys, "filebelt-worker-io", 110)
-                .unwrap()
-                .generation,
+            verify_mount_storage_capability(
+                &old_wire,
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            )
+            .unwrap()
+            .generation,
             3
         );
-        let mut write = mount_claims();
-        write.operation = MountCapabilityOperation::Write as i32;
         assert_eq!(
-            sign_mount_storage_read_capability(&write, 3, &pair),
+            verify_mount_storage_capability(
+                &new_wire,
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Write,
+                110,
+            )
+            .unwrap()
+            .generation,
+            4
+        );
+    }
+
+    #[test]
+    fn mount_prefix_purpose_domain_signature_audience_and_generation_are_bound() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let claims = mount_claims(MountStorageCapabilityUse::Read);
+        let wire =
+            sign_mount_storage_capability(&claims, MountStorageCapabilityUse::Read, 3, &pair)
+                .unwrap();
+        let keys = mount_keyset(&pair, 3);
+        assert_eq!(
+            verify_mount_storage_capability(
+                wire.replacen("fbcap2.", "fbcap1.", 1).as_str(),
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::InvalidEncoding)
+        );
+        for malformed in ["fbcap2.%", "fbcap2.AA"] {
+            assert_eq!(
+                verify_mount_storage_capability(
+                    malformed,
+                    &keys,
+                    "filebelt-worker-io",
+                    MountStorageCapabilityUse::Read,
+                    110,
+                ),
+                Err(CapabilityError::InvalidEncoding)
+            );
+        }
+        assert_eq!(
+            verify_mount_storage_capability(
+                &wire,
+                &keys,
+                "another-audience",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::WrongAudience)
+        );
+        assert_eq!(
+            sign_mount_storage_capability(&claims, MountStorageCapabilityUse::Read, 0, &pair,),
             Err(CapabilityError::InvalidClaims)
+        );
+        assert_eq!(
+            verify_mount_storage_capability(
+                &wire,
+                &mount_keyset(&pair, 4),
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::UnknownKey)
+        );
+        assert!(matches!(
+            MountStorageKeyset::parse(&format!(
+                "filebelt-capability-keyset-v2\npurpose=api-storage\n3:{}\n",
+                URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+            )),
+            Err(KeysetError::InvalidEncoding)
+        ));
+
+        let claims_bytes = claims.encode_to_vec();
+        let wrong_domain_input = [CAPABILITY_SIGNATURE_DOMAIN, claims_bytes.as_slice()].concat();
+        let wrong_domain = SignedMountCapability {
+            key_generation: 3,
+            claims: claims_bytes,
+            signature: pair.sign(&wrong_domain_input).as_ref().to_vec(),
+        };
+        let wrong_domain_wire = format!(
+            "fbcap2.{}",
+            URL_SAFE_NO_PAD.encode(wrong_domain.encode_to_vec())
+        );
+        assert_eq!(
+            verify_mount_storage_capability(
+                &wrong_domain_wire,
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::InvalidSignature)
+        );
+
+        let encoded = wire.strip_prefix("fbcap2.").unwrap();
+        let mut signed =
+            SignedMountCapability::decode(URL_SAFE_NO_PAD.decode(encoded).unwrap().as_slice())
+                .unwrap();
+        let mut changed_claims = MountCapabilityClaims::decode(signed.claims.as_slice()).unwrap();
+        changed_claims.drive_id = Uuid::new_v4().to_string();
+        signed.claims = changed_claims.encode_to_vec();
+        let changed_claims_wire =
+            format!("fbcap2.{}", URL_SAFE_NO_PAD.encode(signed.encode_to_vec()));
+        assert_eq!(
+            verify_mount_storage_capability(
+                &changed_claims_wire,
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::InvalidSignature)
+        );
+
+        let mut signed =
+            SignedMountCapability::decode(URL_SAFE_NO_PAD.decode(encoded).unwrap().as_slice())
+                .unwrap();
+        signed.signature[0] ^= 1;
+        let tampered = format!("fbcap2.{}", URL_SAFE_NO_PAD.encode(signed.encode_to_vec()));
+        assert_eq!(
+            verify_mount_storage_capability(
+                &tampered,
+                &keys,
+                "filebelt-worker-io",
+                MountStorageCapabilityUse::Read,
+                110,
+            ),
+            Err(CapabilityError::InvalidSignature)
         );
     }
 }

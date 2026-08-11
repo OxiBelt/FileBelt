@@ -80,7 +80,11 @@ SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
-path = [".agents/skills/subagent-delegation/SKILL.md"]
+path = [
+  ".agents/skills/subagent-orchestration/SKILL.md",
+  ".agents/skills/subagent-orchestration/references/orchestration-patterns.md",
+  ".agents/skills/subagent-orchestration/references/security-review-budgeting.md",
+]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "Apache-2.0"

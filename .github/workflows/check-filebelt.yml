@@ -45,6 +45,8 @@ jobs:
         run: tests/scripts/check-helm-chart.sh
       - name: Check Kubernetes acceptance contracts
         run: tests/kubernetes/check-acceptance-contract.sh
+      - name: Check fail-closed NFS qualification contract
+        run: tests/scripts/check-nfs-qualification-contract.sh
       - name: Install REUSE
         run: >-
           python3 -m pip install --disable-pip-version-check

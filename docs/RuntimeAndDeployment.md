@@ -434,6 +434,15 @@ only Service is ClusterIP TCP 2049, and policy provides no KDC egress. Until
 that image ABI and protocol evidence are qualified, operators must leave NFS
 disabled.
 
+The checked-in NFS qualification scaffold is read-only and deliberately fails
+its publication boundary. It rejects emulated builds, an image that retains the
+`abi-probe-only` label, incomplete LGPL/source/SBOM/provenance evidence, and an
+incomplete Ubuntu/Debian/RHEL 10 `krb5p` client matrix. The repository currently
+defines no native RISC-V runner label, immutable client rootfs set, external
+KDC fixture, cluster administration driver, evidence assembler, or NFS
+promotion job. Those inputs require separate review before the scaffold can
+become release evidence; see [NFS release qualification](operations/nfs-qualification.md).
+
 The media release target is one isolated Job per fenced attempt in a
 pre-created namespace, with no service-account token, database credential,
 payload/cache mount, DNS, or Internet route. The current tree contains closed

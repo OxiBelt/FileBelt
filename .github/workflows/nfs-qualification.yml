@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: NFS release qualification scaffold
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nfs-qualification.yml"
+      - "tests/nfs/qualification/**"
+      - "tests/scripts/*nfs*"
+      - "docs/operations/nfs-qualification.md"
+  workflow_dispatch:
+    inputs:
+      native_riscv64_runner:
+        description: Repository-configured native RISC-V runner label; QEMU is forbidden
+        required: true
+        type: string
+      ubuntu_amd64_runner:
+        description: Isolated native Ubuntu amd64 krb5p client runner label
+        required: true
+        type: string
+      ubuntu_arm64_runner:
+        description: Isolated native Ubuntu arm64 krb5p client runner label
+        required: true
+        type: string
+      debian_amd64_runner:
+        description: Isolated native Debian amd64 krb5p client runner label
+        required: true
+        type: string
+      debian_arm64_runner:
+        description: Isolated native Debian arm64 krb5p client runner label
+        required: true
+        type: string
+      rhel10_amd64_runner:
+        description: Isolated native RHEL 10 amd64 krb5p client runner label
+        required: true
+        type: string
+      rhel10_arm64_runner:
+        description: Isolated native RHEL 10 arm64 krb5p client runner label
+        required: true
+        type: string
+      qualification_config:
+        description: Absolute path to the root-owned fixture config on every client runner
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nfs-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Validate fail-closed qualification contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Test the immutable evidence validator
+        run: python3 tests/scripts/test_validate_nfs_qualification.py
+      - name: Check the workflow and executable harness contract
+        run: tests/scripts/check-nfs-qualification-contract.sh
+
+  native-builds:
+    name: Native adapter build (${{ matrix.platform }})
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            artifact-arch: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            artifact-arch: arm64
+          - runner: ${{ inputs.native_riscv64_runner }}
+            platform: linux/riscv64
+            artifact-arch: riscv64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      - name: Check out the exact signed release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Build and inspect the exact native Ganesha 6.5 image
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          NFS_PLATFORM: ${{ matrix.platform }}
+          EVIDENCE_OUTPUT: artifacts/nfs/native/${{ matrix.artifact-arch }}.json
+        run: >-
+          tests/scripts/run-nfs-native-build.sh
+          --tag "$RELEASE_TAG"
+          --platform "$NFS_PLATFORM"
+          --output "$EVIDENCE_OUTPUT"
+      - name: Upload native build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-nfs-native-${{ matrix.artifact-arch }}
+          path: artifacts/nfs/native
+          if-no-files-found: error
+          retention-days: 30
+
+  clients:
+    name: ${{ matrix.distribution }} ${{ matrix.architecture }} krb5p client
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+    needs: native-builds
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ${{ inputs.ubuntu_amd64_runner }}
+            distribution: ubuntu
+            architecture: amd64
+          - runner: ${{ inputs.ubuntu_arm64_runner }}
+            distribution: ubuntu
+            architecture: arm64
+          - runner: ${{ inputs.debian_amd64_runner }}
+            distribution: debian
+            architecture: amd64
+          - runner: ${{ inputs.debian_arm64_runner }}
+            distribution: debian
+            architecture: arm64
+          - runner: ${{ inputs.rhel10_amd64_runner }}
+            distribution: rhel
+            architecture: amd64
+          - runner: ${{ inputs.rhel10_arm64_runner }}
+            distribution: rhel
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact signed release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Verify the authorized release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: tests/scripts/verify-release-tag.sh "$RELEASE_TAG"
+      - name: Run the real NFSv4.2 krb5p client suite
+        env:
+          CLIENT_DISTRIBUTION: ${{ matrix.distribution }}
+          CLIENT_ARCHITECTURE: ${{ matrix.architecture }}
+          QUALIFICATION_CONFIG: ${{ inputs.qualification_config }}
+          EVIDENCE_OUTPUT: artifacts/nfs/clients/${{ matrix.distribution }}-${{ matrix.architecture }}.json
+        run: >-
+          sudo /usr/bin/timeout --signal=TERM --kill-after=30s 2400s
+          /usr/bin/python3 tests/scripts/run-nfs-client-qualification.py
+          --distribution "$CLIENT_DISTRIBUTION"
+          --architecture "$CLIENT_ARCHITECTURE"
+          --config "$QUALIFICATION_CONFIG"
+          --output "$EVIDENCE_OUTPUT"
+      - name: Reconcile exact run-owned client resources
+        if: always()
+        env:
+          CLIENT_DISTRIBUTION: ${{ matrix.distribution }}
+          CLIENT_ARCHITECTURE: ${{ matrix.architecture }}
+          QUALIFICATION_CONFIG: ${{ inputs.qualification_config }}
+          EVIDENCE_OUTPUT: artifacts/nfs/clients/${{ matrix.distribution }}-${{ matrix.architecture }}.json
+        run: >-
+          sudo /usr/bin/timeout --signal=TERM --kill-after=30s 300s
+          /usr/bin/python3 tests/scripts/run-nfs-client-qualification.py
+          --distribution "$CLIENT_DISTRIBUTION"
+          --architecture "$CLIENT_ARCHITECTURE"
+          --config "$QUALIFICATION_CONFIG"
+          --output "$EVIDENCE_OUTPUT"
+          --cleanup-only
+      - name: Upload secret-free client evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-nfs-client-${{ matrix.distribution }}-${{ matrix.architecture }}
+          path: artifacts/nfs/clients
+          if-no-files-found: error
+          retention-days: 30
+
+  qualification-boundary:
+    name: Preserve the NFS publication boundary
+    if: always() && github.event_name == 'workflow_dispatch'
+    needs: [contract, native-builds, clients]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every executable qualification tier
+        env:
+          CONTRACT: ${{ needs.contract.result }}
+          NATIVE_BUILDS: ${{ needs.native-builds.result }}
+          CLIENTS: ${{ needs.clients.result }}
+        run: |
+          test "$CONTRACT" = success
+          test "$NATIVE_BUILDS" = success
+          test "$CLIENTS" = success
+      - name: Refuse publication without an assembled immutable evidence package
+        run: |
+          echo "NFS publication remains blocked: the repository has no admitted native RISC-V/client runner labels, root-owned KDC/admin fixture, or immutable SBOM/source/provenance evidence assembler." >&2
+          exit 1

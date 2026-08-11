@@ -39,8 +39,10 @@ their respective details:
 - [UI documentation](../ui/README.md) defines browser security, accessibility,
   design, dependency, and test requirements.
 - [Kubernetes operations](operations/kubernetes.md),
-  [ONLYOFFICE integration operations](operations/onlyoffice.md), and the neighboring
-  operations guides define deployment-specific procedures and rollback steps.
+  [ONLYOFFICE integration operations](operations/onlyoffice.md),
+  [NFS release qualification](operations/nfs-qualification.md), and the
+  neighboring operations guides define deployment-specific procedures and
+  rollback steps.
 
 ## Maintaining the specifications
 

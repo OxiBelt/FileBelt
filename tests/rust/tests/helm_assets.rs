@@ -53,7 +53,7 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
         .map(str::to_owned)
         .collect()
     );
-    assert!(metadata.contains("filebelt.dev/phase: \"5\""));
+    assert!(metadata.contains("filebelt.dev/phase: \"8\""));
     assert!(metadata.contains("kubeVersion: \">=1.34.0-0 <1.37.0-0\""));
     for role in [
         "filebelt-api",
@@ -128,10 +128,18 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
     assert!(
         values.contains("launchAction: https://filebelt-editor.example.invalid/onlyoffice/launch")
     );
+    let mount_properties = &schema["properties"]["mounts"]["properties"];
+    assert!(mount_properties.get("enabled").is_none());
     assert_eq!(
-        schema["properties"]["mounts"]["properties"]["enabled"]["type"],
+        schema["definitions"]["tailnetStatefulSet"]["properties"]["enabled"]["type"],
         "boolean"
     );
+    for protocol in ["ftpFtps", "nfs"] {
+        assert_eq!(
+            mount_properties[protocol]["properties"]["enabled"]["type"],
+            "boolean"
+        );
+    }
 }
 
 #[test]

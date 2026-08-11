@@ -108,7 +108,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(checks.contains("linux/arm64"));
     assert!(checks.contains("linux/riscv64"));
     assert!(checks.contains("--qemu-mode rootless"));
-    assert!(checks.contains("azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4"));
+    assert!(checks.contains("azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310"));
     assert!(checks.contains("version: v4.2.3"));
     assert!(checks.contains("tests/scripts/check-helm-chart.sh"));
     assert!(checks.contains("tests/scripts/verify-release-tag.sh --check-trust"));
@@ -152,7 +152,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         assert!(release.contains(node_image));
     }
     assert!(release.contains("oci://ghcr.io/oxibelt/charts"));
-    assert!(release.contains("actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d"));
+    assert!(release.contains("actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"));
     assert!(release.contains("sha256sum --check SHA256SUMS"));
     assert!(release.contains("refusing to replace existing Helm release"));
     assert!(release.contains("--verify-tag"));
@@ -238,7 +238,7 @@ fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
     let protocol = &workflow[protocol_start..protocol_end];
 
     let setup = protocol
-        .find("actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020")
+        .find("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
         .expect("pinned Node setup");
     let activation = protocol
         .find("corepack prepare pnpm@11.20.0 --activate")

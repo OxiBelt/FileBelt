@@ -565,6 +565,116 @@ paths:
                 $ref: "#/components/schemas/MediaPreview"
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs:
+    get:
+      operationId: getNfsAdminOverview
+      description: Returns the PostgreSQL-authoritative desired and gateway-applied NFS state for a recently reauthenticated tenant administrator.
+      responses:
+        "200":
+          description: Current NFS feature, export, POSIX group, and exact principal projections.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsAdminOverview"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/feature:
+    put:
+      operationId: transitionNfsFeature
+      description: Advances the NFS feature through one generation-fenced staged transition. Unsafe state jumps fail closed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NfsFeatureTransition"
+      responses:
+        "200":
+          description: Feature state advanced by its expected generation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsFeature"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/exports:
+    post:
+      operationId: registerNfsExport
+      description: Registers one drive export in the disabled desired state. Registration does not expose the drive to NFS.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NfsExportRegistration"
+      responses:
+        "201":
+          description: New disabled export registration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsExport"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/exports/{drive_id}:
+    put:
+      operationId: transitionNfsExport
+      description: Stages one generation-fenced desired export transition. Disabling requires an applied draining generation.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NfsExportTransition"
+      responses:
+        "200":
+          description: Export desired state advanced by its expected generation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsExport"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/admin/mounts/nfs/posix-groups:
+    post:
+      operationId: registerNfsPosixGroup
+      description: Registers one existing FileBelt group as a tenant-unique POSIX group projection.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NfsPosixGroupRegistration"
+      responses:
+        "201":
+          description: New POSIX group projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NfsPosixGroup"
+        default:
+          $ref: "#/components/responses/Problem"
   /api/v1/admin/mounts/nfs/mappings:
     get:
       operationId: listNfsPrincipalMappings
@@ -3156,12 +3266,19 @@ components:
           type: integer
           format: int64
           minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
         projected_gid:
           type: integer
           format: int64
           minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
         allowed_drive_ids:
           type: array
+          minItems: 1
           maxItems: 256
           uniqueItems: true
           items:
@@ -3187,14 +3304,197 @@ components:
           type: integer
           format: int64
           minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
         projected_gid:
           type: integer
           format: int64
           minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
         generation:
           type: integer
           format: int64
           minimum: 1
+    NfsAdminOverview:
+      type: object
+      additionalProperties: false
+      required: [feature, exports, posix_groups, mappings]
+      properties:
+        feature:
+          $ref: "#/components/schemas/NfsFeature"
+        exports:
+          type: array
+          items:
+            $ref: "#/components/schemas/NfsExport"
+        posix_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/NfsPosixGroup"
+        mappings:
+          type: array
+          items:
+            $ref: "#/components/schemas/NfsPrincipalMapping"
+    NfsFeatureState:
+      type: string
+      enum: [disabled, preflight, active, draining]
+    NfsFeatureTransition:
+      type: object
+      additionalProperties: false
+      required: [target_state, expected_generation]
+      properties:
+        target_state:
+          $ref: "#/components/schemas/NfsFeatureState"
+        expected_generation:
+          type: integer
+          format: int64
+          minimum: 1
+    NfsFeature:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - generation
+        - desired_manifest_generation
+        - applied_manifest_generation
+        - manifest_applied
+        - applied_gateway_id
+        - applied_gateway_epoch
+        - restore_generation
+      properties:
+        state:
+          $ref: "#/components/schemas/NfsFeatureState"
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        desired_manifest_generation:
+          type: integer
+          format: int64
+          minimum: 1
+        applied_manifest_generation:
+          type: integer
+          format: int64
+          minimum: 0
+        manifest_applied:
+          type: boolean
+        applied_gateway_id:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 255
+            - type: "null"
+        applied_gateway_epoch:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+            - type: "null"
+        restore_generation:
+          type: integer
+          format: int64
+          minimum: 1
+    NfsExportRegistration:
+      type: object
+      additionalProperties: false
+      required: [drive_id, export_id]
+      properties:
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        export_id:
+          type: integer
+          format: int64
+          minimum: 1
+    NfsExportTransition:
+      type: object
+      additionalProperties: false
+      required: [target_state, expected_generation]
+      properties:
+        target_state:
+          type: string
+          enum: [disabled, active, draining]
+        expected_generation:
+          type: integer
+          format: int64
+          minimum: 1
+    NfsExport:
+      type: object
+      additionalProperties: false
+      required:
+        - drive_id
+        - export_id
+        - export_path
+        - desired_state
+        - applied_state
+        - desired_generation
+        - applied_generation
+        - in_sync
+      properties:
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        export_id:
+          type: integer
+          format: int64
+          minimum: 1
+        export_path:
+          type: string
+          pattern: '^/filebelt/[0-9a-f-]+$'
+        desired_state:
+          type: string
+          enum: [disabled, active, draining]
+        applied_state:
+          type: string
+          enum: [disabled, active, draining]
+        desired_generation:
+          type: integer
+          format: int64
+          minimum: 1
+        applied_generation:
+          type: integer
+          format: int64
+          minimum: 0
+        in_sync:
+          type: boolean
+    NfsPosixGroupRegistration:
+      type: object
+      additionalProperties: false
+      required: [group_id, posix_name, projected_gid]
+      properties:
+        group_id:
+          $ref: "#/components/schemas/UuidV4"
+        posix_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[a-z_][a-z0-9_.-]{0,254}$'
+        projected_gid:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
+    NfsPosixGroup:
+      type: object
+      additionalProperties: false
+      required: [group_id, posix_name, projected_gid]
+      properties:
+        group_id:
+          $ref: "#/components/schemas/UuidV4"
+        posix_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[a-z_][a-z0-9_.-]{0,254}$'
+        projected_gid:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967294
+          not:
+            const: 65534
     CreateMarkdownImportIntent:
       type: object
       additionalProperties: false

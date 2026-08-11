@@ -51,6 +51,7 @@ import {
   VisuallyHiddenStyle,
 } from "@filebelt/design-system";
 import type { Density, ThemeChoice } from "@filebelt/design-system";
+import type { NfsAdminClient } from "@filebelt/admin";
 import type { McpSettingsClient } from "@filebelt/mcp-settings";
 
 import { PrivacyView, SessionsView, SharesView, UploadsView, VersionsView } from "./ActivityViews.js";
@@ -208,6 +209,7 @@ interface AppProps {
   DocumentClient?: DocumentSessionClient;
   McpClient?: McpSettingsClient;
   MountClient?: MountSettingsClient;
+  NfsClient?: NfsAdminClient;
 }
 
 export function OidcLoginHref(): string {
@@ -224,7 +226,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
-export function App({ Client, DocumentClient, McpClient, MountClient }: AppProps): ReactNode {
+export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient }: AppProps): ReactNode {
   const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
@@ -408,6 +410,7 @@ export function App({ Client, DocumentClient, McpClient, MountClient }: AppProps
                     onCreateGroup={(Name) => Mutate(() => Client.createGroup(Name), En.createdGroup(Name))}
                     onCreateSharedDrive={(Name) => Mutate(() => Client.createSharedDrive(Name), En.createdSharedDrive(Name))}
                     onToggleUserSuspension={(Id) => Mutate(() => Client.suspendUser(Id), En.userStatusUpdated)}
+                    {...(NfsClient === undefined ? {} : { NfsClient })}
                     Users={Snapshot.Admin.Users}
                   />
                 </Suspense>

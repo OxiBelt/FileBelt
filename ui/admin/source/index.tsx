@@ -1,11 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Button, Input, Tab as FluentTab, TabList } from "@fluentui/react-components";
-import { CircleGauge, HardDrive, Plus, ShieldCheck, Users as UsersIcon } from "lucide-react";
+import { CircleGauge, HardDrive, Network, Plus, ShieldCheck, Users as UsersIcon } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import { AdminEn as strings } from "./strings.js";
+import { NfsAdminSurface } from "./nfs.js";
+import type { NfsAdminClient } from "./nfs.js";
+
+export {
+  ExportTransitions,
+  FeatureTransitions,
+  NfsAdminOverviewView,
+  NfsAdminSurface,
+  NfsReauthenticationRequiredError,
+} from "./nfs.js";
+export type {
+  NfsAdminClient,
+  NfsAdminSnapshot,
+  NfsExportRegistration,
+  NfsExportState,
+  NfsExportView,
+  NfsFeatureState,
+  NfsFeatureView,
+  NfsMappingUpsert,
+  NfsMappingView,
+  NfsPosixGroupRegistration,
+  NfsPosixGroupView,
+} from "./nfs.js";
 
 export interface AdminUserView {
   Email: string;
@@ -34,10 +57,11 @@ export interface AdminPanelProps {
   onCreateGroup(Name: string): Promise<void>;
   onCreateSharedDrive(Name: string): Promise<void>;
   onToggleUserSuspension(UserId: string): Promise<void>;
+  NfsClient?: NfsAdminClient;
   Users: readonly AdminUserView[];
 }
 
-type AdminTab = "drives" | "groups" | "users";
+type AdminTab = "drives" | "groups" | "nfs" | "users";
 
 function FormatBytes(Value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(Value);
@@ -95,6 +119,7 @@ export default function AdminPanel({
   onCreateGroup: OnCreateGroup,
   onCreateSharedDrive: OnCreateSharedDrive,
   onToggleUserSuspension: OnToggleUserSuspension,
+  NfsClient,
   Users,
 }: AdminPanelProps): ReactNode {
   const [Tab, SetTab] = useState<AdminTab>("users");
@@ -123,6 +148,7 @@ export default function AdminPanel({
         <FluentTab icon={<UsersIcon aria-hidden="true" size={20} strokeWidth={1.75} />} value="users">{strings.users}</FluentTab>
         <FluentTab icon={<CircleGauge aria-hidden="true" size={20} strokeWidth={1.75} />} value="groups">{strings.groups}</FluentTab>
         <FluentTab icon={<HardDrive aria-hidden="true" size={20} strokeWidth={1.75} />} value="drives">{strings.drives}</FluentTab>
+        {NfsClient === undefined ? null : <FluentTab icon={<Network aria-hidden="true" size={20} strokeWidth={1.75} />} value="nfs">{strings.nfs}</FluentTab>}
       </TabList>
 
       {Tab === "users" ? (
@@ -181,6 +207,8 @@ export default function AdminPanel({
           </div>
         </div>
       ) : null}
+
+      {Tab === "nfs" && NfsClient !== undefined ? <NfsAdminSurface Client={NfsClient} /> : null}
     </section>
   );
 }

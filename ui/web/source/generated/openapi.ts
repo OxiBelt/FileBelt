@@ -154,6 +154,74 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/admin/mounts/nfs": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns the PostgreSQL-authoritative desired and gateway-applied NFS state for a recently reauthenticated tenant administrator. */
+        readonly get: operations["getNfsAdminOverview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/exports": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Registers one drive export in the disabled desired state. Registration does not expose the drive to NFS. */
+        readonly post: operations["registerNfsExport"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/exports/{drive_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** @description Stages one generation-fenced desired export transition. Disabling requires an applied draining generation. */
+        readonly put: operations["transitionNfsExport"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/feature": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** @description Advances the NFS feature through one generation-fenced staged transition. Unsafe state jumps fail closed. */
+        readonly put: operations["transitionNfsFeature"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/admin/mounts/nfs/mappings": {
         readonly parameters: {
             readonly query?: never;
@@ -182,6 +250,23 @@ export interface paths {
         readonly put?: never;
         readonly post?: never;
         readonly delete: operations["revokeNfsPrincipalMapping"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/posix-groups": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Registers one existing FileBelt group as a tenant-unique POSIX group projection. */
+        readonly post: operations["registerNfsPosixGroup"];
+        readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
@@ -2054,6 +2139,71 @@ export interface components {
             /** Format: int64 */
             readonly expected_namespace_generation: number;
         };
+        readonly NfsAdminOverview: {
+            readonly exports: readonly components["schemas"]["NfsExport"][];
+            readonly feature: components["schemas"]["NfsFeature"];
+            readonly mappings: readonly components["schemas"]["NfsPrincipalMapping"][];
+            readonly posix_groups: readonly components["schemas"]["NfsPosixGroup"][];
+        };
+        readonly NfsExport: {
+            /** Format: int64 */
+            readonly applied_generation: number;
+            /** @enum {string} */
+            readonly applied_state: "disabled" | "active" | "draining";
+            /** Format: int64 */
+            readonly desired_generation: number;
+            /** @enum {string} */
+            readonly desired_state: "disabled" | "active" | "draining";
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly export_id: number;
+            readonly export_path: string;
+            readonly in_sync: boolean;
+        };
+        readonly NfsExportRegistration: {
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly export_id: number;
+        };
+        readonly NfsExportTransition: {
+            /** Format: int64 */
+            readonly expected_generation: number;
+            /** @enum {string} */
+            readonly target_state: "disabled" | "active" | "draining";
+        };
+        readonly NfsFeature: {
+            readonly applied_gateway_epoch: number | null;
+            readonly applied_gateway_id: string | null;
+            /** Format: int64 */
+            readonly applied_manifest_generation: number;
+            /** Format: int64 */
+            readonly desired_manifest_generation: number;
+            /** Format: int64 */
+            readonly generation: number;
+            readonly manifest_applied: boolean;
+            /** Format: int64 */
+            readonly restore_generation: number;
+            readonly state: components["schemas"]["NfsFeatureState"];
+        };
+        /** @enum {string} */
+        readonly NfsFeatureState: "disabled" | "preflight" | "active" | "draining";
+        readonly NfsFeatureTransition: {
+            /** Format: int64 */
+            readonly expected_generation: number;
+            readonly target_state: components["schemas"]["NfsFeatureState"];
+        };
+        readonly NfsPosixGroup: {
+            readonly group_id: components["schemas"]["UuidV4"];
+            readonly posix_name: string;
+            /** Format: int64 */
+            readonly projected_gid: number;
+        };
+        readonly NfsPosixGroupRegistration: {
+            readonly group_id: components["schemas"]["UuidV4"];
+            readonly posix_name: string;
+            /** Format: int64 */
+            readonly projected_gid: number;
+        };
         readonly NfsPrincipalMapping: {
             readonly credential_id: components["schemas"]["UuidV4"];
             /** Format: int64 */
@@ -2837,6 +2987,119 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly getNfsAdminOverview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current NFS feature, export, POSIX group, and exact principal projections. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsAdminOverview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly registerNfsExport: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsExportRegistration"];
+            };
+        };
+        readonly responses: {
+            /** @description New disabled export registration. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsExport"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly transitionNfsExport: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsExportTransition"];
+            };
+        };
+        readonly responses: {
+            /** @description Export desired state advanced by its expected generation. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsExport"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly transitionNfsFeature: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsFeatureTransition"];
+            };
+        };
+        readonly responses: {
+            /** @description Feature state advanced by its expected generation. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsFeature"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly listNfsPrincipalMappings: {
         readonly parameters: {
             readonly query?: never;
@@ -2921,6 +3184,36 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly registerNfsPosixGroup: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsPosixGroupRegistration"];
+            };
+        };
+        readonly responses: {
+            /** @description New POSIX group projection. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsPosixGroup"];
+                };
             };
             readonly default: components["responses"]["Problem"];
         };

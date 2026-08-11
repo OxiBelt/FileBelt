@@ -6,6 +6,7 @@
 
 mod audit;
 mod grants;
+mod nfs;
 mod phase8;
 mod recovery;
 mod scrub;
@@ -78,6 +79,10 @@ enum Command {
     Phase8 {
         #[command(subcommand)]
         command: Phase8Command,
+    },
+    Nfs {
+        #[command(subcommand)]
+        command: nfs::Command,
     },
     Security {
         #[command(subcommand)]
@@ -788,6 +793,7 @@ async fn execute(command: Command) -> Result<String, String> {
             let (configuration, database) = configured_database(&config).await?;
             phase8::deactivate(&database, &configuration.tenant.slug, actor_principal_id).await
         }
+        Command::Nfs { command } => nfs::execute(command).await,
         Command::Security {
             command:
                 SecurityCommand::DescendantShares {

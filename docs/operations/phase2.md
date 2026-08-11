@@ -97,6 +97,12 @@ compatibility analysis in the same pull request.
 
 ## Normal operation
 
+The descendant-share cutover is an authorization repair, not a routine feature
+toggle. When its gate is blocked, direct-share and MCP data-grant creation must
+remain unavailable until the tenant-scoped 1,000-row repair, verification, and
+explicit tenant-admin activation complete. Preserve the operation UUID and
+receipts with Phase 2 operational evidence.
+
 ### Identity and access
 
 - Use local suspend when an IdP account must be blocked immediately; FileBelt

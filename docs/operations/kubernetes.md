@@ -140,6 +140,30 @@ Never combine a new workload image/config rollout with the migration revision.
    approval/data-grant/revocation path before enabling runners in a separate
    revision.
 
+### Descendant-share security cutover
+
+For the descendant-share migration, the migration itself deliberately leaves
+direct-share and MCP data-grant admission blocked. After migration and grant
+verification, roll compatible API images before running these recovery-credential
+Jobs, one per Helm revision. Generate one operation UUID for the tenant cutover
+and reuse it for every repair retry, verification, and activation:
+
+1. Render `security-descendant-shares-status` with only `operationId` to record
+   the tenant's gate/run state.
+2. Render `security-descendant-shares-repair` with `operationId`, exact
+   `tenantSlugConfirmation`, and the live tenant-admin `actorPrincipalId`.
+   Repeat the same operation UUID until its 1,000-row batches report complete.
+3. Render `security-descendant-shares-verify` with the same three values; stop
+   on any residual target, receipt/checkpoint, generation, or audit mismatch.
+4. After compatible workload rollout and acceptance, render
+   `security-descendant-shares-activate` with the verified run UUID, exact
+   tenant slug, and tenant-admin actor. Only this action reopens the tenant.
+
+These Jobs mount only the recovery database Secret, have no payload claim or
+service-account token, and may reach only DNS/PostgreSQL. Do not use freeform
+operation arguments, a database-owner login, a direct SQL update, or an old API
+image as a substitute for verification or activation.
+
 For the additive mount migrations, keep mount workloads disabled while the DBA
 applies VFS and Headscale grants. Provision the purpose-tagged `mount-storage`
 public keyset in I/O before any VFS signer could start. Rollback leaves

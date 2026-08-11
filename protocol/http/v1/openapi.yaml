@@ -902,6 +902,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DirectShare"
+        "503":
+          description: Direct-share admission is blocked until the tenant descendant-share repair is verified and activated. The Problem code is `share.remediation_in_progress`.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter60"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}:
@@ -1575,6 +1584,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/McpDataGrant"
+        "503":
+          description: MCP data-grant admission is blocked until the tenant descendant-share repair is verified and activated. The Problem code is `mcp.data_grant.remediation_in_progress`.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter60"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants/{mcp_grant_id}:
@@ -2238,6 +2256,11 @@ components:
       description: Opaque generation validator for this representation.
       schema:
         type: string
+    RetryAfter60:
+      description: The tenant-wide security admission gate is rechecked after 60 seconds; clients must not retry earlier.
+      schema:
+        type: string
+        const: "60"
   responses:
     Problem:
       description: Stable FileBelt problem response.

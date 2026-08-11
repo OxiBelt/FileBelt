@@ -11,6 +11,7 @@ pub(crate) struct ApiError {
     status: StatusCode,
     code: &'static str,
     title: &'static str,
+    retry_after_seconds: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -28,6 +29,16 @@ impl ApiError {
             status,
             code,
             title,
+            retry_after_seconds: None,
+        }
+    }
+
+    pub(crate) const fn remediation_in_progress(code: &'static str, title: &'static str) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code,
+            title,
+            retry_after_seconds: Some(60),
         }
     }
 
@@ -84,6 +95,13 @@ impl IntoResponse for ApiError {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(seconds) = self.retry_after_seconds {
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(&seconds.to_string())
+                    .expect("a positive integer is a valid Retry-After header"),
+            );
+        }
         response
     }
 }
@@ -116,9 +134,36 @@ impl From<DatabaseError> for ApiError {
                 "generation.stale",
                 "The supplied generation is stale",
             ),
+            DatabaseError::SecurityAdmissionBlocked => Self::remediation_in_progress(
+                "security.remediation_in_progress",
+                "Security repair must complete before this authority can be created",
+            ),
             DatabaseError::Sql(_)
             | DatabaseError::Migration(_)
             | DatabaseError::InvalidPersistedValue => Self::internal(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remediation_errors_are_retryable_problem_responses() {
+        let response = ApiError::remediation_in_progress(
+            "share.remediation_in_progress",
+            "remediation in progress",
+        )
+        .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(header::RETRY_AFTER),
+            Some(&HeaderValue::from_static("60"))
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/problem+json"))
+        );
     }
 }

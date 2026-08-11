@@ -272,11 +272,12 @@
     },
     "operation": {
       "type": "object", "additionalProperties": false,
-      "required": ["type", "operationId", "tenantSlugConfirmation", "payloadId", "args", "checkpoint"],
+      "required": ["type", "operationId", "tenantSlugConfirmation", "actorPrincipalId", "payloadId", "args", "checkpoint"],
       "properties": {
-        "type": {"enum": ["none", "migrate", "bootstrap", "verify-grants", "keys-audit", "storage-probe", "storage-scrub-start", "storage-scrub-status", "storage-scrub-verify", "recovery-checkpoint", "recovery-verify", "audit-export"]},
+        "type": {"enum": ["none", "migrate", "bootstrap", "verify-grants", "keys-audit", "storage-probe", "storage-scrub-start", "storage-scrub-status", "storage-scrub-verify", "recovery-checkpoint", "recovery-verify", "audit-export", "security-descendant-shares-status", "security-descendant-shares-repair", "security-descendant-shares-verify", "security-descendant-shares-activate"]},
         "operationId": {"type": "string", "pattern": "^(?:|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"},
         "tenantSlugConfirmation": {"type": "string", "maxLength": 63, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"},
+        "actorPrincipalId": {"type": "string", "pattern": "^(?:|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"},
         "payloadId": {"type": "string", "pattern": "^(?:|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"},
         "args": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 4096}},
         "checkpoint": {
@@ -288,7 +289,7 @@
         }
       },
       "allOf": [
-        {"if": {"properties": {"type": {"const": "none"}}}, "then": {"properties": {"operationId": {"const": ""}, "tenantSlugConfirmation": {"const": ""}, "payloadId": {"const": ""}, "args": {"maxItems": 0}, "checkpoint": {"properties": {"secretName": {"const": ""}}}}}},
+        {"if": {"properties": {"type": {"const": "none"}}}, "then": {"properties": {"operationId": {"const": ""}, "tenantSlugConfirmation": {"const": ""}, "actorPrincipalId": {"const": ""}, "payloadId": {"const": ""}, "args": {"maxItems": 0}, "checkpoint": {"properties": {"secretName": {"const": ""}}}}}},
         {"if": {"properties": {"type": {"not": {"const": "none"}}}}, "then": {"properties": {"operationId": {"minLength": 36}}}},
         {
           "if": {"properties": {"type": {"const": "storage-scrub-start"}, "payloadId": {"const": ""}}},
@@ -297,6 +298,18 @@
         {
           "if": {"properties": {"type": {"const": "storage-scrub-start"}, "payloadId": {"minLength": 1}}},
           "then": {"properties": {"tenantSlugConfirmation": {"const": ""}}}
+        },
+        {
+          "if": {"properties": {"type": {"enum": ["security-descendant-shares-status", "security-descendant-shares-repair", "security-descendant-shares-verify", "security-descendant-shares-activate"]}}},
+          "then": {"properties": {"payloadId": {"const": ""}, "args": {"maxItems": 0}, "checkpoint": {"properties": {"secretName": {"const": ""}}}}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "security-descendant-shares-status"}}},
+          "then": {"properties": {"tenantSlugConfirmation": {"const": ""}, "actorPrincipalId": {"const": ""}}}
+        },
+        {
+          "if": {"properties": {"type": {"enum": ["security-descendant-shares-repair", "security-descendant-shares-verify", "security-descendant-shares-activate"]}}},
+          "then": {"properties": {"tenantSlugConfirmation": {"minLength": 1}, "actorPrincipalId": {"minLength": 36}}}
         },
         {"if": {"properties": {"type": {"const": "recovery-verify"}}}, "then": {"properties": {"checkpoint": {"properties": {"secretName": {"minLength": 1}}}}}}
       ]

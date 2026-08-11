@@ -2338,6 +2338,8 @@ export interface components {
     headers: {
         /** @description Opaque generation validator for this representation. */
         readonly GenerationEtag: string;
+        /** @description The tenant-wide security admission gate is rechecked after 60 seconds; clients must not retry earlier. */
+        readonly RetryAfter60: "60";
     };
     pathItems: never;
 }
@@ -3573,6 +3575,16 @@ export interface operations {
                     readonly "application/json": components["schemas"]["McpDataGrant"];
                 };
             };
+            /** @description MCP data-grant admission is blocked until the tenant descendant-share repair is verified and activated. The Problem code is `mcp.data_grant.remediation_in_progress`. */
+            readonly 503: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter60"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             readonly default: components["responses"]["Problem"];
         };
     };
@@ -3778,6 +3790,16 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["DirectShare"];
+                };
+            };
+            /** @description Direct-share admission is blocked until the tenant descendant-share repair is verified and activated. The Problem code is `share.remediation_in_progress`. */
+            readonly 503: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter60"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];

@@ -410,6 +410,31 @@ assert_document_not_contains "${temporary}/targeted-scrub.yaml" Job filebelt-sto
 assert_document_not_contains "${temporary}/targeted-scrub.yaml" Job filebelt-storage-scrub-start-123e4567-e89 'claimName:'
 
 helm template phase4 "${chart}" --kube-version 1.36.0 \
+  --set-string operation.type=security-descendant-shares-status \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  >"${temporary}/security-descendant-shares-status.yaml"
+assert_document_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'security'
+assert_document_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'descendant-shares'
+assert_document_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'status'
+assert_document_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'secretName: filebelt-recovery-database'
+assert_document_not_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'claimName:'
+assert_document_not_contains "${temporary}/security-descendant-shares-status.yaml" Job filebelt-security-descendant-shares-status-123e4567-e89 'automountServiceAccountToken: true'
+
+for security_operation in repair verify activate; do
+  helm template phase4 "${chart}" --kube-version 1.36.0 \
+    --set-string operation.type="security-descendant-shares-${security_operation}" \
+    --set-string operation.operationId="${OPERATION_ID}" \
+    --set-string operation.tenantSlugConfirmation=development \
+    --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001 \
+    >"${temporary}/security-descendant-shares-${security_operation}.yaml"
+  assert_document_contains "${temporary}/security-descendant-shares-${security_operation}.yaml" Job "filebelt-security-descendant-shares-${security_operation}-123e4567-e89" "${security_operation}"
+  assert_document_contains "${temporary}/security-descendant-shares-${security_operation}.yaml" Job "filebelt-security-descendant-shares-${security_operation}-123e4567-e89" '--confirm-tenant'
+  assert_document_contains "${temporary}/security-descendant-shares-${security_operation}.yaml" Job "filebelt-security-descendant-shares-${security_operation}-123e4567-e89" '--actor-principal-id'
+  assert_document_contains "${temporary}/security-descendant-shares-${security_operation}.yaml" Job "filebelt-security-descendant-shares-${security_operation}-123e4567-e89" 'secretName: filebelt-recovery-database'
+  assert_document_not_contains "${temporary}/security-descendant-shares-${security_operation}.yaml" Job "filebelt-security-descendant-shares-${security_operation}-123e4567-e89" 'claimName:'
+done
+
+helm template phase4 "${chart}" --kube-version 1.36.0 \
   --set deployment.quiesced=true \
   --set-string operation.type=recovery-checkpoint \
   --set-string operation.operationId="${OPERATION_ID}" \
@@ -695,6 +720,34 @@ expect_failure targeted_scrub_with_confirmation \
   --set-string operation.operationId="${OPERATION_ID}" \
   --set-string operation.payloadId=123e4567-e89b-42d3-a456-426614174001 \
   --set-string operation.tenantSlugConfirmation=development
+expect_failure security_status_with_actor \
+  --set-string operation.type=security-descendant-shares-status \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001
+expect_failure security_status_with_payload \
+  --set-string operation.type=security-descendant-shares-status \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.payloadId=123e4567-e89b-42d3-a456-426614174001
+expect_failure security_repair_without_confirmation \
+  --set-string operation.type=security-descendant-shares-repair \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001
+expect_failure security_verify_without_actor \
+  --set-string operation.type=security-descendant-shares-verify \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.tenantSlugConfirmation=development
+expect_failure security_repair_with_checkpoint \
+  --set-string operation.type=security-descendant-shares-repair \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.tenantSlugConfirmation=development \
+  --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001 \
+  --set-string operation.checkpoint.secretName=unexpected
+expect_failure security_activate_with_args \
+  --set-string operation.type=security-descendant-shares-activate \
+  --set-string operation.operationId="${OPERATION_ID}" \
+  --set-string operation.tenantSlugConfirmation=development \
+  --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001 \
+  --set-string 'operation.args[0]=--unexpected'
 expect_failure recovery_while_live \
   --set-string operation.type=recovery-checkpoint \
   --set-string operation.operationId="${OPERATION_ID}"

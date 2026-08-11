@@ -364,5 +364,15 @@ server_validate recovery-verify \
 server_validate audit-export \
   --set-string operation.type=audit-export \
   --set-string operation.operationId="${OPERATION_ID}"
+server_validate security-descendant-shares-status \
+  --set-string operation.type=security-descendant-shares-status \
+  --set-string operation.operationId="${OPERATION_ID}"
+for security_operation in repair verify activate; do
+  server_validate "security-descendant-shares-${security_operation}" \
+    --set-string operation.type="security-descendant-shares-${security_operation}" \
+    --set-string operation.operationId="${OPERATION_ID}" \
+    --set-string operation.tenantSlugConfirmation=development \
+    --set-string operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001
+done
 
 echo "Kubernetes Kind compatibility check passed for ${expected_version}"

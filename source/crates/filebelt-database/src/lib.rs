@@ -10,7 +10,7 @@ pub mod mcp;
 pub mod media;
 pub mod mount;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use filebelt_domain::Action;
 use filebelt_events_protocol::EventEnvelope;
@@ -48,6 +48,8 @@ pub enum DatabaseError {
     StorageUnavailable,
     #[error("request admission limit is exhausted")]
     AdmissionLimited,
+    #[error("descendant-share admission is temporarily blocked")]
+    SecurityAdmissionBlocked,
     #[error("a stale generation or fencing token was supplied")]
     StaleGeneration,
     #[error("persisted value is outside the supported domain")]
@@ -201,6 +203,8 @@ pub struct AclInputRow {
     pub direct: bool,
     pub generation: i64,
     pub created_by: Uuid,
+    pub direct_share_id: Option<Uuid>,
+    pub direct_share_active: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -209,6 +213,13 @@ pub struct GroupInputRow {
     pub principal_id: Uuid,
     pub role: String,
     pub generation: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuthorizationPrincipalFact {
+    pub principal_id: Uuid,
+    pub groups: Vec<GroupInputRow>,
+    pub entries: Vec<AclInputRow>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -222,6 +233,7 @@ pub struct AuthorizationSnapshot {
     pub actor_principal_id: Uuid,
     pub actor_groups: Vec<GroupInputRow>,
     pub entries: Vec<AclInputRow>,
+    pub creator_facts: Vec<AuthorizationPrincipalFact>,
     pub membership_generation: i64,
     pub drive_acl_generation: i64,
     pub namespace_generation: i64,
@@ -1255,7 +1267,7 @@ impl Database {
             return Err(DatabaseError::Conflict);
         }
         let share_id = Uuid::new_v4();
-        let created_at: String = sqlx::query("INSERT INTO direct_shares (tenant_id,id,drive_id,resource_id,target_principal_id,preset,inheritance,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at::text")
+        let created_at: String = sqlx::query("INSERT INTO direct_shares (tenant_id,id,drive_id,resource_id,target_principal_id,preset,inheritance,created_by,authorization_model_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1) RETURNING created_at::text")
             .bind(tenant_id)
             .bind(share_id)
             .bind(drive_id)
@@ -1266,7 +1278,7 @@ impl Database {
             .bind(actor_principal_id)
             .fetch_one(&mut *transaction)
             .await
-            .map_err(map_conflict)?
+            .map_err(map_security_admission)?
             .get(0);
         for action in actions {
             sqlx::query("INSERT INTO acl_entries (tenant_id,drive_id,resource_id,id,principal_id,action,effect,inheritance,created_by,generation,direct_share_id) VALUES ($1,$2,$3,$4,$5,$6,'allow',$7,$8,1,$9)")
@@ -1323,6 +1335,17 @@ impl Database {
             inheritance: inheritance.into(),
             created_at,
         })
+    }
+
+    pub async fn descendant_share_admission_open(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<bool, DatabaseError> {
+        sqlx::query_scalar("SELECT filebelt_security.descendant_share_admission_open($1)")
+            .bind(tenant_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_security_admission)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1586,10 +1609,14 @@ impl Database {
         drive_id: Uuid,
         resource_id: Uuid,
     ) -> Result<AuthorizationSnapshot, DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *transaction)
+            .await?;
         let resource = sqlx::query("SELECT d.owner_principal_id,p.kind AS owner_kind,g.id AS owner_group_id,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.acl_generation AS resource_acl_generation,actor.generation AS membership_generation FROM drives d JOIN principals p ON p.tenant_id=d.tenant_id AND p.id=d.owner_principal_id LEFT JOIN groups g ON g.tenant_id=p.tenant_id AND g.principal_id=p.id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id JOIN principals actor ON actor.tenant_id=d.tenant_id AND actor.id=$4 AND actor.disabled_at IS NULL WHERE d.tenant_id=$1 AND d.id=$2 AND n.id=$3")
-            .bind(tenant_id).bind(drive_id).bind(resource_id).bind(actor_principal_id).fetch_optional(&self.pool).await?.ok_or(DatabaseError::NotFound)?;
+            .bind(tenant_id).bind(drive_id).bind(resource_id).bind(actor_principal_id).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::NotFound)?;
         let groups = sqlx::query("SELECT g.id AS group_id,g.principal_id,m.role,m.generation FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2")
-            .bind(tenant_id).bind(actor_principal_id).fetch_all(&self.pool).await?;
+            .bind(tenant_id).bind(actor_principal_id).fetch_all(&mut *transaction).await?;
         let membership_generation = resource.get("membership_generation");
         let actor_groups: Vec<GroupInputRow> = groups
             .iter()
@@ -1600,25 +1627,91 @@ impl Database {
                 generation: row.get("generation"),
             })
             .collect();
-        let mut principals: Vec<Uuid> = actor_groups
+        let graph_principals: Vec<Uuid> = sqlx::query_scalar("WITH RECURSIVE graph_principals(principal_id) AS ( \
+                SELECT $4::uuid \
+                UNION \
+                SELECT a.created_by \
+                FROM graph_principals graph \
+                JOIN principals current_principal ON current_principal.tenant_id=$1 AND current_principal.id=graph.principal_id AND current_principal.disabled_at IS NULL \
+                LEFT JOIN users current_user_record ON current_user_record.tenant_id=current_principal.tenant_id AND current_user_record.principal_id=current_principal.id \
+                LEFT JOIN group_memberships membership ON membership.tenant_id=$1 AND membership.user_principal_id=graph.principal_id \
+                LEFT JOIN groups local_group ON local_group.tenant_id=membership.tenant_id AND local_group.id=membership.group_id \
+                JOIN node_ancestry ancestry ON ancestry.tenant_id=$1 AND ancestry.drive_id=$2 AND ancestry.descendant_id=$3 \
+                JOIN acl_entries a ON a.tenant_id=ancestry.tenant_id AND a.drive_id=ancestry.drive_id AND a.resource_id=ancestry.ancestor_id \
+                JOIN direct_shares share ON share.tenant_id=a.tenant_id AND share.id=a.direct_share_id AND share.revoked_at IS NULL \
+                WHERE (current_user_record.id IS NULL OR current_user_record.status='active') \
+                  AND (a.principal_id=graph.principal_id OR a.principal_id=local_group.principal_id) \
+                  AND a.effect='allow' AND a.inheritance='self_and_descendants' \
+            ) \
+            SELECT graph.principal_id \
+            FROM graph_principals graph \
+            JOIN principals p ON p.tenant_id=$1 AND p.id=graph.principal_id AND p.disabled_at IS NULL \
+            LEFT JOIN users u ON u.tenant_id=p.tenant_id AND u.principal_id=p.id \
+            WHERE u.id IS NULL OR u.status='active'")
+            .bind(tenant_id)
+            .bind(drive_id)
+            .bind(resource_id)
+            .bind(actor_principal_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+        if graph_principals.is_empty() {
+            return Err(DatabaseError::NotFound);
+        }
+        let fact_groups = sqlx::query("SELECT m.user_principal_id,g.id AS group_id,g.principal_id,m.role,m.generation FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=ANY($2)")
+            .bind(tenant_id)
+            .bind(&graph_principals)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let fact_entries = sqlx::query("WITH subjects AS ( \
+                SELECT actor_principal_id,actor_principal_id AS acl_principal_id FROM unnest($3::uuid[]) actor(actor_principal_id) \
+                UNION \
+                SELECT membership.user_principal_id,local_group.principal_id \
+                FROM group_memberships membership \
+                JOIN groups local_group ON local_group.tenant_id=membership.tenant_id AND local_group.id=membership.group_id \
+                WHERE membership.tenant_id=$1 AND membership.user_principal_id=ANY($3) \
+            ) \
+            SELECT subjects.actor_principal_id,a.id,a.resource_id,a.principal_id,a.action,a.effect,a.inheritance,a.generation,a.created_by,a.direct_share_id,EXISTS (SELECT 1 FROM direct_shares share WHERE share.tenant_id=a.tenant_id AND share.id=a.direct_share_id AND share.revoked_at IS NULL) AS direct_share_active,ancestry.depth,(a.resource_id=$4) AS direct \
+            FROM subjects \
+            JOIN node_ancestry ancestry ON ancestry.tenant_id=$1 AND ancestry.drive_id=$2 AND ancestry.descendant_id=$4 \
+            JOIN acl_entries a ON a.tenant_id=ancestry.tenant_id AND a.drive_id=ancestry.drive_id AND a.resource_id=ancestry.ancestor_id AND a.principal_id=subjects.acl_principal_id \
+              AND (a.resource_id=$4 \
+                OR (ancestry.depth=1 AND a.inheritance IN ('children','descendants','self_and_descendants')) \
+                OR (ancestry.depth>1 AND a.inheritance IN ('descendants','self_and_descendants')))")
+            .bind(tenant_id)
+            .bind(drive_id)
+            .bind(&graph_principals)
+            .bind(resource_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let mut creator_facts: BTreeMap<Uuid, AuthorizationPrincipalFact> = graph_principals
             .iter()
-            .map(|group| group.principal_id)
+            .copied()
+            .map(|principal_id| {
+                (
+                    principal_id,
+                    AuthorizationPrincipalFact {
+                        principal_id,
+                        groups: Vec::new(),
+                        entries: Vec::new(),
+                    },
+                )
+            })
             .collect();
-        principals.push(actor_principal_id);
-        let rows = sqlx::query("SELECT a.id,a.resource_id,a.principal_id,a.action,a.effect,a.inheritance,a.generation,a.created_by,na.depth,(a.resource_id=$4) AS direct FROM node_ancestry na JOIN acl_entries a ON a.tenant_id=na.tenant_id AND a.drive_id=na.drive_id AND a.resource_id=na.ancestor_id WHERE na.tenant_id=$1 AND na.drive_id=$2 AND na.descendant_id=$4 AND a.principal_id=ANY($3)")
-            .bind(tenant_id).bind(drive_id).bind(&principals).bind(resource_id).fetch_all(&self.pool).await?;
-        Ok(AuthorizationSnapshot {
-            tenant_id,
-            drive_id,
-            resource_id,
-            owner_principal_id: resource.get("owner_principal_id"),
-            owner_kind: resource.get("owner_kind"),
-            owner_group_id: resource.get("owner_group_id"),
-            actor_principal_id,
-            actor_groups,
-            entries: rows
-                .into_iter()
-                .map(|row| AclInputRow {
+        for row in fact_groups {
+            let principal_id: Uuid = row.get("user_principal_id");
+            if let Some(facts) = creator_facts.get_mut(&principal_id) {
+                facts.groups.push(GroupInputRow {
+                    group_id: row.get("group_id"),
+                    principal_id: row.get("principal_id"),
+                    role: row.get("role"),
+                    generation: row.get("generation"),
+                });
+            }
+        }
+        for row in fact_entries {
+            let principal_id: Uuid = row.get("actor_principal_id");
+            if let Some(facts) = creator_facts.get_mut(&principal_id) {
+                facts.entries.push(AclInputRow {
                     id: row.get("id"),
                     resource_id: row.get("resource_id"),
                     principal_id: row.get("principal_id"),
@@ -1629,13 +1722,33 @@ impl Database {
                     direct: row.get("direct"),
                     generation: row.get("generation"),
                     created_by: row.get("created_by"),
-                })
-                .collect(),
+                    direct_share_id: row.get("direct_share_id"),
+                    direct_share_active: row.get("direct_share_active"),
+                });
+            }
+        }
+        let entries = creator_facts
+            .get(&actor_principal_id)
+            .map(|facts| facts.entries.clone())
+            .ok_or(DatabaseError::NotFound)?;
+        let snapshot = AuthorizationSnapshot {
+            tenant_id,
+            drive_id,
+            resource_id,
+            owner_principal_id: resource.get("owner_principal_id"),
+            owner_kind: resource.get("owner_kind"),
+            owner_group_id: resource.get("owner_group_id"),
+            actor_principal_id,
+            actor_groups,
+            entries,
+            creator_facts: creator_facts.into_values().collect(),
             membership_generation,
             drive_acl_generation: resource.get("drive_acl_generation"),
             namespace_generation: resource.get("namespace_generation"),
             resource_acl_generation: resource.get("resource_acl_generation"),
-        })
+        };
+        transaction.commit().await?;
+        Ok(snapshot)
     }
 
     pub async fn publish_authorization_generations(
@@ -3022,6 +3135,14 @@ fn map_conflict(error: sqlx::Error) -> DatabaseError {
         DatabaseError::Sql(error)
     }
 }
+
+fn map_security_admission(error: sqlx::Error) -> DatabaseError {
+    if matches!(&error, sqlx::Error::Database(db) if db.code().as_deref() == Some("FB001")) {
+        DatabaseError::SecurityAdmissionBlocked
+    } else {
+        map_conflict(error)
+    }
+}
 async fn is_admin(
     tx: &mut Transaction<'_, Postgres>,
     tenant_id: Uuid,
@@ -3242,6 +3363,35 @@ mod tests {
         assert!(create_attempt.contains("DELETE FROM oidc_login_attempts"));
         assert!(create_attempt.contains("active >= 4096"));
         assert!(create_attempt.contains("FOR UPDATE"));
+    }
+
+    #[test]
+    fn authorization_snapshots_collect_recursive_share_creator_facts_atomically() {
+        let source = include_str!("lib.rs");
+        let snapshot = source
+            .split_once("pub async fn authorization_snapshot")
+            .expect("authorization snapshot exists")
+            .1
+            .split_once("pub async fn publish_authorization_generations")
+            .expect("generation publication follows snapshot")
+            .0;
+        assert!(snapshot.contains("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"));
+        assert!(snapshot.contains("WITH RECURSIVE graph_principals"));
+        assert!(snapshot.contains("share.revoked_at IS NULL"));
+        assert!(snapshot.contains("a.inheritance='self_and_descendants'"));
+        assert!(snapshot.contains("ancestry.depth=1 AND a.inheritance IN"));
+        assert!(snapshot.contains("ancestry.depth>1 AND a.inheritance IN"));
+        assert!(snapshot.contains("AS direct_share_active"));
+        assert!(snapshot.contains("creator_facts: creator_facts.into_values().collect()"));
+        assert!(snapshot.contains("transaction.commit().await?"));
+    }
+
+    #[test]
+    fn descendant_share_admission_maps_the_database_guard_code() {
+        let source = include_str!("lib.rs");
+        assert!(source.contains("descendant_share_admission_open($1)"));
+        assert!(source.contains("Some(\"FB001\")"));
+        assert!(source.contains("DatabaseError::SecurityAdmissionBlocked"));
     }
 
     #[test]

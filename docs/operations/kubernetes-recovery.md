@@ -53,7 +53,8 @@ unredacted logs in ordinary CI artifacts.
    collaboration room/manifest inventory and dirty-retention deadlines, MCP
    registration/tombstone/vault inventories, every referenced MCP KEK
    generation, retained mount policy/vault inventory and every referenced mount
-   KEK generation, and the deterministic expected-payload inventory hash must
+   KEK generation, descendant-share admission state/fence/repair inventory, and
+   the deterministic expected-payload inventory hash must
    agree. The emitted schema is `filebelt.recovery.verification.v3`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
    deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP
@@ -71,6 +72,9 @@ unredacted logs in ordinary CI artifacts.
    followed by MCP registration, explicit approval,
    exact-version data disclosure, broker-mediated authenticated test, and
    revocation checks.
+   If restored descendant-share admission is blocked, run the documented
+   repair, verification, and explicit activation sequence before either
+   direct-share or MCP data-grant admission.
 9. Capture only redacted verification metadata. Delete the recovery namespace,
    database, and PVC only after validating their exact deterministic names and
    confirming they are rehearsal-owned.

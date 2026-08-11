@@ -1359,9 +1359,10 @@ fn database_session_error(error: DatabaseError) -> SessionError {
         DatabaseError::NotFound | DatabaseError::StaleGeneration => SessionError::Authorization,
         DatabaseError::Conflict => SessionError::Conflict,
         DatabaseError::QuotaExceeded | DatabaseError::AdmissionLimited => SessionError::Capacity,
-        DatabaseError::StorageUnavailable | DatabaseError::Sql(_) | DatabaseError::Migration(_) => {
-            SessionError::Unavailable
-        }
+        DatabaseError::StorageUnavailable
+        | DatabaseError::SecurityAdmissionBlocked
+        | DatabaseError::Sql(_)
+        | DatabaseError::Migration(_) => SessionError::Unavailable,
         DatabaseError::InvalidPersistedValue => SessionError::Internal,
     }
 }

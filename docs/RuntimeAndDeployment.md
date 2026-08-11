@@ -103,6 +103,27 @@ writable temporary storage, and only role-specific ports, networks, secrets,
 and mounts. Liveness reports process health separately from dependency and
 storage readiness.
 
+## Descendant-share security cutover
+
+The descendant-share migration is a fail-closed compatibility boundary. Apply
+the forward migration and reviewed grants first; its tenant gate blocks new
+direct shares and MCP data grants, including writes from still-running older
+API replicas. Roll out the compatible API/database image, then use the
+recovery-credential Helm Jobs in order: `security-descendant-shares-repair`
+(the command runs bounded batches until complete),
+`security-descendant-shares-verify`, and
+`security-descendant-shares-activate`. Generate one operation UUID for the
+tenant cutover and reuse it across every repair retry, verification, and
+activation. Each mutating Job also requires exact tenant-slug confirmation, a
+validated tenant-admin actor, and the same compiled source revision. The status
+Job is read-only and takes only the operation UUID.
+
+Do not combine activation with migration or normal workload rollout. Retain the
+run/checkpoint/audit output and successful two-user direct-share/MCP denial and
+post-activation acceptance evidence. Rollback preserves the schema and blocked
+gate: an older binary may be restored only if it is schema-compatible, and no
+rollback or scale action reopens admission.
+
 The controller is the sole ServiceAccount-token exception. It runs in the core
 namespace, but its Role is bound only in the runner namespace and permits
 `get/list/create/delete` on Pods, `get/create/delete` on Secrets, and

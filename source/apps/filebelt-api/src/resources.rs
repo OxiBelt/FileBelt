@@ -1722,6 +1722,13 @@ async fn create_share(
     Json(request): Json<CreateShareRequest>,
 ) -> Result<Response, ApiError> {
     let session = authenticate_mutation(&state, &headers).await?;
+    if !state
+        .database
+        .descendant_share_admission_open(state.tenant_id)
+        .await?
+    {
+        return Err(share_remediation_in_progress());
+    }
     let key = idempotency_key(&headers)?;
     let drive_id = parse_uuid_v4(&drive_id)?;
     let node_id = parse_uuid_v4(&node_id)?;
@@ -1778,7 +1785,11 @@ async fn create_share(
             generation_i64(grant.namespace_generation)?,
             generation_i64(grant.resource_acl_generation)?,
         )
-        .await?;
+        .await
+        .map_err(|error| match error {
+            DatabaseError::SecurityAdmissionBlocked => share_remediation_in_progress(),
+            other => ApiError::from(other),
+        })?;
     let response = DirectShareResponse::try_from(share)?;
     let stored = store_idempotent(
         &state,
@@ -1791,6 +1802,13 @@ async fn create_share(
     )
     .await?;
     Ok((StatusCode::CREATED, Json(stored)).into_response())
+}
+
+fn share_remediation_in_progress() -> ApiError {
+    ApiError::remediation_in_progress(
+        "share.remediation_in_progress",
+        "Direct sharing is unavailable until the security repair is activated",
+    )
 }
 
 async fn revoke_share(

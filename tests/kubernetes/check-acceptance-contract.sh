@@ -70,6 +70,14 @@ for mount_boundary in \
   assert_contains "${kind_script}" "${mount_boundary}"
 done
 
+for security_operation in \
+  "server_validate security-descendant-shares-status" \
+  'operation.type="security-descendant-shares-${security_operation}"' \
+  "operation.tenantSlugConfirmation=development" \
+  "operation.actorPrincipalId=123e4567-e89b-42d3-a456-426614174001"; do
+  assert_contains "${kind_script}" "${security_operation}"
+done
+
 assert_contains "${network_script}" \
   "registry.k8s.io/e2e-test-images/agnhost:2.61@sha256:101f3357d1ad890c3090e78ea6c6a47dc5137cbe19836796e13d5dcb2b84d2e6"
 assert_contains "${network_script}" \

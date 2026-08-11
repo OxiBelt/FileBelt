@@ -34,6 +34,7 @@ const SCHEMAS: &[&str] = &[
     "filebelt_document",
     "filebelt_media",
     "filebelt_phase8",
+    "filebelt_security",
 ];
 const TABLE_PRIVILEGES: &[&str] = &[
     "SELECT",
@@ -245,6 +246,7 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
                 | "filebelt_document"
                 | "filebelt_media"
         ),
+        "filebelt_security" => matches!(role, "filebelt_api" | "filebelt_recovery"),
         _ => false,
     }
 }
@@ -386,6 +388,9 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
     if schema == "filebelt_phase8" {
         return expected_phase8_table_privilege(role, table, privilege);
     }
+    if schema == "filebelt_security" {
+        return false;
+    }
     if schema != "public" {
         return false;
     }
@@ -434,6 +439,7 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
                     | "acl_entries"
                     | "file_versions"
                     | "authorization_generations"
+                    | "direct_shares"
             ) && privilege == "SELECT"
                 || matches!(
                     table,
@@ -1061,7 +1067,9 @@ fn expected_column_privilege(
                                 | "namespace_generation"
                         ))
                     || (table == "file_versions"
-                        && matches!(column, "tenant_id" | "id" | "node_id")))
+                        && matches!(column, "tenant_id" | "id" | "node_id"))
+                    || (table == "drives"
+                        && matches!(column, "tenant_id" | "id" | "acl_generation")))
         }
         "filebelt_collaboration" => {
             if privilege == "UPDATE" {
@@ -1200,11 +1208,7 @@ async fn verify_function_privileges(
                 .fetch_one(database.pool())
                 .await
                 .map_err(|error| error.to_string())?;
-            let expected = (function
-                == "filebelt_mcp.replace_registration_configuration_and_erase(uuid,uuid,uuid,bigint,text,text,text,text,text,jsonb)"
-                && *role == "filebelt_mcp_broker")
-                || (function == "filebelt_document.create_session_principal(uuid,uuid)"
-                    && *role == "filebelt_document");
+            let expected = expected_function_privilege(role, &function);
             if actual != expected {
                 failures.push(format!(
                     "role {role} function {function} EXECUTE: expected {expected}, found {actual}"
@@ -1213,6 +1217,24 @@ async fn verify_function_privileges(
         }
     }
     Ok(())
+}
+
+fn expected_function_privilege(role: &str, function: &str) -> bool {
+    (function
+        == "filebelt_mcp.replace_registration_configuration_and_erase(uuid,uuid,uuid,bigint,text,text,text,text,text,jsonb)"
+        && role == "filebelt_mcp_broker")
+        || (function == "filebelt_document.create_session_principal(uuid,uuid)"
+            && role == "filebelt_document")
+        || (function == "filebelt_security.descendant_share_admission_open(uuid)"
+            && role == "filebelt_api")
+        || (function == "filebelt_security.descendant_shares_status(uuid,uuid)"
+            && role == "filebelt_recovery")
+        || (function == "filebelt_security.repair_descendant_shares(uuid,uuid,text,uuid,integer)"
+            && role == "filebelt_recovery")
+        || (function == "filebelt_security.verify_descendant_shares(uuid,uuid,text,uuid)"
+            && role == "filebelt_recovery")
+        || (function == "filebelt_security.activate_descendant_shares(uuid,uuid,text,uuid)"
+            && role == "filebelt_recovery")
 }
 
 fn audit_column(table: &str, column: &str) -> bool {
@@ -1304,6 +1326,29 @@ mod tests {
         assert!(!audit_column("users", "verified_email"));
         assert!(recovery_column("payload_objects", "blake3"));
         assert!(!recovery_column("payload_objects", "quarantine_reason"));
+        assert!(!expected_table_privilege(
+            "filebelt_recovery",
+            "filebelt_security",
+            "descendant_share_repair_runs",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_recovery",
+            "filebelt_security",
+            "descendant_share_repair_runs",
+            "tenant_id",
+            "SELECT"
+        ));
+        assert!(expected_schema_privilege(
+            "filebelt_recovery",
+            "filebelt_security",
+            "USAGE"
+        ));
+        assert!(!expected_schema_privilege(
+            "filebelt_vfs",
+            "filebelt_security",
+            "USAGE"
+        ));
     }
 
     #[test]
@@ -1377,6 +1422,40 @@ mod tests {
             "payload_objects",
             "SELECT"
         ));
+        assert!(expected_table_privilege(
+            "filebelt_vfs",
+            "public",
+            "direct_shares",
+            "SELECT"
+        ));
+        assert!(expected_column_privilege(
+            "filebelt_mcp_broker",
+            "public",
+            "drives",
+            "acl_generation",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_mcp_broker",
+            "public",
+            "drives",
+            "acl_generation",
+            "UPDATE"
+        ));
+    }
+
+    #[test]
+    fn security_functions_are_execute_only_and_narrowly_assigned() {
+        let admission = "filebelt_security.descendant_share_admission_open(uuid)";
+        let repair = "filebelt_security.repair_descendant_shares(uuid,uuid,text,uuid,integer)";
+        let internal = "filebelt_security.require_descendant_share_admission_open(uuid)";
+
+        assert!(expected_function_privilege("filebelt_api", admission));
+        assert!(!expected_function_privilege("filebelt_recovery", admission));
+        assert!(expected_function_privilege("filebelt_recovery", repair));
+        assert!(!expected_function_privilege("filebelt_api", repair));
+        assert!(!expected_function_privilege("filebelt_vfs", admission));
+        assert!(!expected_function_privilege("filebelt_recovery", internal));
     }
 
     #[test]

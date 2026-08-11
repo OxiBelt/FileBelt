@@ -51,6 +51,14 @@ the root. Protocols with stricter limits reject the write before persistence.
 Rename and move stay within one drive; cross-drive move is unsupported rather
 than an implicit copy-and-delete.
 
+The root is a real authorization resource, not an implicit ancestor outside
+the tree. An exact-node grant applies only to that node; a recursive grant is
+evaluated continuously against every descendant that it would affect. Tree
+integrity permits neither a root parent nor a self-parent, and a move rejects a
+destination in the moved node's transitive descendant set. Those root, exact,
+and transitive cycle rules are enforced before persistence and remain bounded
+by the 128-component/4,096-byte logical-path limits.
+
 The normalization and case-fold Unicode data versions are pinned by the domain
 dependencies. Updating either version requires collision analysis, a
 data-preserving migration, compatibility and rollback documentation, and an
@@ -155,6 +163,21 @@ transaction. Capabilities and open byte streams recheck their narrow generation
 projection no less often than every 60 seconds. Iggy may prompt an earlier
 check, but database uncertainty or missing notification delivery never permits
 access.
+
+Direct-share attenuation is equally continuous. Creation of a recursive
+(`self_and_descendants`) direct share checks `SHARE` and every preset action at
+the share root. Each later recipient authorization independently requires the
+creator to hold both `SHARE` and that requested action at the exact resource
+being accessed; the drive root is not an exception. Losing only one action
+suppresses only that action, and access automatically resumes if the creator's
+authority returns; the configured share row is not rewritten. Exact-node
+(`self`) shares remain durable independent roots and never grant descendant
+access. Owner and group-owner-manager rights, advanced ACL grants, and
+exact-node shares are independent proof roots. A transitive recursive-share
+chain is valid only when it reaches such a root, so a rootless cycle confers
+nothing while a rooted cycle may succeed. Evaluation is bounded to 128
+delegation levels and 4,096 relevant recursive edges; either overflow fails
+authorization closed and emits only a low-cardinality reason.
 
 ## SMB and explicit-FTPS mount authorization
 
@@ -376,6 +399,19 @@ removes a fragment token from browser history, but the production client has no
 anonymous exchange or download implementation and reports the feature as
 unavailable. No `/public/v1` application contract is implemented, and public
 routes must never receive an authenticated session cookie.
+
+Following the descendant-share security cutover, each tenant has a durable
+admission gate. It starts blocked, rejects all new direct-share creation and
+new MCP data-grant creation, and returns the stable API problem codes
+`share.remediation_in_progress` and
+`mcp.data_grant.remediation_in_progress` while closed.
+The repair revokes every active recursive direct share and every active MCP data
+grant created before that tenant's repair fence, retaining a per-row reason and
+operation identifier. It deletes linked direct-share ACL rows, advances their
+authorization generations, records transactional invalidations and audit
+evidence, and is idempotent/resumable in batches of at most 1,000 total rows.
+Only an explicitly verified repair run and a tenant-admin activation reopen the
+gate; neither Helm rollback nor an older API image changes that state.
 
 Trash retention defaults to 30 days. A private-drive user may choose 1 through
 90 days; a shared-drive owner or tenant administrator chooses one drive policy.

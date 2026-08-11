@@ -5,17 +5,17 @@
 
 REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
   filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
-  filebelt_phase8 FROM PUBLIC;
+  filebelt_phase8, filebelt_security FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
   filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
-  filebelt_media, filebelt_phase8
+  filebelt_media, filebelt_phase8, filebelt_security
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
        filebelt_document, filebelt_media;
 REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
   filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
-  filebelt_media, filebelt_phase8
+  filebelt_media, filebelt_phase8, filebelt_security
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
@@ -45,6 +45,7 @@ GRANT USAGE ON SCHEMA filebelt_media
 GRANT USAGE ON SCHEMA filebelt_phase8
   TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
      filebelt_collaboration, filebelt_vfs, filebelt_document, filebelt_media;
+GRANT USAGE ON SCHEMA filebelt_security TO filebelt_api, filebelt_recovery;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or
@@ -133,6 +134,7 @@ GRANT UPDATE (state, response_bytes, reason_code, semantic_output_digest, finish
 GRANT SELECT (id, slug) ON tenants TO filebelt_mcp_broker;
 GRANT SELECT (tenant_id, id, kind, generation, disabled_at) ON principals
   TO filebelt_mcp_broker;
+GRANT SELECT (tenant_id, id, acl_generation) ON drives TO filebelt_mcp_broker;
 GRANT SELECT (tenant_id, id, drive_id, acl_generation, namespace_generation)
   ON nodes TO filebelt_mcp_broker;
 GRANT SELECT (tenant_id, id, node_id) ON file_versions TO filebelt_mcp_broker;
@@ -272,7 +274,7 @@ GRANT SELECT (id,slug) ON tenants TO filebelt_vfs;
 GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals TO filebelt_vfs;
 GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_vfs;
 GRANT SELECT ON groups, group_memberships, drives, nodes, node_ancestry,
-  acl_entries, file_versions, authorization_generations TO filebelt_vfs;
+  acl_entries, direct_shares, file_versions, authorization_generations TO filebelt_vfs;
 GRANT SELECT, INSERT ON audit_events, outbox_events, capability_nonces TO filebelt_vfs;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   filebelt_mount.policies, filebelt_mount.credentials,
@@ -466,3 +468,15 @@ GRANT EXECUTE ON FUNCTION filebelt_mcp.replace_registration_configuration_and_er
 ) TO filebelt_mcp_broker;
 REVOKE ALL ON FUNCTION filebelt_mount.erase_revoked_credential_secret() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.advance_authorization_generation() FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA filebelt_security
+  FROM PUBLIC, filebelt_api, filebelt_io, filebelt_maintenance,
+       filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
+       filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
+       filebelt_document, filebelt_media;
+GRANT EXECUTE ON FUNCTION filebelt_security.descendant_share_admission_open(uuid)
+  TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_security.descendant_shares_status(uuid,uuid),
+  filebelt_security.repair_descendant_shares(uuid,uuid,text,uuid,integer),
+  filebelt_security.verify_descendant_shares(uuid,uuid,text,uuid),
+  filebelt_security.activate_descendant_shares(uuid,uuid,text,uuid)
+  TO filebelt_recovery;

@@ -131,6 +131,7 @@ pub struct NewMcpDataGrant {
     pub version_id: Uuid,
     pub allow_metadata: bool,
     pub allow_content: bool,
+    pub drive_acl_generation: i64,
     pub acl_generation: i64,
     pub namespace_generation: i64,
     pub created_by: Uuid,
@@ -141,6 +142,7 @@ pub struct NewMcpDataGrant {
 pub struct McpAuthoritySnapshot {
     pub principal_generation: i64,
     pub registration_generation: i64,
+    pub drive_acl_generation: i64,
     pub acl_generation: i64,
     pub namespace_generation: i64,
     pub allow_metadata: bool,
@@ -562,7 +564,7 @@ impl Database {
         registration_id: Uuid,
         data_grant_id: Uuid,
     ) -> Result<McpAuthoritySnapshot, DatabaseError> {
-        let row = sqlx::query("SELECT p.generation AS principal_generation,r.revocation_generation,n.acl_generation,n.namespace_generation,g.acl_generation AS granted_acl_generation,g.namespace_generation AS granted_namespace_generation,g.allow_metadata,g.allow_content FROM filebelt_mcp.data_grants g JOIN filebelt_mcp.registrations r ON r.tenant_id=g.tenant_id AND r.id=g.registration_id JOIN public.principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id JOIN public.nodes n ON n.tenant_id=g.tenant_id AND n.drive_id=g.drive_id AND n.id=g.resource_id JOIN public.file_versions v ON v.tenant_id=g.tenant_id AND v.node_id=g.resource_id AND v.id=g.version_id WHERE g.tenant_id=$1 AND g.principal_id=$2 AND g.registration_id=$3 AND g.id=$4 AND g.registration_generation=r.revocation_generation AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp() AND r.enabled AND r.revoked_at IS NULL AND r.deleted_at IS NULL AND p.disabled_at IS NULL")
+        let row = sqlx::query("SELECT p.generation AS principal_generation,r.revocation_generation,d.acl_generation AS drive_acl_generation,n.acl_generation,n.namespace_generation,g.drive_acl_generation AS granted_drive_acl_generation,g.acl_generation AS granted_acl_generation,g.namespace_generation AS granted_namespace_generation,g.allow_metadata,g.allow_content FROM filebelt_mcp.data_grants g JOIN filebelt_mcp.registrations r ON r.tenant_id=g.tenant_id AND r.id=g.registration_id JOIN public.principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id JOIN public.drives d ON d.tenant_id=g.tenant_id AND d.id=g.drive_id JOIN public.nodes n ON n.tenant_id=g.tenant_id AND n.drive_id=g.drive_id AND n.id=g.resource_id JOIN public.file_versions v ON v.tenant_id=g.tenant_id AND v.node_id=g.resource_id AND v.id=g.version_id WHERE g.tenant_id=$1 AND g.principal_id=$2 AND g.registration_id=$3 AND g.id=$4 AND g.registration_generation=r.revocation_generation AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp() AND r.enabled AND r.revoked_at IS NULL AND r.deleted_at IS NULL AND p.disabled_at IS NULL")
             .bind(tenant_id)
             .bind(principal_id)
             .bind(registration_id)
@@ -570,9 +572,11 @@ impl Database {
             .fetch_optional(&self.pool)
             .await?
             .ok_or(DatabaseError::NotFound)?;
+        let granted_drive_acl: Option<i64> = row.get("granted_drive_acl_generation");
         let snapshot = McpAuthoritySnapshot {
             principal_generation: row.get("principal_generation"),
             registration_generation: row.get("revocation_generation"),
+            drive_acl_generation: row.get("drive_acl_generation"),
             acl_generation: row.get("acl_generation"),
             namespace_generation: row.get("namespace_generation"),
             allow_metadata: row.get("allow_metadata"),
@@ -580,7 +584,8 @@ impl Database {
         };
         let granted_acl: i64 = row.get("granted_acl_generation");
         let granted_namespace: i64 = row.get("granted_namespace_generation");
-        if snapshot.acl_generation != granted_acl
+        if granted_drive_acl != Some(snapshot.drive_acl_generation)
+            || snapshot.acl_generation != granted_acl
             || snapshot.namespace_generation != granted_namespace
         {
             return Err(DatabaseError::StaleGeneration);
@@ -647,7 +652,13 @@ async fn lock_data_grant_version(
     transaction: &mut Transaction<'_, Postgres>,
     input: &NewMcpDataGrant,
 ) -> Result<(), DatabaseError> {
-    let row = sqlx::query("SELECT n.acl_generation,n.namespace_generation FROM public.nodes n JOIN public.file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=$4 WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 FOR SHARE OF n,v")
+    if input.drive_acl_generation <= 0
+        || input.acl_generation <= 0
+        || input.namespace_generation <= 0
+    {
+        return Err(DatabaseError::InvalidPersistedValue);
+    }
+    let row = sqlx::query("SELECT d.acl_generation AS drive_acl_generation,n.acl_generation,n.namespace_generation FROM public.nodes n JOIN public.drives d ON d.tenant_id=n.tenant_id AND d.id=n.drive_id JOIN public.file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=$4 WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 FOR SHARE OF d,n,v")
         .bind(input.tenant_id)
         .bind(input.drive_id)
         .bind(input.resource_id)
@@ -655,7 +666,8 @@ async fn lock_data_grant_version(
         .fetch_optional(&mut **transaction)
         .await?
         .ok_or(DatabaseError::NotFound)?;
-    if row.get::<i64, _>("acl_generation") != input.acl_generation
+    if row.get::<i64, _>("drive_acl_generation") != input.drive_acl_generation
+        || row.get::<i64, _>("acl_generation") != input.acl_generation
         || row.get::<i64, _>("namespace_generation") != input.namespace_generation
     {
         return Err(DatabaseError::StaleGeneration);
@@ -675,7 +687,7 @@ pub(super) async fn insert_data_grant(
         .await?
         .ok_or(DatabaseError::NotFound)?;
     lock_data_grant_version(transaction, input).await?;
-    sqlx::query("INSERT INTO filebelt_mcp.data_grants (tenant_id,id,principal_id,registration_id,drive_id,resource_id,version_id,allow_metadata,allow_content,acl_generation,namespace_generation,registration_generation,created_by,created_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,statement_timestamp(),statement_timestamp()+make_interval(secs=>$14))")
+    sqlx::query("INSERT INTO filebelt_mcp.data_grants (tenant_id,id,principal_id,registration_id,drive_id,resource_id,version_id,allow_metadata,allow_content,drive_acl_generation,acl_generation,namespace_generation,registration_generation,created_by,created_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,statement_timestamp(),statement_timestamp()+make_interval(secs=>$15))")
         .bind(input.tenant_id)
         .bind(input.id)
         .bind(input.principal_id)
@@ -685,13 +697,15 @@ pub(super) async fn insert_data_grant(
         .bind(input.version_id)
         .bind(input.allow_metadata)
         .bind(input.allow_content)
+        .bind(input.drive_acl_generation)
         .bind(input.acl_generation)
         .bind(input.namespace_generation)
         .bind(registration_generation)
         .bind(input.created_by)
         .bind(input.lifetime_seconds)
         .execute(&mut **transaction)
-        .await?;
+        .await
+        .map_err(crate::map_security_admission)?;
     Ok(())
 }
 
@@ -874,5 +888,22 @@ mod tests {
         assert!(!production.contains("argument_json"));
         assert!(!production.contains("result_json"));
         assert!(!production.contains("stderr_text"));
+    }
+
+    #[test]
+    fn data_grant_queries_bind_drive_acl_generation() {
+        let source = include_str!("mcp.rs");
+        let production = source.split("#[cfg(test)]").next().expect("source prefix");
+        for required in [
+            "pub drive_acl_generation: i64",
+            "g.drive_acl_generation AS granted_drive_acl_generation",
+            "JOIN public.drives d",
+            "FOR SHARE OF d,n,v",
+            "granted_drive_acl != Some(snapshot.drive_acl_generation)",
+            "row.get::<i64, _>(\"drive_acl_generation\") != input.drive_acl_generation",
+            "drive_acl_generation,acl_generation,namespace_generation",
+        ] {
+            assert!(production.contains(required), "missing {required}");
+        }
     }
 }

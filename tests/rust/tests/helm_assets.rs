@@ -94,8 +94,11 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
         schema["properties"]["operation"]["properties"]["type"]["enum"]
             .as_array()
             .is_some_and(|operations| {
-                operations.len() == 12
+                operations.len() == 16
                     && operations.iter().any(|operation| operation == "keys-audit")
+                    && operations
+                        .iter()
+                        .any(|operation| operation == "security-descendant-shares-activate")
             })
     );
     assert!(values.contains("linux/riscv64"));

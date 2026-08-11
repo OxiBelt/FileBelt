@@ -32,3 +32,21 @@ stopped. It preserves revisions and reconciliation state while revoking
 affected live browser sessions and fencing live document state; follow
 [`docs/operations/onlyoffice.md`](../../../docs/operations/onlyoffice.md) for
 rollout, verification, and rollback requirements.
+
+`000011_security_descendant_shares.sql` starts every tenant with descendant
+share admission blocked. It records a resumable, audited repair run that
+revokes every active legacy `self_and_descendants` direct share (and deletes
+its ACL rows) plus every active pre-drive-fence MCP data grant. Recovery
+operators call, in order, `descendant_shares_status`, bounded
+`repair_descendant_shares` batches (maximum total limit 1000) until `remaining`
+is zero, `verify_descendant_shares`, then `activate_descendant_shares`. Each
+mutating call requires the exact tenant-slug confirmation and supplied live
+tenant administrator, the same operation UUID and compiled source revision,
+and serializes per tenant with an advisory lock; status is a checkpoint read
+and accepts an operation UUID without an administrator.
+Only activation opens POST admission. The API may read only
+`descendant_share_admission_open`; it must treat SQLSTATE `FB001` with message
+`filebelt descendant-share admission is blocked` as the authoritative
+close-race result. The migration keeps historical MCP rows with a NULL drive
+ACL generation only after revocation; newly inserted grants require a positive
+drive fence.

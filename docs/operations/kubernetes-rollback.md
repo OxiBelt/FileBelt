@@ -22,6 +22,9 @@
 - Mount policy/vault schemas are forward-only. Keep gateways disabled, retain
   every admitted `mount-storage` public key and every referenced mount KEK, and never use
   tailstate or adapter caches to reconstruct PostgreSQL state.
+- Descendant-share repair state is forward-only and fail-closed. A Helm rollback,
+  older API image, or Job deletion never reopens its tenant admission gate;
+  retain the repair receipts, fence, audit, and outbox evidence.
 
 ## Failure before workload rollout
 
@@ -65,6 +68,17 @@ Do not roll back a Secret in place. After v7 admission, configuration and
 keyset incompatibilities are forward-fix-only: keep the v7 purpose records and
 replace only the affected immutable Secret/generation. Restore the previous versioned Secret name
 or contents, update the matching generation, and roll Pods deliberately.
+
+## Descendant-share cutover rollback
+
+If the migration, repair, verification, or activation fails, leave the gate
+blocked. Preserve the operation UUID, tenant confirmation, actor identity,
+batch receipts, Job logs, audit rows, and outbox watermark. A schema-compatible
+previous binary may serve unaffected routes, but it cannot be used to create a
+direct share or MCP data grant while blocked. Repair the defect with a reviewed
+forward migration or rerun the same idempotent repair operation; never delete
+security rows, disable an admission trigger, or use owner credentials to mark a
+run verified/active.
 
 ## Collaboration rollback
 

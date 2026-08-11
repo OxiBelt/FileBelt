@@ -2021,7 +2021,9 @@ impl From<DatabaseError> for AppError {
             DatabaseError::Conflict => Self::Conflict("state_conflict"),
             DatabaseError::StaleGeneration => Self::Forbidden,
             DatabaseError::QuotaExceeded => Self::Conflict("quota_exceeded"),
-            DatabaseError::AdmissionLimited => Self::Unavailable,
+            DatabaseError::AdmissionLimited | DatabaseError::SecurityAdmissionBlocked => {
+                Self::Unavailable
+            }
             DatabaseError::Sql(_) | DatabaseError::Migration(_) => Self::Unavailable,
             DatabaseError::StorageUnavailable => Self::Unavailable,
             DatabaseError::InvalidPersistedValue => Self::Internal,

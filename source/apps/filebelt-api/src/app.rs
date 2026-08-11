@@ -137,6 +137,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
             async move { database.health().await.is_ok() }
         },
     );
+    crate::policy::register_recursive_share_metrics(&operations);
     let database_ready = operations.register_gauge(
         "database_ready",
         "Whether PostgreSQL is available to this role.",

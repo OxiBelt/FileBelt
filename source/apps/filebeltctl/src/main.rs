@@ -9,6 +9,7 @@ mod grants;
 mod phase8;
 mod recovery;
 mod scrub;
+mod security;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
@@ -77,6 +78,60 @@ enum Command {
     Phase8 {
         #[command(subcommand)]
         command: Phase8Command,
+    },
+    Security {
+        #[command(subcommand)]
+        command: SecurityCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SecurityCommand {
+    DescendantShares {
+        #[command(subcommand)]
+        command: DescendantShareCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DescendantShareCommand {
+    Status {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        operation_id: Uuid,
+    },
+    Repair {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        operation_id: Uuid,
+        #[arg(long)]
+        confirm_tenant: String,
+        #[arg(long)]
+        actor_principal_id: Uuid,
+        #[arg(long, default_value_t = 1_000, value_parser = clap::value_parser!(u32).range(1..=1_000))]
+        batch_size: u32,
+    },
+    Verify {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        operation_id: Uuid,
+        #[arg(long)]
+        confirm_tenant: String,
+        #[arg(long)]
+        actor_principal_id: Uuid,
+    },
+    Activate {
+        #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        operation_id: Uuid,
+        #[arg(long)]
+        confirm_tenant: String,
+        #[arg(long)]
+        actor_principal_id: Uuid,
     },
 }
 
@@ -732,6 +787,88 @@ async fn execute(command: Command) -> Result<String, String> {
         } => {
             let (configuration, database) = configured_database(&config).await?;
             phase8::deactivate(&database, &configuration.tenant.slug, actor_principal_id).await
+        }
+        Command::Security {
+            command:
+                SecurityCommand::DescendantShares {
+                    command:
+                        DescendantShareCommand::Status {
+                            config,
+                            operation_id,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            security::descendant_shares_status(&database, &configuration.tenant.slug, operation_id)
+                .await
+        }
+        Command::Security {
+            command:
+                SecurityCommand::DescendantShares {
+                    command:
+                        DescendantShareCommand::Repair {
+                            config,
+                            operation_id,
+                            confirm_tenant,
+                            actor_principal_id,
+                            batch_size,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            security::repair_descendant_shares(
+                &database,
+                &configuration.tenant.slug,
+                operation_id,
+                &confirm_tenant,
+                actor_principal_id,
+                batch_size,
+            )
+            .await
+        }
+        Command::Security {
+            command:
+                SecurityCommand::DescendantShares {
+                    command:
+                        DescendantShareCommand::Verify {
+                            config,
+                            operation_id,
+                            confirm_tenant,
+                            actor_principal_id,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            security::verify_descendant_shares(
+                &database,
+                &configuration.tenant.slug,
+                operation_id,
+                &confirm_tenant,
+                actor_principal_id,
+            )
+            .await
+        }
+        Command::Security {
+            command:
+                SecurityCommand::DescendantShares {
+                    command:
+                        DescendantShareCommand::Activate {
+                            config,
+                            operation_id,
+                            confirm_tenant,
+                            actor_principal_id,
+                        },
+                },
+        } => {
+            let (configuration, database) = configured_database(&config).await?;
+            security::activate_descendant_shares(
+                &database,
+                &configuration.tenant.slug,
+                operation_id,
+                &confirm_tenant,
+                actor_principal_id,
+            )
+            .await
         }
     }
 }

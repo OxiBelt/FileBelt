@@ -234,6 +234,7 @@ operation:
   type: migrate
   operationId: 123e4567-e89b-42d3-a456-426614174000
   tenantSlugConfirmation: ""
+  actorPrincipalId: ""
   payloadId: ""
   args: []
   checkpoint:
@@ -249,6 +250,19 @@ full-tenant operation and requires the exact tenant slug in
 and leave the tenant confirmation empty; the chart renders the two modes as
 mutually exclusive. `args` appends bounded arguments without invoking a shell,
 for example an audit cursor or export limit.
+
+The descendant-share cutover adds `security-descendant-shares-status`,
+`security-descendant-shares-repair`, `security-descendant-shares-verify`, and
+`security-descendant-shares-activate`. These are recovery-database-only Jobs:
+they have no payload mount and no service-account token. Status accepts only
+`operationId`. Generate one operation ID for the tenant cutover and reuse it
+for every repair retry, verification, and activation, together with exact
+`tenantSlugConfirmation` and validated tenant-admin `actorPrincipalId`; these
+operations reject payload IDs, checkpoints, and freeform `args`. Repair runs
+fixed 1,000-row batches until complete, then verify, and only activate after
+compatible API rollout and retained acceptance evidence. The migration starts
+the tenant gate blocked, so neither a Helm rollback nor an older API image
+reopens direct-share or MCP data-grant admission.
 
 Keyset audit, recovery checkpoint, and recovery verification require quiesced
 workloads. `keys-audit` receives all configured public keysets and no private

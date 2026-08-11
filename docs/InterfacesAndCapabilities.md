@@ -39,6 +39,16 @@ integer byte counts, opaque keyset cursors, and generation ETags. Pages default
 to 50 items and accept 1 through 200. Mutations carry an expected namespace,
 resource, or head generation as applicable.
 
+While a tenant's descendant-share admission gate is blocked,
+`POST /api/v1/drives/{drive_id}/nodes/{node_id}/shares` returns `503` Problem
+code `share.remediation_in_progress`, and
+`POST /api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants` returns `503`
+Problem code `mcp.data_grant.remediation_in_progress`. Both responses carry
+`Retry-After: 60`. This is an admission result, not an idempotency replay or
+an authorization disclosure; clients must not retry earlier. The OpenAPI source
+defines these explicit responses and the generated TypeScript contract remains
+derived from it.
+
 Allocation and commit operations identified in OpenAPI require an
 `Idempotency-Key`. The key is bound to tenant, principal, route, request
 fingerprint, response status, and response body for 24 hours. Repeating the same

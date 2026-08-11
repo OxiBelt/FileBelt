@@ -55,6 +55,13 @@ one path:
 - For an ACL evaluator defect, stop all affected access paths together. Do not
   leave a worker or future adapter on different semantics. Anonymous sharing is
   unsupported in Phase 2 and must remain disabled.
+- For the descendant-share attenuation cutover, rely on the durable tenant gate
+  rather than an edge-only route block. It rejects both direct-share and MCP
+  data-grant creation even from an older API binary. Retain the gate closed,
+  repair all recursive shares and pre-fence grants through the reviewed
+  recovery procedure, verify its receipts/generations/outbox, and explicitly
+  activate only with the validated tenant-admin actor. Do not delete ACL,
+  security, audit, or outbox rows to make a rollback appear complete.
 - For the forward ACL replacement fix, temporarily reject the ACL replacement
   endpoint at method-aware ingress: `PUT
   /api/v1/drives/{drive_id}/nodes/{node_id}/acl`. Drain and replace every API

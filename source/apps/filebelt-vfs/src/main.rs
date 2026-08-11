@@ -216,6 +216,7 @@ async fn run() -> Result<()> {
         let database = ready_database.clone();
         async move { database.health().await.is_ok() }
     });
+    policy::register_recursive_share_metrics(&operations);
     let operations_listener = tokio::net::TcpListener::bind(config.listeners.operations)
         .await
         .context("cannot bind VFS operations listener")?;

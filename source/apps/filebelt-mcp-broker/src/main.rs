@@ -27,8 +27,8 @@ use filebelt_control_protocol::{
     Config, DeploymentMode, McpLimitConfig, McpTrustProfile, read_secret_string,
 };
 use filebelt_database::mcp::{
-    McpRegistrationRecord, McpSecretEnvelope, NewMcpOAuthAttempt, NewMcpRunnerSlotReservation,
-    RegistrationConfigurationUpdate,
+    McpAuthoritySnapshot, McpRegistrationRecord, McpSecretEnvelope, NewMcpOAuthAttempt,
+    NewMcpRunnerSlotReservation, RegistrationConfigurationUpdate,
 };
 use filebelt_database::{Database, DatabaseError};
 use filebelt_mcp_protocol::{
@@ -1013,11 +1013,7 @@ async fn validate_attachment_authority(
             .fields
             .iter()
             .any(|field| field.disclosure != AttachmentDisclosure::Content as i32);
-        if claims.membership_generation != attachment.membership_generation
-            || snapshot.principal_generation != attachment.membership_generation as i64
-            || snapshot.registration_generation != claims.policy_generation as i64
-            || snapshot.acl_generation != attachment.resource_acl_generation as i64
-            || snapshot.namespace_generation != attachment.namespace_generation as i64
+        if !attachment_authority_generations_match(claims, attachment, &snapshot)
             || (needs_content && (!data_grant.allow_content || !snapshot.allow_content))
             || (needs_metadata && (!data_grant.allow_metadata || !snapshot.allow_metadata))
         {
@@ -1025,6 +1021,19 @@ async fn validate_attachment_authority(
         }
     }
     Ok(())
+}
+
+fn attachment_authority_generations_match(
+    claims: &filebelt_mcp_protocol::DelegationClaims,
+    attachment: &AttachmentClaim,
+    snapshot: &McpAuthoritySnapshot,
+) -> bool {
+    claims.membership_generation == attachment.membership_generation
+        && snapshot.principal_generation == attachment.membership_generation as i64
+        && snapshot.registration_generation == claims.policy_generation as i64
+        && snapshot.drive_acl_generation == attachment.drive_acl_generation as i64
+        && snapshot.acl_generation == attachment.resource_acl_generation as i64
+        && snapshot.namespace_generation == attachment.namespace_generation as i64
 }
 
 async fn materialize_attachments(
@@ -4108,6 +4117,40 @@ mod tests {
             attachment_value(&claim, &content, Some(b"abc")).unwrap(),
             json!("YWJj")
         );
+    }
+
+    #[test]
+    fn attachment_authority_rejects_drive_only_staleness() {
+        let claims = delegation_claims(McpOperation::Invoke);
+        let attachment = AttachmentClaim {
+            membership_generation: claims.membership_generation,
+            drive_acl_generation: 11,
+            resource_acl_generation: 13,
+            namespace_generation: 17,
+            ..Default::default()
+        };
+        let snapshot = McpAuthoritySnapshot {
+            principal_generation: claims.membership_generation as i64,
+            registration_generation: claims.policy_generation as i64,
+            drive_acl_generation: 11,
+            acl_generation: 13,
+            namespace_generation: 17,
+            allow_metadata: true,
+            allow_content: true,
+        };
+        assert!(attachment_authority_generations_match(
+            &claims,
+            &attachment,
+            &snapshot
+        ));
+        assert!(!attachment_authority_generations_match(
+            &claims,
+            &attachment,
+            &McpAuthoritySnapshot {
+                drive_acl_generation: 12,
+                ..snapshot
+            },
+        ));
     }
 
     #[test]

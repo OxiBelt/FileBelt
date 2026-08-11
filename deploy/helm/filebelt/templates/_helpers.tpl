@@ -282,6 +282,22 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq .Values.operation.type "storage-scrub-start") (ne .Values.operation.payloadId "") (ne .Values.operation.tenantSlugConfirmation "") -}}
 {{- fail "targeted storage-scrub-start must not include operation.tenantSlugConfirmation" -}}
 {{- end -}}
+{{- $securityDescendantSharesOperations := list "security-descendant-shares-status" "security-descendant-shares-repair" "security-descendant-shares-verify" "security-descendant-shares-activate" -}}
+{{- if has .Values.operation.type $securityDescendantSharesOperations -}}
+{{- if or (ne .Values.operation.payloadId "") (ne (len .Values.operation.args) 0) (ne .Values.operation.checkpoint.secretName "") -}}
+{{- fail "security descendant-share operations do not accept payloadId, args, or checkpoint input" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .Values.operation.type "security-descendant-shares-status" -}}
+{{- if or (ne .Values.operation.tenantSlugConfirmation "") (ne .Values.operation.actorPrincipalId "") -}}
+{{- fail "security-descendant-shares-status accepts only operation.operationId" -}}
+{{- end -}}
+{{- end -}}
+{{- if has .Values.operation.type (list "security-descendant-shares-repair" "security-descendant-shares-verify" "security-descendant-shares-activate") -}}
+{{- if or (eq .Values.operation.tenantSlugConfirmation "") (eq .Values.operation.actorPrincipalId "") -}}
+{{- fail "security descendant-share repair, verify, and activate require tenant confirmation and actor principal ID" -}}
+{{- end -}}
+{{- end -}}
 {{- if and (has .Values.operation.type (list "keys-audit" "recovery-checkpoint" "recovery-verify")) (not .Values.deployment.quiesced) -}}
 {{- fail "keyset audit and recovery operations require deployment.quiesced=true" -}}
 {{- end -}}

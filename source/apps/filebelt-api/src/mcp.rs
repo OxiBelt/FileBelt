@@ -16,6 +16,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use filebelt_collaboration_protocol::normalized_markdown_source_digest;
 use filebelt_control_protocol::{Config, DeploymentMode};
+use filebelt_database::DatabaseError;
 use filebelt_database::mcp::{
     McpIdempotency, McpIdempotentWrite, McpRegistrationRecord, NewCapabilitySnapshot,
     NewMcpApprovalRule, NewMcpDataGrant, NewMcpInvocation, NewMcpManagedTemplate,
@@ -1925,6 +1926,13 @@ async fn create_data_grant(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
+    if !state
+        .database
+        .descendant_share_admission_open(state.tenant_id)
+        .await?
+    {
+        return Err(data_grant_remediation_in_progress());
+    }
     let idempotency_key = require_idempotency(&headers)?.to_owned();
     let drive_id = parse_uuid(&drive_id)?;
     let node_id = parse_uuid(&node_id)?;
@@ -1988,8 +1996,9 @@ async fn create_data_grant(
         Action::ReadMetadata,
     )
     .await?;
+    require_attachment_generations(use_mcp, metadata)?;
     if actions.iter().any(|action| action == "read_content") {
-        authorize(
+        let content = authorize(
             &state.database,
             state.tenant_id,
             session.record.principal_id,
@@ -1998,6 +2007,7 @@ async fn create_data_grant(
             Action::ReadContent,
         )
         .await?;
+        require_attachment_generations(use_mcp, content)?;
     }
     let node = state
         .database
@@ -2005,8 +2015,10 @@ async fn create_data_grant(
         .await?;
     require_etag(&headers, &mcp_node_etag(&node))?;
     if input.expected_acl_generation != node.acl_generation
-        || metadata.resource_acl_generation != use_mcp.resource_acl_generation
-        || metadata.namespace_generation != use_mcp.namespace_generation
+        || node.acl_generation
+            != i64::try_from(use_mcp.resource_acl_generation).map_err(|_| ApiError::internal())?
+        || node.namespace_generation
+            != i64::try_from(use_mcp.namespace_generation).map_err(|_| ApiError::internal())?
     {
         return Err(ApiError::new(
             StatusCode::PRECONDITION_FAILED,
@@ -2048,6 +2060,8 @@ async fn create_data_grant(
                 version_id: input.version_id,
                 allow_metadata: true,
                 allow_content: actions.iter().any(|action| action == "read_content"),
+                drive_acl_generation: i64::try_from(use_mcp.drive_acl_generation)
+                    .map_err(|_| ApiError::internal())?,
                 acl_generation: node.acl_generation,
                 namespace_generation: node.namespace_generation,
                 created_by: session.record.principal_id,
@@ -2062,8 +2076,19 @@ async fn create_data_grant(
                 response_body: &value,
             },
         )
-        .await?;
+        .await
+        .map_err(|error| match error {
+            DatabaseError::SecurityAdmissionBlocked => data_grant_remediation_in_progress(),
+            other => ApiError::from(other),
+        })?;
     mcp_idempotent_response(outcome, Some(&mcp_node_etag(&node)))
+}
+
+fn data_grant_remediation_in_progress() -> ApiError {
+    ApiError::remediation_in_progress(
+        "mcp.data_grant.remediation_in_progress",
+        "MCP data grants are unavailable until the security repair is activated",
+    )
 }
 
 async fn revoke_data_grant(
@@ -4053,6 +4078,27 @@ mod tests {
         assert!(mime_matches("text/*", "text/markdown"));
         assert!(!valid_mime_pattern("*/*"));
         assert!(!valid_mime_pattern("text/plain; charset=utf-8"));
+    }
+
+    #[test]
+    fn attachment_generation_comparison_rejects_drive_only_staleness() {
+        let expected = AuthorizationGrant {
+            membership_generation: 7,
+            drive_acl_generation: 11,
+            namespace_generation: 13,
+            resource_acl_generation: 17,
+        };
+        assert!(require_attachment_generations(expected, expected).is_ok());
+        assert!(
+            require_attachment_generations(
+                expected,
+                AuthorizationGrant {
+                    drive_acl_generation: 12,
+                    ..expected
+                },
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -476,6 +476,62 @@ def audit_count(action: str) -> int:
     return int(result.stdout.strip())
 
 
+def activate_descendant_share_security(actor_principal_id: str) -> None:
+    if UUID_V4.fullmatch(actor_principal_id) is None:
+        raise AssertionError("refusing descendant-share cutover for a non-UUID actor")
+    operation_id = str(uuid.uuid4())
+    result = compose(
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "--username",
+        "filebelt_owner",
+        "--dbname",
+        "filebelt",
+        "--no-psqlrc",
+        "--tuples-only",
+        "--no-align",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--command",
+        (
+            "BEGIN;"
+            "SET LOCAL ROLE filebelt_recovery;"
+            "SELECT set_config('filebelt.source_revision','phase2-acceptance',true);"
+            "SELECT filebelt_security.repair_descendant_shares("
+            "(SELECT id FROM tenants WHERE slug='development'),"
+            f"'{operation_id}'::uuid,'development','{actor_principal_id}'::uuid,1000);"
+            "SELECT filebelt_security.verify_descendant_shares("
+            "(SELECT id FROM tenants WHERE slug='development'),"
+            f"'{operation_id}'::uuid,'development','{actor_principal_id}'::uuid);"
+            "SELECT filebelt_security.activate_descendant_shares("
+            "(SELECT id FROM tenants WHERE slug='development'),"
+            f"'{operation_id}'::uuid,'development','{actor_principal_id}'::uuid);"
+            "SELECT filebelt_security.descendant_shares_status("
+            "(SELECT id FROM tenants WHERE slug='development'),"
+            f"'{operation_id}'::uuid);"
+            "COMMIT;"
+        ),
+        capture=True,
+    )
+    status = None
+    for line in reversed(result.stdout.splitlines()):
+        try:
+            candidate = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and "admission_open" in candidate:
+            status = candidate
+            break
+    if status is None:
+        raise AssertionError(
+            f"descendant-share cutover returned no status: {result.stdout!r}"
+        )
+    if status.get("admission_open") is not True or status.get("remaining") != 0:
+        raise AssertionError(f"descendant-share cutover did not open admission: {status}")
+
+
 def acl_replacement_state(node_id: str, principal_id: str) -> tuple[int, int, int, int]:
     if UUID_V4.fullmatch(node_id) is None or UUID_V4.fullmatch(principal_id) is None:
         raise AssertionError("refusing to query non-UUID ACL replacement state")
@@ -525,6 +581,7 @@ def exercise() -> None:
     assert admin_session["verified_email"] == "admin@example.test"
     assert member_session["verified_email"] == "member@example.test"
     assert audit_count("session.create") == 2
+    activate_descendant_share_security(str(admin_session["principal_id"]))
 
     admin_drive = private_drive(admin)
     root = admin.api("GET", f"/drives/{admin_drive['id']}/nodes/{admin_drive['root_id']}")

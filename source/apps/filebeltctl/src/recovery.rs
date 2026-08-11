@@ -174,6 +174,13 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
                 "id": row.get::<Uuid, _>("id"),
             })
         });
+    let descendant_share_security: Value =
+        sqlx::query_scalar("SELECT filebelt_security.descendant_shares_status($1,$2)")
+            .bind(tenant_id)
+            .bind(Uuid::nil())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|error| error.to_string())?;
     let counts = sqlx::query("SELECT (SELECT count(id) FROM principals WHERE tenant_id=$1) AS principals,(SELECT count(id) FROM users WHERE tenant_id=$1) AS users,(SELECT count(id) FROM groups WHERE tenant_id=$1) AS groups,(SELECT count(id) FROM drives WHERE tenant_id=$1) AS drives,(SELECT count(id) FROM nodes WHERE tenant_id=$1) AS nodes,(SELECT count(id) FROM file_versions WHERE tenant_id=$1) AS file_versions,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1) AS payload_objects,(SELECT count(id) FROM jobs WHERE tenant_id=$1) AS jobs,(SELECT count(id) FROM audit_events WHERE tenant_id=$1) AS audit_events,(SELECT count(id) FROM outbox_events WHERE tenant_id=$1 AND published_at IS NULL) AS pending_outbox,(SELECT count(id) FROM filebelt_mcp.registrations WHERE tenant_id=$1 AND deleted_at IS NULL) AS mcp_registrations,(SELECT count(id) FROM filebelt_mcp.deletion_tombstones WHERE tenant_id=$1) AS mcp_deletion_tombstones,(SELECT count(invocation_id) FROM filebelt_mcp.runner_slot_reservations WHERE tenant_id=$1 AND released_at IS NULL) AS mcp_runner_slot_reservations,(SELECT count(registration_id) FROM filebelt_mcp_vault.secret_envelopes WHERE tenant_id=$1 AND deleted_at IS NULL) AS mcp_secret_envelopes,(SELECT count(attempt_id) FROM filebelt_mcp_vault.oauth_attempt_secrets WHERE tenant_id=$1) AS mcp_oauth_attempt_secrets,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS expected_payloads,(SELECT count(id) FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('quarantining','quarantined')) AS quarantined_payloads,(SELECT COALESCE(sum(size_bytes),0)::bigint FROM payload_objects WHERE tenant_id=$1 AND backend_id=$2 AND state IN ('referenced','finalized','quarantining','quarantined')) AS total_payload_bytes")
         .bind(tenant_id)
         .bind(configuration.storage.backend_id)
@@ -226,6 +233,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "quarantined_payloads": counts.get::<i64, _>("quarantined_payloads"),
             "total_payload_bytes": counts.get::<i64, _>("total_payload_bytes"),
             "payload_manifest_sha256": payload_manifest_sha256,
+            "descendant_share_security": descendant_share_security,
         },
     }))
 }

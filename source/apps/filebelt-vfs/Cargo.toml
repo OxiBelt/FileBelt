@@ -30,6 +30,7 @@ getrandom.workspace = true
 jiff.workspace = true
 md4.workspace = true
 prost.workspace = true
+prometheus-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tokio.workspace = true

@@ -4,6 +4,7 @@
 {{- $storageOperation := has $type (list "storage-probe" "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
 {{- $payloadOperation := eq $type "storage-probe" -}}
 {{- $recoveryOperation := has $type (list "recovery-checkpoint" "recovery-verify") -}}
+{{- $securityDescendantSharesOperation := has $type (list "security-descendant-shares-status" "security-descendant-shares-repair" "security-descendant-shares-verify" "security-descendant-shares-activate") -}}
 {{- $keysetInventoryOperation := or $recoveryOperation (eq $type "keys-audit") -}}
 {{- $databaseSecret := "" -}}
 {{- if eq $type "migrate" -}}
@@ -16,6 +17,8 @@
 {{- $databaseSecret = .Values.secrets.auditDatabase.name -}}
 {{- else if has $type (list "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
 {{- $databaseSecret = .Values.secrets.maintenanceDatabase.name -}}
+{{- else if $securityDescendantSharesOperation -}}
+{{- $databaseSecret = .Values.secrets.recoveryDatabase.name -}}
 {{- else if not (has $type (list "keys-audit" "storage-probe")) -}}
 {{- $databaseSecret = .Values.secrets.recoveryDatabase.name -}}
 {{- end -}}
@@ -30,6 +33,8 @@
 {{- $databaseKey = .Values.secrets.auditDatabase.key -}}
 {{- else if has $type (list "storage-scrub-start" "storage-scrub-status" "storage-scrub-verify") -}}
 {{- $databaseKey = .Values.secrets.maintenanceDatabase.key -}}
+{{- else if $securityDescendantSharesOperation -}}
+{{- $databaseKey = .Values.secrets.recoveryDatabase.key -}}
 {{- else if ne $type "storage-probe" -}}
 {{- $databaseKey = .Values.secrets.recoveryDatabase.key -}}
 {{- end -}}
@@ -130,6 +135,18 @@ spec:
           {{- else if eq $type "audit-export" }}
             - audit
             - export
+          {{- else if $securityDescendantSharesOperation }}
+            - security
+            - descendant-shares
+            - {{ trimPrefix "security-descendant-shares-" $type }}
+            - --operation-id
+            - {{ .Values.operation.operationId | quote }}
+            {{- if ne $type "security-descendant-shares-status" }}
+            - --confirm-tenant
+            - {{ .Values.operation.tenantSlugConfirmation | quote }}
+            - --actor-principal-id
+            - {{ .Values.operation.actorPrincipalId | quote }}
+            {{- end }}
           {{- end }}
             - --config
             - /etc/filebelt/filebelt.toml

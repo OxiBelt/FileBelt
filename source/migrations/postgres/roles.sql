@@ -52,9 +52,10 @@ CREATE SCHEMA IF NOT EXISTS filebelt_mount_vault;
 CREATE SCHEMA IF NOT EXISTS filebelt_document;
 CREATE SCHEMA IF NOT EXISTS filebelt_media;
 CREATE SCHEMA IF NOT EXISTS filebelt_phase8;
+CREATE SCHEMA IF NOT EXISTS filebelt_security;
 REVOKE ALL ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
   filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
-  filebelt_phase8 FROM PUBLIC;
+  filebelt_phase8, filebelt_security FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
   filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
-  filebelt_phase8 TO filebelt_migrator;
+  filebelt_phase8, filebelt_security TO filebelt_migrator;

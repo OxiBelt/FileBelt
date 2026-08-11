@@ -300,6 +300,7 @@ async fn mcp_schema_enforces_tenant_isolation_and_secret_privileges() {
         version_id,
         allow_metadata: true,
         allow_content: true,
+        drive_acl_generation: 1,
         acl_generation: 1,
         namespace_generation: 1,
         created_by: user_principal_id,

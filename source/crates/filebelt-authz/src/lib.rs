@@ -8,7 +8,7 @@
 
 #![deny(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use filebelt_domain::{
     AclEntryId, Action, DriveOwner, Generation, GenerationSnapshot, GroupId, GroupRole,
@@ -132,6 +132,53 @@ pub struct ResolvedAclEntry {
     distance: u32,
 }
 
+/// Whether a resolved entry is an independent ACL fact or a recursive direct
+/// share whose authority is continuously attenuated by its creator.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RecursiveShareProvenance {
+    /// The entry is an independently administered ACL fact.
+    Independent,
+    /// The entry came from a recursive direct share created by this principal.
+    RecursiveDirectShare { creator: PrincipalId },
+}
+
+/// A resolved ACL entry with the provenance needed for recursive-share
+/// attenuation. Existing callers can continue to use [`ResolvedAclEntry`] and
+/// [`evaluate`]; only recursive-share evaluation needs this wrapper.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RecursiveShareResolvedAclEntry {
+    resolved: ResolvedAclEntry,
+    provenance: RecursiveShareProvenance,
+}
+
+impl RecursiveShareResolvedAclEntry {
+    #[must_use]
+    pub const fn independent(resolved: ResolvedAclEntry) -> Self {
+        Self {
+            resolved,
+            provenance: RecursiveShareProvenance::Independent,
+        }
+    }
+
+    #[must_use]
+    pub const fn recursive_direct_share(resolved: ResolvedAclEntry, creator: PrincipalId) -> Self {
+        Self {
+            resolved,
+            provenance: RecursiveShareProvenance::RecursiveDirectShare { creator },
+        }
+    }
+
+    #[must_use]
+    pub const fn resolved(self) -> ResolvedAclEntry {
+        self.resolved
+    }
+
+    #[must_use]
+    pub const fn provenance(self) -> RecursiveShareProvenance {
+        self.provenance
+    }
+}
+
 impl ResolvedAclEntry {
     /// Creates a direct entry attached to the target resource.
     #[must_use]
@@ -226,6 +273,32 @@ impl PrincipalContext {
         self.memberships.iter().any(|membership| {
             membership.group_id == group_id && membership.role == GroupRole::Manager
         })
+    }
+}
+
+/// Complete authorization facts for one possible creator in a recursive direct
+/// share proof. The facts must describe the same requested resource as the
+/// enclosing recursive-share request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrincipalAuthorizationFacts {
+    principal: PrincipalContext,
+    entries: Vec<RecursiveShareResolvedAclEntry>,
+}
+
+impl PrincipalAuthorizationFacts {
+    #[must_use]
+    pub fn new(principal: PrincipalContext, entries: Vec<RecursiveShareResolvedAclEntry>) -> Self {
+        Self { principal, entries }
+    }
+
+    #[must_use]
+    pub const fn principal(&self) -> &PrincipalContext {
+        &self.principal
+    }
+
+    #[must_use]
+    pub fn entries(&self) -> &[RecursiveShareResolvedAclEntry] {
+        &self.entries
     }
 }
 
@@ -389,6 +462,344 @@ pub fn evaluate(request: AuthorizationRequest<'_>) -> AuthorizationDecision {
         source_entries: Vec::new(),
         generations: request.generations,
     }
+}
+
+/// The maximum number of recursive direct-share creators in one proof.
+pub const MAX_RECURSIVE_SHARE_DELEGATION_DEPTH: usize = 128;
+/// The maximum number of recursive direct-share edges examined in one proof.
+pub const MAX_RECURSIVE_SHARE_EDGES: usize = 4096;
+
+/// Complete input for a continuously attenuated recursive direct-share check.
+///
+/// `entries` are facts for `principal`; `creator_facts` supplies the same kind
+/// of facts for every creator reachable from a recursive direct-share entry.
+/// All facts concern `resource` and its authoritative ancestry.
+#[derive(Clone, Debug)]
+pub struct RecursiveShareAuthorizationRequest<'a> {
+    pub principal: &'a PrincipalContext,
+    pub resource: ResourceId,
+    pub drive_owner: DriveOwner,
+    pub action: Action,
+    pub entries: &'a [RecursiveShareResolvedAclEntry],
+    pub creator_facts: &'a [PrincipalAuthorizationFacts],
+    pub generations: GenerationSnapshot,
+}
+
+/// A bounded recursive-share graph could not be evaluated safely.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecursiveShareEvaluationError {
+    DelegationDepthExceeded,
+    RecursiveEdgeLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct RecursiveShareNodeKey {
+    principal: PrincipalId,
+    action: Action,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct RecursiveShareCandidate {
+    entry_id: AclEntryId,
+    creator: PrincipalId,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RecursiveShareNode {
+    denied: Option<(DecisionReason, Vec<AclEntryId>)>,
+    independent: Option<(DecisionReason, Vec<AclEntryId>)>,
+    candidates: Vec<RecursiveShareCandidate>,
+}
+
+#[derive(Clone, Copy)]
+struct RecursiveShareSubject<'a> {
+    principal: &'a PrincipalContext,
+    entries: &'a [RecursiveShareResolvedAclEntry],
+}
+
+/// Evaluates direct shares with recursive inheritance under continuous
+/// delegation attenuation.
+///
+/// A recursive direct-share allow is usable only when its creator can currently
+/// prove both `SHARE` and the requested action at this exact resource.
+/// Exact-resource `self` direct-share rows and independently administered ACL
+/// rows remain roots. The proof is a least fixed point: rootless cycles confer
+/// nothing, while cycles reachable from an independent root can succeed.
+pub fn evaluate_recursive_direct_shares(
+    request: RecursiveShareAuthorizationRequest<'_>,
+) -> Result<AuthorizationDecision, RecursiveShareEvaluationError> {
+    let mut creator_facts = BTreeMap::new();
+    for facts in request.creator_facts {
+        let principal = facts.principal().principal_id();
+        match creator_facts.entry(principal) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(Some(facts));
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                entry.insert(None);
+            }
+        }
+    }
+
+    let root = RecursiveShareNodeKey {
+        principal: request.principal.principal_id(),
+        action: request.action,
+    };
+    let mut depths = BTreeMap::from([(root, 0_usize)]);
+    let mut pending = VecDeque::from([root]);
+    let mut nodes = BTreeMap::new();
+    let mut recursive_edges = 0_usize;
+
+    while let Some(key) = pending.pop_front() {
+        if nodes.contains_key(&key) {
+            continue;
+        }
+        let Some(subject) = recursive_share_subject(key.principal, &request, &creator_facts) else {
+            nodes.insert(key, RecursiveShareNode::default());
+            continue;
+        };
+        let node = recursive_share_node(subject, key.action, &request);
+        let depth = *depths
+            .get(&key)
+            .expect("every queued recursive-share node has a depth");
+        for candidate in &node.candidates {
+            recursive_edges += 1;
+            if recursive_edges > MAX_RECURSIVE_SHARE_EDGES {
+                return Err(RecursiveShareEvaluationError::RecursiveEdgeLimitExceeded);
+            }
+            let next_depth = depth + 1;
+            if next_depth > MAX_RECURSIVE_SHARE_DELEGATION_DEPTH {
+                return Err(RecursiveShareEvaluationError::DelegationDepthExceeded);
+            }
+            enqueue_recursive_share_node(
+                &mut depths,
+                &mut pending,
+                RecursiveShareNodeKey {
+                    principal: candidate.creator,
+                    action: Action::Share,
+                },
+                next_depth,
+            );
+            if key.action != Action::Share {
+                enqueue_recursive_share_node(
+                    &mut depths,
+                    &mut pending,
+                    RecursiveShareNodeKey {
+                        principal: candidate.creator,
+                        action: key.action,
+                    },
+                    next_depth,
+                );
+            }
+        }
+        nodes.insert(key, node);
+    }
+
+    let mut allowed = BTreeMap::<RecursiveShareNodeKey, Option<RecursiveShareCandidate>>::new();
+    for (key, node) in &nodes {
+        if node.denied.is_none() && node.independent.is_some() {
+            allowed.insert(*key, None);
+        }
+    }
+    loop {
+        let mut changed = false;
+        for (key, node) in &nodes {
+            if allowed.contains_key(key) || node.denied.is_some() {
+                continue;
+            }
+            if let Some(candidate) = node.candidates.iter().find(|candidate| {
+                recursive_share_candidate_is_proven(**candidate, key.action, &allowed)
+            }) {
+                allowed.insert(*key, Some(*candidate));
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let node = nodes
+        .get(&root)
+        .expect("the root recursive-share node is always collected");
+    if let Some((reason, source_entries)) = &node.denied {
+        return Ok(AuthorizationDecision {
+            allowed: false,
+            reason: *reason,
+            source_entries: source_entries.clone(),
+            generations: request.generations,
+        });
+    }
+    if let Some((reason, source_entries)) = &node.independent {
+        return Ok(AuthorizationDecision {
+            allowed: true,
+            reason: *reason,
+            source_entries: source_entries.clone(),
+            generations: request.generations,
+        });
+    }
+    if let Some(Some(candidate)) = allowed.get(&root) {
+        return Ok(AuthorizationDecision {
+            allowed: true,
+            reason: DecisionReason::InheritedAllow,
+            source_entries: vec![candidate.entry_id],
+            generations: request.generations,
+        });
+    }
+    Ok(AuthorizationDecision {
+        allowed: false,
+        reason: DecisionReason::NoMatchingGrant,
+        source_entries: Vec::new(),
+        generations: request.generations,
+    })
+}
+
+fn recursive_share_subject<'a>(
+    principal: PrincipalId,
+    request: &'a RecursiveShareAuthorizationRequest<'a>,
+    creator_facts: &BTreeMap<PrincipalId, Option<&'a PrincipalAuthorizationFacts>>,
+) -> Option<RecursiveShareSubject<'a>> {
+    if principal == request.principal.principal_id() {
+        return Some(RecursiveShareSubject {
+            principal: request.principal,
+            entries: request.entries,
+        });
+    }
+    creator_facts.get(&principal).and_then(|facts| {
+        facts.map(|facts| RecursiveShareSubject {
+            principal: facts.principal(),
+            entries: facts.entries(),
+        })
+    })
+}
+
+fn recursive_share_node(
+    subject: RecursiveShareSubject<'_>,
+    action: Action,
+    request: &RecursiveShareAuthorizationRequest<'_>,
+) -> RecursiveShareNode {
+    if let Some(reason) = implicit_owner_reason(subject.principal, request.drive_owner) {
+        return RecursiveShareNode {
+            denied: None,
+            independent: Some((reason, Vec::new())),
+            candidates: Vec::new(),
+        };
+    }
+
+    let mut direct_denies = Vec::new();
+    let mut inherited_denies = Vec::new();
+    let mut direct_allows = Vec::new();
+    let mut inherited_allows = Vec::new();
+    let mut candidates = Vec::new();
+
+    for provenanced in subject.entries {
+        let resolved = provenanced.resolved();
+        let entry = resolved.entry();
+        if entry.action() != action
+            || !subject.principal.includes_principal(entry.principal())
+            || !resolved.applies()
+            || resolved.is_direct() != (entry.resource() == request.resource)
+        {
+            continue;
+        }
+        match entry.effect() {
+            Effect::Deny => {
+                if resolved.is_direct() {
+                    direct_denies.push(entry.id());
+                } else {
+                    inherited_denies.push(entry.id());
+                }
+            }
+            Effect::Allow => match provenanced.provenance() {
+                RecursiveShareProvenance::Independent if resolved.is_direct() => {
+                    direct_allows.push(entry.id());
+                }
+                RecursiveShareProvenance::Independent => inherited_allows.push(entry.id()),
+                RecursiveShareProvenance::RecursiveDirectShare { creator }
+                    if entry.created_by() == creator =>
+                {
+                    candidates.push(RecursiveShareCandidate {
+                        entry_id: entry.id(),
+                        creator,
+                    });
+                }
+                RecursiveShareProvenance::RecursiveDirectShare { .. } => {}
+            },
+        }
+    }
+
+    canonicalize_ids(&mut direct_denies);
+    canonicalize_ids(&mut inherited_denies);
+    canonicalize_ids(&mut direct_allows);
+    canonicalize_ids(&mut inherited_allows);
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    if !direct_denies.is_empty() || !inherited_denies.is_empty() {
+        let reason = if direct_denies.is_empty() {
+            DecisionReason::InheritedDeny
+        } else {
+            DecisionReason::ExplicitDeny
+        };
+        direct_denies.extend(inherited_denies);
+        canonicalize_ids(&mut direct_denies);
+        return RecursiveShareNode {
+            denied: Some((reason, direct_denies)),
+            independent: None,
+            candidates: Vec::new(),
+        };
+    }
+    if !direct_allows.is_empty() || !inherited_allows.is_empty() {
+        let reason = if direct_allows.is_empty() {
+            DecisionReason::InheritedAllow
+        } else {
+            DecisionReason::ExplicitAllow
+        };
+        direct_allows.extend(inherited_allows);
+        canonicalize_ids(&mut direct_allows);
+        return RecursiveShareNode {
+            denied: None,
+            independent: Some((reason, direct_allows)),
+            candidates: Vec::new(),
+        };
+    }
+    RecursiveShareNode {
+        denied: None,
+        independent: None,
+        candidates,
+    }
+}
+
+fn enqueue_recursive_share_node(
+    depths: &mut BTreeMap<RecursiveShareNodeKey, usize>,
+    pending: &mut VecDeque<RecursiveShareNodeKey>,
+    key: RecursiveShareNodeKey,
+    depth: usize,
+) {
+    if match depths.get(&key) {
+        Some(current) => depth < *current,
+        None => true,
+    } {
+        depths.insert(key, depth);
+        pending.push_back(key);
+    }
+}
+
+fn recursive_share_candidate_is_proven(
+    candidate: RecursiveShareCandidate,
+    action: Action,
+    allowed: &BTreeMap<RecursiveShareNodeKey, Option<RecursiveShareCandidate>>,
+) -> bool {
+    let share = RecursiveShareNodeKey {
+        principal: candidate.creator,
+        action: Action::Share,
+    };
+    allowed.contains_key(&share)
+        && (action == Action::Share
+            || allowed.contains_key(&RecursiveShareNodeKey {
+                principal: candidate.creator,
+                action,
+            }))
 }
 
 fn implicit_owner_reason(
@@ -609,6 +1020,130 @@ mod tests {
             resource_acl: Generation::new(3),
             membership: Generation::new(5),
             namespace: Generation::new(8),
+        }
+    }
+
+    fn context(principal_id: PrincipalId) -> PrincipalContext {
+        PrincipalContext::new(principal_id, Vec::new())
+    }
+
+    fn entry_with_creator(
+        index: u64,
+        resource: ResourceId,
+        subject: PrincipalId,
+        action: Action,
+        effect: Effect,
+        inheritance: Inheritance,
+        creator: PrincipalId,
+    ) -> AclEntry {
+        AclEntry::new(
+            entry_id(index),
+            resource,
+            subject,
+            action,
+            effect,
+            inheritance,
+            Generation::new(index),
+            creator,
+        )
+    }
+
+    fn independent_direct(
+        index: u64,
+        subject: PrincipalId,
+        action: Action,
+        effect: Effect,
+    ) -> RecursiveShareResolvedAclEntry {
+        RecursiveShareResolvedAclEntry::independent(ResolvedAclEntry::direct(entry_with_creator(
+            index,
+            node(1),
+            subject,
+            action,
+            effect,
+            Inheritance::ThisResource,
+            principal(99),
+        )))
+    }
+
+    fn independent_inherited_deny(
+        index: u64,
+        subject: PrincipalId,
+        action: Action,
+    ) -> RecursiveShareResolvedAclEntry {
+        RecursiveShareResolvedAclEntry::independent(
+            ResolvedAclEntry::inherited(
+                entry_with_creator(
+                    index,
+                    node(2),
+                    subject,
+                    action,
+                    Effect::Deny,
+                    Inheritance::Descendants,
+                    principal(99),
+                ),
+                1,
+            )
+            .expect("inherited deny"),
+        )
+    }
+
+    fn recursive_inherited(
+        index: u64,
+        subject: PrincipalId,
+        action: Action,
+        creator: PrincipalId,
+    ) -> RecursiveShareResolvedAclEntry {
+        let entry = entry_with_creator(
+            index,
+            node(2),
+            subject,
+            action,
+            Effect::Allow,
+            Inheritance::Descendants,
+            creator,
+        );
+        RecursiveShareResolvedAclEntry::recursive_direct_share(
+            ResolvedAclEntry::inherited(entry, 1).expect("inherited recursive share"),
+            creator,
+        )
+    }
+
+    fn recursive_direct(
+        index: u64,
+        subject: PrincipalId,
+        action: Action,
+        creator: PrincipalId,
+    ) -> RecursiveShareResolvedAclEntry {
+        let entry = entry_with_creator(
+            index,
+            node(1),
+            subject,
+            action,
+            Effect::Allow,
+            Inheritance::Descendants,
+            creator,
+        );
+        RecursiveShareResolvedAclEntry::recursive_direct_share(
+            ResolvedAclEntry::direct(entry),
+            creator,
+        )
+    }
+
+    fn recursive_request<'a>(
+        principal: &'a PrincipalContext,
+        action: Action,
+        entries: &'a [RecursiveShareResolvedAclEntry],
+        creator_facts: &'a [PrincipalAuthorizationFacts],
+        drive_owner: DriveOwner,
+    ) -> RecursiveShareAuthorizationRequest<'a> {
+        RecursiveShareAuthorizationRequest {
+            principal,
+            resource: node(1),
+            drive_owner,
+            action,
+            entries,
+            creator_facts,
+            generations: snapshot(),
         }
     }
 
@@ -1079,5 +1614,470 @@ mod tests {
                     .any(|previous| previous.code() == reason.code())
             );
         }
+    }
+
+    #[test]
+    fn recursive_share_respects_direct_denies_at_the_requested_child() {
+        let recipient = context(principal(1));
+        let creator = principal(2);
+        let recipient_entries = [
+            recursive_inherited(1, principal(1), Action::ReadContent, creator),
+            independent_direct(2, principal(1), Action::ReadContent, Effect::Deny),
+        ];
+        let creator_entries = vec![
+            independent_direct(3, creator, Action::Share, Effect::Allow),
+            independent_direct(4, creator, Action::ReadContent, Effect::Allow),
+        ];
+        let facts = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            creator_entries,
+        )];
+
+        let decision = evaluate_recursive_direct_shares(recursive_request(
+            &recipient,
+            Action::ReadContent,
+            &recipient_entries,
+            &facts,
+            non_owner(),
+        ))
+        .expect("bounded graph");
+
+        assert!(!decision.allowed());
+        assert_eq!(decision.reason(), DecisionReason::ExplicitDeny);
+    }
+
+    #[test]
+    fn recursive_share_at_its_root_requires_the_creator_proof() {
+        let recipient = context(principal(1));
+        let creator = principal(2);
+        let recipient_entries = [recursive_direct(
+            1,
+            principal(1),
+            Action::ReadContent,
+            creator,
+        )];
+        let missing_proof = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            Vec::new(),
+        )];
+        assert!(
+            !evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &missing_proof,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+
+        let proof = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            vec![
+                independent_direct(2, creator, Action::Share, Effect::Allow),
+                independent_direct(3, creator, Action::ReadContent, Effect::Allow),
+            ],
+        )];
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &proof,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+    }
+
+    #[test]
+    fn recursive_share_respects_inherited_denies_at_the_requested_child() {
+        let recipient = context(principal(1));
+        let creator = principal(2);
+        let recipient_entries = [
+            recursive_inherited(1, principal(1), Action::ReadContent, creator),
+            independent_inherited_deny(2, principal(1), Action::ReadContent),
+        ];
+        let facts = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            vec![
+                independent_direct(3, creator, Action::Share, Effect::Allow),
+                independent_direct(4, creator, Action::ReadContent, Effect::Allow),
+            ],
+        )];
+
+        let decision = evaluate_recursive_direct_shares(recursive_request(
+            &recipient,
+            Action::ReadContent,
+            &recipient_entries,
+            &facts,
+            non_owner(),
+        ))
+        .expect("bounded graph");
+
+        assert!(!decision.allowed());
+        assert_eq!(decision.reason(), DecisionReason::InheritedDeny);
+    }
+
+    #[test]
+    fn recursive_share_requires_creator_share_and_the_requested_action() {
+        let recipient = context(principal(1));
+        let creator = principal(2);
+        let recipient_entries = [recursive_inherited(
+            1,
+            principal(1),
+            Action::ReadContent,
+            creator,
+        )];
+
+        let no_share = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            vec![independent_direct(
+                2,
+                creator,
+                Action::ReadContent,
+                Effect::Allow,
+            )],
+        )];
+        let no_share_decision = evaluate_recursive_direct_shares(recursive_request(
+            &recipient,
+            Action::ReadContent,
+            &recipient_entries,
+            &no_share,
+            non_owner(),
+        ))
+        .expect("bounded graph");
+        assert!(!no_share_decision.allowed());
+
+        let no_action = [PrincipalAuthorizationFacts::new(
+            context(creator),
+            vec![independent_direct(3, creator, Action::Share, Effect::Allow)],
+        )];
+        let no_action_decision = evaluate_recursive_direct_shares(recursive_request(
+            &recipient,
+            Action::ReadContent,
+            &recipient_entries,
+            &no_action,
+            non_owner(),
+        ))
+        .expect("bounded graph");
+        assert!(!no_action_decision.allowed());
+    }
+
+    #[test]
+    fn recursive_share_accepts_user_and_group_owner_roots() {
+        let recipient = context(principal(1));
+        let user_owner = principal(2);
+        let recipient_entries = [recursive_inherited(
+            1,
+            principal(1),
+            Action::ReadContent,
+            user_owner,
+        )];
+        let user_facts = [PrincipalAuthorizationFacts::new(
+            context(user_owner),
+            Vec::new(),
+        )];
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &user_facts,
+                DriveOwner::User(user_owner),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+
+        let manager = principal(3);
+        let owner_group = group(1);
+        let manager_context = PrincipalContext::new(
+            manager,
+            vec![GroupMembership {
+                group_id: owner_group,
+                group_principal_id: principal(4),
+                role: GroupRole::Manager,
+            }],
+        );
+        let group_entries = [recursive_inherited(
+            2,
+            principal(1),
+            Action::ReadContent,
+            manager,
+        )];
+        let group_facts = [PrincipalAuthorizationFacts::new(
+            manager_context,
+            Vec::new(),
+        )];
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &group_entries,
+                &group_facts,
+                DriveOwner::Group(owner_group),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+    }
+
+    #[test]
+    fn recursive_share_allows_a_safe_transitive_chain() {
+        let recipient = context(principal(1));
+        let first_creator = principal(2);
+        let owner = principal(3);
+        let recipient_entries = [recursive_inherited(
+            1,
+            principal(1),
+            Action::ReadContent,
+            first_creator,
+        )];
+        let first_entries = vec![
+            recursive_inherited(2, first_creator, Action::Share, owner),
+            recursive_inherited(3, first_creator, Action::ReadContent, owner),
+        ];
+        let facts = [
+            PrincipalAuthorizationFacts::new(context(first_creator), first_entries),
+            PrincipalAuthorizationFacts::new(context(owner), Vec::new()),
+        ];
+
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &facts,
+                DriveOwner::User(owner),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+    }
+
+    #[test]
+    fn recursive_share_cycles_need_an_independent_root() {
+        let recipient = context(principal(1));
+        let first = principal(2);
+        let second = principal(3);
+        let recipient_entries = [recursive_inherited(
+            1,
+            principal(1),
+            Action::ReadContent,
+            first,
+        )];
+        let first_entries = vec![
+            recursive_inherited(2, first, Action::Share, second),
+            recursive_inherited(3, first, Action::ReadContent, second),
+        ];
+        let second_entries = vec![
+            recursive_inherited(4, second, Action::Share, first),
+            recursive_inherited(5, second, Action::ReadContent, first),
+        ];
+        let rootless_facts = [
+            PrincipalAuthorizationFacts::new(context(first), first_entries.clone()),
+            PrincipalAuthorizationFacts::new(context(second), second_entries.clone()),
+        ];
+        assert!(
+            !evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &rootless_facts,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+
+        let rooted_facts = [
+            PrincipalAuthorizationFacts::new(context(first), first_entries),
+            PrincipalAuthorizationFacts::new(
+                context(second),
+                vec![
+                    independent_direct(6, second, Action::Share, Effect::Allow),
+                    independent_direct(7, second, Action::ReadContent, Effect::Allow),
+                ],
+            ),
+        ];
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &rooted_facts,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+    }
+
+    #[test]
+    fn recursive_share_uses_an_alternate_proof_and_resumes_when_facts_change() {
+        let recipient = context(principal(1));
+        let missing_creator = principal(2);
+        let working_creator = principal(3);
+        let recipient_entries = [
+            recursive_inherited(1, principal(1), Action::ReadContent, missing_creator),
+            recursive_inherited(2, principal(1), Action::ReadContent, working_creator),
+        ];
+        let blocked_facts = [PrincipalAuthorizationFacts::new(
+            context(working_creator),
+            vec![independent_direct(
+                3,
+                working_creator,
+                Action::Share,
+                Effect::Allow,
+            )],
+        )];
+        assert!(
+            !evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &blocked_facts,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+
+        let resumed_facts = [PrincipalAuthorizationFacts::new(
+            context(working_creator),
+            vec![
+                independent_direct(3, working_creator, Action::Share, Effect::Allow),
+                independent_direct(4, working_creator, Action::ReadContent, Effect::Allow),
+            ],
+        )];
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &recipient_entries,
+                &resumed_facts,
+                non_owner(),
+            ))
+            .expect("bounded graph")
+            .allowed()
+        );
+    }
+
+    #[test]
+    fn recursive_share_graph_depth_limit_is_exact() {
+        fn chain(
+            edges: usize,
+        ) -> (
+            PrincipalContext,
+            Vec<RecursiveShareResolvedAclEntry>,
+            Vec<PrincipalAuthorizationFacts>,
+            DriveOwner,
+        ) {
+            let recipient = context(principal(1));
+            let owner = principal(u64::try_from(edges + 1).expect("small chain"));
+            let recipient_entries = vec![recursive_inherited(
+                1,
+                principal(1),
+                Action::ReadContent,
+                principal(2),
+            )];
+            let mut facts = Vec::new();
+            for index in 0..edges.saturating_sub(1) {
+                let actor = principal(u64::try_from(index + 2).expect("small chain"));
+                let creator = principal(u64::try_from(index + 3).expect("small chain"));
+                let entry_index = u64::try_from(index * 2 + 2).expect("small chain");
+                facts.push(PrincipalAuthorizationFacts::new(
+                    context(actor),
+                    vec![
+                        recursive_inherited(entry_index, actor, Action::Share, creator),
+                        recursive_inherited(entry_index + 1, actor, Action::ReadContent, creator),
+                    ],
+                ));
+            }
+            facts.push(PrincipalAuthorizationFacts::new(context(owner), Vec::new()));
+            (recipient, recipient_entries, facts, DriveOwner::User(owner))
+        }
+
+        let (recipient, entries, facts, owner) = chain(MAX_RECURSIVE_SHARE_DELEGATION_DEPTH);
+        assert!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &entries,
+                &facts,
+                owner,
+            ))
+            .expect("exact depth limit succeeds")
+            .allowed()
+        );
+
+        let (recipient, entries, facts, owner) = chain(MAX_RECURSIVE_SHARE_DELEGATION_DEPTH + 1);
+        assert_eq!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &entries,
+                &facts,
+                owner,
+            )),
+            Err(RecursiveShareEvaluationError::DelegationDepthExceeded)
+        );
+    }
+
+    #[test]
+    fn recursive_share_edge_limit_is_exact() {
+        fn wide_entries(count: usize) -> (PrincipalContext, Vec<RecursiveShareResolvedAclEntry>) {
+            let recipient_id = principal(1);
+            let memberships = (0..count)
+                .map(|index| GroupMembership {
+                    group_id: group(u64::try_from(index + 1).expect("small graph")),
+                    group_principal_id: principal(
+                        u64::try_from(index + 10_000).expect("small graph"),
+                    ),
+                    role: GroupRole::Member,
+                })
+                .collect();
+            let entries = (0..count)
+                .map(|index| {
+                    let subject = principal(u64::try_from(index + 10_000).expect("small graph"));
+                    let creator = principal(u64::try_from(index + 20_000).expect("small graph"));
+                    recursive_inherited(
+                        u64::try_from(index + 1).expect("small graph"),
+                        subject,
+                        Action::ReadContent,
+                        creator,
+                    )
+                })
+                .collect();
+            (PrincipalContext::new(recipient_id, memberships), entries)
+        }
+
+        let (recipient, entries) = wide_entries(MAX_RECURSIVE_SHARE_EDGES);
+        assert!(
+            !evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &entries,
+                &[],
+                non_owner(),
+            ))
+            .expect("exact edge limit succeeds")
+            .allowed()
+        );
+
+        let (recipient, entries) = wide_entries(MAX_RECURSIVE_SHARE_EDGES + 1);
+        assert_eq!(
+            evaluate_recursive_direct_shares(recursive_request(
+                &recipient,
+                Action::ReadContent,
+                &entries,
+                &[],
+                non_owner(),
+            )),
+            Err(RecursiveShareEvaluationError::RecursiveEdgeLimitExceeded)
+        );
     }
 }

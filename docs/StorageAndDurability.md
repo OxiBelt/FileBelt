@@ -54,6 +54,21 @@ preset-expansion marker. PostgreSQL is authoritative for callback idempotency,
 expected-head conflicts, and commit outcomes; provider callbacks, adapter
 memory, and Iggy delivery cannot reconstruct or replace that state.
 
+The descendant-share cutover migration adds a `filebelt_security` tenant
+admission state, repair-run/batch checkpoints, and per-row repair receipts.
+PostgreSQL seeds every current and future tenant blocked with a durable fence;
+direct-share and MCP-data-grant insertion checks fail closed below the API.
+Each repair transaction selects no more than 1,000 total eligible rows, records
+the row reason and operation UUID, revokes recursive direct shares and
+pre-fence active MCP data grants, deletes linked ACL rows, advances generation
+projections, and records audit/outbox evidence atomically. Verification and
+explicit activation require the same operation, administrator, compiled source
+revision, and tenant serialization fence. Recovery inventory must preserve and
+verify this admission/repair state; an absent or mismatched projection admits
+no new affected grant. Post-activation direct-share rows must carry the current
+authorization-model marker, and MCP grants must carry their drive ACL fence;
+older writers that omit either value fail closed.
+
 Logical identifiers and physical storage locators are independently generated
 UUIDv4 values. Public UUID strings use canonical lowercase form. Composite
 keys and foreign keys carry tenant and drive boundaries. A transactional

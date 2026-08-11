@@ -32,6 +32,7 @@ getrandom.workspace = true
 jiff.workspace = true
 openidconnect.workspace = true
 prost.workspace = true
+prometheus-client.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true

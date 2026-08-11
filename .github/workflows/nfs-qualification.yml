@@ -47,9 +47,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: nfs-qualification-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   contract:

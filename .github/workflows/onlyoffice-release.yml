@@ -16,10 +16,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: onlyoffice-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   adapter-contract:
     name: Validate adapter and multi-platform release contract

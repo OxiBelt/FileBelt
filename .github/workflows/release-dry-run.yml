@@ -8,9 +8,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-dry-run-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   image-platforms:

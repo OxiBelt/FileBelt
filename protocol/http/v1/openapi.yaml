@@ -2901,7 +2901,7 @@ components:
             - type: "null"
         kind:
           type: string
-          enum: [file, directory]
+          enum: [file, directory, symlink]
         display_name:
           type: string
         head_version_id:

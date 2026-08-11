@@ -38,4 +38,34 @@ describe("FileTable", () => {
     expect(Markup).toContain('aria-selected="true"');
     expect(Markup).toContain('<bdi dir="auto"');
   });
+
+  it("labels logical symlinks without making them file-open candidates", () => {
+    const Markup = renderToStaticMarkup(
+      <FileTable
+        dispatchSelection={() => undefined}
+        Entries={[{
+          HeadVersionId: null,
+          Id: "symlink-1",
+          Kind: "symlink",
+          ModifiedAt: "2026-08-11T12:00:00Z",
+          MarkdownEligibility: "ineligible",
+          MediaType: null,
+          Name: "Current report",
+          Owner: "Avery Morgan",
+          Shared: false,
+          Size: null,
+          Status: "ready",
+          Trashed: false,
+          Version: 0,
+        }]}
+        onOpenActions={() => undefined}
+        onOpenEntry={() => undefined}
+        Selection={{ AnchorId: null, FocusedId: "symlink-1", SelectedIds: new Set() }}
+        Strings={En}
+      />,
+    );
+
+    expect(Markup).toContain(`aria-label="${En.symlink}"`);
+    expect(Markup).toContain("Current report");
+  });
 });

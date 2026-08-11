@@ -44,6 +44,7 @@ type UploadCommit = operations["commitUpload"]["responses"][201]["content"]["app
 interface NodeLocation {
   DriveId: string;
   HeadVersionId: string | null;
+  Kind: NodeResponse["kind"];
   NamespaceGeneration: number;
   ParentId: string | null;
 }
@@ -173,7 +174,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       for (const Node of Nodes) {
         this.#Locations.set(Node.id, {
           DriveId: Drive.id,
-          HeadVersionId: Node.head_version_id,
+          HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
+          Kind: Node.kind,
           NamespaceGeneration: Node.namespace_generation,
           ParentId: Node.parent_id,
         });
@@ -216,7 +218,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       if (KnownEntries.has(Node.id)) continue;
       this.#Locations.set(Node.id, {
         DriveId: Node.drive_id,
-        HeadVersionId: Node.head_version_id,
+        HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
+        Kind: Node.kind,
         NamespaceGeneration: Node.namespace_generation,
         ParentId: Node.parent_id,
       });
@@ -330,7 +333,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async download(EntryId: string): Promise<Blob> {
-    const Location = this.#location(EntryId);
+    const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
     const Grant = RequireData<DownloadGrant>(await this.#Api.POST(
       "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants",
@@ -347,7 +350,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
-    const Location = this.#location(EntryId);
+    const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
     const Grant = RequireData<DownloadGrant>(await this.#Api.POST(
       "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants",
@@ -357,7 +360,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async importMarkdown(Input: MarkdownImportInput): Promise<string> {
-    const Location = this.#location(Input.EntryId);
+    const Location = this.#fileLocation(Input.EntryId);
     await this.#ensureSession();
     const Intent = RequireData<MarkdownImportIntent>(await this.#Api.POST(
       "/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
@@ -376,7 +379,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async beginMarkdownCollaboration(EntryId: string, ClientId: string): Promise<MarkdownCollaborationGrant | null> {
-    const Location = this.#location(EntryId);
+    const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
     let Grant: CollaborationGrant;
     try {
@@ -406,7 +409,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
-    const Location = this.#location(EntryId);
+    const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
     const Node = await this.#getNode(Location.DriveId, EntryId);
     if (Node.head_version_id === null) throw new Error("The Markdown file has no current version.");
@@ -414,7 +417,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
-    const Location = this.#location(Input.EntryId);
+    const Location = this.#fileLocation(Input.EntryId);
     if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
     await this.#ensureSession();
     try {
@@ -430,7 +433,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string> {
-    const Location = this.#location(Input.EntryId);
+    const Location = this.#fileLocation(Input.EntryId);
     if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
     await this.#ensureSession();
     const Parent = await this.#getNode(Location.DriveId, Location.ParentId);
@@ -571,6 +574,12 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Location;
   }
 
+  #fileLocation(EntryId: string): NodeLocation {
+    const Location = this.#location(EntryId);
+    if (Location.Kind !== "file") throw new Error("The selected resource is not a file.");
+    return Location;
+  }
+
   async #putUploadContents(Allocation: UploadAllocation, Contents: Blob): Promise<string> {
     let Cursor: string | null = null;
     let Finalize: ByteGrant | null;
@@ -706,21 +715,22 @@ function DefaultBaseUrl(): string {
 }
 
 function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntry {
+  const IsFile = Node.kind === "file";
   return {
     DriveId: Node.drive_id,
     Id: Node.id,
-    HeadVersionId: Node.head_version_id,
-    Kind: Node.kind === "directory" ? "folder" : "file",
+    HeadVersionId: IsFile ? Node.head_version_id : null,
+    Kind: Node.kind === "directory" ? "folder" : Node.kind,
     ModifiedAt: Node.updated_at,
-    MarkdownEligibility: MarkdownEligibility(Node.display_name, Node.head_media_type, Node.size_bytes),
-    MediaType: Node.head_media_type,
+    MarkdownEligibility: IsFile ? MarkdownEligibility(Node.display_name, Node.head_media_type, Node.size_bytes) : "ineligible",
+    MediaType: IsFile ? Node.head_media_type : null,
     Name: Node.display_name,
     Owner,
     Shared,
-    Size: Node.size_bytes,
+    Size: IsFile ? Node.size_bytes : null,
     Status: "ready",
     Trashed: Node.trashed,
-    Version: Node.version_ordinal ?? 0,
+    Version: IsFile ? Node.version_ordinal ?? 0 : 0,
   };
 }
 

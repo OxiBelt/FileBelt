@@ -16,7 +16,7 @@ export type RouteId =
   | "mounts"
   | "markdown";
 
-export type EntryKind = "file" | "folder";
+export type EntryKind = "file" | "folder" | "symlink";
 export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";
 export type MarkdownEligibility = "editable" | "ineligible" | "viewable";
 

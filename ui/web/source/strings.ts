@@ -167,6 +167,8 @@ export const En = {
   status: "Status",
   skipToContent: "Skip to content",
   system: "System",
+  symlink: "Symbolic link",
+  symlinkActionsUnavailable: "Symbolic links are shown as metadata only. File content, version, Markdown, and document-editor actions are unavailable.",
   theme: "Theme",
   trash: "Trash",
   upload: "Upload",

@@ -15,6 +15,7 @@ const UploadId = "00000000-0000-4000-8000-000000000006";
 const PayloadId = "00000000-0000-4000-8000-000000000007";
 const GrantId = "00000000-0000-4000-8000-000000000008";
 const ImportIntentId = "00000000-0000-4000-8000-000000000014";
+const SymlinkNodeId = "00000000-0000-4000-8000-000000000015";
 
 const Session = {
   csrf_token: "csrf-value-not-browser-storage",
@@ -66,6 +67,17 @@ function Node(Id: string, Name: string): components["schemas"]["Node"] {
     trashed: false,
     updated_at: "2026-08-06T12:00:00Z",
     version_ordinal: 1,
+  };
+}
+
+function SymlinkNode(): components["schemas"]["Node"] {
+  return {
+    ...Node(SymlinkNodeId, "Current report"),
+    head_media_type: null,
+    head_version_id: null,
+    kind: "symlink",
+    size_bytes: null,
+    version_ordinal: null,
   };
 }
 
@@ -262,6 +274,25 @@ describe("HttpFileBeltClient", () => {
     const Allocation = Server.Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
     expect(Allocation).toBeDefined();
     if (Allocation !== undefined) expect(await Allocation.clone().json()).toMatchObject({ declared_media_type: "text/markdown", expected_parent_generation: 19, import_intent_id: ImportIntentId, name: "Source.md", parent_id: RootId });
+  });
+
+  it("projects symlinks without traversing them or requesting file versions and content", async () => {
+    const Server = new ContractServer([SymlinkNode()]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+
+    const Workspace = await Client.getWorkspace();
+    expect(Workspace.Entries.find(({ Id }) => Id === SymlinkNodeId)).toMatchObject({
+      HeadVersionId: null,
+      Kind: "symlink",
+      MarkdownEligibility: "ineligible",
+      MediaType: null,
+      Size: null,
+      Version: 0,
+    });
+    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/children`)).toBe(false);
+    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/versions`)).toBe(false);
+    await expect(Client.download(SymlinkNodeId)).rejects.toThrow("not a file");
+    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/download-grants`)).toBe(false);
   });
 });
 

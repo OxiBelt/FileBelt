@@ -2676,7 +2676,7 @@ fn decode_cursor(value: &str) -> Result<NodeCursor, ApiError> {
         name_key: fields.1,
         id: fields.2,
     };
-    if !matches!(cursor.kind.as_str(), "file" | "directory") {
+    if !matches!(cursor.kind.as_str(), "file" | "directory" | "symlink") {
         return Err(ApiError::bad_request(
             "pagination.cursor_invalid",
             "The page cursor is invalid",
@@ -3163,14 +3163,14 @@ mod tests {
     }
 
     #[test]
-    fn cursor_round_trip_preserves_ordering_fields() {
+    fn symlink_cursor_round_trip_preserves_ordering_fields() {
         let node = NodeRecord {
             id: Uuid::new_v4(),
             drive_id: Uuid::new_v4(),
             parent_id: None,
-            kind: "directory".into(),
-            display_name: "Folder".into(),
-            name_key: "folder".into(),
+            kind: "symlink".into(),
+            display_name: "Current report".into(),
+            name_key: "current report".into(),
             head_version_id: None,
             namespace_generation: 1,
             acl_generation: 1,

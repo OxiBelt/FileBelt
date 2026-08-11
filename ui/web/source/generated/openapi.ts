@@ -2224,7 +2224,7 @@ export interface components {
             readonly head_version_id: components["schemas"]["UuidV4"] | null;
             readonly id: components["schemas"]["UuidV4"];
             /** @enum {string} */
-            readonly kind: "file" | "directory";
+            readonly kind: "file" | "directory" | "symlink";
             /** Format: int64 */
             readonly namespace_generation: number;
             readonly parent_id: components["schemas"]["UuidV4"] | null;

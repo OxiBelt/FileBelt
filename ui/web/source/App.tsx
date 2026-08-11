@@ -18,6 +18,7 @@ import {
   Download,
   FilePenLine,
   FileOutput,
+  FileSymlink,
   Files,
   FolderClock,
   FolderInput,
@@ -305,12 +306,15 @@ export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient 
   const SelectedEntries = Snapshot?.Entries.filter(({ Id }) => Selection.SelectedIds.has(Id)) ?? [];
   const PrimarySelection = SelectedEntries.at(-1);
   const ActionEntry = Snapshot?.Entries.find(({ Id }) => Id === ActionEntryId);
+  const PrimaryFileActionDescription = PrimarySelection?.Kind === "symlink" ? "symlink-actions-unavailable" : undefined;
+  const ActionFileActionDescription = ActionEntry?.Kind === "symlink" ? "symlink-actions-unavailable" : undefined;
   const MarkdownEntryId = Route === "markdown" ? window.location.pathname.split("/")[2] : undefined;
   const MarkdownEntry = Snapshot?.Entries.find(({ Id }) => Id === MarkdownEntryId);
   const OpenFileBeltReference = (Target: FileBeltReference): boolean => {
     // Snapshot membership is a UX hint only; the destination read still obtains
     // a new server-authorized grant before rendering any content.
-    if (!Snapshot?.Entries.some(({ Id }) => Id === Target.NodeId)) return false;
+    const Entry = Snapshot?.Entries.find(({ Id }) => Id === Target.NodeId);
+    if (Entry?.Kind !== "file" || Entry.MarkdownEligibility === "ineligible") return false;
     OpenMarkdown(Target.NodeId);
     return true;
   };
@@ -417,7 +421,7 @@ export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient 
               ) : null}
               {Route === "admin" && !Snapshot.CurrentUser.IsTenantAdmin ? <div className="fb-error" role="alert">{En.permissionDenied}</div> : null}
               {Route === "uploads" ? <UploadsView Strings={En} Uploads={Snapshot.Uploads} /> : null}
-              {Route === "versions" ? <VersionsView File={PrimarySelection} onRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)} Strings={En} Versions={Snapshot.Versions} /> : null}
+              {Route === "versions" ? <VersionsView File={PrimarySelection?.Kind === "file" ? PrimarySelection : undefined} onRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)} Strings={En} Versions={Snapshot.Versions} /> : null}
               {Route === "shares" ? <SharesView File={PrimarySelection} onCreate={(Input) => Mutate(() => Client.createShare(Input), En.shareCreated)} onRevoke={(Id) => Mutate(() => Client.revokeShare(Id), En.shareRevoked)} Shares={Snapshot.Shares} Strings={En} /> : null}
               {Route === "sessions" ? <SessionsView onRevoke={(Id) => Mutate(() => Client.revokeSession(Id), En.sessionRevoked)} Sessions={Snapshot.Sessions} Strings={En} /> : null}
               {Route === "documents" && DocumentClient !== undefined ? <Suspense fallback={<Spinner label={En.documentSessions} />}><DocumentSessions Client={DocumentClient} OnWorkspaceChanged={Refresh} /></Suspense> : null}
@@ -427,25 +431,25 @@ export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient 
               {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
               {Route === "mounts" && MountClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><MountSettings Client={MountClient} /></Suspense> : null}
               {Route === "mounts" && MountClient === undefined ? <div className="fb-error" role="alert">Mount settings are unavailable.</div> : null}
-              {Route === "markdown" && MarkdownEntry !== undefined ? <Suspense fallback={<Spinner label={En.markdownLoading} />}><MarkdownFileView Client={Client} Entry={MarkdownEntry} {...(McpClient === undefined ? {} : { McpClient })} OnClose={() => Navigate("drive")} OnFileBeltLink={OpenFileBeltReference} OnNavigationGuardChange={SetNavigationGuard} OnSaved={() => void Refresh()} /></Suspense> : null}
-              {Route === "markdown" && MarkdownEntry === undefined ? <div className="fb-error" role="alert">{En.markdownUnavailable}</div> : null}
+              {Route === "markdown" && MarkdownEntry?.Kind === "file" && MarkdownEntry.MarkdownEligibility !== "ineligible" ? <Suspense fallback={<Spinner label={En.markdownLoading} />}><MarkdownFileView Client={Client} Entry={MarkdownEntry} {...(McpClient === undefined ? {} : { McpClient })} OnClose={() => Navigate("drive")} OnFileBeltLink={OpenFileBeltReference} OnNavigationGuardChange={SetNavigationGuard} OnSaved={() => void Refresh()} /></Suspense> : null}
+              {Route === "markdown" && (MarkdownEntry === undefined || MarkdownEntry.Kind !== "file" || MarkdownEntry.MarkdownEligibility === "ineligible") ? <div className="fb-error" role="alert">{En.markdownUnavailable}</div> : null}
               {["drive", "shared-drives", "shared", "recent", "trash"].includes(Route) ? (
                 <section aria-labelledby="files-heading" className="fb-files-view">
                   <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.files}</p><h1 id="files-heading">{RouteTitle(Route)}</h1></div><div className="fb-heading-actions"><Tooltip content={En.refresh} relationship="label"><Button appearance="subtle" icon={<RefreshCw />} onClick={() => void Refresh()} /></Tooltip><Button appearance="primary" icon={<Upload />} onClick={() => FileInput.current?.click()}>{En.upload}</Button><input accept="*/*" aria-label={En.uploadHint} hidden multiple onChange={OnFiles} ref={FileInput} type="file" /></div></header>
                   <div aria-label={En.fileCommands} className="fb-commandbar" role="toolbar">
                     <span>{En.selectedAnnouncement(Selection.SelectedIds.size)}</span>
-                    <Button disabled={PrimarySelection?.Kind !== "file" || Busy} icon={<Download />} onClick={() => PrimarySelection === undefined ? undefined : void DownloadEntry(PrimarySelection)}>{En.download}</Button>
+                    <Button aria-describedby={PrimaryFileActionDescription} disabled={PrimarySelection?.Kind !== "file" || Busy} icon={<Download />} onClick={() => PrimarySelection === undefined ? undefined : void DownloadEntry(PrimarySelection)}>{En.download}</Button>
                     <Button disabled={SelectedEntries.length === 0 || Busy} icon={Route === "trash" ? <FolderInput /> : <Trash2 />} onClick={() => void Mutate(() => Route === "trash" ? Client.restoreEntries(SelectedEntries.map(({ Id }) => Id)) : Client.trashEntries(SelectedEntries.map(({ Id }) => Id)), Route === "trash" ? En.itemsRestored : En.itemsTrashed)}>{Route === "trash" ? En.restore : En.moveToTrash}</Button>
-                    <Button disabled={PrimarySelection === undefined} icon={<History />} onClick={() => Navigate("versions")}>{En.versions}</Button>
+                    <Button aria-describedby={PrimaryFileActionDescription} disabled={PrimarySelection?.Kind !== "file"} icon={<History />} onClick={() => Navigate("versions")}>{En.versions}</Button>
                     <Button disabled={PrimarySelection === undefined} icon={<Link2 />} onClick={() => Navigate("shares")}>{En.shares}</Button>
-                    <Button disabled={PrimarySelection === undefined || PrimarySelection.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => PrimarySelection === undefined ? undefined : OpenMarkdown(PrimarySelection.Id)}>{En.openMarkdown}</Button>
-                    <Button disabled={PrimarySelection === undefined || !IsOfficeImportCandidate(PrimarySelection) || Busy} icon={<FileOutput />} onClick={() => PrimarySelection === undefined ? undefined : void ImportOfficeEntry(PrimarySelection)}>{En.importMarkdown}</Button>
-                    {DocumentClient === undefined ? null : <Button disabled={PrimarySelection === undefined || !IsOfficeDocumentCandidate(PrimarySelection) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => PrimarySelection === undefined ? undefined : SetDocumentEntry(PrimarySelection)}>{En.documentEditor}</Button>}
+                    <Button aria-describedby={PrimaryFileActionDescription} disabled={PrimarySelection === undefined || PrimarySelection.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => PrimarySelection === undefined ? undefined : OpenMarkdown(PrimarySelection.Id)}>{En.openMarkdown}</Button>
+                    <Button aria-describedby={PrimaryFileActionDescription} disabled={PrimarySelection === undefined || !IsOfficeImportCandidate(PrimarySelection) || Busy} icon={<FileOutput />} onClick={() => PrimarySelection === undefined ? undefined : void ImportOfficeEntry(PrimarySelection)}>{En.importMarkdown}</Button>
+                    {DocumentClient === undefined ? null : <Button aria-describedby={PrimaryFileActionDescription} disabled={PrimarySelection === undefined || !IsOfficeDocumentCandidate(PrimarySelection) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => PrimarySelection === undefined ? undefined : SetDocumentEntry(PrimarySelection)}>{En.documentEditor}</Button>}
                   </div>
                   <div className="fb-content-split">
                     <FileTable dispatchSelection={DispatchSelection} Entries={Entries} onOpenActions={(Entry) => { DispatchSelection({ Id: Entry.Id, Type: "replace" }); SetActionEntryId(Entry.Id); }} onOpenEntry={(Entry) => OpenMarkdown(Entry.Id)} Selection={Selection} Strings={En} />
                     <aside aria-label={En.details} className="fb-details-pane">
-                      {PrimarySelection === undefined ? <p className="fb-muted">{En.noSelection}</p> : <><div className="fb-details-icon"><FileBeltIcon Icon={PrimarySelection.Kind === "folder" ? FolderClock : Files} size={28} /></div><h2><BidiText>{PrimarySelection.Name}</BidiText></h2><dl><div><dt>{En.owner}</dt><dd><BidiText>{PrimarySelection.Owner}</BidiText></dd></div><div><dt>{En.version}</dt><dd>{PrimarySelection.Version}</dd></div><div><dt>{En.status}</dt><dd><StatusPill Kind="success">{En.ready}</StatusPill></dd></div></dl><Button appearance="secondary" icon={<MoreHorizontal />} onClick={() => SetActionEntryId(PrimarySelection.Id)}>{En.openMenu}</Button></>}
+                      {PrimarySelection === undefined ? <p className="fb-muted">{En.noSelection}</p> : <><div className="fb-details-icon"><FileBeltIcon Icon={PrimarySelection.Kind === "folder" ? FolderClock : PrimarySelection.Kind === "symlink" ? FileSymlink : Files} {...(PrimarySelection.Kind === "symlink" ? { Label: En.symlink } : {})} size={28} /></div><h2><BidiText>{PrimarySelection.Name}</BidiText></h2><dl><div><dt>{En.owner}</dt><dd><BidiText>{PrimarySelection.Owner}</BidiText></dd></div><div><dt>{En.version}</dt><dd>{PrimarySelection.Kind === "file" ? PrimarySelection.Version : "—"}</dd></div><div><dt>{En.status}</dt><dd><StatusPill Kind="success">{En.ready}</StatusPill></dd></div></dl>{PrimarySelection.Kind === "symlink" ? <p className="fb-muted" id="symlink-actions-unavailable">{En.symlinkActionsUnavailable}</p> : null}<Button appearance="secondary" icon={<MoreHorizontal />} onClick={() => SetActionEntryId(PrimarySelection.Id)}>{En.openMenu}</Button></>}
                     </aside>
                   </div>
                 </section>
@@ -459,10 +463,10 @@ export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient 
           <div className="fb-action-backdrop" onClick={() => SetActionEntryId(null)} role="presentation">
             <div aria-label={En.selectionActions} className="fb-action-menu" onClick={(Event) => Event.stopPropagation()} onKeyDown={(Event) => { if (Event.key === "Escape") SetActionEntryId(null); }} role="menu">
               <strong><BidiText>{ActionEntry.Name}</BidiText></strong>
-              <Button appearance="subtle" disabled={ActionEntry.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => { SetActionEntryId(null); OpenMarkdown(ActionEntry.Id); }} role="menuitem">{En.openMarkdown}</Button>
-              <Button appearance="subtle" disabled={ActionEntry.Kind !== "file"} icon={<Download />} onClick={() => { SetActionEntryId(null); void DownloadEntry(ActionEntry); }} role="menuitem">{En.download}</Button>
-              <Button appearance="subtle" disabled={!IsOfficeImportCandidate(ActionEntry) || Busy} icon={<FileOutput />} onClick={() => { SetActionEntryId(null); void ImportOfficeEntry(ActionEntry); }} role="menuitem">{En.importMarkdown}</Button>
-              {DocumentClient === undefined ? null : <Button appearance="subtle" disabled={!IsOfficeDocumentCandidate(ActionEntry) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => { SetActionEntryId(null); SetDocumentEntry(ActionEntry); }} role="menuitem">{En.documentEditor}</Button>}
+              <Button appearance="subtle" aria-describedby={ActionFileActionDescription} disabled={ActionEntry.MarkdownEligibility === "ineligible"} icon={<FilePenLine />} onClick={() => { SetActionEntryId(null); OpenMarkdown(ActionEntry.Id); }} role="menuitem">{En.openMarkdown}</Button>
+              <Button appearance="subtle" aria-describedby={ActionFileActionDescription} disabled={ActionEntry.Kind !== "file"} icon={<Download />} onClick={() => { SetActionEntryId(null); void DownloadEntry(ActionEntry); }} role="menuitem">{En.download}</Button>
+              <Button appearance="subtle" aria-describedby={ActionFileActionDescription} disabled={!IsOfficeImportCandidate(ActionEntry) || Busy} icon={<FileOutput />} onClick={() => { SetActionEntryId(null); void ImportOfficeEntry(ActionEntry); }} role="menuitem">{En.importMarkdown}</Button>
+              {DocumentClient === undefined ? null : <Button appearance="subtle" aria-describedby={ActionFileActionDescription} disabled={!IsOfficeDocumentCandidate(ActionEntry) || Busy} icon={<FilePenLine />} onFocus={PreloadDocuments} onMouseEnter={PreloadDocuments} onClick={() => { SetActionEntryId(null); SetDocumentEntry(ActionEntry); }} role="menuitem">{En.documentEditor}</Button>}
               <Button appearance="subtle" icon={<Link2 />} onClick={() => { SetActionEntryId(null); Navigate("shares"); }} role="menuitem">{En.shares}</Button>
               <Button appearance="subtle" icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />} onClick={() => { SetActionEntryId(null); void Mutate(() => ActionEntry.Trashed ? Client.restoreEntries([ActionEntry.Id]) : Client.trashEntries([ActionEntry.Id]), ActionEntry.Trashed ? En.itemsRestored : En.itemsTrashed); }} role="menuitem">{ActionEntry.Trashed ? En.restore : En.moveToTrash}</Button>
               <Button appearance="secondary" onClick={() => SetActionEntryId(null)} role="menuitem">{En.close}</Button>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Checkbox } from "@fluentui/react-components";
-import { AlertTriangle, File, Folder, LockKeyhole, Share2 } from "lucide-react";
+import { AlertTriangle, File, FileSymlink, Folder, LockKeyhole, Share2 } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
@@ -108,6 +108,7 @@ export function FileTable({
           {Entries.map((Entry, Index) => {
             const Selected = Selection.SelectedIds.has(Entry.Id);
             const Focused = Selection.FocusedId === Entry.Id || (Selection.FocusedId === null && Index === 0);
+            const EntryIcon = Entry.Kind === "folder" ? Folder : Entry.Kind === "symlink" ? FileSymlink : File;
             return (
               <tr
                 aria-selected={Selected}
@@ -136,7 +137,7 @@ export function FileTable({
                 </td>
                 <td role="gridcell">
                   <span className="fb-name-cell">
-                    <FileBeltIcon Icon={Entry.Kind === "folder" ? Folder : File} />
+                    <FileBeltIcon Icon={EntryIcon} {...(Entry.Kind === "symlink" ? { Label: Strings.symlink } : {})} />
                     <BidiText>{Entry.Name}</BidiText>
                     {Entry.Shared ? <FileBeltIcon Icon={Share2} size={16} /> : null}
                   </span>

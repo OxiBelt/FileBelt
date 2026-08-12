@@ -1,35 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultKeymap } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { Awareness } from "y-protocols/awareness";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import * as Y from "yjs";
 import { useEffect, useRef, type JSX } from "react";
-import type { CollaborationIdentity, MarkdownSource } from "./types.js";
+import type { CollaborationIdentity, TextSource } from "./types.js";
 
-export interface MarkdownCollaboration {
+export interface TextCollaboration {
   Awareness: Awareness;
   Document: Y.Doc;
   TextName: string;
 }
 
-export interface MarkdownSourceEditorProps {
-  Collaboration?: MarkdownCollaboration;
+export interface TextSourceEditorProps {
+  Collaboration?: TextCollaboration;
   Disabled?: boolean;
   Identity?: CollaborationIdentity;
   OnTextChange?: (Text: string) => void;
   OnSelectionChange?: (Selection: { End: number; Start: number }) => void;
-  Source: MarkdownSource;
+  Source: TextSource;
   SourceEditorLabel: string;
 }
 
-export function MarkdownSourceEditor({ Collaboration, Disabled = false, Identity, OnSelectionChange, OnTextChange, Source, SourceEditorLabel }: MarkdownSourceEditorProps): JSX.Element {
+export function TextSourceEditor({ Collaboration, Disabled = false, Identity, OnSelectionChange, OnTextChange, Source, SourceEditorLabel }: TextSourceEditorProps): JSX.Element {
   const Host = useRef<HTMLDivElement>(null);
   const ViewReference = useRef<EditorView | null>(null);
-  const ActiveCollaborationReference = useRef<MarkdownCollaboration | null>(null);
+  const ActiveCollaborationReference = useRef<TextCollaboration | null>(null);
   const DisabledCompartment = useRef(new Compartment());
   const LabelCompartment = useRef(new Compartment());
   const InitialSource = useRef(Source.Text);
@@ -52,7 +51,8 @@ export function MarkdownSourceEditor({ Collaboration, Disabled = false, Identity
         extensions: [
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
           EditorView.lineWrapping,
-          markdown(),
+          // Text content is server-classified; language-specific parsing stays
+          // in the Markdown preview path and never changes source semantics.
           DisabledCompartment.current.of(EditorView.editable.of(!Disabled)),
           LabelCompartment.current.of(EditorView.contentAttributes.of({ "aria-label": SourceEditorLabel, "aria-multiline": "true" })),
           yCollab(SharedText, ActiveCollaboration.Awareness, { undoManager: new Y.UndoManager(SharedText) }),
@@ -101,5 +101,12 @@ export function MarkdownSourceEditor({ Collaboration, Disabled = false, Identity
     AwarenessValue.setLocalStateField("user", Identity === undefined ? null : { color: Identity.Color, name: Identity.DisplayName });
   }, [Identity]);
 
-  return <div data-filebelt-markdown-editor="source" ref={Host} />;
+  return <div data-filebelt-text-editor="source" ref={Host} />;
 }
+
+/** @deprecated Use `TextCollaboration` for new language-neutral callers. */
+export type MarkdownCollaboration = TextCollaboration;
+/** @deprecated Use `TextSourceEditor` for new language-neutral callers. */
+export type MarkdownSourceEditorProps = TextSourceEditorProps;
+/** @deprecated Use `TextSourceEditor` for new language-neutral callers. */
+export const MarkdownSourceEditor = TextSourceEditor;

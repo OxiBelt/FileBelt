@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+
+global:
+  registry: ghcr.io
+  registryMirror: ""
+  runAsUser: 10001
+  runAsGroup: 10001
+
+gitNamespace: filebelt-git
+coreNamespace: filebelt-core
+
+image:
+  repository: oxibelt/filebelt-git-adapter
+  registryMirror: ""
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  license: GPL-2.0-only
+  correspondingSource: https://github.com/OxiBelt/FileBelt/tree/0.1.0
+
+config:
+  existingConfigMap: filebelt-git-config
+  key: adapter.toml
+  generation: initial
+
+secrets:
+  serverTls:
+    name: filebelt-git-server-tls
+    certificateKey: tls.crt
+    privateKeyKey: tls.key
+    caKey: client-ca.crt
+    generation: initial
+
+storage:
+  existingClaim: filebelt-git-rwx
+  mountPath: /var/lib/filebelt/git
+
+service:
+  port: 8092
+
+workload:
+  replicas: 1
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 256Mi}
+    limits: {cpu: 1000m, memory: 1Gi, ephemeral-storage: 512Mi}
+
+networkPolicy:
+  coordinatorIngress:
+    from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-core}}
+        podSelector: {matchLabels: {app.kubernetes.io/component: revision-coordinator}}

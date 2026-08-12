@@ -322,7 +322,7 @@ old_checksum="$(kubectl_cmd get deployment filebelt-api --namespace "${NAMESPACE
 [[ "$(kubectl_cmd get configmap "${old_config_name}" --namespace "${NAMESPACE}" -o jsonpath='{.immutable}')" == "true" ]] \
   || die "the initial content-addressed ConfigMap is not immutable"
 
-changed_config=$'version = 8\n\n[deployment]\nmode = "kubernetes"\n\n[keys]\ndigest_key_file = "/run/secrets/digest-key"\ndigest_key_generation = 1\n\n[keys.api_storage]\nprivate_key_file = "/run/secrets/api-storage-capability-private-key"\npublic_keyset_file = "/run/secrets/api-storage-capability-public-keyset"\ncurrent_generation = 1\n\n[media]\nenabled = false\n\n[media.capability_signing]\nprivate_key_file = "/run/secrets/media-storage-capability-private-key"\npublic_keyset_file = "/run/secrets/media-storage-capability-public-keyset"\ncurrent_generation = 1\n\n[acceptance]\nrevision = "second"'
+changed_config=$'version = 9\n\n[deployment]\nmode = "kubernetes"\n\n[keys]\ndigest_key_file = "/run/secrets/digest-key"\ndigest_key_generation = 1\n\n[keys.api_storage]\nprivate_key_file = "/run/secrets/api-storage-capability-private-key"\npublic_keyset_file = "/run/secrets/api-storage-capability-public-keyset"\ncurrent_generation = 1\n\n[media]\nenabled = false\n\n[media.capability_signing]\nprivate_key_file = "/run/secrets/media-storage-capability-private-key"\npublic_keyset_file = "/run/secrets/media-storage-capability-public-keyset"\ncurrent_generation = 1\n\n[acceptance]\nrevision = "second"'
 helm --kubeconfig "${KUBECONFIG}" upgrade "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --reuse-values \

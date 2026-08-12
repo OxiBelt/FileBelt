@@ -502,7 +502,8 @@ fn callback_response(
             CallbackError::Fingerprint
             | CallbackError::Core
             | CallbackError::Egress
-            | CallbackError::MediaType,
+            | CallbackError::MediaType
+            | CallbackError::Package,
         ) => Response::text(503, "callback unavailable\n"),
     }
 }
@@ -558,6 +559,11 @@ fn callback_event(
             .get("url")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
+        file_type: body
+            .get("filetype")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or(())?,
         provider_event_id: provider_event_id.to_owned(),
         revision: revision.to_owned(),
     })
@@ -700,6 +706,7 @@ mod tests {
         let body = serde_json::json!({
             "key": "session-1", "status": 6, "forcesavetype": 1,
             "url": "https://office.example.test/cache/output", "event_id": "event",
+            "filetype": "docx",
             "history": {"serverVersion": 42}
         });
         let event =
@@ -724,6 +731,7 @@ mod tests {
             let mut body = serde_json::json!({
                 "key": "session-1", "status": code, "forcesavetype": 1,
                 "url": "https://office.example.test/cache/output",
+                "filetype": "docx",
                 "userdata": "event", "history": {"serverVersion": 42}
             });
             if code == 1 {

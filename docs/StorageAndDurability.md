@@ -225,6 +225,36 @@ matches. Metadata-only changes create no content version. Restoring history
 creates a new head that references retained immutable content; it does not
 mutate an old version or create sibling conflict versions.
 
+Migration `000016_revision_storage.sql` adds the canonical content indirection,
+Git projection, per-drive shared-chunk manifests, persistent text preferences,
+content-class policy, backfill jobs, per-version repair holds, and an explicit
+tenant activation fence. PostgreSQL remains authoritative for versions,
+expected heads, backend choice, chunk references, quota, reconciliation, and
+activation. Git and chunk files are replaceable byte planes and never determine
+authorization or current head state.
+
+All office and binary content uses fixed 16 MiB chunks except the final chunk,
+including zero-length manifests. Reuse is limited to an exact
+`(tenant, drive, BLAKE3, size)` match; a physical chunk is charged once to that
+drive while every manifest retains its logical size. Publication fsyncs the
+immutable chunk and parent directory before the PostgreSQL reference-count and
+manifest transaction can commit. Range reads verify only intersecting chunks;
+scrub and recovery cover the complete manifest. Delete intent, quarantine, and
+reference-count transitions are fenced and never inferred from a directory
+scan.
+
+The first compatible release leaves revision writers disabled, creates a
+legacy-content row for every existing and concurrent old-format version in the
+same transaction, and backfills in the background through purpose-scoped I/O
+reads. Validated text targets Git; ODT/ODS/ODP, DOCX/XLSX/PPTX, and other bytes
+target shared chunks. A digest, classification, Git, or chunk mismatch creates
+one per-version hold instead of blocking unrelated history. Activation requires
+zero pending jobs, zero unresolved holds, verified Git refs/chunk refcounts,
+and a recorded compatible source revision. The next release may switch writers
+only by advancing that PostgreSQL fence; rollback before activation keeps dual
+reads, while rollback after activation requires a v4 checkpoint and a binary
+that understands both backends.
+
 Markdown explicit save consumes a durable collaboration checkpoint through the
 ordinary expected-head upload/commit transaction and creates the same linear
 immutable version as any other content update. It records validated media type
@@ -631,16 +661,20 @@ reconciliation, checkpoint comparison, a complete physical BLAKE3 scrub, and
 two-user authorization acceptance must pass before traffic returns.
 
 The current checkpoint and verification formats are
-`filebelt.recovery.checkpoint.v3` and `filebelt.recovery.verification.v3`.
-Version 3 records every purpose name, digest generation, and local signer
+`filebelt.recovery.checkpoint.v4` and `filebelt.recovery.verification.v4`.
+Version 4 records every purpose name, digest generation, and local signer
 generation in its `capability_keysets` inventory; version 2 remains offline-only
 and cannot admit a v8 deployment.
 It retains collaboration room/manifest/checkpoint inventory and dirty-room
 retention deadlines, plus MCP registration, deletion-tombstone, active
 runner-slot, secret-envelope, and OAuth attempt inventories. It records every
 referenced MCP vault KEK generation without granting recovery access to
-ciphertext, nonce, issuer, or secret kind. The checkpoint remains bounded to 1
-MiB. Restore verification fails when a collaboration inventory or retention
+ciphertext, nonce, issuer, or secret kind. Version 4 also hashes every
+authoritative revision-storage row and field in deterministic primary-key
+batches, including Git refs, shared-chunk manifests and members, reference
+counts, operations, backfill jobs, holds, and activation fences. The checkpoint
+remains bounded to 1 MiB. Restore verification fails when a revision,
+collaboration inventory or retention
 deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
 or payload manifest differs. Operators must restore purpose-specific v8 public
 keysets, digest generation, and local signer generations before enabling I/O,

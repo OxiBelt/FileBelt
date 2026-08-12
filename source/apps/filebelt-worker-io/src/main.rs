@@ -26,7 +26,7 @@ use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use filebelt_capability_keyset::{
     ApiStorageKeyset, CollaborationStorageKeyset, DocumentStorageKeyset, MountStorageKeyset,
-    public_key_material_is_disjoint,
+    RevisionStorageKeyset, public_key_material_is_disjoint,
 };
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::collaboration::{
@@ -46,15 +46,16 @@ use filebelt_runtime::{
     install_crypto_provider, observe_request, operations_router, trace_request, wait_for_shutdown,
 };
 use filebelt_storage::{
-    CowBaseChunk, CowLockGuard, CowManifest, DownloadSegment, StorageError, StorageLayout,
+    CowBaseChunk, CowLockGuard, CowManifest, DownloadSegment, REVISION_CHUNK_SIZE_BYTES,
+    RevisionChunkLocator, StorageError, StorageLayout,
 };
 use filebelt_storage_protocol::{
     ApiStorageCapabilityUse, CapabilityClaims, CapabilityOperation,
     CollaborationStorageCapabilityUse, DocumentStorageCapabilityUse, MountCapabilityClaims,
-    MountStorageCapabilityUse, mount_capability_claims_digest, unix_time_now,
-    verify_api_storage_capability, verify_collaboration_storage_capability,
+    MountStorageCapabilityUse, RevisionStorageCapabilityUse, mount_capability_claims_digest,
+    unix_time_now, verify_api_storage_capability, verify_collaboration_storage_capability,
     verify_document_storage_capability, verify_mount_storage_capability,
-    verify_mount_storage_read_capability,
+    verify_mount_storage_read_capability, verify_revision_storage_capability,
 };
 use futures_util::StreamExt as _;
 use serde::Serialize;
@@ -71,6 +72,7 @@ const FINALIZATION_HEARTBEAT_SECONDS: u64 = 30;
 const MOUNT_CLEANUP_HEARTBEAT_SECONDS: u64 = 10;
 const MOUNT_WRITE_MODE_HEADER: &str = "x-filebelt-mount-write-mode";
 const MAX_MOUNT_WRITE_BYTES: u64 = 1_048_576;
+const REVISION_CHUNK_CAPABILITY_NONCE_BYTES: usize = 64;
 
 #[derive(Debug, Parser)]
 #[command(disable_version_flag = true)]
@@ -94,6 +96,7 @@ struct AppState {
     api_storage_keys: Arc<ApiStorageKeyset>,
     collaboration_storage_keys: Option<Arc<CollaborationStorageKeyset>>,
     document_storage_keys: Option<Arc<DocumentStorageKeyset>>,
+    revision_storage_keys: Option<Arc<RevisionStorageKeyset>>,
     mount_storage_keys: Option<Arc<MountStorageKeyset>>,
     generation_recheck: Duration,
     tenant_id: Uuid,
@@ -248,6 +251,15 @@ struct DocumentRevisionResult {
 }
 
 #[derive(Serialize)]
+struct RevisionChunkResult {
+    chunk_id: Uuid,
+    drive_id: Uuid,
+    size_bytes: u64,
+    blake3: String,
+    state: &'static str,
+}
+
+#[derive(Serialize)]
 struct MountWriteResult {
     write_session_id: Uuid,
     logical_size_bytes: u64,
@@ -358,6 +370,12 @@ async fn serve(config: Config) -> Result<(), String> {
         .as_ref()
         .map(|key| load_document_storage_keys(&key.public_keyset_file).map(Arc::new))
         .transpose()?;
+    let revision_storage_keys = config
+        .revisions
+        .capability_signing
+        .as_ref()
+        .map(|key| load_revision_storage_keys(&key.public_keyset_file).map(Arc::new))
+        .transpose()?;
     let mount_storage_keys = config
         .mounts
         .capability_signing
@@ -368,6 +386,7 @@ async fn serve(config: Config) -> Result<(), String> {
         &api_storage_keys,
         collaboration_storage_keys.as_deref(),
         document_storage_keys.as_deref(),
+        revision_storage_keys.as_deref(),
         mount_storage_keys.as_deref(),
     )?;
     let storage_ready = Arc::new(AtomicBool::new(true));
@@ -377,6 +396,7 @@ async fn serve(config: Config) -> Result<(), String> {
         api_storage_keys,
         collaboration_storage_keys,
         document_storage_keys,
+        revision_storage_keys,
         mount_storage_keys,
         generation_recheck: Duration::from_secs(config.limits.generation_recheck_seconds),
         tenant_id,
@@ -432,6 +452,17 @@ async fn serve(config: Config) -> Result<(), String> {
         .route("/io/v1/uploads/{upload_id}/parts/{part}", put(upload_part))
         .route("/io/v1/uploads/{upload_id}/finalize", post(finalize_upload))
         .route("/io/v1/downloads/{grant_id}", get(download).head(download))
+        .route(
+            "/io/v1/revision-chunks/{chunk_id}",
+            put(write_revision_chunk)
+                .get(read_revision_chunk)
+                .head(read_revision_chunk)
+                .delete(delete_revision_chunk),
+        )
+        .route(
+            "/io/v1/revision-legacy-payloads/{payload_id}",
+            get(read_revision_legacy_payload).head(read_revision_legacy_payload),
+        )
         .route(
             "/io/v1/documents/{session_id}/versions/{version_id}",
             get(read_document_version).head(read_document_version),
@@ -951,6 +982,187 @@ async fn download(
             segments,
             state.generation_recheck,
         ))
+    };
+    builder.body(body).map_err(|_| AppError::Internal)
+}
+
+async fn write_revision_chunk(
+    State(state): State<AppState>,
+    Path(chunk_id): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<RevisionChunkResult>, AppError> {
+    let chunk_id =
+        Uuid::parse_str(&chunk_id).map_err(|_| AppError::BadRequest("invalid_chunk_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::WriteRevisionChunk).await?;
+    let locator = revision_chunk_locator(&authorized, chunk_id)?;
+    if let Some(length) = headers.get(CONTENT_LENGTH) {
+        let length = length
+            .to_str()
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .ok_or(AppError::BadRequest("invalid_content_length"))?;
+        if length != locator.size {
+            return Err(AppError::Conflict("revision_chunk_size_mismatch"));
+        }
+    }
+    consume_nonce(&state, &authorized, "revision_write_chunk").await?;
+    let temporary = state
+        .storage
+        .revision_chunk_staging_path(locator.drive_id, authorized.capability_id)
+        .map_err(storage_error)?;
+    let (size, digest) = write_body(body, &temporary, locator.size).await?;
+    if size != locator.size || digest != locator.digest {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(AppError::Conflict("revision_chunk_digest_mismatch"));
+    }
+    let storage = state.storage.clone();
+    let temporary_for_publish = temporary.clone();
+    tokio::task::spawn_blocking(move || {
+        storage.publish_revision_chunk(&temporary_for_publish, locator)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    Ok(Json(RevisionChunkResult {
+        chunk_id,
+        drive_id: locator.drive_id,
+        size_bytes: locator.size,
+        blake3: hex_digest(&locator.digest),
+        state: "durable",
+    }))
+}
+
+async fn read_revision_chunk(
+    State(state): State<AppState>,
+    Path(chunk_id): Path<String>,
+    headers: HeaderMap,
+    request: Request<Body>,
+) -> Result<Response, AppError> {
+    let chunk_id =
+        Uuid::parse_str(&chunk_id).map_err(|_| AppError::BadRequest("invalid_chunk_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::ReadRevisionChunk).await?;
+    let locator = revision_chunk_locator(&authorized, chunk_id)?;
+    let (start, end, partial) =
+        requested_range(headers.get(RANGE), locator.size, &authorized.claims)?;
+    let storage = state.storage.clone();
+    let segment = tokio::task::spawn_blocking(move || {
+        storage.verified_revision_chunk_segment(locator, start, end)
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    binary_response(
+        request.method(),
+        locator.size,
+        start,
+        end,
+        partial,
+        vec![segment],
+    )
+}
+
+async fn delete_revision_chunk(
+    State(state): State<AppState>,
+    Path(chunk_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    let chunk_id =
+        Uuid::parse_str(&chunk_id).map_err(|_| AppError::BadRequest("invalid_chunk_id"))?;
+    let authorized = authorize(&state, &headers, CapabilityOperation::DeleteRevisionChunk).await?;
+    let locator = revision_chunk_locator(&authorized, chunk_id)?;
+    consume_nonce(&state, &authorized, "revision_delete_chunk").await?;
+    let storage = state.storage.clone();
+    let operation_id = authorized.capability_id;
+    tokio::task::spawn_blocking(move || storage.delete_revision_chunk(locator, operation_id))
+        .await
+        .map_err(|_| AppError::Internal)?
+        .map_err(storage_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn read_revision_legacy_payload(
+    State(state): State<AppState>,
+    Path(payload_id): Path<String>,
+    headers: HeaderMap,
+    request: Request<Body>,
+) -> Result<Response, AppError> {
+    let payload_id =
+        Uuid::parse_str(&payload_id).map_err(|_| AppError::BadRequest("invalid_payload_id"))?;
+    let authorized = authorize(
+        &state,
+        &headers,
+        CapabilityOperation::ReadRevisionLegacyPayload,
+    )
+    .await?;
+    validate_revision_legacy_payload_capability(&authorized, payload_id)?;
+    let payload = state
+        .database
+        .payload(authorized.tenant_id, payload_id)
+        .await?;
+    if payload.state != "referenced" || payload.backend_id != state.backend_id {
+        return Err(AppError::Conflict("legacy_payload_not_referenced"));
+    }
+    if payload.drive_id != authorized.resource_id {
+        return Err(AppError::Forbidden);
+    }
+    let size = u64::try_from(payload.size_bytes).map_err(|_| AppError::Internal)?;
+    validate_exact_range(&authorized, size)?;
+    let (start, end, partial) = requested_range(headers.get(RANGE), size, &authorized.claims)?;
+    let storage = state.storage.clone();
+    let payload_for_storage = payload.clone();
+    let parts = if payload.layout == "chunked" {
+        state
+            .database
+            .payload_parts_for_mount_read(authorized.tenant_id, payload_id)
+            .await?
+    } else {
+        Vec::new()
+    };
+    let segments = tokio::task::spawn_blocking(move || {
+        if payload_for_storage.layout == "whole" {
+            storage.verified_whole_object_segment(&payload_for_storage, start, end)
+        } else {
+            let chunks = parts
+                .iter()
+                .map(mount_base_chunk)
+                .collect::<Result<Vec<_>, _>>()?;
+            storage.verified_chunked_object_segments(&payload_for_storage, &chunks, start, end)
+        }
+    })
+    .await
+    .map_err(|_| AppError::Internal)?
+    .map_err(storage_error)?;
+    binary_response(request.method(), size, start, end, partial, segments)
+}
+
+fn binary_response(
+    method: &Method,
+    size: u64,
+    start: u64,
+    end: u64,
+    partial: bool,
+    segments: Vec<DownloadSegment>,
+) -> Result<Response, AppError> {
+    let response_length = if size == 0 { 0 } else { end - start + 1 };
+    let mut builder = Response::builder()
+        .status(if partial {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .header(ACCEPT_RANGES, "bytes")
+        .header(CONTENT_TYPE, "application/octet-stream")
+        .header(CONTENT_LENGTH, response_length.to_string())
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff");
+    if partial {
+        builder = builder.header(CONTENT_RANGE, format!("bytes {start}-{end}/{size}"));
+    }
+    let body = if *method == Method::HEAD || size == 0 {
+        Body::empty()
+    } else {
+        Body::from_stream(mount_download_stream(segments))
     };
     builder.body(body).map_err(|_| AppError::Internal)
 }
@@ -3122,6 +3334,7 @@ async fn authorize(
         &state.api_storage_keys,
         state.collaboration_storage_keys.as_deref(),
         state.document_storage_keys.as_deref(),
+        state.revision_storage_keys.as_deref(),
     )?;
     let tenant_id = parse_required_uuid(&claims.tenant_id)?;
     if tenant_id != state.tenant_id {
@@ -3148,6 +3361,7 @@ fn verify_capability_for_operation(
     api_storage_keys: &ApiStorageKeyset,
     collaboration_storage_keys: Option<&CollaborationStorageKeyset>,
     document_storage_keys: Option<&DocumentStorageKeyset>,
+    revision_storage_keys: Option<&RevisionStorageKeyset>,
 ) -> Result<CapabilityClaims, AppError> {
     match operation {
         CapabilityOperation::UploadPart => verify_api_storage_capability(
@@ -3224,6 +3438,38 @@ fn verify_capability_for_operation(
             now,
         )
         .map(|verified| verified.claims),
+        CapabilityOperation::WriteRevisionChunk => verify_revision_storage_capability(
+            wire,
+            revision_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            RevisionStorageCapabilityUse::WriteChunk,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::ReadRevisionChunk => verify_revision_storage_capability(
+            wire,
+            revision_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            RevisionStorageCapabilityUse::ReadChunk,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::DeleteRevisionChunk => verify_revision_storage_capability(
+            wire,
+            revision_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            RevisionStorageCapabilityUse::DeleteChunk,
+            now,
+        )
+        .map(|verified| verified.claims),
+        CapabilityOperation::ReadRevisionLegacyPayload => verify_revision_storage_capability(
+            wire,
+            revision_storage_keys.ok_or(AppError::Unauthorized)?,
+            CAPABILITY_AUDIENCE,
+            RevisionStorageCapabilityUse::ReadLegacyPayload,
+            now,
+        )
+        .map(|verified| verified.claims),
         _ => return Err(AppError::Unauthorized),
     }
     .map_err(|_| AppError::Unauthorized)
@@ -3288,6 +3534,55 @@ fn validate_upload_capability(
         || upload.fencing_token
             != i64::try_from(authorized.claims.fencing_token).map_err(|_| AppError::Forbidden)?
         || authorized.resource_id != upload.node_id.unwrap_or(upload.parent_id)
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+/// Decodes the revision coordinator's fixed chunk binding from a verified
+/// purpose-scoped capability.  The nonce is intentionally 64 bytes: its first
+/// 32 bytes are the immutable BLAKE3 locator and its random suffix preserves
+/// one-time capability identity.  PostgreSQL persists the same
+/// `(drive_id, digest, size)` tuple before it can issue the capability.
+fn revision_chunk_locator(
+    authorized: &AuthorizedCapability,
+    expected_chunk_id: Uuid,
+) -> Result<RevisionChunkLocator, AppError> {
+    let _operation_id = parse_required_non_nil_uuid(&authorized.claims.upload_id)?;
+    let _manifest_member_id = parse_required_non_nil_uuid(&authorized.claims.grant_id)?;
+    if expected_chunk_id.is_nil()
+        || parse_required_uuid(&authorized.claims.payload_id)? != expected_chunk_id
+        || parse_required_non_nil_uuid(&authorized.claims.resource_id)? != authorized.resource_id
+        || authorized.claims.range_start != 0
+        || authorized.claims.nonce.len() != REVISION_CHUNK_CAPABILITY_NONCE_BYTES
+        || authorized.claims.nonce[32..].iter().all(|byte| *byte == 0)
+    {
+        return Err(AppError::Forbidden);
+    }
+    let size = authorized
+        .claims
+        .range_end
+        .checked_add(1)
+        .ok_or(AppError::Forbidden)?;
+    if size == 0 || size > REVISION_CHUNK_SIZE_BYTES {
+        return Err(AppError::Forbidden);
+    }
+    let digest = authorized.claims.nonce[..32]
+        .try_into()
+        .map_err(|_| AppError::Forbidden)?;
+    RevisionChunkLocator::new(authorized.resource_id, digest, size).map_err(|_| AppError::Forbidden)
+}
+
+fn validate_revision_legacy_payload_capability(
+    authorized: &AuthorizedCapability,
+    expected_payload_id: Uuid,
+) -> Result<(), AppError> {
+    let _operation_id = parse_required_non_nil_uuid(&authorized.claims.grant_id)?;
+    let _drive_id = parse_required_non_nil_uuid(&authorized.claims.resource_id)?;
+    let _operation_id = parse_required_non_nil_uuid(&authorized.claims.upload_id)?;
+    if expected_payload_id.is_nil()
+        || parse_required_uuid(&authorized.claims.payload_id)? != expected_payload_id
     {
         return Err(AppError::Forbidden);
     }
@@ -3534,6 +3829,14 @@ fn parse_required_uuid(value: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(value).map_err(|_| AppError::Unauthorized)
 }
 
+fn parse_required_non_nil_uuid(value: &str) -> Result<Uuid, AppError> {
+    let identifier = parse_required_uuid(value)?;
+    if identifier.is_nil() {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(identifier)
+}
+
 fn parse_required_mount_uuid(value: &str) -> Result<Uuid, AppError> {
     let identifier = parse_required_uuid(value)?;
     if identifier.is_nil() {
@@ -3561,6 +3864,11 @@ fn load_document_storage_keys(path: &FilePath) -> Result<DocumentStorageKeyset, 
         .map_err(|_| "capability public keyset is invalid".to_owned())
 }
 
+fn load_revision_storage_keys(path: &FilePath) -> Result<RevisionStorageKeyset, String> {
+    RevisionStorageKeyset::parse(&keyset_source(path)?)
+        .map_err(|_| "capability public keyset is invalid".to_owned())
+}
+
 fn load_mount_storage_keys(path: &FilePath) -> Result<MountStorageKeyset, String> {
     MountStorageKeyset::parse(&keyset_source(path)?)
         .map_err(|_| "capability public keyset is invalid".to_owned())
@@ -3570,6 +3878,7 @@ fn validate_storage_keyset_disjointness(
     api: &ApiStorageKeyset,
     collaboration: Option<&CollaborationStorageKeyset>,
     document: Option<&DocumentStorageKeyset>,
+    revision: Option<&RevisionStorageKeyset>,
     mount: Option<&MountStorageKeyset>,
 ) -> Result<(), String> {
     let mut material = api.entries().map(|(_, key)| *key).collect::<Vec<_>>();
@@ -3577,6 +3886,9 @@ fn validate_storage_keyset_disjointness(
         material.extend(keys.entries().map(|(_, key)| *key));
     }
     if let Some(keys) = document {
+        material.extend(keys.entries().map(|(_, key)| *key));
+    }
+    if let Some(keys) = revision {
         material.extend(keys.entries().map(|(_, key)| *key));
     }
     if let Some(keys) = mount {
@@ -3879,7 +4191,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            validate_storage_keyset_disjointness(&api, Some(&collaboration), None, None).is_err()
+            validate_storage_keyset_disjointness(&api, Some(&collaboration), None, None, None)
+                .is_err()
         );
     }
 
@@ -3925,6 +4238,7 @@ mod tests {
                     &api,
                     Some(&collaboration),
                     None,
+                    None,
                 )
                 .is_ok()
             );
@@ -3944,6 +4258,7 @@ mod tests {
                 120,
                 &api,
                 Some(&collaboration),
+                None,
                 None,
             ),
             Err(AppError::Unauthorized)
@@ -3979,6 +4294,93 @@ mod tests {
             parse_required_mount_uuid(&Uuid::nil().to_string()),
             Err(AppError::Unauthorized)
         ));
+    }
+
+    #[test]
+    fn revision_chunk_locator_requires_a_fixed_bound_digest_size_and_drive() {
+        let chunk_id = Uuid::new_v4();
+        let drive_id = Uuid::new_v4();
+        let mut claims = valid_claims(CapabilityOperation::WriteRevisionChunk);
+        claims.payload_id = chunk_id.to_string();
+        claims.resource_id = drive_id.to_string();
+        claims.range_start = 0;
+        claims.range_end = 63;
+        claims.nonce = vec![0x5a; REVISION_CHUNK_CAPABILITY_NONCE_BYTES];
+        let authorized = AuthorizedCapability {
+            tenant_id: Uuid::parse_str(&claims.tenant_id).unwrap(),
+            session_id: Uuid::parse_str(&claims.session_id).unwrap(),
+            principal_id: Uuid::parse_str(&claims.principal_id).unwrap(),
+            resource_id: drive_id,
+            capability_id: Uuid::parse_str(&claims.capability_id).unwrap(),
+            claims,
+        };
+        let locator = revision_chunk_locator(&authorized, chunk_id).expect("bound revision chunk");
+        assert_eq!(locator.drive_id, drive_id);
+        assert_eq!(locator.size, 64);
+        assert_eq!(locator.digest, [0x5a; 32]);
+
+        let mut malformed = authorized.claims.clone();
+        malformed.nonce.truncate(32);
+        let malformed = AuthorizedCapability {
+            claims: malformed,
+            ..authorized
+        };
+        assert!(matches!(
+            revision_chunk_locator(&malformed, chunk_id),
+            Err(AppError::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn revision_keyset_rejects_cross_operation_substitution() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let keyset = RevisionStorageKeyset::parse(
+            &filebelt_capability_keyset::encode_keyset(
+                filebelt_capability_keyset::KeyPurpose::RevisionStorage,
+                &[(1, pair.public_key().as_ref().try_into().unwrap())],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let uses = [
+            RevisionStorageCapabilityUse::WriteChunk,
+            RevisionStorageCapabilityUse::ReadChunk,
+            RevisionStorageCapabilityUse::DeleteChunk,
+            RevisionStorageCapabilityUse::ReadLegacyPayload,
+        ];
+        for signed_use in uses {
+            let operation = match signed_use {
+                RevisionStorageCapabilityUse::WriteChunk => CapabilityOperation::WriteRevisionChunk,
+                RevisionStorageCapabilityUse::ReadChunk => CapabilityOperation::ReadRevisionChunk,
+                RevisionStorageCapabilityUse::DeleteChunk => {
+                    CapabilityOperation::DeleteRevisionChunk
+                }
+                RevisionStorageCapabilityUse::ReadLegacyPayload => {
+                    CapabilityOperation::ReadRevisionLegacyPayload
+                }
+            };
+            let wire = filebelt_storage_protocol::sign_revision_storage_capability(
+                &valid_claims(operation),
+                signed_use,
+                1,
+                &pair,
+            )
+            .unwrap();
+            for expected_use in uses {
+                assert_eq!(
+                    filebelt_storage_protocol::verify_revision_storage_capability(
+                        &wire,
+                        &keyset,
+                        CAPABILITY_AUDIENCE,
+                        expected_use,
+                        120,
+                    )
+                    .is_ok(),
+                    signed_use == expected_use,
+                    "signed={signed_use:?} expected={expected_use:?}"
+                );
+            }
+        }
     }
 
     #[test]

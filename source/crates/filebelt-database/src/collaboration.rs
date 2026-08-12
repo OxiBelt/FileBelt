@@ -158,7 +158,7 @@ impl Database {
     ) -> Result<Uuid, DatabaseError> {
         if durable_sequence < 0
             || state_vector.len() > 1_048_576
-            || !(0..=2_097_152).contains(&source_size_bytes)
+            || !(0..=16_777_216).contains(&source_size_bytes)
             || source_blake3.len() != 32
         {
             return Err(DatabaseError::InvalidPersistedValue);

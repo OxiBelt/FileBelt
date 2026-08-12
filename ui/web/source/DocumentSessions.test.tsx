@@ -10,7 +10,7 @@ const Office: FileEntry = {
   HeadVersionId: "00000000-0000-4000-8000-000000000002",
   Id: "00000000-0000-4000-8000-000000000003",
   Kind: "file",
-  MarkdownEligibility: "ineligible",
+  TextEligibility: "ineligible",
   MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ModifiedAt: "2026-08-09T10:00:00Z",
   Name: "Plan.docx",
@@ -23,8 +23,10 @@ const Office: FileEntry = {
 };
 
 describe("document session controls", () => {
-  it("accepts only exact DOCX, XLSX, and PPTX types through 100 MiB", () => {
+  it("accepts exact OOXML and ODF document types through 100 MiB", () => {
     expect(IsOfficeDocumentCandidate(Office)).toBe(true);
+    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/vnd.oasis.opendocument.text", Name: "Plan.odt" })).toBe(true);
+    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/vnd.oasis.opendocument.text", Name: "Plan.ODT" })).toBe(false);
     expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/octet-stream" })).toBe(false);
     expect(IsOfficeDocumentCandidate({ ...Office, Name: "Plan.pdf" })).toBe(false);
     expect(IsOfficeDocumentCandidate({ ...Office, Size: 100 * 1024 * 1024 + 1 })).toBe(false);

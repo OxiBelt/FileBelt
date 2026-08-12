@@ -75,6 +75,7 @@ spec:
 {{- if .Values.mcp.enabled }}{{- $metricsComponents = append $metricsComponents "mcp-broker" -}}{{- end }}
 {{- if .Values.mcp.runners.enabled }}{{- $metricsComponents = append $metricsComponents "controller" -}}{{- end }}
 {{- if .Values.mounts.nfs.enabled }}{{- $metricsComponents = append $metricsComponents "nfs-relay" -}}{{- end }}
+{{- if .Values.revisions.enabled }}{{- $metricsComponents = append $metricsComponents "revision-coordinator" -}}{{- end }}
 {{- range $component := $metricsComponents }}
 apiVersion: v1
 kind: Service

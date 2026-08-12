@@ -16,6 +16,7 @@ members = [
   "source/apps/filebelt-vfs",
   "source/apps/filebelt-headscale-sync",
   "source/apps/filebelt-nfs-relay",
+  "source/apps/filebelt-revision",
   "source/crates/filebelt-build-identity",
   "source/crates/filebelt-domain",
   "source/crates/filebelt-authz",
@@ -26,6 +27,7 @@ members = [
   "source/crates/filebelt-storage-protocol",
   "source/crates/filebelt-vfs-protocol",
   "source/crates/filebelt-document-protocol",
+  "source/crates/filebelt-revision-protocol",
   "source/crates/filebelt-mcp-policy",
   "source/crates/filebelt-mcp-protocol",
   "source/crates/filebelt-mcp-vault",
@@ -44,6 +46,7 @@ exclude = [
   "adapters/onlyoffice",
   "adapters/nfs",
   "adapters/transcode",
+  "adapters/git",
 ]
 resolver = "3"
 
@@ -71,6 +74,7 @@ filebelt-database = { version = "=0.1.0", path = "source/crates/filebelt-databas
 filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/filebelt-deployment-diagnostics" }
 filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
 filebelt-document-protocol = { version = "=0.1.0", path = "source/crates/filebelt-document-protocol" }
+filebelt-revision-protocol = { version = "=0.1.0", path = "source/crates/filebelt-revision-protocol" }
 filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-events-protocol" }
 filebelt-mcp-policy = { version = "=0.1.0", path = "source/crates/filebelt-mcp-policy" }
 filebelt-mcp-protocol = { version = "=0.1.0", path = "source/crates/filebelt-mcp-protocol" }

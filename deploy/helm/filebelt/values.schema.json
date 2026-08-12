@@ -3,7 +3,7 @@
   "title": "FileBelt Phase 8 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "documents", "mounts", "networkPolicy", "monitoring", "operation"],
+  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "documents", "revisions", "mounts", "networkPolicy", "monitoring", "operation"],
   "properties": {
     "global": {
       "type": "object",
@@ -27,7 +27,7 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "filebelt-nfs-gateway", "filebelt-nfs-relay", "tailscaled"],
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-revision", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "filebelt-nfs-gateway", "filebelt-nfs-relay", "tailscaled"],
       "properties": {
         "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
         "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
@@ -41,6 +41,7 @@
         "filebelt-vfs": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-vfs"}}}]},
         "filebelt-headscale-sync": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-headscale-sync"}}}]},
         "filebelt-document": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-document"}}}]},
+        "filebelt-revision": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-revision"}}}]},
         "filebelt-smb-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-smb-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
         "filebelt-ftp-ftps-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-ftp-ftps-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
         "filebelt-nfs-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-nfs-gateway"}, "license": {"const": "LGPL-3.0-or-later"}}}]},
@@ -67,7 +68,7 @@
     },
     "workloads": {
       "type": "object", "additionalProperties": false,
-      "required": ["web", "api", "io", "maintenance", "collaboration", "document", "mcpBroker", "controller", "operation"],
+      "required": ["web", "api", "io", "maintenance", "collaboration", "document", "revision", "mcpBroker", "controller", "operation"],
       "properties": {
         "web": {"$ref": "#/definitions/servingWorkload"},
         "api": {"$ref": "#/definitions/servingWorkload"},
@@ -75,6 +76,7 @@
         "maintenance": {"$ref": "#/definitions/servingWorkload"},
         "collaboration": {"$ref": "#/definitions/servingWorkload"},
         "document": {"$ref": "#/definitions/servingWorkload"},
+        "revision": {"allOf": [{"$ref": "#/definitions/servingWorkload"}, {"properties": {"replicas": {"const": 1}}}]},
         "mcpBroker": {"$ref": "#/definitions/servingWorkload"},
         "controller": {"$ref": "#/definitions/servingWorkload"},
         "operation": {
@@ -103,7 +105,7 @@
     },
     "secrets": {
       "type": "object", "additionalProperties": false,
-      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "nfsGaneshaKeytab", "nfsBridgeVfsClientTls", "nfsHandleKeyring", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls"],
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "nfsGaneshaKeytab", "nfsBridgeVfsClientTls", "nfsHandleKeyring", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls", "revisionDatabase", "revisionStorageCapabilityPrivateKey", "revisionStorageCapabilityPublicKeyset", "revisionServerTls", "apiRevisionClientTls", "revisionAdapterClientTls", "revisionIoClientTls"],
       "properties": {
         "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
@@ -164,6 +166,13 @@
         "documentAdapterServerTls": {"$ref": "#/definitions/tlsSecret"},
         "apiDocumentClientTls": {"$ref": "#/definitions/tlsSecret"},
         "onlyofficeEdgeClientTls": {"$ref": "#/definitions/tlsSecret"}
+        ,"revisionDatabase": {"$ref": "#/definitions/singleKeySecret"}
+        ,"revisionStorageCapabilityPrivateKey": {"$ref": "#/definitions/singleKeySecret"}
+        ,"revisionStorageCapabilityPublicKeyset": {"$ref": "#/definitions/singleKeySecret"}
+        ,"revisionServerTls": {"$ref": "#/definitions/tlsSecret"}
+        ,"apiRevisionClientTls": {"$ref": "#/definitions/tlsSecret"}
+        ,"revisionAdapterClientTls": {"$ref": "#/definitions/tlsSecret"}
+        ,"revisionIoClientTls": {"$ref": "#/definitions/tlsSecret"}
       }
     },
     "mcp": {
@@ -220,6 +229,18 @@
         "adapterPort": {"type": "integer", "minimum": 1024, "maximum": 65535},
         "launchAction": {"type": "string", "pattern": "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?/onlyoffice/launch$", "maxLength": 512},
         "providerOrigin": {"type": "string", "pattern": "^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$", "maxLength": 512}
+      }
+    },
+    "revisions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "gitNamespace", "adapterOrigin", "adapterServerName", "adapterPort", "activation"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "gitNamespace": {"$ref": "#/definitions/dnsLabel"},
+        "adapterOrigin": {"type": "string", "pattern": "^https://[a-z0-9.-]+:[1-9][0-9]{0,4}$", "maxLength": 512},
+        "adapterServerName": {"type": "string", "pattern": "^[a-z0-9.-]+$", "minLength": 1, "maxLength": 253},
+        "adapterPort": {"const": 8092},
+        "activation": {"type": "object", "additionalProperties": false, "required": ["compatibilityGate"], "properties": {"compatibilityGate": {"type": "string", "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$|^$"}}}
       }
     },
     "mounts": {

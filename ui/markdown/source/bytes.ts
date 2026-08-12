@@ -38,11 +38,26 @@ export function EncodeMarkdown(Source: MarkdownSource, MaximumBytes: number): Ui
 }
 
 export function DecodeEditableMarkdown(Bytes: Uint8Array): MarkdownSource {
-  return DecodeMarkdown(Bytes, MaximumEditableBytes);
+  return DecodeEditableText(Bytes);
 }
 
 export function DecodeViewableMarkdown(Bytes: Uint8Array): MarkdownSource {
+  return DecodeViewableText(Bytes);
+}
+
+/** Decode a server-validated text source for an editable CodeMirror surface. */
+export function DecodeEditableText(Bytes: Uint8Array): MarkdownSource {
+  return DecodeMarkdown(Bytes, MaximumEditableBytes);
+}
+
+/** Decode a server-validated text source for a source-only viewer. */
+export function DecodeViewableText(Bytes: Uint8Array): MarkdownSource {
   return DecodeMarkdown(Bytes, MaximumViewableBytes);
+}
+
+/** Encode a language-neutral source while preserving its reviewed byte format. */
+export function EncodeText(Source: MarkdownSource, MaximumBytes: number): Uint8Array {
+  return EncodeMarkdown(Source, MaximumBytes);
 }
 
 export function DetectLineEnding(Text: string): LineEnding {

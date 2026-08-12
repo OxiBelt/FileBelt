@@ -25,6 +25,7 @@ ROLES = (
     "filebelt-headscale-sync",
     "filebelt-nfs-relay",
     "filebelt-document",
+    "filebelt-revision",
     "filebelt-web",
 )
 

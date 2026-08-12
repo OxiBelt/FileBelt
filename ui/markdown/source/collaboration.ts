@@ -3,7 +3,7 @@
 import * as Encoding from "lib0/encoding";
 import { applyAwarenessUpdate, Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import type { MarkdownCollaboration } from "./editor.js";
+import type { TextCollaboration } from "./editor.js";
 
 const Encoder = new TextEncoder();
 const Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -36,7 +36,7 @@ export interface ConnectMarkdownCollaborationOptions {
   WebSocketFactory?: (Url: string) => WebSocket;
 }
 
-export class MarkdownRealtimeSession implements MarkdownCollaboration {
+export class MarkdownRealtimeSession implements TextCollaboration {
   readonly Awareness: Awareness;
   readonly Document: Y.Doc;
   readonly TextName = "source";
@@ -354,6 +354,9 @@ export class MarkdownRealtimeSession implements MarkdownCollaboration {
     this.#OnStateChange?.("disconnected");
   }
 }
+
+/** Language-neutral alias; the wire codec remains the reviewed Yjs codec. */
+export { MarkdownRealtimeSession as TextRealtimeSession };
 
 interface ChunkAccumulator {
   Chunks: (Uint8Array | undefined)[];

@@ -9,6 +9,7 @@ pub mod document;
 pub mod mcp;
 pub mod media;
 pub mod mount;
+pub mod revision;
 
 mod idempotency;
 
@@ -134,6 +135,8 @@ pub struct NodeRecord {
     pub head_version_id: Option<Uuid>,
     pub namespace_generation: i64,
     pub acl_generation: i64,
+    pub attribute_generation: i64,
+    pub content_class_policy: String,
     pub trashed: bool,
     pub updated_at: String,
     pub size_bytes: Option<i64>,
@@ -156,6 +159,9 @@ pub struct FileVersionRecord {
     pub source_version_id: Option<Uuid>,
     pub creator_display_name: Option<String>,
     pub mcp_assisted: bool,
+    pub observed_content_class: String,
+    pub revision_backend: String,
+    pub git_commit_oid: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -843,7 +849,7 @@ impl Database {
         drive_id: Uuid,
         node_id: Uuid,
     ) -> Result<Vec<FileVersionRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT v.id,v.node_id,v.ordinal,v.size_bytes,v.created_by,v.restored_from_version_id,v.created_at::text,(n.head_version_id=v.id) AS current,v.media_type,v.origin_kind,v.source_version_id,v.creator_display_name,v.mcp_assisted FROM nodes n JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 AND n.kind='file' ORDER BY v.ordinal DESC,v.id")
+        let rows = sqlx::query("SELECT v.id,v.node_id,v.ordinal,v.size_bytes,v.created_by,v.restored_from_version_id,v.created_at::text,(n.head_version_id=v.id) AS current,v.media_type,v.origin_kind,v.source_version_id,v.creator_display_name,v.mcp_assisted,c.observed_class,c.backend,encode(g.commit_oid,'hex') AS git_commit_oid FROM nodes n JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id JOIN filebelt_revision.contents c ON c.tenant_id=v.tenant_id AND c.id=v.content_id LEFT JOIN filebelt_revision.git_revisions g ON g.tenant_id=c.tenant_id AND g.content_id=c.id WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3 AND n.kind='file' ORDER BY v.ordinal DESC,v.id")
             .bind(tenant_id)
             .bind(drive_id)
             .bind(node_id)
@@ -1218,6 +1224,9 @@ impl Database {
             source_version_id: Some(source_version_id),
             creator_display_name,
             mcp_assisted: false,
+            observed_content_class: "unclassified".into(),
+            revision_backend: "legacy_payload".into(),
+            git_commit_oid: None,
         })
     }
 
@@ -2400,10 +2409,11 @@ impl Database {
             checkpoint_id
         {
             let checkpoint = sqlx::query(
-                "SELECT base_version_id,source_size_bytes,source_blake3,mcp_assisted \
-                 FROM filebelt_collaboration.checkpoints WHERE tenant_id=$1 AND id=$2 \
-                   AND node_id=$3 AND created_by=$4 AND state='prepared' \
-                   AND expires_at>clock_timestamp() FOR UPDATE",
+                "SELECT c.base_version_id,c.source_size_bytes,c.source_blake3,c.mcp_assisted,v.media_type \
+                 FROM filebelt_collaboration.checkpoints c JOIN file_versions v \
+                   ON v.tenant_id=c.tenant_id AND v.node_id=c.node_id AND v.id=c.base_version_id \
+                 WHERE c.tenant_id=$1 AND c.id=$2 AND c.node_id=$3 AND c.created_by=$4 \
+                   AND c.state='prepared' AND c.expires_at>clock_timestamp() FOR UPDATE OF c",
             )
             .bind(tenant_id)
             .bind(checkpoint_id)
@@ -2416,7 +2426,7 @@ impl Database {
                 != expected.ok_or(DatabaseError::StaleGeneration)?
                 || checkpoint.get::<i64, _>("source_size_bytes") != size
                 || checkpoint.get::<Vec<u8>, _>("source_blake3") != digest
-                || declared_media_type.as_deref() != Some("text/markdown")
+                || declared_media_type != checkpoint.get::<Option<String>, _>("media_type")
             {
                 return Err(DatabaseError::Conflict);
             }
@@ -2460,9 +2470,11 @@ impl Database {
             .await?;
             ("import", Some(intent.get("source_version_id")), false)
         } else if row.get::<Option<Uuid>, _>("node_id").is_some()
-            && declared_media_type.as_deref() == Some("text/markdown")
+            && declared_media_type
+                .as_deref()
+                .is_some_and(|media_type| media_type.starts_with("text/"))
         {
-            ("markdown_save", expected, false)
+            ("text_save", expected, false)
         } else {
             ("upload", None, false)
         };
@@ -3089,6 +3101,9 @@ fn file_version_from_row(row: &sqlx::postgres::PgRow) -> FileVersionRecord {
         source_version_id: row.get("source_version_id"),
         creator_display_name: row.get("creator_display_name"),
         mcp_assisted: row.get("mcp_assisted"),
+        observed_content_class: row.get("observed_class"),
+        revision_backend: row.get("backend"),
+        git_commit_oid: row.get("git_commit_oid"),
     }
 }
 
@@ -3103,6 +3118,8 @@ fn node_from_row(row: &sqlx::postgres::PgRow) -> NodeRecord {
         head_version_id: row.get("head_version_id"),
         namespace_generation: row.get("namespace_generation"),
         acl_generation: row.get("acl_generation"),
+        attribute_generation: row.get("attribute_generation"),
+        content_class_policy: row.get("content_class_policy"),
         trashed: row.get::<Option<Uuid>, _>("trash_root_id").is_some(),
         updated_at: row.get("updated_at_text"),
         size_bytes: row.get("size_bytes"),

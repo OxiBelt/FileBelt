@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains fourteen Apache-region images on
+The current build matrix contains fifteen Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -51,6 +51,7 @@ The current build matrix contains fourteen Apache-region images on
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
 | `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
 | `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs `document-storage` exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
+| `filebelt-revision` | Compatibility-gated and disabled by default. Coordinates PostgreSQL-authoritative text Git revisions, shared-chunk backfill, comparison, activation, and repair holds through purpose-scoped I/O and adapter calls. It has a narrow PostgreSQL role and no payload/Git mount, browser session credential, or Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
@@ -59,7 +60,7 @@ The current build matrix contains fourteen Apache-region images on
 | `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
 | `filebelt-nfs-relay` | Active and publishable, but NFS delivery is disabled by default. Opaquely forwards bounded TCP/2049 streams from the tailnet edge to one chart-pinned Ganesha backend. It has no Ganesha keytab, bridge TLS identity, VFS route, payload mount, or authority over NFS identities. |
 
-Format-8 deployment material is purpose-scoped and operator-created. API mounts
+Format-9 deployment material is purpose-scoped and operator-created. API mounts
 only its enabled API private/public pairs; I/O mounts API-storage plus enabled
 storage-purpose public keysets; collaboration additionally receives its own
 pair and API storage/grant public sets; broker receives API-MCP-delegation
@@ -67,7 +68,7 @@ public material only; document and VFS receive their own pairs. No runtime Pod
 mounts media signing material; recovery/admin Jobs receive the media public
 keyset. Helm values name every Secret separately and exact Secret generations
 are included in the relevant immutable-Secret rollout checksum. Before any
-format-8 admission, the public-only `keys-audit` Job must load the complete
+format-9 admission, the public-only `keys-audit` Job must load the complete
 configured inventory and prove that current generations are present and public
 key bytes are globally disjoint across purposes.
 
@@ -92,6 +93,16 @@ arm64 source/SBOM/provenance evidence is admitted; RISC-V is compile/probe
 evidence because the upstream provider has no qualified RISC-V runtime. The
 separately versioned deployment chart does not create or redistribute
 DocumentServer, a database, a Secret, a Namespace, or a volume.
+
+The `GPL-2.0-only` `filebelt-git-adapter` is also a separately released process
+and chart. It requires exactly system Git `2.55.0`, a Git-only RWX PVC, a
+private TLS-1.3/mTLS listener on 8092, a distinct operations listener, and no
+general egress, PostgreSQL credential, payload mount, API route, or browser
+identity. The Apache coordinator listens privately on 8091 without either
+byte-plane mount. Adapter images remain non-publishable until their exact Git
+source, build inputs, license notices, SBOM/provenance, amd64/arm64 behavior,
+SHA-256 repository behavior, and restore/fsck matrix are admitted. The chart
+does not create its Namespace, Secrets, or database.
 
 Other reserved adapter roles are future `filebelt-nfs-gateway` and
 `filebelt-transcoder`. Each has an independently truthful platform and license contract. Transcode implementation remains
@@ -601,8 +612,8 @@ Markdown, MCP, and disabled mount paths throughout this rollback.
 
 Phase 4 rollout is staged. First apply the forward MCP migration and reviewed
 role grants, provision the broker database/vault/gateway/mTLS inputs, validate
-the current format-8 configuration with its independent API-MCP-delegation
-purpose, and take a coordinated recovery-v3 checkpoint. Enable the broker
+the current format-9 configuration with its independent API-MCP-delegation
+purpose, and take a coordinated recovery-v4 checkpoint. Enable the broker
 without runners, test one personal registration, discovery, explicit approval,
 version-pinned attachment, revocation, and cross-user denial, then admit normal
 MCP traffic. Enable the controller and runner only in a later revision after
@@ -616,7 +627,7 @@ the broker. After v8 admission, configuration and keyset repair is forward-only:
 retain purpose-specific immutable Secret generations and use a compatible v8
 ConfigMap revision only. Do not drop `filebelt_mcp` or `filebelt_mcp_vault`, run
 a down migration, roll back to a v7 configuration, or remove a KEK generation
-referenced by a `filebelt.recovery.checkpoint.v3` document.
+referenced by a `filebelt.recovery.checkpoint.v4` document.
 
 When compatibility cannot be proved, remain quiesced and restore the last
 coordinated checkpoint into fresh targets before migrating forward.

@@ -42,6 +42,7 @@ pub(crate) struct AppState {
     pub(crate) mcp: Option<Arc<crate::mcp::McpApiState>>,
     pub(crate) documents: Option<Arc<crate::documents::DocumentApiState>>,
     pub(crate) mounts: Option<Arc<crate::mounts::MountApiState>>,
+    pub(crate) revisions: Option<Arc<crate::revisions::RevisionApiState>>,
     digest_key: [u8; 32],
 }
 
@@ -110,6 +111,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
     let mcp = crate::mcp::initialize(&config)?;
     let documents = crate::documents::initialize(&config)?;
     let mounts = crate::mounts::initialize(&config)?;
+    let revisions = crate::revisions::initialize(&config)?;
     let listener = config.listeners.api;
     let state = AppState {
         config: config.clone(),
@@ -125,6 +127,7 @@ pub(crate) async fn serve(config: Config) -> Result<()> {
         mcp,
         documents,
         mounts,
+        revisions,
         digest_key,
     };
     tokio::spawn(refresh_oidc(state.clone()));
@@ -258,6 +261,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
                 .merge(crate::documents::router())
                 .merge(crate::media::router())
                 .merge(crate::mounts::router())
+                .merge(crate::revisions::router())
                 .merge(crate::resources::router()),
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))
@@ -564,6 +568,7 @@ mod tests {
             mcp: filebelt_control_protocol::McpConfig::default(),
             collaboration: filebelt_control_protocol::CollaborationConfig::default(),
             documents: DocumentConfig::default(),
+            revisions: filebelt_control_protocol::RevisionConfig::default(),
             media: filebelt_control_protocol::MediaConfig::default(),
             mounts: filebelt_control_protocol::MountConfig::default(),
         };

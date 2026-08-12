@@ -740,6 +740,7 @@ async fn receive_callback(
                 command.revision_kind,
             )?,
             activity: callback_activity(command.callback_kind, command.activity)?,
+            output_file_type: document_file_type(&command.output_file_type)?,
         })
         .await
         .map_err(database_error)?;
@@ -756,6 +757,12 @@ async fn receive_callback(
             event_id: receipt.event_id.to_string(),
         },
     ))
+}
+
+fn document_file_type(value: &str) -> Result<&str, DocumentSessionErrorCode> {
+    matches!(value, "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp")
+        .then_some(value)
+        .ok_or(DocumentSessionErrorCode::ProtocolViolation)
 }
 
 async fn refresh_source(

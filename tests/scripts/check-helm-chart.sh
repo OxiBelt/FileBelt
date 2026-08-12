@@ -188,6 +188,11 @@ helm template phase7-editor-override "${chart}" --kube-version 1.36.0 \
   --set-string documents.launchAction=https://editor.example.test/onlyoffice/launch \
   --set-string documents.providerOrigin=https://provider.example.test \
   >"${temporary}/render-documents-editor-override.yaml"
+helm template phase9 "${chart}" --kube-version 1.36.0 \
+  --set revisions.enabled=true \
+  --set-string revisions.activation.compatibilityGate=release-a-v9 \
+  >"${temporary}/render-revisions.yaml"
+expect_failure revisions-without-compatibility-gate --set revisions.enabled=true
 assert_rendered_toml "${default_manifest}" filebelt.toml
 assert_rendered_toml "${default_manifest}" oxibelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" filebelt.toml
@@ -196,6 +201,7 @@ assert_rendered_toml "${temporary}/render-documents.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-documents.yaml" oxibelt.toml
 assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" oxibelt.toml
+assert_rendered_toml "${temporary}/render-revisions.yaml" filebelt.toml
 assert_count "${default_manifest}" '^kind: Deployment$' 4
 assert_count "${default_manifest}" '^kind: Service$' 7
 assert_count "${default_manifest}" '^kind: ServiceAccount$' 5
@@ -221,6 +227,7 @@ assert_not_contains "${default_manifest}" 'filebelt-document'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-broker'
 assert_not_contains "${default_manifest}" 'filebelt-controller'
 assert_not_contains "${default_manifest}" 'filebelt-mcp-runner'
+assert_not_contains "${default_manifest}" 'filebelt-revision'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-vfs 'name: filebelt-vfs'
 assert_document_not_contains "${default_manifest}" Deployment filebelt-headscale-sync 'name: filebelt-headscale-sync'
 assert_document_not_contains "${default_manifest}" StatefulSet filebelt-smb-gateway 'name: filebelt-smb-gateway'
@@ -268,6 +275,23 @@ assert_contains "${temporary}/render-documents.yaml" 'spiffe://filebelt/onlyoffi
 assert_contains "${temporary}/render-documents-editor-override.yaml" 'server_names = ["filebelt.example.invalid", "editor.example.test"]'
 assert_contains "${temporary}/render-documents-editor-override.yaml" 'hosts = ["editor.example.test"]'
 assert_contains "${temporary}/render-documents-editor-override.yaml" "form-action 'self' https://editor.example.test"
+assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision 'replicas: 1'
+assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision 'containerPort: 8091'
+assert_container_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision revision 'args: ["serve", "--config", "/etc/filebelt/filebelt.toml"]'
+assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision 'mountPath: /run/secrets/revision-database-url'
+assert_document_not_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision 'mountPath: /var/lib/filebelt/payloads'
+assert_document_not_contains "${temporary}/render-revisions.yaml" Deployment filebelt-revision 'mountPath: /var/lib/filebelt/git'
+assert_document_contains "${temporary}/render-revisions.yaml" Service filebelt-revision 'targetPort: revision'
+assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy filebelt-revision-ingress 'component: api'
+assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy filebelt-revision-egress 'app.kubernetes.io/name: filebelt-git'
+assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy filebelt-revision-egress 'kubernetes.io/metadata.name: filebelt-git'
+assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy filebelt-api-egress 'component: revision-coordinator'
+assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy filebelt-io-ingress 'component: revision-coordinator'
+assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-api 'mountPath: /run/secrets/revision-client-tls'
+assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-io 'mountPath: /run/secrets/revision-storage-capability-public-keyset'
+assert_contains "${temporary}/render-revisions.yaml" 'adapter_url = "https://filebelt-git.filebelt-git.svc:8092"'
+assert_contains "${temporary}/render-revisions.yaml" 'allowed_client_uri_sans = ["spiffe://filebelt/api/revision"]'
+assert_contains "${temporary}/render-revisions.yaml" 'spiffe://filebelt/revision-coordinator/io'
 python3 - "${temporary}/render-documents.yaml" <<'PY'
 import sys
 import tomllib
@@ -814,7 +838,7 @@ for document in open(sys.argv[1], encoding="utf-8").read().split("\n---\n"):
         else:
             break
     config = tomllib.loads("\n".join(rendered))
-    assert config["version"] == 8
+    assert config["version"] == 9
     nfs = config["mounts"]["nfs"]
     assert nfs["enabled"] is True
     assert nfs["realm"] == "EXAMPLE.TEST"
@@ -967,4 +991,4 @@ expect_failure runner_namespace_is_core \
   --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
   --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 
-echo "Helm chart contract through Phase 8 passed"
+echo "Helm chart contract through Phase 9 passed"

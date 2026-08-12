@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::config::{AdapterConfig, JwtKeySet, MAX_ACTIVE_TABS, MAX_OUTPUT_BYTES};
+use quick_xml::events::{BytesStart, Event as XmlEvent};
+use quick_xml::name::ResolveResult;
+use quick_xml::reader::NsReader;
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{BufReader, Read as _};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,8 +117,9 @@ pub trait ProviderJwtVerifier {
 
 pub trait EventFingerprintDeriver {
     /// Produce a canonical cryptographic fingerprint of the verified callback
-    /// event. It must include document, status, save type, URL, revision, and
-    /// provider event ID.  A process may not acknowledge a callback if it
+    /// event. The legacy `callback.v1` field set includes document, status,
+    /// save type, activity, URL, revision, and provider event ID, but not the
+    /// later-added file type. A process may not acknowledge a callback if it
     /// cannot derive one.
     fn derive(&self, event: &CallbackEvent) -> Result<EventFingerprint, FingerprintError>;
 }
@@ -268,6 +273,9 @@ pub struct CallbackEvent {
     /// It must equal the route-bound participant UUID.
     pub activity_user_id: String,
     pub output_url: Option<String>,
+    /// The exact lower-case ONLYOFFICE file type, authenticated in both the
+    /// callback body and provider outbox JWT.
+    pub file_type: String,
     pub provider_event_id: String,
     pub revision: String,
 }
@@ -280,12 +288,43 @@ pub fn callback_requires_output(event: &CallbackEvent) -> bool {
 }
 
 pub fn allowed_document_media_type(value: &str) -> bool {
-    matches!(
-        value.split(';').next().unwrap_or_default().trim(),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    )
+    normalized_document_media_type(value).is_some()
+}
+
+pub fn normalized_document_media_type(value: &str) -> Option<&'static str> {
+    match value.split(';').next().unwrap_or_default().trim() {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        }
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        }
+        "application/vnd.oasis.opendocument.text" => {
+            Some("application/vnd.oasis.opendocument.text")
+        }
+        "application/vnd.oasis.opendocument.spreadsheet" => {
+            Some("application/vnd.oasis.opendocument.spreadsheet")
+        }
+        "application/vnd.oasis.opendocument.presentation" => {
+            Some("application/vnd.oasis.opendocument.presentation")
+        }
+        _ => None,
+    }
+}
+
+pub fn document_media_type_for_file_type(value: &str) -> Option<&'static str> {
+    match value {
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "odt" => Some("application/vnd.oasis.opendocument.text"),
+        "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+        "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+        _ => None,
+    }
 }
 
 pub fn validate_callback(
@@ -293,6 +332,9 @@ pub fn validate_callback(
     config: &AdapterConfig,
 ) -> Result<(), CallbackError> {
     if event.document_id.is_empty() || !is_uuid(&event.participant_id) {
+        return Err(CallbackError::Malformed);
+    }
+    if document_media_type_for_file_type(&event.file_type).is_none() {
         return Err(CallbackError::Malformed);
     }
     if matches!(event.status, CallbackStatus::Editing)
@@ -404,6 +446,7 @@ pub fn signed_callback_matches(payload: &Value, event: &CallbackEvent) -> bool {
     if payload.get("key").and_then(Value::as_str) != Some(event.document_id.as_str())
         || payload.get("status").and_then(Value::as_u64) != Some(event.status as u64)
         || payload.get("url").and_then(Value::as_str) != event.output_url.as_deref()
+        || payload.get("filetype").and_then(Value::as_str) != Some(event.file_type.as_str())
     {
         return false;
     }
@@ -450,6 +493,7 @@ pub enum CallbackError {
     Core,
     Egress,
     MediaType,
+    Package,
 }
 
 pub struct AdapterService<C, J, F, E> {
@@ -618,9 +662,377 @@ impl<C: CoreClient, J: ProviderJwtVerifier, F: EventFingerprintDeriver, E: Egres
         if !allowed_document_media_type(output.content_type()) {
             return Err(CallbackError::MediaType);
         }
+        if normalized_document_media_type(output.content_type())
+            != document_media_type_for_file_type(&event.file_type)
+        {
+            return Err(CallbackError::MediaType);
+        }
+        validate_output_package(&output, &event.file_type)?;
         self.core
             .commit_callback_output(&event, &fingerprint, &output)
             .map_err(|_| CallbackError::Core)
+    }
+}
+
+const MAX_ZIP_ENTRIES: usize = 10_000;
+const MAX_ZIP_UNCOMPRESSED_BYTES: u64 = 1_073_741_824;
+const MAX_REQUIRED_METADATA_BYTES: u64 = 1_048_576;
+const MAX_ODF_CONTENT_XML_BYTES: u64 = 100 * 1024 * 1024;
+// Legitimate ODF documents are shallow trees. This compatibility ceiling is
+// deliberately far below quick-xml 0.41's internal u16 namespace depth, so an
+// attacker cannot wrap the resolver while preserving ordinary document shape.
+const MAX_ODF_XML_NESTING_DEPTH: usize = 256;
+const ODF_OFFICE_NAMESPACE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+const ODF_SCRIPT_NAMESPACE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:script:1.0";
+const ODF_TEXT_NAMESPACE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+const ODF_TABLE_NAMESPACE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+
+/// Validates the bounded, preserved-format package before FileBelt accepts a
+/// provider save. This owns no payload publication; Core/I/O retain the
+/// capability-scoped write and finalization seam.
+pub(crate) fn validate_output_package(
+    output: &CallbackOutput,
+    file_type: &str,
+) -> Result<(), CallbackError> {
+    let expected_media_type =
+        document_media_type_for_file_type(file_type).ok_or(CallbackError::Package)?;
+    let file = std::fs::File::open(&output.path).map_err(|_| CallbackError::Package)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|_| CallbackError::Package)?;
+    if archive.len() > MAX_ZIP_ENTRIES {
+        return Err(CallbackError::Package);
+    }
+    let mut names = BTreeSet::new();
+    let mut total = 0_u64;
+    let mut required = BTreeSet::new();
+    let mut mimetype_is_first = false;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|_| CallbackError::Package)?;
+        let name = entry.name();
+        let canonical = canonical_zip_path(name).ok_or(CallbackError::Package)?;
+        if !names.insert(canonical.clone())
+            || entry.encrypted()
+            || !matches!(
+                entry.compression(),
+                zip::CompressionMethod::Stored | zip::CompressionMethod::Deflated
+            )
+        {
+            return Err(CallbackError::Package);
+        }
+        total = total
+            .checked_add(entry.size())
+            .ok_or(CallbackError::Package)?;
+        if total > MAX_ZIP_UNCOMPRESSED_BYTES || is_macro_path(&canonical) {
+            return Err(CallbackError::Package);
+        }
+        if canonical == "mimetype" {
+            mimetype_is_first = index == 0;
+        }
+        if required_metadata_path(file_type, &canonical)
+            && entry.size() > MAX_REQUIRED_METADATA_BYTES
+        {
+            return Err(CallbackError::Package);
+        }
+        if matches!(file_type, "odt" | "ods" | "odp")
+            && canonical == "content.xml"
+            && !odf_content_size_allowed(entry.size())
+        {
+            return Err(CallbackError::Package);
+        }
+        if required_package_path(file_type, &canonical) {
+            required.insert(canonical);
+        }
+    }
+    let expected = required_paths(file_type).ok_or(CallbackError::Package)?;
+    if !expected.iter().all(|path| required.contains(*path)) {
+        return Err(CallbackError::Package);
+    }
+    if matches!(file_type, "odt" | "ods" | "odp") {
+        let bytes = {
+            let mimetype = archive
+                .by_name("mimetype")
+                .map_err(|_| CallbackError::Package)?;
+            if mimetype.compression() != zip::CompressionMethod::Stored || !mimetype_is_first {
+                return Err(CallbackError::Package);
+            }
+            let mut mimetype = mimetype.take(MAX_REQUIRED_METADATA_BYTES + 1);
+            let mut bytes = Vec::new();
+            mimetype
+                .read_to_end(&mut bytes)
+                .map_err(|_| CallbackError::Package)?;
+            bytes
+        };
+        if bytes.len() as u64 > MAX_REQUIRED_METADATA_BYTES
+            || bytes != expected_media_type.as_bytes()
+        {
+            return Err(CallbackError::Package);
+        }
+        let manifest = read_required_metadata(&mut archive, "META-INF/manifest.xml")?;
+        if !manifest.starts_with(b"<") {
+            return Err(CallbackError::Package);
+        }
+        validate_odf_content_xml(&mut archive)?;
+    } else {
+        let content_types = read_required_metadata(&mut archive, "[Content_Types].xml")?;
+        if !content_types
+            .windows(expected_media_type.len())
+            .any(|window| window == expected_media_type.as_bytes())
+        {
+            return Err(CallbackError::Package);
+        }
+        let relationships = read_required_metadata(&mut archive, "_rels/.rels")?;
+        if !relationships.starts_with(b"<") {
+            return Err(CallbackError::Package);
+        }
+    }
+    Ok(())
+}
+
+fn odf_content_size_allowed(size: u64) -> bool {
+    size <= MAX_ODF_CONTENT_XML_BYTES
+}
+
+fn validate_odf_content_xml(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+) -> Result<(), CallbackError> {
+    let entry = archive
+        .by_name("content.xml")
+        .map_err(|_| CallbackError::Package)?;
+    if !odf_content_size_allowed(entry.size()) {
+        return Err(CallbackError::Package);
+    }
+    let bounded = entry.take(MAX_ODF_CONTENT_XML_BYTES + 1);
+    let mut reader = NsReader::from_reader(BufReader::new(bounded));
+    reader.config_mut().check_end_names = true;
+    let mut buffer = Vec::new();
+    let mut depth = 0_usize;
+    let mut root_seen = false;
+    let mut root_closed = false;
+    let mut declaration_seen = false;
+    let mut declaration_allowed = true;
+    loop {
+        let event = reader
+            .read_event_into(&mut buffer)
+            .map_err(|_| CallbackError::Package)?;
+        match event {
+            XmlEvent::Start(element) => {
+                declaration_allowed = false;
+                if depth == 0 {
+                    if root_seen || root_closed {
+                        return Err(CallbackError::Package);
+                    }
+                    root_seen = true;
+                }
+                let next_depth = depth.checked_add(1).ok_or(CallbackError::Package)?;
+                if next_depth > MAX_ODF_XML_NESTING_DEPTH {
+                    return Err(CallbackError::Package);
+                }
+                validate_odf_element(&element, reader.resolver())?;
+                depth = next_depth;
+            }
+            XmlEvent::Empty(element) => {
+                declaration_allowed = false;
+                if depth == 0 {
+                    if root_seen || root_closed {
+                        return Err(CallbackError::Package);
+                    }
+                    root_seen = true;
+                    root_closed = true;
+                }
+                validate_odf_element(&element, reader.resolver())?;
+            }
+            XmlEvent::End(element) => {
+                declaration_allowed = false;
+                if depth == 0 {
+                    return Err(CallbackError::Package);
+                }
+                if matches!(
+                    reader.resolver().resolve_element(element.name()).0,
+                    ResolveResult::Unknown(_)
+                ) {
+                    return Err(CallbackError::Package);
+                }
+                depth -= 1;
+                if depth == 0 {
+                    root_closed = true;
+                }
+            }
+            XmlEvent::DocType(_) => return Err(CallbackError::Package),
+            XmlEvent::Decl(_) => {
+                if declaration_seen || !declaration_allowed || root_seen {
+                    return Err(CallbackError::Package);
+                }
+                declaration_seen = true;
+                declaration_allowed = false;
+            }
+            XmlEvent::Text(text) => {
+                let text: &[u8] = text.as_ref();
+                if !text.is_empty() {
+                    declaration_allowed = false;
+                }
+                if depth == 0 && text.iter().any(|byte| !byte.is_ascii_whitespace()) {
+                    return Err(CallbackError::Package);
+                }
+            }
+            XmlEvent::CData(_) if depth == 0 => return Err(CallbackError::Package),
+            XmlEvent::CData(_) | XmlEvent::Comment(_) | XmlEvent::PI(_) => {
+                declaration_allowed = false;
+            }
+            XmlEvent::GeneralRef(reference) => {
+                declaration_allowed = false;
+                if depth == 0 || !allowed_xml_reference(reference.as_ref()) {
+                    return Err(CallbackError::Package);
+                }
+            }
+            XmlEvent::Eof => {
+                if !root_seen || !root_closed || depth != 0 {
+                    return Err(CallbackError::Package);
+                }
+                break;
+            }
+        }
+        buffer.clear();
+    }
+    let bounded = reader.into_inner().into_inner();
+    if bounded.limit() == 0 {
+        return Err(CallbackError::Package);
+    }
+    Ok(())
+}
+
+fn validate_odf_element(
+    element: &BytesStart<'_>,
+    resolver: &quick_xml::name::NamespaceResolver,
+) -> Result<(), CallbackError> {
+    let namespace = resolver.resolve_element(element.name()).0;
+    if matches!(namespace, ResolveResult::Unknown(_)) {
+        return Err(CallbackError::Package);
+    }
+    for attribute in element.attributes() {
+        let attribute = attribute.map_err(|_| CallbackError::Package)?;
+        if attribute.key.as_namespace_binding().is_none()
+            && matches!(
+                resolver.resolve_attribute(attribute.key).0,
+                ResolveResult::Unknown(_)
+            )
+        {
+            return Err(CallbackError::Package);
+        }
+    }
+    let ResolveResult::Bound(namespace) = namespace else {
+        return Ok(());
+    };
+    let namespace = normalize_xml_reference_bytes(namespace.as_ref())?;
+    let local = element.local_name();
+    let active = (namespace.as_slice() == ODF_OFFICE_NAMESPACE
+        && matches!(local.as_ref(), b"scripts" | b"script" | b"event-listeners"))
+        || (namespace.as_slice() == ODF_SCRIPT_NAMESPACE && local.as_ref() == b"event-listener")
+        || (namespace.as_slice() == ODF_TEXT_NAMESPACE && local.as_ref() == b"execute-macro")
+        || (namespace.as_slice() == ODF_TABLE_NAMESPACE && local.as_ref() == b"error-macro");
+    (!active).then_some(()).ok_or(CallbackError::Package)
+}
+
+fn normalize_xml_reference_bytes(value: &[u8]) -> Result<Vec<u8>, CallbackError> {
+    let mut normalized = Vec::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(index) = remaining.iter().position(|byte| *byte == b'&') {
+        normalized.extend_from_slice(&remaining[..index]);
+        let reference_with_end = &remaining[index + 1..];
+        let end = reference_with_end
+            .iter()
+            .position(|byte| *byte == b';')
+            .ok_or(CallbackError::Package)?;
+        let reference = &reference_with_end[..end];
+        match reference {
+            b"amp" => normalized.push(b'&'),
+            b"lt" => normalized.push(b'<'),
+            b"gt" => normalized.push(b'>'),
+            b"apos" => normalized.push(b'\''),
+            b"quot" => normalized.push(b'"'),
+            _ => {
+                let (digits, radix) = reference
+                    .strip_prefix(b"#x")
+                    .map(|digits| (digits, 16))
+                    .or_else(|| reference.strip_prefix(b"#").map(|digits| (digits, 10)))
+                    .ok_or(CallbackError::Package)?;
+                let digits = std::str::from_utf8(digits).map_err(|_| CallbackError::Package)?;
+                let codepoint =
+                    u32::from_str_radix(digits, radix).map_err(|_| CallbackError::Package)?;
+                let character = char::from_u32(codepoint).ok_or(CallbackError::Package)?;
+                let mut encoded = [0_u8; 4];
+                normalized.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+            }
+        }
+        remaining = &remaining[index + end + 2..];
+    }
+    normalized.extend_from_slice(remaining);
+    Ok(normalized)
+}
+
+fn allowed_xml_reference(reference: &[u8]) -> bool {
+    matches!(reference, b"amp" | b"lt" | b"gt" | b"apos" | b"quot")
+        || reference
+            .strip_prefix(b"#")
+            .is_some_and(|value| !value.is_empty() && value.iter().all(u8::is_ascii_digit))
+        || reference
+            .strip_prefix(b"#x")
+            .is_some_and(|value| !value.is_empty() && value.iter().all(u8::is_ascii_hexdigit))
+}
+
+fn read_required_metadata(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    path: &str,
+) -> Result<Vec<u8>, CallbackError> {
+    let mut entry = archive.by_name(path).map_err(|_| CallbackError::Package)?;
+    let mut bytes = Vec::new();
+    entry
+        .by_ref()
+        .take(MAX_REQUIRED_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| CallbackError::Package)?;
+    (bytes.len() as u64 <= MAX_REQUIRED_METADATA_BYTES)
+        .then_some(bytes)
+        .ok_or(CallbackError::Package)
+}
+
+fn canonical_zip_path(value: &str) -> Option<String> {
+    if value.is_empty() || value.contains('\\') || value.contains('\0') || value.starts_with('/') {
+        return None;
+    }
+    let path = Path::new(value);
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
+}
+
+fn is_macro_path(path: &str) -> bool {
+    path.starts_with("basic/") || path.starts_with("scripts/") || path.contains("vba")
+}
+
+fn required_package_path(file_type: &str, path: &str) -> bool {
+    required_paths(file_type).is_some_and(|required| required.contains(&path))
+}
+
+fn required_metadata_path(file_type: &str, path: &str) -> bool {
+    match file_type {
+        "docx" | "xlsx" | "pptx" => matches!(path, "[content_types].xml" | "_rels/.rels"),
+        "odt" | "ods" | "odp" => matches!(path, "mimetype" | "meta-inf/manifest.xml"),
+        _ => false,
+    }
+}
+
+fn required_paths(file_type: &str) -> Option<&'static [&'static str]> {
+    match file_type {
+        "docx" => Some(&["[content_types].xml", "_rels/.rels", "word/document.xml"]),
+        "xlsx" => Some(&["[content_types].xml", "_rels/.rels", "xl/workbook.xml"]),
+        "pptx" => Some(&["[content_types].xml", "_rels/.rels", "ppt/presentation.xml"]),
+        "odt" | "ods" | "odp" => Some(&["mimetype", "meta-inf/manifest.xml", "content.xml"]),
+        _ => None,
     }
 }
 
@@ -659,7 +1071,9 @@ mod tests {
     use crate::config::{
         DOCUMENT_SERVER_VERSION, MtlsClientConfig, Origin, Provider, ServerTlsConfig,
     };
+    use std::io::Write as _;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
 
     fn config() -> AdapterConfig {
@@ -695,6 +1109,93 @@ mod tests {
             private_key_file: "key".into(),
             server_ca_file: "ca".into(),
         }
+    }
+
+    fn output_fixture(entries: &[(&str, &[u8], u16)]) -> CallbackOutput {
+        let path = std::env::temp_dir().join(format!(
+            "filebelt-onlyoffice-package-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&zip_fixture(entries)).unwrap();
+        drop(file);
+        CallbackOutput::new(path, "application/vnd.oasis.opendocument.text".into(), 0)
+    }
+
+    fn zip_fixture(entries: &[(&str, &[u8], u16)]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut central = Vec::new();
+        for (name, contents, method) in entries {
+            let offset = u32::try_from(bytes.len()).unwrap();
+            let name = name.as_bytes();
+            let crc = crc32(contents);
+            push_u32(&mut bytes, 0x0403_4b50);
+            push_u16(&mut bytes, 20);
+            push_u16(&mut bytes, 0);
+            push_u16(&mut bytes, *method);
+            push_u16(&mut bytes, 0);
+            push_u16(&mut bytes, 0);
+            push_u32(&mut bytes, crc);
+            push_u32(&mut bytes, u32::try_from(contents.len()).unwrap());
+            push_u32(&mut bytes, u32::try_from(contents.len()).unwrap());
+            push_u16(&mut bytes, u16::try_from(name.len()).unwrap());
+            push_u16(&mut bytes, 0);
+            bytes.extend_from_slice(name);
+            bytes.extend_from_slice(contents);
+
+            push_u32(&mut central, 0x0201_4b50);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, *method);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, crc);
+            push_u32(&mut central, u32::try_from(contents.len()).unwrap());
+            push_u32(&mut central, u32::try_from(contents.len()).unwrap());
+            push_u16(&mut central, u16::try_from(name.len()).unwrap());
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, 0);
+            push_u32(&mut central, offset);
+            central.extend_from_slice(name);
+        }
+        let central_offset = u32::try_from(bytes.len()).unwrap();
+        bytes.extend_from_slice(&central);
+        push_u32(&mut bytes, 0x0605_4b50);
+        push_u16(&mut bytes, 0);
+        push_u16(&mut bytes, 0);
+        push_u16(&mut bytes, u16::try_from(entries.len()).unwrap());
+        push_u16(&mut bytes, u16::try_from(entries.len()).unwrap());
+        push_u32(&mut bytes, u32::try_from(central.len()).unwrap());
+        push_u32(&mut bytes, central_offset);
+        push_u16(&mut bytes, 0);
+        bytes
+    }
+
+    fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0_u32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & u32::wrapping_neg(crc & 1));
+            }
+        }
+        !crc
     }
 
     #[test]
@@ -737,6 +1238,7 @@ mod tests {
                 } else {
                     None
                 },
+                file_type: "docx".into(),
                 provider_event_id: "e".into(),
                 revision: "r".into(),
             };
@@ -754,6 +1256,7 @@ mod tests {
             activity: ParticipantActivity::Unspecified,
             activity_user_id: String::new(),
             output_url: Some("https://evil.example/cache".into()),
+            file_type: "docx".into(),
             provider_event_id: "e".into(),
             revision: "r".into(),
         };
@@ -792,12 +1295,14 @@ mod tests {
             activity: ParticipantActivity::Unspecified,
             activity_user_id: String::new(),
             output_url: Some("https://office.example.test/cache/output".into()),
+            file_type: "docx".into(),
             provider_event_id: "event".into(),
             revision: "42".into(),
         };
         let payload = serde_json::json!({
             "key": "session", "status": 2,
             "url": "https://office.example.test/cache/output",
+            "filetype": "docx",
             "userdata": "event", "history": {"serverVersion": 42}
         });
         assert!(signed_callback_matches(&payload, &event));
@@ -845,16 +1350,26 @@ mod tests {
             activity: ParticipantActivity::Connected,
             activity_user_id: participant.into(),
             output_url: None,
+            file_type: "docx".into(),
             provider_event_id: String::new(),
             revision: String::new(),
         };
         let payload = serde_json::json!({
             "key": "session", "status": 1,
+            "filetype": "docx",
             "actions": [{"type": 1, "userid": participant}]
         });
         assert!(signed_callback_matches(&payload, &event));
+        let changed_file_type = serde_json::json!({
+            "key": "session", "status": 2,
+            "url": "https://office.example.test/cache/output",
+            "filetype": "odt",
+            "userdata": "event", "history": {"serverVersion": 42}
+        });
+        assert!(!signed_callback_matches(&changed_file_type, &event));
         let replaced = serde_json::json!({
             "key": "session", "status": 1,
+            "filetype": "docx",
             "actions": [{"type": 0, "userid": participant}]
         });
         assert!(!signed_callback_matches(&replaced, &event));
@@ -939,8 +1454,269 @@ mod tests {
         assert!(allowed_document_media_type(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=binary"
         ));
+        assert!(allowed_document_media_type(
+            "application/vnd.oasis.opendocument.text"
+        ));
+        assert!(allowed_document_media_type(
+            "application/vnd.oasis.opendocument.spreadsheet"
+        ));
+        assert!(allowed_document_media_type(
+            "application/vnd.oasis.opendocument.presentation"
+        ));
         assert!(!allowed_document_media_type("application/octet-stream"));
         assert!(!allowed_document_media_type("application/pdf"));
+    }
+
+    #[test]
+    fn validates_preserved_odf_package_and_rejects_malicious_variants() {
+        let ordinary_odf_content = br#"<office:document-content
+            xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+            xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+            xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+            xmlns:xlink="http://www.w3.org/1999/xlink">
+            <office:body><text:p><text:a xlink:href="https://example.test/">external &amp; link</text:a></text:p>
+            <draw:object xlink:href="./Object 1"/></office:body>
+        </office:document-content>"#;
+        let valid = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", ordinary_odf_content, 0),
+        ]);
+        assert_eq!(validate_output_package(&valid, "odt"), Ok(()));
+
+        let valid_ooxml = output_fixture(&[
+            (
+                "[Content_Types].xml",
+                b"<Types><Override ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>",
+                0,
+            ),
+            ("_rels/.rels", b"<Relationships/>", 0),
+            ("word/document.xml", b"<w:document/>", 0),
+        ]);
+        assert_eq!(validate_output_package(&valid_ooxml, "docx"), Ok(()));
+
+        let duplicate = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", b"<content/>", 0),
+            ("CONTENT.XML", b"<other/>", 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&duplicate, "odt"),
+            Err(CallbackError::Package)
+        );
+
+        let macro_path = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", b"<content/>", 0),
+            ("Basic/Standard/script-lb.xml", b"<macro/>", 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&macro_path, "odt"),
+            Err(CallbackError::Package)
+        );
+
+        let format_mismatch = output_fixture(&[
+            (
+                "mimetype",
+                b"application/vnd.oasis.opendocument.spreadsheet",
+                0,
+            ),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", b"<content/>", 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&format_mismatch, "odt"),
+            Err(CallbackError::Package)
+        );
+    }
+
+    #[test]
+    fn rejects_every_executable_odf_content_construct_by_namespace() {
+        let constructs = [
+            (ODF_OFFICE_NAMESPACE, "scripts"),
+            (ODF_OFFICE_NAMESPACE, "script"),
+            (ODF_OFFICE_NAMESPACE, "event-listeners"),
+            (ODF_SCRIPT_NAMESPACE, "event-listener"),
+            (ODF_TEXT_NAMESPACE, "execute-macro"),
+            (ODF_TABLE_NAMESPACE, "error-macro"),
+        ];
+        for (namespace, local) in constructs {
+            let namespace = std::str::from_utf8(namespace).unwrap();
+            let content = format!("<root xmlns:alias=\"{namespace}\"><alias:{local}/></root>");
+            let output = output_fixture(&[
+                ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+                ("META-INF/manifest.xml", b"<manifest/>", 0),
+                ("content.xml", content.as_bytes(), 0),
+            ]);
+            assert_eq!(
+                validate_output_package(&output, "odt"),
+                Err(CallbackError::Package),
+                "active ODF element {{{namespace}}}{local} was admitted"
+            );
+        }
+
+        let default_namespace = format!(
+            "<scripts xmlns=\"{}\"/>",
+            std::str::from_utf8(ODF_OFFICE_NAMESPACE).unwrap()
+        );
+        let output = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", default_namespace.as_bytes(), 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&output, "odt"),
+            Err(CallbackError::Package)
+        );
+    }
+
+    #[test]
+    fn odf_content_parser_rejects_dtd_malformed_and_unbound_prefixes() {
+        let invalid_documents: [&[u8]; 8] = [
+            br#"<!DOCTYPE root [<!ENTITY payload "replacement">]><root>&payload;</root>"#,
+            br#"<root><child></root>"#,
+            br#"<root><unbound:child/></root>"#,
+            br#"<root unbound:attribute="value"/>"#,
+            br#"<root/><second/>"#,
+            br#"<root/>trailing"#,
+            br#""#,
+            br#" <?xml version="1.0"?><root/>"#,
+        ];
+        for content in invalid_documents {
+            let output = output_fixture(&[
+                ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+                ("META-INF/manifest.xml", b"<manifest/>", 0),
+                ("content.xml", content, 0),
+            ]);
+            assert_eq!(
+                validate_output_package(&output, "odt"),
+                Err(CallbackError::Package)
+            );
+        }
+
+        let encoded_namespace = format!(
+            "<alias:scripts xmlns:alias=\"{}&#x3a;1.0\"/>",
+            "urn:oasis:names:tc:opendocument:xmlns:office"
+        );
+        let output = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", encoded_namespace.as_bytes(), 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&output, "odt"),
+            Err(CallbackError::Package)
+        );
+    }
+
+    #[test]
+    fn odf_active_content_matching_is_exact_and_content_has_a_hard_ceiling() {
+        let harmless = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            (
+                "content.xml",
+                br#"<safe:scripts xmlns:safe="urn:filebelt:test"><safe:event-listener/></safe:scripts>"#,
+                0,
+            ),
+        ]);
+        assert_eq!(validate_output_package(&harmless, "odt"), Ok(()));
+        assert!(odf_content_size_allowed(MAX_ODF_CONTENT_XML_BYTES));
+        assert!(!odf_content_size_allowed(MAX_ODF_CONTENT_XML_BYTES + 1));
+    }
+
+    #[test]
+    fn odf_nesting_accepts_the_exact_ceiling_and_rejects_one_more_level() {
+        let at_ceiling = nested_odf_xml(MAX_ODF_XML_NESTING_DEPTH);
+        let output = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", at_ceiling.as_bytes(), 0),
+        ]);
+        assert_eq!(validate_output_package(&output, "odt"), Ok(()));
+
+        let excessive = nested_odf_xml(MAX_ODF_XML_NESTING_DEPTH + 1);
+        let output = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", excessive.as_bytes(), 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&output, "odt"),
+            Err(CallbackError::Package)
+        );
+    }
+
+    #[test]
+    fn odf_nesting_rejects_namespace_shadowing_before_resolver_wrap() {
+        let mut content = format!(
+            "<root xmlns:p=\"{}\">",
+            std::str::from_utf8(ODF_OFFICE_NAMESPACE).unwrap()
+        );
+        for _ in 1..MAX_ODF_XML_NESTING_DEPTH {
+            content.push_str("<n>");
+        }
+        content.push_str("<shadow xmlns:p=\"urn:filebelt:safe\"></shadow>");
+        for _ in 1..MAX_ODF_XML_NESTING_DEPTH {
+            content.push_str("</n>");
+        }
+        content.push_str("<p:scripts/></root>");
+        let output = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", content.as_bytes(), 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&output, "odt"),
+            Err(CallbackError::Package)
+        );
+    }
+
+    fn nested_odf_xml(depth: usize) -> String {
+        let mut content = String::new();
+        for _ in 0..depth {
+            content.push_str("<n>");
+        }
+        for _ in 0..depth {
+            content.push_str("</n>");
+        }
+        content
+    }
+
+    #[test]
+    fn rejects_unsafe_compression_and_oversized_required_metadata() {
+        let unsafe_path = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("../content.xml", b"<content/>", 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&unsafe_path, "odt"),
+            Err(CallbackError::Package)
+        );
+
+        let unsupported_compression = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", b"<manifest/>", 0),
+            ("content.xml", b"<content/>", 99),
+        ]);
+        assert_eq!(
+            validate_output_package(&unsupported_compression, "odt"),
+            Err(CallbackError::Package)
+        );
+
+        let oversized = vec![b'x'; usize::try_from(MAX_REQUIRED_METADATA_BYTES + 1).unwrap()];
+        let oversized_metadata = output_fixture(&[
+            ("mimetype", b"application/vnd.oasis.opendocument.text", 0),
+            ("META-INF/manifest.xml", oversized.as_slice(), 0),
+            ("content.xml", b"<content/>", 0),
+        ]);
+        assert_eq!(
+            validate_output_package(&oversized_metadata, "odt"),
+            Err(CallbackError::Package)
+        );
     }
 
     impl CallbackEvent {
@@ -953,6 +1729,7 @@ mod tests {
                 activity: ParticipantActivity::Unspecified,
                 activity_user_id: String::new(),
                 output_url: Some("https://office.example.test/cache/output".into()),
+                file_type: "docx".into(),
                 provider_event_id: "provider-event".into(),
                 revision: "revision".into(),
             }

@@ -2111,6 +2111,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "filebelt-revision"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "axum",
+ "blake3",
+ "clap",
+ "filebelt-capability-keyset",
+ "filebelt-control-protocol",
+ "filebelt-database",
+ "filebelt-deployment-diagnostics",
+ "filebelt-revision-protocol",
+ "filebelt-runtime",
+ "filebelt-storage-protocol",
+ "getrandom 0.4.3",
+ "prost",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "filebelt-revision-protocol"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "filebelt-runtime"
 version = "0.1.0"
 dependencies = [

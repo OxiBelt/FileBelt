@@ -199,6 +199,7 @@ pub struct ReceiveDocumentCallbackInput<'a> {
     pub callback_kind: &'a str,
     pub revision_kind: Option<&'a str>,
     pub activity: Option<&'a str>,
+    pub output_file_type: &'a str,
 }
 
 #[derive(Clone, Debug)]
@@ -262,6 +263,8 @@ impl Database {
         &self,
         input: &ReceiveDocumentCallbackInput<'_>,
     ) -> Result<ReceivedDocumentCallback, DatabaseError> {
+        let output_media_type = media_type_for_document_file_type(input.output_file_type)
+            .ok_or(DatabaseError::InvalidPersistedValue)?;
         if !matches!(
             input.callback_kind,
             "editing" | "output_required" | "corrupted" | "closed_no_changes" | "force_save_error"
@@ -343,6 +346,14 @@ impl Database {
         .await?;
         if input.callback_kind == "output_required"
             && !document_participant_can_write(&participant.get::<String, _>("mode"))
+        {
+            return Err(DatabaseError::Conflict);
+        }
+        if input.callback_kind == "output_required"
+            && Some(output_media_type)
+                != participant
+                    .get::<Option<String>, _>("media_type")
+                    .as_deref()
         {
             return Err(DatabaseError::Conflict);
         }
@@ -512,6 +523,9 @@ impl Database {
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        | "application/vnd.oasis.opendocument.text"
+                        | "application/vnd.oasis.opendocument.spreadsheet"
+                        | "application/vnd.oasis.opendocument.presentation"
                 )
             )
         {
@@ -1288,6 +1302,9 @@ impl Database {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    | "application/vnd.oasis.opendocument.text"
+                    | "application/vnd.oasis.opendocument.spreadsheet"
+                    | "application/vnd.oasis.opendocument.presentation"
             )
         {
             return Err(DatabaseError::InvalidPersistedValue);
@@ -1482,6 +1499,9 @@ impl Database {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    | "application/vnd.oasis.opendocument.text"
+                    | "application/vnd.oasis.opendocument.spreadsheet"
+                    | "application/vnd.oasis.opendocument.presentation"
             )
         {
             return Err(DatabaseError::InvalidPersistedValue);
@@ -2354,6 +2374,18 @@ impl Database {
     }
 }
 
+fn media_type_for_document_file_type(value: &str) -> Option<&'static str> {
+    match value {
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "odt" => Some("application/vnd.oasis.opendocument.text"),
+        "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+        "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+        _ => None,
+    }
+}
+
 /// Serializes same-operation retries behind a transaction-scoped lock, then
 /// returns the originally persisted public result. The operation digest is
 /// opaque and already bound by the caller to tenant, actor, route, and its
@@ -2721,6 +2753,32 @@ mod tests {
     fn limits_match_the_reviewed_public_beta_profile() {
         assert_eq!(DOCUMENT_MAX_ACTIVE_PARTICIPANTS, 20);
         assert_eq!(DOCUMENT_MAX_BYTES, 104_857_600);
+    }
+
+    #[test]
+    fn document_file_type_mapping_preserves_the_admitted_office_formats() {
+        for (file_type, media_type) in [
+            (
+                "docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            (
+                "pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ),
+            ("odt", "application/vnd.oasis.opendocument.text"),
+            ("ods", "application/vnd.oasis.opendocument.spreadsheet"),
+            ("odp", "application/vnd.oasis.opendocument.presentation"),
+        ] {
+            assert_eq!(
+                media_type_for_document_file_type(file_type),
+                Some(media_type)
+            );
+        }
     }
 
     #[test]

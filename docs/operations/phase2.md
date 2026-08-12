@@ -53,7 +53,7 @@ non-secret deployment wiring only.
 4. Write the versioned `filebelt.toml`, run `filebeltctl config validate`, then
    run `filebeltctl keys audit --config /etc/filebelt/filebelt.toml` with every
    configured public keyset available. Treat either failure as a startup
-   blocker and do not admit format-8 traffic without the global disjointness
+   blocker and do not admit format-9 traffic without the global disjointness
    proof.
 5. Run `filebeltctl database migrate` once with the migrator role, then run
    `grants.sql` as the database owner to apply the reviewed per-table grants.

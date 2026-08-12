@@ -13,7 +13,7 @@
 - Iggy contains no rollback authority. PostgreSQL and the payload checkpoint
   determine recovery state.
 - MCP policy/vault schemas are forward-only. Retain every KEK generation named
-  by `filebelt.recovery.checkpoint.v3`; disabling MCP never authorizes dropping
+  by `filebelt.recovery.checkpoint.v4`; disabling MCP never authorizes dropping
   its tables or deleting encrypted rows.
 - Collaboration room and manifest schemas are forward-only. A rollback fences
   active rooms and retains their UUID CRDT objects and PostgreSQL manifest

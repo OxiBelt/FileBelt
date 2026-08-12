@@ -13,6 +13,9 @@ import type {
   MarkdownImportInput,
   MarkdownCollaborationGrant,
   MarkdownHead,
+  TextComparison,
+  TextPreferences,
+  VersionPage as TextVersionPage,
 } from "./client.js";
 import type { components, operations, paths } from "./generated/openapi.js";
 import type {
@@ -39,6 +42,8 @@ type MarkdownImportIntent = components["schemas"]["MarkdownImportIntent"];
 type DrivePage = components["schemas"]["DrivePage"];
 type NodePage = components["schemas"]["NodePage"];
 type VersionPage = components["schemas"]["VersionPage"];
+type TextComparisonResponse = components["schemas"]["TextVersionComparison"];
+type TextPreferencesResponse = components["schemas"]["TextPreferences"];
 type UploadCommit = operations["commitUpload"]["responses"][201]["content"]["application/json"];
 
 interface NodeLocation {
@@ -359,6 +364,69 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return (await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin")).blob();
   }
 
+  async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
+    const Result = await this.#Api.GET("/api/v1/preferences/text");
+    const Value = RequireData<TextPreferencesResponse>(Result);
+    return {
+      Etag: RequireEtag(Result.response),
+      Value: { EditLimitBytes: Value.edit_limit_bytes, InlineLimitBytes: Value.inline_limit_bytes },
+    };
+  }
+
+  async updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }> {
+    await this.#ensureSession();
+    const Result = await this.#Api.PATCH("/api/v1/preferences/text", {
+      body: { edit_limit_bytes: Patch.EditLimitBytes, inline_limit_bytes: Patch.InlineLimitBytes },
+      params: { header: { ...this.#mutationHeaders(), "If-Match": ExpectedEtag } },
+    });
+    const Value = RequireData<TextPreferencesResponse>(Result);
+    return {
+      Etag: RequireEtag(Result.response),
+      Value: { EditLimitBytes: Value.edit_limit_bytes, InlineLimitBytes: Value.inline_limit_bytes },
+    };
+  }
+
+  async listTextVersions(EntryId: string, Cursor: string | null): Promise<TextVersionPage> {
+    const Location = this.#fileLocation(EntryId);
+    const Page = RequireData<VersionPage>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
+      params: { path: { drive_id: Location.DriveId, node_id: EntryId }, query: PageQuery(Cursor) },
+    }));
+    for (const Version of Page.items) this.#Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
+    return { Items: Page.items.map(VersionRecord), NextCursor: Page.next_cursor };
+  }
+
+  async compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison> {
+    const Location = this.#fileLocation(EntryId);
+    const Comparison = RequireData<TextComparisonResponse>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}", {
+      params: { path: { base_version_id: BaseVersionId, drive_id: Location.DriveId, node_id: EntryId, target_version_id: TargetVersionId } },
+    }));
+    return {
+      Hunks: Comparison.hunks.map((Hunk) => ({
+        BaseLines: Hunk.base_lines,
+        BaseStart: Hunk.base_start,
+        Lines: Hunk.lines.map((Line) => ({ Kind: Line.kind === "delete" ? "remove" : Line.kind, Text: Line.text })),
+        TargetLines: Hunk.target_lines,
+        TargetStart: Hunk.target_start,
+      })),
+    };
+  }
+
+  async setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void> {
+    const Location = this.#fileLocation(EntryId);
+    await this.#ensureSession();
+    const Current = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
+      params: { path: { drive_id: Location.DriveId, node_id: EntryId } },
+    });
+    RequireData<NodeResponse>(Current);
+    RequireSuccess(await this.#Api.PATCH("/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy", {
+      body: { policy: ContentClass },
+      params: {
+        header: { ...this.#idempotentMutationHeaders(), "If-Match": RequireEtag(Current.response) },
+        path: { drive_id: Location.DriveId, node_id: EntryId },
+      },
+    }));
+  }
+
   async importMarkdown(Input: MarkdownImportInput): Promise<string> {
     const Location = this.#fileLocation(Input.EntryId);
     await this.#ensureSession();
@@ -422,7 +490,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     await this.#ensureSession();
     try {
       const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-        body: { ...(Input.CheckpointId === undefined ? {} : { collaboration_checkpoint_id: Input.CheckpointId }), declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_head_version_id: Input.ExpectedHeadVersionId, name: Input.Name, node_id: Input.EntryId, parent_id: Location.ParentId },
+        body: { ...(Input.CheckpointId === undefined ? {} : { collaboration_checkpoint_id: Input.CheckpointId }), declared_media_type: Input.Contents.type || "text/plain", declared_size_bytes: Input.Contents.size, expected_head_version_id: Input.ExpectedHeadVersionId, name: Input.Name, node_id: Input.EntryId, parent_id: Location.ParentId },
         params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
       }));
       return await this.#putUploadContents(Allocation, Input.Contents);
@@ -439,7 +507,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     const Parent = await this.#getNode(Location.DriveId, Location.ParentId);
     if (Parent.kind !== "directory") throw new Error("The Markdown file parent is unavailable.");
     const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-      body: { declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, name: Input.Name, parent_id: Location.ParentId },
+      body: { declared_media_type: Input.Contents.type || "text/plain", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, name: Input.Name, parent_id: Location.ParentId },
       params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
     }));
     return this.#putUploadContents(Allocation, Input.Contents);
@@ -722,7 +790,7 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
     HeadVersionId: IsFile ? Node.head_version_id : null,
     Kind: Node.kind === "directory" ? "folder" : Node.kind,
     ModifiedAt: Node.updated_at,
-    MarkdownEligibility: IsFile ? MarkdownEligibility(Node.display_name, Node.head_media_type, Node.size_bytes) : "ineligible",
+    TextEligibility: IsFile ? TextEligibility(Node.content_class_policy, Node.display_name, Node.head_media_type, Node.size_bytes) : "ineligible",
     MediaType: IsFile ? Node.head_media_type : null,
     Name: Node.display_name,
     Owner,
@@ -734,10 +802,12 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
   };
 }
 
-function MarkdownEligibility(Name: string, MediaType: string | null, Size: number | null): FileEntry["MarkdownEligibility"] {
-  const IsMarkdown = MediaType === "text/markdown" || /\.(md|markdown|mdown|mkdn)$/i.test(Name);
-  if (!IsMarkdown || Size === null || Size > 8 * 1024 * 1024) return "ineligible";
-  return Size <= 2 * 1024 * 1024 ? "editable" : "viewable";
+function TextEligibility(Policy: NodeResponse["content_class_policy"], Name: string, MediaType: string | null, Size: number | null): FileEntry["TextEligibility"] {
+  const IsText = MediaType?.startsWith("text/") === true || /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(Name);
+  if (Policy === "binary") return "history-only";
+  if (!IsText || Size === null) return "ineligible";
+  if (Size > 100 * 1024 * 1024) return "history-only";
+  return Size <= 16 * 1024 * 1024 ? "editable" : "viewable";
 }
 
 function PageQuery(Cursor: string | null): PageQueryShape {
@@ -751,6 +821,12 @@ function RequireData<T>(Result: ApiResult<unknown>): T {
 
 function RequireSuccess(Result: ApiResult<unknown>): void {
   if (!Result.response.ok) throw RequestError(Result.response, Result.error);
+}
+
+function RequireEtag(Response: Response): string {
+  const Etag = Response.headers.get("ETag");
+  if (Etag === null || Etag.length === 0) throw new Error("The server did not return the required generation ETag.");
+  return Etag;
 }
 
 function RequestError(Response: Response, Error: unknown): Error {
@@ -799,6 +875,9 @@ function VersionRecord(Version: VersionResponse): VersionRecord {
     CreatedAt: Version.created_at,
     FileId: Version.node_id,
     Id: Version.id,
+    GitCommitOid: Version.git_commit_oid,
+    ObservedContentClass: Version.observed_content_class,
+    RevisionBackend: Version.revision_backend,
     Size: Version.size_bytes,
     Version: Version.ordinal,
   };

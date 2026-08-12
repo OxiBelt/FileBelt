@@ -45,7 +45,7 @@ const Detail = {
 } satisfies components["schemas"]["DocumentSessionDetail"];
 
 function Node(Id: string, Parent: string | null, Kind: "directory" | "file"): components["schemas"]["Node"] {
-  return { acl_generation: 2, display_name: Kind === "directory" ? "Documents" : "Plan.docx", drive_id: DriveId, head_media_type: Kind === "directory" ? null : "application/vnd.openxmlformats-officedocument.wordprocessingml.document", head_version_id: Kind === "directory" ? null : VersionId, id: Id, kind: Kind, namespace_generation: 7, parent_id: Parent, size_bytes: Kind === "directory" ? null : 8, trashed: false, updated_at: "2026-08-09T10:00:00Z", version_ordinal: Kind === "directory" ? null : 1 };
+  return { acl_generation: 2, attribute_generation: 3, content_class_policy: "auto", display_name: Kind === "directory" ? "Documents" : "Plan.docx", drive_id: DriveId, head_media_type: Kind === "directory" ? null : "application/vnd.openxmlformats-officedocument.wordprocessingml.document", head_version_id: Kind === "directory" ? null : VersionId, id: Id, kind: Kind, namespace_generation: 7, parent_id: Parent, size_bytes: Kind === "directory" ? null : 8, trashed: false, updated_at: "2026-08-09T10:00:00Z", version_ordinal: Kind === "directory" ? null : 1 };
 }
 
 describe("HttpDocumentSessionClient", () => {

@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.revision.v1;
+
+// Provider-neutral, private revision-store process contract. Every repository
+// identifier is an opaque FileBelt UUID; no host path, Git transport URL, user
+// ref, author, or message crosses this boundary.
+message RevisionExecuteRequest {
+  string request_id = 1;
+  oneof operation {
+    PrepareRevisionCommit prepare_commit = 2;
+    ReadRevisionBlob read_blob = 3;
+    CompareRevisionCommits compare_commits = 4;
+    ReconcileRevisionRef reconcile_ref = 5;
+    VerifyRevisionRepository verify_repository = 6;
+    MaintainRevisionRepository maintain_repository = 7;
+    DeleteRevisionRepository delete_repository = 8;
+  }
+}
+
+message RevisionExecuteResponse {
+  string request_id = 1;
+  oneof result {
+    PreparedRevisionCommit prepared_commit = 2;
+    RevisionBlob blob = 3;
+    RevisionComparison comparison = 4;
+    ReconcileRevisionRefResult reconcile_result = 5;
+    VerifyRevisionRepositoryResult verify_result = 6;
+    MaintainRevisionRepositoryResult maintain_result = 7;
+    DeleteRevisionRepositoryResult delete_result = 8;
+    RevisionError error = 9;
+  }
+}
+
+// Write one fixed mode-100644 `content` entry into an unsigned commit. The
+// content is validated UTF-8 text and is limited to 16 MiB for an edit. A
+// migration import may contain up to the 100 MiB immutable-text read limit;
+// only the revision coordinator's fenced backfill path sets that flag. Core
+// selects the UTC timestamp, ordinal, and version before request admission.
+message PrepareRevisionCommit {
+  string repository_id = 1;
+  string version_id = 2;
+  uint64 ordinal = 3;
+  int64 committed_at_unix_seconds = 4;
+  bytes content = 5;
+  string expected_old_commit_oid = 6;
+  bool migration_import = 7;
+}
+
+message PreparedRevisionCommit {
+  string commit_oid = 1;
+  string blob_oid = 2;
+  string tree_oid = 3;
+  // Total loose plus packed Git object storage, rounded up by Git to KiB.
+  uint64 repository_size_kib = 4;
+}
+
+// Reads the exact object named by Core. The adapter never resolves the mutable
+// `refs/heads/filebelt` ref for a read. A returned blob is validated UTF-8
+// text and is limited to 100 MiB.
+message ReadRevisionBlob {
+  string repository_id = 1;
+  string commit_oid = 2;
+}
+
+message RevisionBlob {
+  string commit_oid = 1;
+  string blob_oid = 2;
+  bytes content = 3;
+}
+
+message CompareRevisionCommits {
+  string repository_id = 1;
+  string base_commit_oid = 2;
+  string target_commit_oid = 3;
+  RevisionComparisonKind kind = 4;
+}
+
+enum RevisionComparisonKind {
+  REVISION_COMPARISON_KIND_UNSPECIFIED = 0;
+  REVISION_COMPARISON_KIND_HISTOGRAM = 1;
+  REVISION_COMPARISON_KIND_LINE_DIFF = 2;
+}
+
+// A typed, bounded result. A line diff uses Git's histogram algorithm with
+// three context lines; it contains at most 50,000 typed lines and 8 MiB of
+// encoded result data. The complete result is rejected atomically when a bound
+// is exceeded.
+message RevisionComparison {
+  RevisionComparisonKind kind = 1;
+  RevisionHistogram histogram = 2;
+  repeated RevisionLineDiffHunk line_diff = 3;
+}
+
+message RevisionHistogram {
+  uint64 added_lines = 1;
+  uint64 deleted_lines = 2;
+  uint64 changed_files = 3;
+}
+
+message RevisionLineDiffHunk {
+  uint64 old_start = 1;
+  uint64 old_lines = 2;
+  uint64 new_start = 3;
+  uint64 new_lines = 4;
+  repeated RevisionLine lines = 5;
+}
+
+message RevisionLine {
+  RevisionLineKind kind = 1;
+  string text = 2;
+}
+
+enum RevisionLineKind {
+  REVISION_LINE_KIND_UNSPECIFIED = 0;
+  REVISION_LINE_KIND_CONTEXT = 1;
+  REVISION_LINE_KIND_ADDED = 2;
+  REVISION_LINE_KIND_DELETED = 3;
+}
+
+// Atomically advance the sole mutable ref after Core has durably selected the
+// prepared commit. An empty expected-old OID means the ref must be absent.
+message ReconcileRevisionRef {
+  string repository_id = 1;
+  string expected_old_commit_oid = 2;
+  string new_commit_oid = 3;
+}
+
+message ReconcileRevisionRefResult {
+  bool advanced = 1;
+  string observed_commit_oid = 2;
+}
+
+message VerifyRevisionRepository { string repository_id = 1; }
+message VerifyRevisionRepositoryResult {
+  string head_commit_oid = 1;
+  uint64 loose_objects = 2;
+  uint64 packed_objects = 3;
+}
+
+message MaintainRevisionRepository { string repository_id = 1; }
+message MaintainRevisionRepositoryResult {
+  uint64 loose_objects = 1;
+  uint64 packed_objects = 2;
+  uint64 size_kib = 3;
+}
+
+message DeleteRevisionRepository { string repository_id = 1; }
+message DeleteRevisionRepositoryResult { bool deleted = 1; }
+
+enum RevisionErrorCode {
+  REVISION_ERROR_CODE_UNSPECIFIED = 0;
+  REVISION_ERROR_CODE_INVALID_REQUEST = 1;
+  REVISION_ERROR_CODE_NOT_FOUND = 2;
+  REVISION_ERROR_CODE_CONFLICT = 3;
+  REVISION_ERROR_CODE_RESOURCE_EXHAUSTED = 4;
+  REVISION_ERROR_CODE_UNAVAILABLE = 5;
+  REVISION_ERROR_CODE_INTEGRITY_FAILURE = 6;
+  REVISION_ERROR_CODE_INTERNAL = 7;
+}
+
+message RevisionError {
+  RevisionErrorCode code = 1;
+  string message = 2;
+  uint64 retry_after_millis = 3;
+}

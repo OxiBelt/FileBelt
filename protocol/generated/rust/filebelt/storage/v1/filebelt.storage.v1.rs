@@ -151,6 +151,15 @@ pub enum CapabilityOperation {
     /// Finalize that same whole-object staging revision after its digest has been
     /// verified by the I/O worker.
     FinalizeDocumentRevision = 11,
+    /// Publish, read, or retire one immutable drive-scoped shared chunk. Exact
+    /// chunk/content identifiers remain opaque UUID fields in the claims.
+    WriteRevisionChunk = 12,
+    ReadRevisionChunk = 13,
+    DeleteRevisionChunk = 14,
+    /// Read the exact old payload plane object while the coordinator backfills a
+    /// manifest.  This operation is unavailable to API, document, collaboration,
+    /// and mount keysets, and it never accepts a filesystem path.
+    ReadRevisionLegacyPayload = 15,
 }
 impl CapabilityOperation {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -171,6 +180,10 @@ impl CapabilityOperation {
             Self::ReadDocumentVersion => "CAPABILITY_OPERATION_READ_DOCUMENT_VERSION",
             Self::WriteDocumentRevision => "CAPABILITY_OPERATION_WRITE_DOCUMENT_REVISION",
             Self::FinalizeDocumentRevision => "CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION",
+            Self::WriteRevisionChunk => "CAPABILITY_OPERATION_WRITE_REVISION_CHUNK",
+            Self::ReadRevisionChunk => "CAPABILITY_OPERATION_READ_REVISION_CHUNK",
+            Self::DeleteRevisionChunk => "CAPABILITY_OPERATION_DELETE_REVISION_CHUNK",
+            Self::ReadRevisionLegacyPayload => "CAPABILITY_OPERATION_READ_REVISION_LEGACY_PAYLOAD",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -188,6 +201,10 @@ impl CapabilityOperation {
             "CAPABILITY_OPERATION_READ_DOCUMENT_VERSION" => Some(Self::ReadDocumentVersion),
             "CAPABILITY_OPERATION_WRITE_DOCUMENT_REVISION" => Some(Self::WriteDocumentRevision),
             "CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION" => Some(Self::FinalizeDocumentRevision),
+            "CAPABILITY_OPERATION_WRITE_REVISION_CHUNK" => Some(Self::WriteRevisionChunk),
+            "CAPABILITY_OPERATION_READ_REVISION_CHUNK" => Some(Self::ReadRevisionChunk),
+            "CAPABILITY_OPERATION_DELETE_REVISION_CHUNK" => Some(Self::DeleteRevisionChunk),
+            "CAPABILITY_OPERATION_READ_REVISION_LEGACY_PAYLOAD" => Some(Self::ReadRevisionLegacyPayload),
             _ => None,
         }
     }

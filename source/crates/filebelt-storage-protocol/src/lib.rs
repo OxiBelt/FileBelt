@@ -11,7 +11,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use filebelt_capability_keyset::{
     ApiStorageKeyset, CollaborationStorageKeyset, DocumentStorageKeyset, KeysetError,
-    MountStorageKeyset,
+    MountStorageKeyset, RevisionStorageKeyset,
 };
 use prost::Message;
 use thiserror::Error;
@@ -63,6 +63,15 @@ pub enum DocumentStorageCapabilityUse {
     ReadVersion,
     WriteRevision,
     FinalizeRevision,
+}
+
+/// The only revision-issued `fbcap1` uses accepted by the I/O worker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RevisionStorageCapabilityUse {
+    WriteChunk,
+    ReadChunk,
+    DeleteChunk,
+    ReadLegacyPayload,
 }
 
 /// The closed set of mount-storage `fbcap2` operations.
@@ -126,6 +135,17 @@ impl DocumentStorageCapabilityUse {
             Self::ReadVersion => CapabilityOperation::ReadDocumentVersion,
             Self::WriteRevision => CapabilityOperation::WriteDocumentRevision,
             Self::FinalizeRevision => CapabilityOperation::FinalizeDocumentRevision,
+        }
+    }
+}
+
+impl RevisionStorageCapabilityUse {
+    const fn operation(self) -> CapabilityOperation {
+        match self {
+            Self::WriteChunk => CapabilityOperation::WriteRevisionChunk,
+            Self::ReadChunk => CapabilityOperation::ReadRevisionChunk,
+            Self::DeleteChunk => CapabilityOperation::DeleteRevisionChunk,
+            Self::ReadLegacyPayload => CapabilityOperation::ReadRevisionLegacyPayload,
         }
     }
 }
@@ -270,6 +290,33 @@ pub fn verify_document_storage_capability(
     keys: &DocumentStorageKeyset,
     expected_audience: &str,
     purpose: DocumentStorageCapabilityUse,
+    now_unix_seconds: i64,
+) -> Result<Verified<CapabilityClaims>, CapabilityError> {
+    verify_capability(
+        wire,
+        keys,
+        expected_audience,
+        purpose.operation(),
+        now_unix_seconds,
+    )
+}
+
+/// Signs one revision-storage chunk capability.
+pub fn sign_revision_storage_capability(
+    claims: &CapabilityClaims,
+    purpose: RevisionStorageCapabilityUse,
+    generation: u32,
+    key_pair: &Ed25519KeyPair,
+) -> Result<String, CapabilityError> {
+    sign_capability(claims, purpose.operation(), generation, key_pair)
+}
+
+/// Verifies one revision-storage chunk capability.
+pub fn verify_revision_storage_capability(
+    wire: &str,
+    keys: &RevisionStorageKeyset,
+    expected_audience: &str,
+    purpose: RevisionStorageCapabilityUse,
     now_unix_seconds: i64,
 ) -> Result<Verified<CapabilityClaims>, CapabilityError> {
     verify_capability(
@@ -448,6 +495,7 @@ macro_rules! capability_keyset {
 capability_keyset!(ApiStorageKeyset);
 capability_keyset!(CollaborationStorageKeyset);
 capability_keyset!(DocumentStorageKeyset);
+capability_keyset!(RevisionStorageKeyset);
 
 fn validate_capability_claims(
     claims: &CapabilityClaims,
@@ -475,12 +523,24 @@ fn validate_capability_claims(
         MAX_CAPABILITY_LIFETIME_SECONDS,
         now_unix_seconds,
     )?;
-    if !(16..=64).contains(&claims.nonce.len())
-        || claims.range_end < claims.range_start
-        || claims.resource_acl_generation == 0
+    if !(16..=64).contains(&claims.nonce.len()) || claims.range_end < claims.range_start {
+        return Err(CapabilityError::InvalidClaims);
+    }
+    // Revision storage is a PostgreSQL-lease-scoped internal data-plane
+    // operation, not an end-user authorization grant. Its exact tenant, drive,
+    // version/content, range, nonce, purpose key, and short lifetime remain
+    // mandatory, but it has no session authorization-generation fence to bind.
+    // Every user-facing capability continues to require all four fences.
+    if !matches!(
+        expected_operation,
+        CapabilityOperation::WriteRevisionChunk
+            | CapabilityOperation::ReadRevisionChunk
+            | CapabilityOperation::DeleteRevisionChunk
+            | CapabilityOperation::ReadRevisionLegacyPayload
+    ) && (claims.resource_acl_generation == 0
         || claims.drive_acl_generation == 0
         || claims.membership_generation == 0
-        || claims.namespace_generation == 0
+        || claims.namespace_generation == 0)
     {
         return Err(CapabilityError::InvalidClaims);
     }
@@ -626,6 +686,13 @@ mod tests {
         ))
         .unwrap()
     }
+    fn revision_keyset(pair: &Ed25519KeyPair, generation: u32) -> RevisionStorageKeyset {
+        RevisionStorageKeyset::parse(&format!(
+            "filebelt-capability-keyset-v2\npurpose=revision-storage\n{generation}:{}\n",
+            URL_SAFE_NO_PAD.encode(pair.public_key().as_ref())
+        ))
+        .unwrap()
+    }
     fn mount_keyset(pair: &Ed25519KeyPair, generation: u32) -> MountStorageKeyset {
         MountStorageKeyset::parse(&format!(
             "filebelt-capability-keyset-v2\npurpose=mount-storage\n{generation}:{}\n",
@@ -761,6 +828,72 @@ mod tests {
             ),
             Err(CapabilityError::InvalidClaims)
         );
+    }
+
+    #[test]
+    fn only_revision_storage_operations_may_omit_authorization_generations() {
+        let pair = Ed25519KeyPair::generate().unwrap();
+        let keys = revision_keyset(&pair, 7);
+        for (operation, purpose) in [
+            (
+                CapabilityOperation::WriteRevisionChunk,
+                RevisionStorageCapabilityUse::WriteChunk,
+            ),
+            (
+                CapabilityOperation::ReadRevisionChunk,
+                RevisionStorageCapabilityUse::ReadChunk,
+            ),
+            (
+                CapabilityOperation::DeleteRevisionChunk,
+                RevisionStorageCapabilityUse::DeleteChunk,
+            ),
+            (
+                CapabilityOperation::ReadRevisionLegacyPayload,
+                RevisionStorageCapabilityUse::ReadLegacyPayload,
+            ),
+        ] {
+            let mut revision = claims(operation);
+            revision.resource_acl_generation = 0;
+            revision.drive_acl_generation = 0;
+            revision.membership_generation = 0;
+            revision.namespace_generation = 0;
+            let wire = sign_revision_storage_capability(&revision, purpose, 7, &pair).unwrap();
+            assert!(
+                verify_revision_storage_capability(
+                    &wire,
+                    &keys,
+                    "filebelt-worker-io",
+                    purpose,
+                    120,
+                )
+                .is_ok()
+            );
+        }
+
+        let api_keys = api_keyset(&pair, 7);
+        for without_generation in 0..4 {
+            let mut api = claims(CapabilityOperation::UploadPart);
+            match without_generation {
+                0 => api.resource_acl_generation = 0,
+                1 => api.drive_acl_generation = 0,
+                2 => api.membership_generation = 0,
+                3 => api.namespace_generation = 0,
+                _ => unreachable!(),
+            }
+            let wire =
+                sign_api_storage_capability(&api, ApiStorageCapabilityUse::UploadPart, 7, &pair)
+                    .unwrap();
+            assert_eq!(
+                verify_api_storage_capability(
+                    &wire,
+                    &api_keys,
+                    "filebelt-worker-io",
+                    ApiStorageCapabilityUse::UploadPart,
+                    120,
+                ),
+                Err(CapabilityError::InvalidClaims)
+            );
+        }
     }
 
     #[test]

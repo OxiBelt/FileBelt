@@ -29,7 +29,7 @@ use reqwest::blocking::Client;
 use reqwest::{Certificate, Identity, StatusCode};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::os::unix::fs::OpenOptionsExt as _;
@@ -41,6 +41,10 @@ use subtle::ConstantTimeEq as _;
 use url::Url;
 
 const EXECUTE_CONTENT_TYPE: &str = "application/x-protobuf";
+// Core is the durable fingerprint-to-revision authority. This cache only
+// bridges one adapter request to its scoped I/O write, so eviction is safe:
+// retrying the callback makes Core replay the same revision ID.
+const MAX_CALLBACK_CONTEXTS: usize = 1_024;
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 type HmacSha256 = Hmac<Sha256>;
@@ -133,12 +137,41 @@ pub struct HttpCoreClient {
     config: AdapterConfig,
     core: Client,
     io: Client,
-    callbacks: Mutex<BTreeMap<[u8; 32], CallbackContext>>,
+    callbacks: Mutex<CallbackContexts>,
 }
 
 #[derive(Clone)]
 struct CallbackContext {
     revision_id: String,
+}
+
+#[derive(Default)]
+struct CallbackContexts {
+    by_fingerprint: BTreeMap<[u8; 32], CallbackContext>,
+    insertion_order: VecDeque<[u8; 32]>,
+}
+
+impl CallbackContexts {
+    fn remember(&mut self, fingerprint: [u8; 32], context: CallbackContext) {
+        if self.by_fingerprint.contains_key(&fingerprint) {
+            self.insertion_order
+                .retain(|candidate| candidate != &fingerprint);
+        }
+        self.by_fingerprint.insert(fingerprint, context);
+        self.insertion_order.push_back(fingerprint);
+        while self.by_fingerprint.len() > MAX_CALLBACK_CONTEXTS {
+            let Some(evicted) = self.insertion_order.pop_front() else {
+                break;
+            };
+            self.by_fingerprint.remove(&evicted);
+        }
+    }
+
+    fn remove(&mut self, fingerprint: &[u8; 32]) {
+        self.by_fingerprint.remove(fingerprint);
+        self.insertion_order
+            .retain(|candidate| candidate != fingerprint);
+    }
 }
 
 impl HttpCoreClient {
@@ -147,7 +180,7 @@ impl HttpCoreClient {
             core: mtls_client(&config.core).map_err(|_| CoreError::Unavailable)?,
             io: mtls_client(&config.io).map_err(|_| CoreError::Unavailable)?,
             config,
-            callbacks: Mutex::new(BTreeMap::new()),
+            callbacks: Mutex::new(CallbackContexts::default()),
         })
     }
 
@@ -221,6 +254,7 @@ impl CoreClient for HttpCoreClient {
         if !allowed_media_type(&launch.media_type)
             || launch.display_name.is_empty()
             || launch.display_name.chars().count() > 128
+            || !has_exact_source_extension(&launch.display_name, &launch.media_type)
         {
             return Err(CoreError::Invalid);
         }
@@ -246,6 +280,7 @@ impl CoreClient for HttpCoreClient {
             },
             "editorConfig": {
                 "callbackUrl": callback_url,
+                "assemblyFormatAsOrigin": true,
                 "mode": mode.name(),
                 // Bind ONLYOFFICE status-1 `actions[].userid` to the same
                 // opaque participant UUID carried in the callback route.
@@ -382,6 +417,7 @@ impl CoreClient for HttpCoreClient {
                 callback_kind: callback_kind(event) as i32,
                 revision_kind: callback_revision_kind(event) as i32,
                 activity: callback_activity(event) as i32,
+                output_file_type: event.file_type.clone(),
             },
         ))?;
         let document_execute_response::Result::CallbackReceipt(receipt) = result else {
@@ -400,7 +436,7 @@ impl CoreClient for HttpCoreClient {
         self.callbacks
             .lock()
             .map_err(|_| CoreError::Unavailable)?
-            .insert(
+            .remember(
                 fingerprint.0,
                 CallbackContext {
                     revision_id: receipt.revision_id,
@@ -419,6 +455,7 @@ impl CoreClient for HttpCoreClient {
             .callbacks
             .lock()
             .map_err(|_| CoreError::Unavailable)?
+            .by_fingerprint
             .get(&fingerprint.0)
             .cloned()
             .ok_or(CoreError::Gone)?;
@@ -598,7 +635,7 @@ impl EgressGateway for HttpEgressGateway {
 }
 
 fn remove_callback_context(
-    callbacks: &Mutex<BTreeMap<[u8; 32], CallbackContext>>,
+    callbacks: &Mutex<CallbackContexts>,
     fingerprint: &EventFingerprint,
 ) -> Result<(), CoreError> {
     callbacks
@@ -666,12 +703,7 @@ fn verify_hs256(key: &[u8], signing_input: &[u8], signature: &[u8]) -> bool {
 }
 
 fn allowed_media_type(value: &str) -> bool {
-    matches!(
-        value,
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    )
+    file_extension(value).is_some()
 }
 
 fn file_extension(media_type: &str) -> Option<&'static str> {
@@ -679,6 +711,9 @@ fn file_extension(media_type: &str) -> Option<&'static str> {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Some("xlsx"),
         "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
+        "application/vnd.oasis.opendocument.text" => Some("odt"),
+        "application/vnd.oasis.opendocument.spreadsheet" => Some("ods"),
+        "application/vnd.oasis.opendocument.presentation" => Some("odp"),
         _ => None,
     }
 }
@@ -690,8 +725,16 @@ fn document_type(media_type: &str) -> Option<&'static str> {
         "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
             Some("slide")
         }
+        "application/vnd.oasis.opendocument.text" => Some("word"),
+        "application/vnd.oasis.opendocument.spreadsheet" => Some("cell"),
+        "application/vnd.oasis.opendocument.presentation" => Some("slide"),
         _ => None,
     }
+}
+
+fn has_exact_source_extension(display_name: &str, media_type: &str) -> bool {
+    file_extension(media_type)
+        .is_some_and(|extension| display_name.ends_with(&format!(".{extension}")))
 }
 
 #[derive(Clone, Copy)]
@@ -962,6 +1005,22 @@ mod tests {
             ),
             Some("slide")
         );
+        assert_eq!(
+            file_extension("application/vnd.oasis.opendocument.text"),
+            Some("odt")
+        );
+        assert_eq!(
+            document_type("application/vnd.oasis.opendocument.spreadsheet"),
+            Some("cell")
+        );
+        assert!(has_exact_source_extension(
+            "report.odp",
+            "application/vnd.oasis.opendocument.presentation"
+        ));
+        assert!(!has_exact_source_extension(
+            "report.ODP",
+            "application/vnd.oasis.opendocument.presentation"
+        ));
         assert_eq!(document_mode(1).unwrap().permissions()["edit"], false);
         assert_eq!(document_mode(2).unwrap().permissions()["comment"], true);
         assert_eq!(document_mode(3).unwrap().permissions()["review"], true);
@@ -969,13 +1028,33 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_is_canonical_and_changes_with_output_identity() {
+    fn callback_v1_fingerprint_matches_the_legacy_known_answer() {
+        let event = CallbackEvent::test_event();
+        let first = Sha256FingerprintDeriver.derive(&event).unwrap();
+        assert_eq!(
+            first.0,
+            [
+                178, 43, 89, 29, 77, 172, 189, 152, 101, 112, 154, 161, 42, 73, 138, 67, 88, 100,
+                54, 85, 6, 154, 1, 100, 160, 198, 129, 47, 98, 185, 60, 4,
+            ]
+        );
+    }
+
+    #[test]
+    fn callback_v1_fingerprint_is_stable_across_file_type_rollout_retries() {
         let event = CallbackEvent::test_event();
         let first = Sha256FingerprintDeriver.derive(&event).unwrap();
         assert_eq!(first, Sha256FingerprintDeriver.derive(&event).unwrap());
-        let mut changed = event;
+        let mut changed = event.clone();
         changed.output_url = Some("https://office.example.test/cache/next".into());
         assert_ne!(first, Sha256FingerprintDeriver.derive(&changed).unwrap());
+        let mut changed_file_type = event.clone();
+        changed_file_type.file_type = "odt".into();
+        assert_eq!(
+            first,
+            Sha256FingerprintDeriver.derive(&changed_file_type).unwrap()
+        );
+        changed = event;
         changed.activity = crate::routes::ParticipantActivity::Connected;
         changed.activity_user_id = changed.participant_id.clone();
         assert_ne!(first, Sha256FingerprintDeriver.derive(&changed).unwrap());
@@ -1084,13 +1163,75 @@ mod tests {
     #[test]
     fn terminal_callback_cleanup_releases_in_process_context() {
         let fingerprint = EventFingerprint([7_u8; 32]);
-        let callbacks = Mutex::new(BTreeMap::from([(
+        let mut contexts = CallbackContexts::default();
+        contexts.remember(
             fingerprint.0,
             CallbackContext {
                 revision_id: "revision".into(),
             },
-        )]));
+        );
+        let callbacks = Mutex::new(contexts);
         remove_callback_context(&callbacks, &fingerprint).unwrap();
-        assert!(callbacks.lock().unwrap().is_empty());
+        let callbacks = callbacks.lock().unwrap();
+        assert!(callbacks.by_fingerprint.is_empty());
+        assert!(callbacks.insertion_order.is_empty());
+    }
+
+    #[test]
+    fn callback_context_cache_enforces_exact_cap_and_recovers_evicted_retry() {
+        let mut contexts = CallbackContexts::default();
+        for index in 0..MAX_CALLBACK_CONTEXTS {
+            contexts.remember(
+                test_fingerprint(index),
+                CallbackContext {
+                    revision_id: format!("revision-{index}"),
+                },
+            );
+        }
+        assert_eq!(contexts.by_fingerprint.len(), MAX_CALLBACK_CONTEXTS);
+        assert_eq!(contexts.insertion_order.len(), MAX_CALLBACK_CONTEXTS);
+
+        contexts.remember(
+            test_fingerprint(MAX_CALLBACK_CONTEXTS),
+            CallbackContext {
+                revision_id: format!("revision-{MAX_CALLBACK_CONTEXTS}"),
+            },
+        );
+        assert_eq!(contexts.by_fingerprint.len(), MAX_CALLBACK_CONTEXTS);
+        assert_eq!(contexts.insertion_order.len(), MAX_CALLBACK_CONTEXTS);
+        assert!(!contexts.by_fingerprint.contains_key(&test_fingerprint(0)));
+        assert_eq!(contexts.insertion_order.front(), Some(&test_fingerprint(1)));
+        assert!(
+            contexts
+                .by_fingerprint
+                .contains_key(&test_fingerprint(MAX_CALLBACK_CONTEXTS))
+        );
+
+        // Core replays the durable revision ID when the evicted callback is
+        // retried; remembering it again restores the local write bridge.
+        contexts.remember(
+            test_fingerprint(0),
+            CallbackContext {
+                revision_id: "revision-0".into(),
+            },
+        );
+        assert_eq!(contexts.by_fingerprint.len(), MAX_CALLBACK_CONTEXTS);
+        assert_eq!(contexts.insertion_order.len(), MAX_CALLBACK_CONTEXTS);
+        assert_eq!(
+            contexts
+                .by_fingerprint
+                .get(&test_fingerprint(0))
+                .map(|context| context.revision_id.as_str()),
+            Some("revision-0")
+        );
+        assert!(!contexts.by_fingerprint.contains_key(&test_fingerprint(1)));
+        assert_eq!(contexts.insertion_order.front(), Some(&test_fingerprint(2)));
+        assert_eq!(contexts.insertion_order.back(), Some(&test_fingerprint(0)));
+    }
+
+    fn test_fingerprint(index: usize) -> [u8; 32] {
+        let mut fingerprint = [0_u8; 32];
+        fingerprint[..8].copy_from_slice(&(index as u64).to_be_bytes());
+        fingerprint
     }
 }

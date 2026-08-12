@@ -59,6 +59,10 @@ images:
     repository: oxibelt/filebelt-document
     registryMirror: ""
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  filebelt-revision:
+    repository: oxibelt/filebelt-revision
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   filebelt-smb-gateway:
     repository: oxibelt/filebelt-smb-gateway
     registryMirror: ""
@@ -95,7 +99,7 @@ configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
   filebelt: |
-    version = 8
+    version = 9
     public_origin = "https://filebelt.example.invalid/"
 
     [deployment]
@@ -145,6 +149,7 @@ configuration:
     vfs_management = "0.0.0.0:8088"
     document = "0.0.0.0:8089"
     document_adapter = "0.0.0.0:8090"
+    revision = "0.0.0.0:8091"
     operations = "0.0.0.0:9090"
     allow_container_wildcard = true
 
@@ -176,6 +181,9 @@ configuration:
     webtransport_enabled = false
 
     [documents]
+    enabled = false
+
+    [revisions]
     enabled = false
 
     [media]
@@ -764,6 +772,14 @@ workloads:
     resources:
       requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
       limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
+  revision:
+    # The coordinator is intentionally a singleton: PostgreSQL fences all
+    # revision operations and there is no shared payload or Git mount here.
+    replicas: 1
+    terminationGracePeriodSeconds: 90
+    resources:
+      requests: {cpu: 250m, memory: 256Mi, ephemeral-storage: 128Mi}
+      limits: {cpu: "2", memory: 1Gi, ephemeral-storage: 512Mi}
   operation:
     resources:
       database:
@@ -837,6 +853,13 @@ secrets:
   documentAdapterServerTls: {name: filebelt-document-adapter-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   apiDocumentClientTls: {name: filebelt-api-document-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   onlyofficeEdgeClientTls: {name: filebelt-onlyoffice-edge-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  revisionDatabase: {name: filebelt-revision-database, key: database-url, generation: "1"}
+  revisionStorageCapabilityPrivateKey: {name: filebelt-revision-storage-capability-private, key: private-key, generation: "1"}
+  revisionStorageCapabilityPublicKeyset: {name: filebelt-revision-storage-capability-public, key: public-keyset, generation: "1"}
+  revisionServerTls: {name: filebelt-revision-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+  apiRevisionClientTls: {name: filebelt-api-revision-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  revisionAdapterClientTls: {name: filebelt-revision-adapter-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  revisionIoClientTls: {name: filebelt-revision-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
 
 mcp:
   enabled: false
@@ -868,6 +891,18 @@ documents:
   adapterPort: 8089
   launchAction: https://filebelt-editor.example.invalid/onlyoffice/launch
   providerOrigin: https://documentserver.example.invalid
+
+# Revision activation requires a compatible two-release rollout. This chart
+# defaults to disabled and does not project revision authority until operators
+# explicitly enable it after the old-version backfill and recovery gates pass.
+revisions:
+  enabled: false
+  gitNamespace: filebelt-git
+  adapterOrigin: https://filebelt-git.filebelt-git.svc:8092
+  adapterServerName: filebelt-git.filebelt-git.svc
+  adapterPort: 8092
+  activation:
+    compatibilityGate: ""
 
 # Mount delivery is independently opt-in per protocol. FileBelt never creates
 # gateway tailstate or NFS recovery storage; every claim is operator-owned RWO.

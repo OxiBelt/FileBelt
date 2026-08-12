@@ -20,6 +20,7 @@ mod media;
 mod mounts;
 mod policy;
 mod resources;
+mod revisions;
 
 #[derive(Debug, Parser)]
 #[command(name = "filebelt-api", disable_version_flag = true)]

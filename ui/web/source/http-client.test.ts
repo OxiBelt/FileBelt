@@ -16,6 +16,8 @@ const PayloadId = "00000000-0000-4000-8000-000000000007";
 const GrantId = "00000000-0000-4000-8000-000000000008";
 const ImportIntentId = "00000000-0000-4000-8000-000000000014";
 const SymlinkNodeId = "00000000-0000-4000-8000-000000000015";
+const FirstVersionId = "00000000-0000-4000-8000-000000000012";
+const SecondVersionId = "00000000-0000-4000-8000-000000000013";
 
 const Session = {
   csrf_token: "csrf-value-not-browser-storage",
@@ -55,6 +57,8 @@ const SessionSummary = {
 function Node(Id: string, Name: string): components["schemas"]["Node"] {
   return {
     acl_generation: 1,
+    attribute_generation: 2,
+    content_class_policy: "auto",
     display_name: Name,
     drive_id: DriveId,
     head_media_type: "text/markdown",
@@ -123,6 +127,7 @@ class ContractServer {
         version_ordinal: null,
       });
     }
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}` && HttpRequest.method === "GET") return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-2"' });
     if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children` && HttpRequest.method === "GET") {
       return Json({ items: this.#Nodes, next_cursor: null });
     }
@@ -133,8 +138,12 @@ class ContractServer {
       return Json({ items: [], next_cursor: null });
     }
     if (Path === "/api/v1/sessions" && HttpRequest.method === "GET") return Json([SessionSummary]);
+    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "GET") return Json({ edit_limit_bytes: 2_097_152, generation: 5, inline_limit_bytes: 8_388_608 }, 200, { ETag: '"preferences-5"' });
+    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "PATCH") return Json({ edit_limit_bytes: 4_194_304, generation: 6, inline_limit_bytes: 8_388_608 }, 200, { ETag: '"preferences-6"' });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/compare/${SecondVersionId}` && HttpRequest.method === "GET") return Json({ algorithm: "git-histogram-v1", base_final_newline: true, base_version_id: FirstVersionId, context_lines: 3, hunks: [{ base_lines: 1, base_start: 1, lines: [{ base_line: 1, kind: "context", target_line: 1, text: "same" }], target_lines: 1, target_start: 1 }], target_final_newline: true, target_version_id: SecondVersionId });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy` && HttpRequest.method === "PATCH") return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-3"' });
     if (Path.endsWith("/versions") && HttpRequest.method === "GET") {
-      return Json({ items: [], next_cursor: null });
+      return Json({ items: [FileVersion(FirstNodeId, FirstVersionId), FileVersion(FirstNodeId, SecondVersionId)], next_cursor: null });
     }
     if (Path.endsWith("/shares") && HttpRequest.method === "GET") return Json([DirectShare()]);
     if (Path === `/api/v1/drives/${DriveId}/uploads` && HttpRequest.method === "POST") {
@@ -276,6 +285,26 @@ describe("HttpFileBeltClient", () => {
     if (Allocation !== undefined) expect(await Allocation.clone().json()).toMatchObject({ declared_media_type: "text/markdown", expected_parent_generation: 19, import_intent_id: ImportIntentId, name: "Source.md", parent_id: RootId });
   });
 
+  it("uses generated text preferences, history, comparison, and content-class routes", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+    const Preferences = await Client.getTextPreferences();
+    expect(Preferences).toMatchObject({ Etag: '"preferences-5"', Value: { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 } });
+    await Client.updateTextPreferences({ EditLimitBytes: 4_194_304, InlineLimitBytes: 8_388_608 }, Preferences.Etag);
+    const History = await Client.listTextVersions(FirstNodeId, null);
+    expect(History.Items).toHaveLength(2);
+    expect(History.Items[0]).toMatchObject({ GitCommitOid: "a".repeat(64), ObservedContentClass: "text", RevisionBackend: "git_sha256" });
+    const Comparison = await Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId);
+    expect(Comparison.Hunks[0]?.Lines[0]).toEqual({ Kind: "context", Text: "same" });
+    await Client.setNodeContentClass(FirstNodeId, "binary");
+    const PreferencePatch = FindRequest(Server.Requests, "PATCH", "/api/v1/preferences/text");
+    expect(PreferencePatch.headers.get("if-match")).toBe('"preferences-5"');
+    const PolicyPatch = FindRequest(Server.Requests, "PATCH", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy`);
+    expect(PolicyPatch.headers.get("if-match")).toBe('"node-attribute-2"');
+    expect(await PolicyPatch.clone().json()).toEqual({ policy: "binary" });
+  });
+
   it("projects symlinks without traversing them or requesting file versions and content", async () => {
     const Server = new ContractServer([SymlinkNode()]);
     const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
@@ -284,7 +313,7 @@ describe("HttpFileBeltClient", () => {
     expect(Workspace.Entries.find(({ Id }) => Id === SymlinkNodeId)).toMatchObject({
       HeadVersionId: null,
       Kind: "symlink",
-      MarkdownEligibility: "ineligible",
+      TextEligibility: "ineligible",
       MediaType: null,
       Size: null,
       Version: 0,
@@ -312,6 +341,24 @@ function UploadAllocation(): components["schemas"]["UploadAllocation"] {
   };
 }
 
+function FileVersion(NodeId: string, Id: string): components["schemas"]["FileVersion"] {
+  return {
+    created_at: "2026-08-06T12:00:00Z",
+    created_by: Session.principal_id,
+    current: Id === FirstVersionId,
+    git_commit_oid: "a".repeat(64),
+    id: Id,
+    media_type: "text/plain",
+    node_id: NodeId,
+    observed_content_class: "text",
+    ordinal: Id === FirstVersionId ? 2 : 1,
+    provenance: { creator_display_name: "Avery Morgan", mcp_assisted: false, origin: "upload", source_version_id: null },
+    restored_from_version_id: null,
+    revision_backend: "git_sha256",
+    size_bytes: 4,
+  };
+}
+
 function ByteGrant(
   Method: components["schemas"]["ByteGrant"]["method"],
   Path: string,
@@ -326,9 +373,9 @@ function ByteGrant(
   };
 }
 
-function Json(Value: unknown, Status = 200): Response {
+function Json(Value: unknown, Status = 200, Headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(Value), {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...Headers },
     status: Status,
   });
 }

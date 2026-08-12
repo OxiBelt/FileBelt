@@ -120,6 +120,25 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if .Values.revisions.enabled -}}
+{{- $revisionConfig := printf "[revisions]\nenabled = true\ndatabase_url_file = \"/run/secrets/revision-database-url\"\nurl = \"https://filebelt-revision:8091/\"\nadapter_url = %q\nio_url = \"https://filebelt-worker-io:8081/\"\nclient_certificate_chain_file = \"/run/secrets/revision-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/revision-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/revision-client-tls/server-ca.crt\"\nadapter_client_certificate_chain_file = \"/run/secrets/revision-adapter-client-tls/tls.crt\"\nadapter_client_private_key_file = \"/run/secrets/revision-adapter-client-tls/tls.key\"\nadapter_server_ca_file = \"/run/secrets/revision-adapter-client-tls/server-ca.crt\"\nio_client_certificate_chain_file = \"/run/secrets/revision-io-client-tls/tls.crt\"\nio_client_private_key_file = \"/run/secrets/revision-io-client-tls/tls.key\"\nio_server_ca_file = \"/run/secrets/revision-io-client-tls/server-ca.crt\"\nchunk_size_bytes = 16777216\nmax_text_bytes = 104857600\ngit_object_format = \"sha256\"\n\n[revisions.capability_signing]\nprivate_key_file = \"/run/secrets/revision-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/revision-storage-capability-public-keyset\"\ncurrent_generation = 1" .Values.revisions.adapterOrigin -}}
+{{- $configuration = replace "[revisions]\nenabled = false" $revisionConfig $configuration -}}
+{{- $configuration = printf "%s\n\n[backend_tls.revision]\ncertificate_chain_file = \"/run/secrets/revision-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/revision-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/revision-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/api/revision\"]" $configuration -}}
+{{- range $current := list
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/onlyoffice-adapter/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/onlyoffice-adapter/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\", \"spiffe://filebelt/onlyoffice-adapter/io\"]"
+    "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/collaboration/io\", \"spiffe://filebelt/vfs/io\", \"spiffe://filebelt/onlyoffice-adapter/io\"]" -}}
+{{- if contains $current $configuration -}}
+{{- $withRevision := replace "]" ", \"spiffe://filebelt/revision-coordinator/io\"]" $current -}}
+{{- $configuration = replace $current $withRevision $configuration -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $configuration -}}
 {{- end -}}
 
@@ -140,8 +159,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- $renderedFilebeltConfig := include "filebelt.renderedFilebeltConfiguration" . -}}
 {{- $mountsEnabled := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled -}}
 {{- $headscaleRequired := or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled -}}
-{{- if not (hasPrefix "version = 8" (trim .Values.configuration.filebelt)) -}}
-{{- fail "configuration.filebelt must begin with version = 8" -}}
+{{- if not (hasPrefix "version = 9" (trim .Values.configuration.filebelt)) -}}
+{{- fail "configuration.filebelt must begin with version = 9" -}}
 {{- end -}}
 {{- if not (contains "mode = \"kubernetes\"" .Values.configuration.filebelt) -}}
 {{- fail "configuration.filebelt must select deployment.mode = kubernetes" -}}
@@ -178,6 +197,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- if .Values.documents.enabled -}}
 {{- $collaborationIoClientUris = replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $collaborationIoClientUris -}}
+{{- end -}}
+{{- if .Values.revisions.enabled -}}
+{{- $collaborationIoClientUris = replace "]" ", \"spiffe://filebelt/revision-coordinator/io\"]" $collaborationIoClientUris -}}
 {{- end -}}
 {{- if or (not (contains $collaborationIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact web, enabled MCP, and collaboration SPIFFE identities" -}}
@@ -256,12 +278,63 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.documents.enabled -}}
 {{- $mcpIoClientUris = replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $mcpIoClientUris -}}
 {{- end -}}
+{{- if .Values.revisions.enabled -}}
+{{- $mcpIoClientUris = replace "]" ", \"spiffe://filebelt/revision-coordinator/io\"]" $mcpIoClientUris -}}
+{{- end -}}
 {{- if or (not (contains $mcpIoClientUris $ioTls)) (contains "allowed_client_trust_domains" $ioTls) -}}
 {{- fail "I/O backend TLS must permit only the exact FileBelt web and MCP broker SPIFFE identities" -}}
 {{- end -}}
 {{- range $required := list "io_url = \"https://filebelt-worker-io:8081/\"" "client_certificate_chain_file = \"/run/secrets/mcp-backend-tls/tls.crt\"" "client_private_key_file = \"/run/secrets/mcp-backend-tls/tls.key\"" "server_ca_file = \"/run/secrets/mcp-backend-tls/server-ca.crt\"" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "mcp.enabled requires configuration.filebelt attachment setting %s" $required) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.revisions.enabled -}}
+{{- if eq .Values.revisions.activation.compatibilityGate "" -}}
+{{- fail "revisions.enabled requires a nonempty completed compatibility-gate identifier" -}}
+{{- end -}}
+{{- if eq .Values.revisions.gitNamespace .Release.Namespace -}}
+{{- fail "revisions.gitNamespace must be a dedicated Git-adapter namespace separate from the FileBelt release namespace" -}}
+{{- end -}}
+{{- $expectedRevisionAdapterOrigin := printf "https://filebelt-git.%s.svc:8092" .Values.revisions.gitNamespace -}}
+{{- $expectedRevisionAdapterName := printf "filebelt-git.%s.svc" .Values.revisions.gitNamespace -}}
+{{- if or (ne .Values.revisions.adapterOrigin $expectedRevisionAdapterOrigin) (ne .Values.revisions.adapterServerName $expectedRevisionAdapterName) -}}
+{{- fail "revisions must use the dedicated Git-adapter Service endpoint and exact server name" -}}
+{{- end -}}
+{{- if not (regexMatch "(?m)^\\[revisions\\]\\s*$[\\s\\S]*^enabled = true\\s*$" $renderedFilebeltConfig) -}}
+{{- fail "revisions.enabled requires configuration.filebelt to enable the coordinator" -}}
+{{- end -}}
+{{- $revisionSections := regexSplit "(?m)^\\[backend_tls\\.revision\\]\\s*$" $renderedFilebeltConfig 2 -}}
+{{- if ne (len $revisionSections) 2 -}}
+{{- fail "revisions.enabled requires an exact backend_tls.revision section" -}}
+{{- end -}}
+{{- $revisionTls := first (regexSplit "(?m)^\\[" (last $revisionSections) 2) -}}
+{{- if or (not (contains "allowed_client_uri_sans = [\"spiffe://filebelt/api/revision\"]" $revisionTls)) (contains "allowed_client_trust_domains" $revisionTls) -}}
+{{- fail "revision backend TLS must permit only the exact FileBelt API SPIFFE identity" -}}
+{{- end -}}
+{{- $revisionIoSections := regexSplit "(?m)^\\[backend_tls\\.io\\]\\s*$" $renderedFilebeltConfig 2 -}}
+{{- if ne (len $revisionIoSections) 2 -}}
+{{- fail "revisions.enabled requires an exact backend_tls.io section" -}}
+{{- end -}}
+{{- $revisionIoTls := first (regexSplit "(?m)^\\[" (last $revisionIoSections) 2) -}}
+{{- $revisionIoClientUris := "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" -}}
+{{- if .Values.collaboration.enabled -}}
+{{- $revisionIoClientUris = replace "]" ", \"spiffe://filebelt/collaboration/io\"]" $revisionIoClientUris -}}
+{{- end -}}
+{{- if $mountsEnabled -}}
+{{- $revisionIoClientUris = replace "]" ", \"spiffe://filebelt/vfs/io\"]" $revisionIoClientUris -}}
+{{- end -}}
+{{- if .Values.documents.enabled -}}
+{{- $revisionIoClientUris = replace "]" ", \"spiffe://filebelt/onlyoffice-adapter/io\"]" $revisionIoClientUris -}}
+{{- end -}}
+{{- $revisionIoClientUris = replace "]" ", \"spiffe://filebelt/revision-coordinator/io\"]" $revisionIoClientUris -}}
+{{- if or (not (contains $revisionIoClientUris $revisionIoTls)) (contains "allowed_client_trust_domains" $revisionIoTls) -}}
+{{- fail "I/O backend TLS must permit only the exact enabled revision and other FileBelt client SPIFFE identities" -}}
+{{- end -}}
+{{- range $required := list "revision = \"0.0.0.0:8091\"" "url = \"https://filebelt-revision:8091/\"" (printf "adapter_url = %q" .Values.revisions.adapterOrigin) "io_url = \"https://filebelt-worker-io:8081/\"" "[revisions.capability_signing]" "chunk_size_bytes = 16777216" "max_text_bytes = 104857600" "git_object_format = \"sha256\"" -}}
+{{- if not (contains $required $renderedFilebeltConfig) -}}
+{{- fail (printf "revisions.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

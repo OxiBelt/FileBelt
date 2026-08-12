@@ -1,0 +1,11 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "filebelt-git.name" . }}
+  labels:
+{{ include "filebelt-git.labels" . | indent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt-git, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: git-adapter}

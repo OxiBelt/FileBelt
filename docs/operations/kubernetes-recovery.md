@@ -28,7 +28,7 @@ sensitive operational evidence.
    Wait for web/API/I/O/maintenance/broker/controller Pods and all remaining
    streams and leases to drain or fence.
 3. In a second revision, still quiesced, run the recovery checkpoint Job. Save
-   its single `filebelt.recovery.checkpoint.v3` JSON document outside the
+   its single `filebelt.recovery.checkpoint.v4` JSON document outside the
    cluster.
 4. While still quiesced, take the external PostgreSQL backup and RWX volume
    snapshot/copy. Record their immutable provider identifiers alongside the
@@ -55,7 +55,9 @@ unredacted logs in ordinary CI artifacts.
    generation, retained mount policy/vault inventory and every referenced mount
    KEK generation, descendant-share admission state/fence/repair inventory, and
    the deterministic expected-payload inventory hash must
-   agree. The emitted schema is `filebelt.recovery.verification.v3`.
+   agree. Revision activation, Git refs, shared-chunk manifests and members,
+   reference counts, operations, backfill jobs, and holds must also agree. The
+   emitted schema is `filebelt.recovery.verification.v4`.
 6. Run bounded reconciliation. Inspect upload/finalization state, leases,
    deletion intent, quarantine, collaboration manifest/checkpoint fences, MCP
    invocation/runner leases and revocation tombstones, mount
@@ -102,7 +104,7 @@ unredacted logs in ordinary CI artifacts.
   reuse an API/collaboration signing key.
 - Partial scrub: rerun the same run UUID to resume idempotently. Do not treat a
   partial run as verification.
-Recovery v3 records each capability purpose, digest generation, and local
+Recovery v4 records each capability purpose, digest generation, and local
 generation. Recovery verification may wait up to 120 seconds for MCP quiesce
 and reconciliation. Version-2 evidence is offline-only: it can inform an
 investigation but cannot be used to admit a v8 runtime. After v8 admission,

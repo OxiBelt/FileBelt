@@ -14,7 +14,7 @@ describe("SharesView", () => {
       Id: "00000000-0000-4000-8000-000000000101",
       Kind: "file",
       ModifiedAt: "2026-08-06T12:00:00Z",
-      MarkdownEligibility: "ineligible",
+      TextEligibility: "ineligible",
       MediaType: null,
       Name: "same-name.txt",
       Owner: "Owner",

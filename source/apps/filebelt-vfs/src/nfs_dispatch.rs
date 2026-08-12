@@ -3617,6 +3617,8 @@ mod tests {
             head_version_id: None,
             namespace_generation: 1,
             acl_generation: 1,
+            attribute_generation: 1,
+            content_class_policy: "auto".into(),
             trashed: false,
             updated_at: "2026-08-11T00:00:00Z".into(),
             size_bytes: None,

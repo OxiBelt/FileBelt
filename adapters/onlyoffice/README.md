@@ -42,12 +42,33 @@ adapter's one-use launch endpoint has redeemed a Core-issued launch ID.
   route-bound participant UUID: type `1` is connected and type `0` is
   disconnected. Missing, multiple, mismatched-user, or unsupported actions
   are rejected. All other statuses send Core activity `UNSPECIFIED`.
-  Canonical SHA-256 fingerprints use unambiguous length-delimited fields and
-  are recorded by Core before output processing.
+  Canonical SHA-256 fingerprints use the legacy `callback.v1` unambiguous
+  length-delimited field set and are recorded by Core before output
+  processing. The later-added signed `filetype` is intentionally omitted from
+  that v1 digest so an in-flight retry remains idempotent across a rolling
+  deployment. JWT/body matching and Core's immutable media binding still
+  validate `filetype` independently.
 - Save output may be fetched only through the mTLS egress gateway, with no
   redirects, exactly the configured provider origin, and a 100 MiB ceiling.
-  Output is boundedly spooled to private adapter tmpfs then streamed through
-  scoped write capabilities, never mounted or retained as a payload plane.
+  DOCX, XLSX, PPTX, ODT, ODS, and ODP are admitted only when the source name
+  has the exact lower-case extension for its media type. The signed callback
+  `filetype`, the authenticated callback body, and Core's immutable source
+  media binding must agree.
+  The adapter sets `assemblyFormatAsOrigin=true`, so save-back preserves that
+  admitted format rather than accepting a provider conversion.
+- Before scoped publication, save output is boundedly spooled to private
+  adapter tmpfs and structurally inspected as a ZIP package. It rejects
+  encryption, unsafe or duplicate paths, macros, unsupported compression, a
+  format mismatch, more than 10,000 entries, more than 1 GiB uncompressed,
+  and required metadata larger than 1 MiB. ODF `content.xml` has a separate
+  100 MiB uncompressed ceiling and a streaming, namespace-aware XML gate that
+  rejects trees deeper than 256 elements, DTDs, malformed XML, undeclared
+  prefixes, `office:scripts`,
+  `office:script`, `office:event-listeners`, `script:event-listener`,
+  `text:execute-macro`, and `table:error-macro`. Ordinary external links and
+  embedded office objects remain supported residual content. Failed
+  inspection leaves the Core receipt retryable and does not commit a FileBelt
+  version.
 - The per-tab TypeScript launcher has isolated `idle`, `loading-api`,
   `launching`, `ready`, and `error` states. It uses no browser storage. Its
   embedding view must expose progress in an `aria-live` region and errors with
@@ -61,8 +82,15 @@ The adapter makes no direct PostgreSQL write. It redeems launches and refreshes
 the exact 60-second source capability through Core mTLS; provider callbacks are
 durably received by Core before the adapter asks its sole egress gateway for
 bytes. It then obtains a provider-neutral revision admission, writes and
-finalizes only through scoped I/O capabilities, and commits idempotently. The
+finalizes only through scoped I/O capabilities, and commits idempotently. A
+replica retains at most 1,024 fingerprint-to-revision retry contexts in FIFO
+order. Eviction loses no durable state: retrying the same callback makes Core
+replay its authoritative revision ID and repopulates the local context. The
 adapter retains no callback or version authority.
+
+The package validator is a bounded adapter-side gate, not a production
+compatibility qualification. Operators must still run the documented real
+ONLYOFFICE Community `9.4.0` browser matrix before enabling ODF traffic.
 
 ## Per-replica availability limits
 

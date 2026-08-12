@@ -14,11 +14,12 @@ export type RouteId =
   | "privacy"
   | "mcp"
   | "mounts"
+  | "text"
   | "markdown";
 
 export type EntryKind = "file" | "folder" | "symlink";
 export type EntryStatus = "ready" | "uploading" | "conflict" | "quarantined";
-export type MarkdownEligibility = "editable" | "ineligible" | "viewable";
+export type TextEligibility = "editable" | "history-only" | "ineligible" | "viewable";
 
 export interface FileEntry {
   /** Available only from the generated node projection; never treated as authorization. */
@@ -27,7 +28,8 @@ export interface FileEntry {
   Id: string;
   Kind: EntryKind;
   ModifiedAt: string;
-  MarkdownEligibility: MarkdownEligibility;
+  /** Server-validated text admission; this remains a presentation hint only. */
+  TextEligibility: TextEligibility;
   MediaType: string | null;
   Name: string;
   Owner: string;
@@ -53,6 +55,9 @@ export interface VersionRecord {
   Id: string;
   Size: number;
   Version: number;
+  GitCommitOid?: string | null;
+  ObservedContentClass?: "binary" | "office" | "text" | "unclassified" | null;
+  RevisionBackend?: "git_sha256" | "legacy_payload" | "shared_chunks" | null;
 }
 
 export interface ShareRecord {

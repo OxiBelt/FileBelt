@@ -332,6 +332,6 @@ mod tests {
             PHASE8_CONFIG_VERSION,
             filebelt_control_protocol::CONFIG_VERSION as i32
         );
-        assert_eq!(PHASE8_CONFIG_VERSION, 8);
+        assert_eq!(PHASE8_CONFIG_VERSION, 9);
     }
 }

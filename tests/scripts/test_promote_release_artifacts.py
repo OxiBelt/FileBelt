@@ -25,6 +25,7 @@ ACTIVE_ROLES = (
     "filebelt-headscale-sync",
     "filebelt-nfs-relay",
     "filebelt-document",
+    "filebelt-revision",
     "filebelt-web",
 )
 ARCHITECTURES = ("amd64", "arm64", "riscv64")

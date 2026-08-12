@@ -17,11 +17,53 @@ use uuid::Uuid;
 use crate::grants::{encode_hex, migration_manifest_in};
 use crate::read_keyset;
 
-const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v3";
-const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v3";
+const CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v4";
+const VERIFICATION_SCHEMA: &str = "filebelt.recovery.verification.v4";
 const LEGACY_CHECKPOINT_SCHEMA: &str = "filebelt.recovery.checkpoint.v2";
 const MAX_CHECKPOINT_BYTES: u64 = 1_048_576;
 const PAYLOAD_BATCH_SIZE: i64 = 1_000;
+const REVISION_MANIFEST_TABLES: &[RevisionManifestTable] = &[
+    RevisionManifestTable::singleton(
+        "activation_state",
+        "SELECT jsonb_build_array(tenant_id,state,generation,extract(epoch FROM activated_at)::text,source_revision,extract(epoch FROM updated_at)::text) AS document FROM filebelt_revision.activation_state WHERE tenant_id=$1",
+    ),
+    RevisionManifestTable::uuid(
+        "contents",
+        "SELECT id AS cursor,jsonb_build_array(tenant_id,id,drive_id,node_id,backend,observed_class,state,legacy_payload_id,size_bytes,encode(blake3,'hex'),media_type,extract(epoch FROM created_at)::text) AS document FROM filebelt_revision.contents WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "git_repositories",
+        "SELECT id AS cursor,jsonb_build_array(tenant_id,id,drive_id,node_id,object_format,encode(projected_head_oid,'hex'),state,allocated_bytes,fencing_token,quarantine_reason,extract(epoch FROM created_at)::text,extract(epoch FROM updated_at)::text) AS document FROM filebelt_revision.git_repositories WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "git_revisions",
+        "SELECT content_id AS cursor,jsonb_build_array(tenant_id,content_id,repository_id,drive_id,node_id,encode(commit_oid,'hex'),encode(tree_oid,'hex'),encode(blob_oid,'hex'),final_newline,encode(parent_commit_oid,'hex'),ordinal,extract(epoch FROM committed_at)::text) AS document FROM filebelt_revision.git_revisions WHERE tenant_id=$1 AND ($2::uuid IS NULL OR content_id>$2) ORDER BY content_id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "chunk_objects",
+        "SELECT id AS cursor,jsonb_build_array(tenant_id,id,drive_id,locator,size_bytes,encode(blake3,'hex'),state,reference_count,fencing_token,quarantine_reason,extract(epoch FROM created_at)::text,extract(epoch FROM referenced_at)::text) AS document FROM filebelt_revision.chunk_objects WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "chunk_manifests",
+        "SELECT id AS cursor,jsonb_build_array(tenant_id,id,content_id,drive_id,chunk_size_bytes,chunk_count,size_bytes,encode(blake3,'hex'),state,extract(epoch FROM created_at)::text) AS document FROM filebelt_revision.chunk_manifests WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3",
+    ),
+    RevisionManifestTable::chunk_members(
+        "chunk_members",
+        "SELECT manifest_id AS manifest_cursor,chunk_index AS index_cursor,jsonb_build_array(tenant_id,manifest_id,drive_id,chunk_index,chunk_id,logical_offset,size_bytes) AS document FROM filebelt_revision.chunk_members WHERE tenant_id=$1 AND ($2::uuid IS NULL OR (manifest_id,chunk_index)>($2,$3)) ORDER BY manifest_id,chunk_index LIMIT $4",
+    ),
+    RevisionManifestTable::uuid(
+        "operations",
+        "SELECT id AS cursor,jsonb_build_array(tenant_id,id,drive_id,node_id,actor_principal_id,api_session_id,expected_head_version_id,target_version_id,kind,backend,state,encode(request_fingerprint,'hex'),fencing_token,lease_owner,extract(epoch FROM lease_expires_at)::text,failure_code,extract(epoch FROM created_at)::text,extract(epoch FROM updated_at)::text) AS document FROM filebelt_revision.operations WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "backfill_jobs",
+        "SELECT content_id AS cursor,jsonb_build_array(tenant_id,content_id,target_backend,state,attempt_count,fencing_token,lease_owner,extract(epoch FROM lease_expires_at)::text,extract(epoch FROM next_attempt_at)::text,last_error_code,extract(epoch FROM updated_at)::text) AS document FROM filebelt_revision.backfill_jobs WHERE tenant_id=$1 AND ($2::uuid IS NULL OR content_id>$2) ORDER BY content_id LIMIT $3",
+    ),
+    RevisionManifestTable::uuid(
+        "holds",
+        "SELECT content_id AS cursor,jsonb_build_array(tenant_id,content_id,reason_code,detail,extract(epoch FROM created_at)::text,extract(epoch FROM resolved_at)::text,resolution) AS document FROM filebelt_revision.holds WHERE tenant_id=$1 AND ($2::uuid IS NULL OR content_id>$2) ORDER BY content_id LIMIT $3",
+    ),
+];
 const CHECKPOINT_FIELDS: &[&str] = &[
     "schema",
     "tenant",
@@ -33,6 +75,46 @@ const CHECKPOINT_FIELDS: &[&str] = &[
     "audit_watermark",
     "inventory",
 ];
+
+#[derive(Clone, Copy)]
+enum RevisionManifestCursor {
+    Singleton,
+    Uuid,
+    ChunkMembers,
+}
+
+#[derive(Clone, Copy)]
+struct RevisionManifestTable {
+    name: &'static str,
+    query: &'static str,
+    cursor: RevisionManifestCursor,
+}
+
+impl RevisionManifestTable {
+    const fn singleton(name: &'static str, query: &'static str) -> Self {
+        Self {
+            name,
+            query,
+            cursor: RevisionManifestCursor::Singleton,
+        }
+    }
+
+    const fn uuid(name: &'static str, query: &'static str) -> Self {
+        Self {
+            name,
+            query,
+            cursor: RevisionManifestCursor::Uuid,
+        }
+    }
+
+    const fn chunk_members(name: &'static str, query: &'static str) -> Self {
+        Self {
+            name,
+            query,
+            cursor: RevisionManifestCursor::ChunkMembers,
+        }
+    }
+}
 
 pub async fn checkpoint(database: &Database, configuration: &Config) -> Result<String, String> {
     let checkpoint = checkpoint_value(database, configuration).await?;
@@ -76,7 +158,7 @@ pub async fn verify(
             "admission_verified": false,
             "key_purpose_proven": false,
             "traffic_admission": false,
-            "required_next_step": "create and verify a v3 recovery checkpoint before admitting traffic",
+            "required_next_step": "create and verify a v4 recovery checkpoint before admitting traffic",
         });
         if !differences.is_empty() {
             return Err(serde_json::to_string(&document).map_err(|error| error.to_string())?);
@@ -273,6 +355,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
         configuration.storage.backend_id,
     )
     .await?;
+    let revision_inventory = revision_inventory(&mut transaction, tenant_id).await?;
     transaction
         .commit()
         .await
@@ -315,6 +398,7 @@ async fn checkpoint_value(database: &Database, configuration: &Config) -> Result
             "payload_manifest_sha256": payload_manifest_sha256,
             "descendant_share_security": descendant_share_security,
             "nfs": nfs_inventory,
+            "revisions": revision_inventory,
         },
     }))
 }
@@ -354,6 +438,9 @@ fn capability_keysets(configuration: &Config) -> Result<Value, String> {
     }
     if let Some(key) = &configuration.mounts.capability_signing {
         configured.push(("mount_storage", KeyPurpose::MountStorage, key));
+    }
+    if let Some(key) = &configuration.revisions.capability_signing {
+        configured.push(("revision_storage", KeyPurpose::RevisionStorage, key));
     }
     let mut result = serde_json::Map::new();
     let mut observed = Vec::<[u8; 32]>::new();
@@ -453,6 +540,136 @@ async fn payload_manifest(
         }
     }
     Ok(encode_hex(context.finish().as_ref()))
+}
+
+async fn revision_inventory(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+) -> Result<Value, String> {
+    let summary = sqlx::query(
+        "SELECT a.state,a.generation,extract(epoch FROM a.activated_at)::text AS activated_at,a.source_revision, \
+         (SELECT count(*) FROM filebelt_revision.contents c WHERE c.tenant_id=a.tenant_id) AS contents, \
+         (SELECT count(*) FROM filebelt_revision.contents c WHERE c.tenant_id=a.tenant_id AND c.backend='legacy_payload') AS legacy_contents, \
+         (SELECT count(*) FROM filebelt_revision.git_repositories r WHERE r.tenant_id=a.tenant_id) AS git_repositories, \
+         (SELECT count(*) FROM filebelt_revision.git_revisions r WHERE r.tenant_id=a.tenant_id) AS git_revisions, \
+         (SELECT count(*) FROM filebelt_revision.chunk_objects c WHERE c.tenant_id=a.tenant_id) AS chunk_objects, \
+         (SELECT COALESCE(sum(size_bytes),0)::bigint FROM filebelt_revision.chunk_objects c WHERE c.tenant_id=a.tenant_id AND c.state='referenced') AS chunk_physical_bytes, \
+         (SELECT count(*) FROM filebelt_revision.chunk_manifests m WHERE m.tenant_id=a.tenant_id) AS chunk_manifests, \
+         (SELECT count(*) FROM filebelt_revision.chunk_members m WHERE m.tenant_id=a.tenant_id) AS chunk_members, \
+         (SELECT count(*) FROM filebelt_revision.operations o WHERE o.tenant_id=a.tenant_id) AS operations, \
+         (SELECT count(*) FROM filebelt_revision.operations o WHERE o.tenant_id=a.tenant_id AND o.state IN ('allocated','staging','prepared','committing')) AS pending_operations, \
+         (SELECT count(*) FROM filebelt_revision.backfill_jobs b WHERE b.tenant_id=a.tenant_id) AS backfill_jobs, \
+         (SELECT count(*) FROM filebelt_revision.backfill_jobs b WHERE b.tenant_id=a.tenant_id AND b.state<>'verified') AS pending_backfills, \
+         (SELECT count(*) FROM filebelt_revision.holds h WHERE h.tenant_id=a.tenant_id) AS holds, \
+         (SELECT count(*) FROM filebelt_revision.holds h WHERE h.tenant_id=a.tenant_id AND h.resolved_at IS NULL) AS unresolved_holds \
+         FROM filebelt_revision.activation_state a WHERE a.tenant_id=$1",
+    )
+    .bind(tenant_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut context = Context::new(&SHA256);
+    for table in REVISION_MANIFEST_TABLES {
+        hash_revision_manifest_table(transaction, tenant_id, &mut context, *table).await?;
+    }
+    Ok(json!({
+        "activation_state": summary.get::<String, _>("state"),
+        "activation_generation": summary.get::<i64, _>("generation"),
+        "activation_activated_at": summary.get::<Option<String>, _>("activated_at"),
+        "activation_source_revision": summary.get::<Option<String>, _>("source_revision"),
+        "contents": summary.get::<i64, _>("contents"),
+        "legacy_contents": summary.get::<i64, _>("legacy_contents"),
+        "git_repositories": summary.get::<i64, _>("git_repositories"),
+        "git_revisions": summary.get::<i64, _>("git_revisions"),
+        "chunk_objects": summary.get::<i64, _>("chunk_objects"),
+        "chunk_physical_bytes": summary.get::<i64, _>("chunk_physical_bytes"),
+        "chunk_manifests": summary.get::<i64, _>("chunk_manifests"),
+        "chunk_members": summary.get::<i64, _>("chunk_members"),
+        "operations": summary.get::<i64, _>("operations"),
+        "pending_operations": summary.get::<i64, _>("pending_operations"),
+        "backfill_jobs": summary.get::<i64, _>("backfill_jobs"),
+        "pending_backfills": summary.get::<i64, _>("pending_backfills"),
+        "holds": summary.get::<i64, _>("holds"),
+        "unresolved_holds": summary.get::<i64, _>("unresolved_holds"),
+        "manifest_sha256": encode_hex(context.finish().as_ref()),
+    }))
+}
+
+async fn hash_revision_manifest_table(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    context: &mut Context,
+    table: RevisionManifestTable,
+) -> Result<(), String> {
+    match table.cursor {
+        RevisionManifestCursor::Singleton => {
+            let row = sqlx::query(table.query)
+                .bind(tenant_id)
+                .fetch_one(&mut **transaction)
+                .await
+                .map_err(|error| error.to_string())?;
+            hash_revision_manifest_row(context, table.name, &row.get("document"))?;
+        }
+        RevisionManifestCursor::Uuid => {
+            let mut last_id = None;
+            loop {
+                let rows = sqlx::query(table.query)
+                    .bind(tenant_id)
+                    .bind(last_id)
+                    .bind(PAYLOAD_BATCH_SIZE)
+                    .fetch_all(&mut **transaction)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if rows.is_empty() {
+                    break;
+                }
+                for row in &rows {
+                    hash_revision_manifest_row(context, table.name, &row.get("document"))?;
+                    last_id = Some(row.get::<Uuid, _>("cursor"));
+                }
+                if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+                    break;
+                }
+            }
+        }
+        RevisionManifestCursor::ChunkMembers => {
+            let mut last_manifest_id = None;
+            let mut last_chunk_index = 0_i32;
+            loop {
+                let rows = sqlx::query(table.query)
+                    .bind(tenant_id)
+                    .bind(last_manifest_id)
+                    .bind(last_chunk_index)
+                    .bind(PAYLOAD_BATCH_SIZE)
+                    .fetch_all(&mut **transaction)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if rows.is_empty() {
+                    break;
+                }
+                for row in &rows {
+                    hash_revision_manifest_row(context, table.name, &row.get("document"))?;
+                    last_manifest_id = Some(row.get::<Uuid, _>("manifest_cursor"));
+                    last_chunk_index = row.get("index_cursor");
+                }
+                if rows.len() < usize::try_from(PAYLOAD_BATCH_SIZE).expect("positive batch size") {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn hash_revision_manifest_row(
+    context: &mut Context,
+    table: &str,
+    document: &Value,
+) -> Result<(), String> {
+    let canonical = json!([table, document]);
+    context.update(&serde_json::to_vec(&canonical).map_err(|error| error.to_string())?);
+    context.update(b"\n");
+    Ok(())
 }
 
 async fn nfs_replay_slot_inventory(
@@ -1047,5 +1264,101 @@ mod tests {
     #[test]
     fn hexadecimal_encoding_is_stable() {
         assert_eq!(encode_hex(&[0x00, 0x7f, 0x80, 0xff]), "007f80ff");
+    }
+
+    #[test]
+    fn revision_manifest_has_closed_authoritative_table_order() {
+        assert_eq!(
+            REVISION_MANIFEST_TABLES
+                .iter()
+                .map(|table| table.name)
+                .collect::<Vec<_>>(),
+            [
+                "activation_state",
+                "contents",
+                "git_repositories",
+                "git_revisions",
+                "chunk_objects",
+                "chunk_manifests",
+                "chunk_members",
+                "operations",
+                "backfill_jobs",
+                "holds",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_revision_table_family_changes_the_manifest_digest() {
+        fn digest(documents: &[(&str, Value)]) -> String {
+            let mut context = Context::new(&SHA256);
+            for (table, document) in documents {
+                hash_revision_manifest_row(&mut context, table, document)
+                    .expect("canonical manifest row");
+            }
+            encode_hex(context.finish().as_ref())
+        }
+
+        let baseline = REVISION_MANIFEST_TABLES
+            .iter()
+            .enumerate()
+            .map(|(index, table)| {
+                (
+                    table.name,
+                    json!([table.name, index, "authoritative-field"]),
+                )
+            })
+            .collect::<Vec<_>>();
+        let baseline_digest = digest(&baseline);
+        for index in 0..baseline.len() {
+            let mut mutated = baseline.clone();
+            mutated[index].1[2] = json!("mutated");
+            assert_ne!(
+                digest(&mutated),
+                baseline_digest,
+                "{} mutation must change the digest",
+                REVISION_MANIFEST_TABLES[index].name
+            );
+            let mut missing = baseline.clone();
+            missing.remove(index);
+            assert_ne!(
+                digest(&missing),
+                baseline_digest,
+                "{} removal must change the digest",
+                REVISION_MANIFEST_TABLES[index].name
+            );
+        }
+    }
+
+    #[test]
+    fn revision_manifest_queries_are_keyset_bounded_and_large_hashes_are_stable() {
+        for table in REVISION_MANIFEST_TABLES {
+            match table.cursor {
+                RevisionManifestCursor::Singleton => assert_eq!(table.name, "activation_state"),
+                RevisionManifestCursor::Uuid => {
+                    assert!(table.query.contains("cursor"));
+                    assert!(table.query.contains("ORDER BY"));
+                    assert!(table.query.contains("LIMIT $3"));
+                }
+                RevisionManifestCursor::ChunkMembers => {
+                    assert!(table.query.contains("(manifest_id,chunk_index)>($2,$3)"));
+                    assert!(
+                        table
+                            .query
+                            .contains("ORDER BY manifest_id,chunk_index LIMIT $4")
+                    );
+                }
+            }
+        }
+
+        let hash_rows = || {
+            let mut context = Context::new(&SHA256);
+            for index in 0..=PAYLOAD_BATCH_SIZE {
+                hash_revision_manifest_row(&mut context, "contents", &json!([index]))
+                    .expect("canonical manifest row");
+            }
+            encode_hex(context.finish().as_ref())
+        };
+        assert_eq!(hash_rows(), hash_rows());
     }
 }

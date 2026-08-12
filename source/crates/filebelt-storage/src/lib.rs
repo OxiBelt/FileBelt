@@ -25,6 +25,37 @@ pub use cow::{CowBaseChunk, CowChunkDigest, CowLockGuard, CowManifest, CowWriteR
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 
+/// The canonical, immutable revision-object chunk size.  This is deliberately
+/// independent from upload and mount chunking: revision manifests must stay
+/// portable between every byte-plane implementation.
+pub const REVISION_CHUNK_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// A drive-scoped immutable revision chunk identity.
+///
+/// The same digest and size on two drives intentionally produce different
+/// paths.  Deduplication is therefore an explicit per-drive PostgreSQL policy,
+/// never an accidental consequence of the local filesystem layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RevisionChunkLocator {
+    pub drive_id: Uuid,
+    pub digest: [u8; 32],
+    pub size: u64,
+}
+
+impl RevisionChunkLocator {
+    /// Constructs one fixed-size (except for the final) revision chunk locator.
+    pub fn new(drive_id: Uuid, digest: [u8; 32], size: u64) -> Result<Self, StorageError> {
+        if drive_id.is_nil() || size == 0 || size > REVISION_CHUNK_SIZE_BYTES {
+            return Err(StorageError::StateConflict);
+        }
+        Ok(Self {
+            drive_id,
+            digest,
+            size,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StorageLayout {
     root: PathBuf,
@@ -117,7 +148,14 @@ impl StorageLayout {
 
     pub fn prepare(&self) -> Result<(), StorageError> {
         create_secure_directory(&self.root)?;
-        for name in ["whole", "chunks", "staging", "quarantine"] {
+        for name in [
+            "whole",
+            "chunks",
+            "staging",
+            "quarantine",
+            "revision-chunks",
+            "revision-quarantine",
+        ] {
             let child = self.root.join(name);
             create_secure_directory(&child)?;
             verify_same_owner(&child, &self.root)?;
@@ -139,6 +177,146 @@ impl StorageLayout {
         Ok(self
             .shard_directory("staging", locator)?
             .join(format!("{locator}.{operation_id}.writing")))
+    }
+
+    /// Returns the private staging path for one revision chunk publication.
+    ///
+    /// Both identifiers are UUIDs accepted only after capability verification;
+    /// neither a caller-provided filename nor a relative component is used.
+    pub fn revision_chunk_staging_path(
+        &self,
+        drive_id: Uuid,
+        operation_id: Uuid,
+    ) -> Result<PathBuf, StorageError> {
+        if drive_id.is_nil() || operation_id.is_nil() {
+            return Err(StorageError::StateConflict);
+        }
+        Ok(self
+            .shard_directory("staging", operation_id)?
+            .join(format!("revision-{drive_id}-{operation_id}.writing")))
+    }
+
+    /// Returns the immutable, per-drive destination for a shared revision
+    /// chunk.  The digest and size are part of the filename so a corrupt or
+    /// substituted chunk cannot masquerade as a different persisted locator.
+    pub fn revision_chunk_path(
+        &self,
+        locator: RevisionChunkLocator,
+    ) -> Result<PathBuf, StorageError> {
+        Ok(self
+            .revision_chunk_directory("revision-chunks", locator.drive_id, &locator.digest)?
+            .join(revision_chunk_file_name(locator)))
+    }
+
+    /// Publishes an already fsynced revision chunk exactly once.
+    ///
+    /// A hard link makes concurrent/retried publication idempotent without
+    /// overwriting existing bytes.  Both the candidate and any pre-existing
+    /// object are fully verified before the staging inode is released.
+    pub fn publish_revision_chunk(
+        &self,
+        temporary: &Path,
+        locator: RevisionChunkLocator,
+    ) -> Result<PathBuf, StorageError> {
+        verify_file(temporary, locator.size, &locator.digest)?;
+        let destination = self.revision_chunk_path(locator)?;
+        match fs::hard_link(temporary, &destination) {
+            Ok(()) => sync_directory(parent(&destination)?)?,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                verify_file(&destination, locator.size, &locator.digest)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        verify_file(&destination, locator.size, &locator.digest)?;
+        fs::remove_file(temporary)?;
+        sync_directory(parent(temporary)?)?;
+        Ok(destination)
+    }
+
+    /// Verifies an immutable revision chunk and returns a bounded file segment.
+    pub fn verified_revision_chunk_segment(
+        &self,
+        locator: RevisionChunkLocator,
+        start: u64,
+        end_inclusive: u64,
+    ) -> Result<DownloadSegment, StorageError> {
+        if start > end_inclusive || end_inclusive >= locator.size {
+            return Err(StorageError::StateConflict);
+        }
+        let path = self.revision_chunk_path(locator)?;
+        verify_file(&path, locator.size, &locator.digest)?;
+        Ok(DownloadSegment {
+            path,
+            offset: start,
+            length: end_inclusive - start + 1,
+        })
+    }
+
+    /// Moves a verified chunk aside before destructive reclamation.  This is
+    /// idempotent for a retry with the same operation identifier.
+    pub fn quarantine_revision_chunk(
+        &self,
+        locator: RevisionChunkLocator,
+        operation_id: Uuid,
+    ) -> Result<PathBuf, StorageError> {
+        if operation_id.is_nil() {
+            return Err(StorageError::StateConflict);
+        }
+        let source = self.revision_chunk_path(locator)?;
+        let destination = self
+            .revision_chunk_directory("revision-quarantine", locator.drive_id, &locator.digest)?
+            .join(format!(
+                "{}.{}.quarantine",
+                revision_chunk_file_name(locator),
+                operation_id
+            ));
+        match (path_kind(&source)?, path_kind(&destination)?) {
+            (PathKind::Missing, PathKind::Present) => {
+                verify_file(&destination, locator.size, &locator.digest)?;
+                return Ok(destination);
+            }
+            (PathKind::Missing, PathKind::Missing) => return Ok(destination),
+            (PathKind::Present, PathKind::Present) => return Err(StorageError::StateConflict),
+            (PathKind::Present, PathKind::Missing) => {
+                verify_file(&source, locator.size, &locator.digest)?;
+            }
+        }
+        match fs::rename(&source, &destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if path_kind(&source)? != PathKind::Missing
+                    || path_kind(&destination)? != PathKind::Present
+                {
+                    return Err(error.into());
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+        verify_file(&destination, locator.size, &locator.digest)?;
+        sync_directory(parent(&source)?)?;
+        sync_directory(parent(&destination)?)?;
+        Ok(destination)
+    }
+
+    /// Removes one immutable revision chunk through the quarantine transition.
+    /// This is only safe after PostgreSQL has removed the final manifest
+    /// reference and issued a delete capability for this exact locator.
+    pub fn delete_revision_chunk(
+        &self,
+        locator: RevisionChunkLocator,
+        operation_id: Uuid,
+    ) -> Result<(), StorageError> {
+        let quarantined = self.quarantine_revision_chunk(locator, operation_id)?;
+        match fs::symlink_metadata(&quarantined) {
+            Ok(_) => {
+                verify_file(&quarantined, locator.size, &locator.digest)?;
+                fs::remove_file(&quarantined)?;
+                sync_directory(parent(&quarantined)?)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        Ok(())
     }
 
     pub fn payload_path(&self, payload: &PayloadRecord) -> Result<PathBuf, StorageError> {
@@ -673,6 +851,27 @@ impl StorageLayout {
         verify_same_owner(&second, &first)?;
         Ok(second)
     }
+
+    fn revision_chunk_directory(
+        &self,
+        area: &str,
+        drive_id: Uuid,
+        digest: &[u8; 32],
+    ) -> Result<PathBuf, StorageError> {
+        if drive_id.is_nil() {
+            return Err(StorageError::StateConflict);
+        }
+        let area_path = self.root.join(area);
+        create_secure_directory(&area_path)?;
+        verify_same_owner(&area_path, &self.root)?;
+        let drive = area_path.join(drive_id.to_string());
+        create_secure_directory(&drive)?;
+        verify_same_owner(&drive, &area_path)?;
+        let digest_shard = drive.join(format!("{:02x}", digest[0]));
+        create_secure_directory(&digest_shard)?;
+        verify_same_owner(&digest_shard, &drive)?;
+        Ok(digest_shard)
+    }
 }
 
 fn validate_markdown_payload(
@@ -953,6 +1152,15 @@ fn part_file_name(part_number: i32) -> String {
     format!("{part_number:08}.part")
 }
 
+fn revision_chunk_file_name(locator: RevisionChunkLocator) -> String {
+    let digest = locator
+        .digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{digest}-{}.chunk", locator.size)
+}
+
 fn remove_empty_or_operation_directory(path: &Path) -> Result<(), StorageError> {
     match fs::symlink_metadata(path) {
         Ok(_) => {}
@@ -1046,6 +1254,119 @@ mod tests {
         for area in ["whole", "chunks", "staging", "quarantine"] {
             assert!(root.join(area).is_dir());
         }
+    }
+
+    #[test]
+    fn revision_chunks_are_immutable_per_drive_and_support_bounded_reads() {
+        let temporary = tempfile::tempdir().expect("temporary storage root");
+        let layout = StorageLayout::new(temporary.path().join("payloads"));
+        layout.prepare().expect("prepare storage");
+        let bytes = b"shared revision bytes";
+        let digest = *blake3::hash(bytes).as_bytes();
+        let drive = Uuid::new_v4();
+        let locator = RevisionChunkLocator::new(drive, digest, bytes.len() as u64)
+            .expect("valid revision locator");
+        let operation = Uuid::new_v4();
+        let temporary_path = layout
+            .revision_chunk_staging_path(drive, operation)
+            .expect("revision staging path");
+        let mut file = create_new_file(&temporary_path).expect("new revision staging file");
+        file.write_all(bytes).expect("revision bytes");
+        file.sync_all().expect("sync revision bytes");
+
+        let published = layout
+            .publish_revision_chunk(&temporary_path, locator)
+            .expect("publish revision chunk");
+        assert!(
+            published.starts_with(
+                layout
+                    .root()
+                    .join("revision-chunks")
+                    .join(drive.to_string())
+            )
+        );
+        assert!(
+            published
+                .file_name()
+                .and_then(OsStr::to_str)
+                .is_some_and(
+                    |name| name.ends_with(".chunk") && name.contains(&bytes.len().to_string())
+                )
+        );
+        assert!(!temporary_path.exists());
+
+        let segment = layout
+            .verified_revision_chunk_segment(locator, 2, 8)
+            .expect("bounded revision segment");
+        assert_eq!(segment.offset, 2);
+        assert_eq!(segment.length, 7);
+        assert_eq!(
+            std::fs::read(&segment.path).expect("published bytes"),
+            bytes
+        );
+        assert!(matches!(
+            layout.verified_revision_chunk_segment(locator, 8, 2),
+            Err(StorageError::StateConflict)
+        ));
+
+        let other_drive = RevisionChunkLocator::new(Uuid::new_v4(), digest, bytes.len() as u64)
+            .expect("valid other-drive locator");
+        assert_ne!(
+            layout.revision_chunk_path(locator).expect("first path"),
+            layout
+                .revision_chunk_path(other_drive)
+                .expect("second path")
+        );
+    }
+
+    #[test]
+    fn revision_chunk_publish_rejects_wrong_size_and_delete_quarantines_first() {
+        let temporary = tempfile::tempdir().expect("temporary storage root");
+        let layout = StorageLayout::new(temporary.path().join("payloads"));
+        layout.prepare().expect("prepare storage");
+        let bytes = b"immutable";
+        let locator = RevisionChunkLocator::new(
+            Uuid::new_v4(),
+            *blake3::hash(bytes).as_bytes(),
+            bytes.len() as u64,
+        )
+        .expect("valid revision locator");
+        let temporary_path = layout
+            .revision_chunk_staging_path(locator.drive_id, Uuid::new_v4())
+            .expect("revision staging path");
+        let mut file = create_new_file(&temporary_path).expect("new revision staging file");
+        file.write_all(b"wrong").expect("wrong bytes");
+        file.sync_all().expect("sync wrong bytes");
+        assert!(matches!(
+            layout.publish_revision_chunk(&temporary_path, locator),
+            Err(StorageError::CorruptObject)
+        ));
+
+        std::fs::remove_file(&temporary_path).expect("remove wrong staging file");
+        let temporary_path = layout
+            .revision_chunk_staging_path(locator.drive_id, Uuid::new_v4())
+            .expect("revision staging path");
+        let mut file = create_new_file(&temporary_path).expect("new revision staging file");
+        file.write_all(bytes).expect("revision bytes");
+        file.sync_all().expect("sync revision bytes");
+        layout
+            .publish_revision_chunk(&temporary_path, locator)
+            .expect("publish revision chunk");
+        let operation = Uuid::new_v4();
+        let quarantined = layout
+            .quarantine_revision_chunk(locator, operation)
+            .expect("quarantine revision chunk");
+        assert!(quarantined.exists());
+        assert!(
+            !layout
+                .revision_chunk_path(locator)
+                .expect("chunk path")
+                .exists()
+        );
+        layout
+            .delete_revision_chunk(locator, operation)
+            .expect("delete quarantined revision chunk");
+        assert!(!quarantined.exists());
     }
 
     #[test]

@@ -46,6 +46,7 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
             "networkpolicies.yaml",
             "operation-job.yaml",
             "pdbs.yaml",
+            "revisions.yaml",
             "serviceaccounts.yaml",
             "services.yaml",
         ]
@@ -68,6 +69,7 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
         "filebelt-vfs",
         "filebelt-headscale-sync",
         "filebelt-document",
+        "filebelt-revision",
         "filebelt-smb-gateway",
         "filebelt-ftp-ftps-gateway",
         "tailscaled",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { DecodeMarkdown, EncodeMarkdown, MarkdownInputError } from "./bytes.js";
+import { DecodeEditableText, DecodeMarkdown, EncodeMarkdown, MarkdownInputError } from "./bytes.js";
 
 describe("Markdown byte boundaries", () => {
   it("preserves a BOM and CRLF save format while editing normalized text", () => {
@@ -15,5 +15,10 @@ describe("Markdown byte boundaries", () => {
     expect(() => DecodeMarkdown(new Uint8Array([0]), 32)).toThrow(MarkdownInputError);
     expect(() => DecodeMarkdown(new TextEncoder().encode("a\nb\r\nc"), 32)).toThrow(MarkdownInputError);
     expect(() => DecodeMarkdown(new TextEncoder().encode("four"), 3)).toThrow(MarkdownInputError);
+  });
+
+  it("allows the reviewed 16 MiB editable text boundary", () => {
+    expect(DecodeEditableText(new Uint8Array(16 * 1024 * 1024).fill(0x61)).Text).toHaveLength(16 * 1024 * 1024);
+    expect(() => DecodeEditableText(new Uint8Array(16 * 1024 * 1024 + 1).fill(0x61))).toThrow(MarkdownInputError);
   });
 });

@@ -185,6 +185,9 @@ spec:
             {{- if .Values.documents.enabled }}
             - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
+            {{- if .Values.revisions.enabled }}
+            - {name: revision-storage-capability-public, mountPath: /run/secrets/revision-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
             {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
             - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
@@ -246,6 +249,13 @@ spec:
             secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}
             defaultMode: 0440
             items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
+        {{- end }}
+        {{- if .Values.revisions.enabled }}
+        - name: revision-storage-capability-public
+          secret:
+            secretName: {{ .Values.secrets.revisionStorageCapabilityPublicKeyset.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.revisionStorageCapabilityPublicKeyset.key }}, path: public-keyset}]
         {{- end }}
         {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         - name: mount-storage-capability-public

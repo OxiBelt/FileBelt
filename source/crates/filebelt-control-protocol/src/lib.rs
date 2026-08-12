@@ -14,7 +14,7 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 
-pub const CONFIG_VERSION: u32 = 8;
+pub const CONFIG_VERSION: u32 = 9;
 pub const SMB_GATEWAY_URI_SAN: &str = "spiffe://filebelt/smb-gateway/vfs";
 pub const FTP_FTPS_GATEWAY_URI_SAN: &str = "spiffe://filebelt/ftp-ftps-gateway/vfs";
 pub const NFS_GATEWAY_URI_SAN: &str = "spiffe://filebelt/nfs-gateway/vfs";
@@ -46,6 +46,8 @@ pub struct Config {
     pub collaboration: CollaborationConfig,
     #[serde(default)]
     pub documents: DocumentConfig,
+    #[serde(default)]
+    pub revisions: RevisionConfig,
     pub media: MediaConfig,
     #[serde(default)]
     pub mounts: MountConfig,
@@ -120,6 +122,8 @@ pub struct BackendTlsConfig {
     pub document: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub document_adapter: Option<BackendServerTlsConfig>,
+    #[serde(default)]
+    pub revision: Option<BackendServerTlsConfig>,
     #[serde(default)]
     pub vfs: Option<BackendServerTlsConfig>,
     #[serde(default)]
@@ -241,6 +245,8 @@ pub struct ListenerConfig {
     pub document: SocketAddr,
     #[serde(default = "default_document_adapter_listener")]
     pub document_adapter: SocketAddr,
+    #[serde(default = "default_revision_listener")]
+    pub revision: SocketAddr,
     /// Permit an unspecified bind address inside an explicitly isolated
     /// container network.
     #[serde(default)]
@@ -262,6 +268,7 @@ impl Default for ListenerConfig {
             vfs_management: default_vfs_management_listener(),
             document: default_document_listener(),
             document_adapter: default_document_adapter_listener(),
+            revision: default_revision_listener(),
             allow_container_wildcard: false,
         }
     }
@@ -318,6 +325,73 @@ impl Default for DocumentConfig {
             max_active_tabs: default_document_max_active_tabs(),
             max_document_bytes: default_document_max_bytes(),
             generation_recheck_seconds: default_document_generation_recheck_seconds(),
+        }
+    }
+}
+
+/// Canonical revision coordinator and its purpose-scoped byte-plane clients.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevisionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub database_url_file: Option<PathBuf>,
+    #[serde(default)]
+    pub url: Option<Url>,
+    #[serde(default)]
+    pub adapter_url: Option<Url>,
+    #[serde(default)]
+    pub io_url: Option<Url>,
+    #[serde(default)]
+    pub client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub adapter_client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub adapter_client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub adapter_server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub io_client_certificate_chain_file: Option<PathBuf>,
+    #[serde(default)]
+    pub io_client_private_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub io_server_ca_file: Option<PathBuf>,
+    #[serde(default)]
+    pub capability_signing: Option<SigningKeyConfig>,
+    #[serde(default = "default_revision_chunk_bytes")]
+    pub chunk_size_bytes: u64,
+    #[serde(default = "default_revision_text_bytes")]
+    pub max_text_bytes: u64,
+    #[serde(default = "default_revision_object_format")]
+    pub git_object_format: String,
+}
+
+impl Default for RevisionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            database_url_file: None,
+            url: None,
+            adapter_url: None,
+            io_url: None,
+            client_certificate_chain_file: None,
+            client_private_key_file: None,
+            server_ca_file: None,
+            adapter_client_certificate_chain_file: None,
+            adapter_client_private_key_file: None,
+            adapter_server_ca_file: None,
+            io_client_certificate_chain_file: None,
+            io_client_private_key_file: None,
+            io_server_ca_file: None,
+            capability_signing: None,
+            chunk_size_bytes: default_revision_chunk_bytes(),
+            max_text_bytes: default_revision_text_bytes(),
+            git_object_format: default_revision_object_format(),
         }
     }
 }
@@ -1050,6 +1124,7 @@ impl Config {
                 || (self.documents.enabled && self.listeners.document.ip().is_unspecified())
                 || (self.documents.enabled
                     && self.listeners.document_adapter.ip().is_unspecified())
+                || (self.revisions.enabled && self.listeners.revision.ip().is_unspecified())
                 || (self.mounts.any_protocol_enabled() && self.listeners.vfs.ip().is_unspecified())
                 || (self.mounts.any_protocol_enabled()
                     && self.listeners.vfs_management.ip().is_unspecified()))
@@ -1112,6 +1187,28 @@ impl Config {
                     }) {
                         return Err(invalid(&format!(
                             "document adapter and {role} backend TLS client identities and trust domains must not overlap"
+                        )));
+                    }
+                }
+            }
+            if let Some(revision) = &tls.revision {
+                validate_backend_tls(revision)?;
+                for (role, other) in [
+                    ("API", Some(&tls.api)),
+                    ("I/O", Some(&tls.io)),
+                    ("MCP broker", tls.mcp_broker.as_ref()),
+                    ("controller", tls.controller.as_ref()),
+                    ("collaboration", tls.collaboration.as_ref()),
+                    ("document API", tls.document.as_ref()),
+                    ("document adapter", tls.document_adapter.as_ref()),
+                    ("VFS", tls.vfs.as_ref()),
+                    ("VFS management", tls.vfs_management.as_ref()),
+                ] {
+                    if other
+                        .is_some_and(|other| backend_tls_identity_policies_overlap(revision, other))
+                    {
+                        return Err(invalid(&format!(
+                            "revision and {role} backend TLS client identities and trust domains must not overlap"
                         )));
                     }
                 }
@@ -1237,6 +1334,7 @@ impl Config {
         self.validate_mcp()?;
         self.validate_collaboration()?;
         self.validate_documents()?;
+        self.validate_revisions()?;
         self.validate_media()?;
         self.validate_mounts()?;
         Ok(())
@@ -1254,6 +1352,9 @@ impl Config {
             configured.push(key);
         }
         if let Some(key) = &self.documents.capability_signing {
+            configured.push(key);
+        }
+        if let Some(key) = &self.revisions.capability_signing {
             configured.push(key);
         }
         if let Some(key) = &self.mounts.capability_signing {
@@ -1391,6 +1492,106 @@ impl Config {
             return Err(invalid(
                 "document TLS paths must be absolute when configured",
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_revisions(&self) -> Result<(), ConfigError> {
+        let revisions = &self.revisions;
+        if revisions.chunk_size_bytes != default_revision_chunk_bytes()
+            || revisions.max_text_bytes != default_revision_text_bytes()
+            || revisions.git_object_format != "sha256"
+        {
+            return Err(invalid(
+                "revision storage requires 16 MiB fixed chunks, a 100 MiB text cap, and SHA-256 Git objects",
+            ));
+        }
+        let authority_paths = [
+            revisions.database_url_file.as_ref(),
+            revisions.client_certificate_chain_file.as_ref(),
+            revisions.client_private_key_file.as_ref(),
+            revisions.server_ca_file.as_ref(),
+            revisions.adapter_client_certificate_chain_file.as_ref(),
+            revisions.adapter_client_private_key_file.as_ref(),
+            revisions.adapter_server_ca_file.as_ref(),
+            revisions.io_client_certificate_chain_file.as_ref(),
+            revisions.io_client_private_key_file.as_ref(),
+            revisions.io_server_ca_file.as_ref(),
+        ];
+        if !revisions.enabled {
+            if authority_paths.into_iter().any(|path| path.is_some())
+                || revisions.url.is_some()
+                || revisions.adapter_url.is_some()
+                || revisions.io_url.is_some()
+                || revisions.capability_signing.is_some()
+                || self
+                    .backend_tls
+                    .as_ref()
+                    .is_some_and(|tls| tls.revision.is_some())
+            {
+                return Err(invalid(
+                    "disabled revisions must not configure database, service, capability, or TLS authority",
+                ));
+            }
+            return Ok(());
+        }
+        if authority_paths
+            .into_iter()
+            .any(|path| path.is_none_or(|path| !path.is_absolute()))
+        {
+            return Err(invalid(
+                "enabled revisions require absolute database and mTLS paths",
+            ));
+        }
+        let signing = revisions
+            .capability_signing
+            .as_ref()
+            .ok_or_else(|| invalid("enabled revisions require capability signing"))?;
+        validate_signing_key(signing, "revision storage")?;
+        for (url, label) in [
+            (revisions.url.as_ref(), "revision service"),
+            (revisions.adapter_url.as_ref(), "revision adapter"),
+            (revisions.io_url.as_ref(), "revision I/O"),
+        ] {
+            validate_internal_service_url(url, self.deployment.mode, label)?;
+        }
+        if [
+            self.listeners.api,
+            self.listeners.io,
+            self.listeners.operations,
+            self.listeners.mcp_broker,
+            self.listeners.mcp_runner_relay,
+            self.listeners.controller,
+            self.listeners.collaboration_ws,
+            self.listeners.collaboration_webtransport,
+            self.listeners.vfs,
+            self.listeners.vfs_management,
+            self.listeners.document,
+            self.listeners.document_adapter,
+        ]
+        .contains(&self.listeners.revision)
+        {
+            return Err(invalid(
+                "revision listener must be distinct from every other listener",
+            ));
+        }
+        if self.deployment.mode == DeploymentMode::Kubernetes
+            && self
+                .backend_tls
+                .as_ref()
+                .and_then(|tls| tls.revision.as_ref())
+                .is_none()
+        {
+            return Err(invalid(
+                "Kubernetes revisions require a dedicated backend mTLS configuration",
+            ));
+        }
+        if let Some(tls) = self
+            .backend_tls
+            .as_ref()
+            .and_then(|backend| backend.revision.as_ref())
+        {
+            validate_backend_tls(tls)?;
         }
         Ok(())
     }
@@ -2322,7 +2523,7 @@ fn validate_internal_service_url(
 ) -> Result<(), ConfigError> {
     let url = url.ok_or_else(|| {
         invalid(&format!(
-            "enabled documents require an internal {service} URL"
+            "enabled feature requires an internal {service} URL"
         ))
     })?;
     let loopback_http = url
@@ -2491,6 +2692,22 @@ fn default_document_listener() -> SocketAddr {
 
 fn default_document_adapter_listener() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8090))
+}
+
+fn default_revision_listener() -> SocketAddr {
+    "127.0.0.1:8091".parse().expect("valid default listener")
+}
+
+const fn default_revision_chunk_bytes() -> u64 {
+    16 * 1024 * 1024
+}
+
+const fn default_revision_text_bytes() -> u64 {
+    100 * 1024 * 1024
+}
+
+fn default_revision_object_format() -> String {
+    "sha256".to_owned()
 }
 const fn default_headscale_sync_seconds() -> u64 {
     15
@@ -2752,6 +2969,7 @@ mod tests {
             collaboration: None,
             document: None,
             document_adapter: None,
+            revision: None,
             vfs: Some(backend_server_tls(NFS_GATEWAY_URI_SAN)),
             vfs_management: Some(backend_server_tls(
                 "spiffe://filebelt.test/api-vfs-management",
@@ -2810,6 +3028,7 @@ mod tests {
             mcp: McpConfig::default(),
             collaboration: CollaborationConfig::default(),
             documents: DocumentConfig::default(),
+            revisions: RevisionConfig::default(),
             media: MediaConfig::default(),
             mounts: MountConfig::default(),
         }
@@ -2840,7 +3059,7 @@ mod tests {
     #[test]
     fn unsupported_configuration_version_is_rejected() {
         let mut candidate = config();
-        assert_eq!(CONFIG_VERSION, 8);
+        assert_eq!(CONFIG_VERSION, 9);
         candidate.version = 7;
         assert!(candidate.validate().is_err());
     }
@@ -2888,6 +3107,7 @@ mod tests {
             collaboration: None,
             document: None,
             document_adapter: None,
+            revision: None,
             vfs: None,
             vfs_management: None,
         });
@@ -3252,6 +3472,7 @@ mod tests {
                 allowed_client_uri_sans: vec!["spiffe://filebelt.test/onlyoffice-document".into()],
                 allowed_client_trust_domains: Vec::new(),
             }),
+            revision: None,
             vfs: None,
             vfs_management: None,
         });
@@ -3333,6 +3554,7 @@ mod tests {
             collaboration: None,
             document: None,
             document_adapter: None,
+            revision: None,
             vfs: None,
             vfs_management: None,
         });
@@ -3362,6 +3584,7 @@ mod tests {
             collaboration: None,
             document: None,
             document_adapter: None,
+            revision: None,
             vfs: None,
             vfs_management: None,
         });
@@ -3383,6 +3606,7 @@ mod tests {
             collaboration: None,
             document: None,
             document_adapter: None,
+            revision: None,
             vfs: None,
             vfs_management: None,
         });

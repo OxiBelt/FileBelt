@@ -218,9 +218,18 @@ PostgreSQL, and session idle/absolute expiry is checked on every operation.
 No mount authorization depends on Headscale packet delivery, Iggy delivery, or
 an adapter-local path or UUID cache.
 
-## Markdown editing and collaboration authorization
+## Text editing, history, and collaboration authorization
 
-Markdown editing introduces no Virtual ACL action. Opening or participating in
+Text editing and Git history introduce no Virtual ACL action. Reading an
+authorized commit ID or comparing two immutable versions always reauthorizes
+the current node with `READ_CONTENT`; a commit ID is an identifier, never a
+capability. Saving requires `WRITE_CONTENT` and `CREATE_VERSION` with the same
+expected-head and generation fences as other writers. Changing persistent
+`content_class_policy` requires `SET_ATTRIBUTES`, an exact attribute ETag, and
+freezes active incompatible collaboration state before returning. Per-user
+size preferences carry no resource authority.
+
+Opening or participating in
 a collaboration room requires both `READ_CONTENT` and `WRITE_CONTENT`; there
 is no read-only spectator membership. Saving the room as an immutable version
 also requires `CREATE_VERSION`. Discarding dirty room state requires `DELETE`

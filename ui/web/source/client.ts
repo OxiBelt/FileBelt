@@ -6,8 +6,40 @@ import type {
   FileEntry,
   ShareRecord,
   UploadCandidate,
+  VersionRecord,
   WorkspaceSnapshot,
 } from "./model.js";
+
+/** Transitional browser shape until the generated OpenAPI contract lands. */
+export type EditTextLimitBytes = 1_048_576 | 2_097_152 | 4_194_304 | 8_388_608 | 16_777_216;
+export type InlineTextLimitBytes = 8_388_608 | 16_777_216 | 33_554_432 | 67_108_864 | 104_857_600;
+
+export interface TextPreferences {
+  EditLimitBytes: EditTextLimitBytes;
+  InlineLimitBytes: InlineTextLimitBytes;
+}
+
+export interface VersionPage {
+  Items: readonly VersionRecord[];
+  NextCursor: string | null;
+}
+
+export interface TextDiffHunk {
+  BaseLines: number;
+  BaseStart: number;
+  Lines: readonly TextDiffLine[];
+  TargetLines: number;
+  TargetStart: number;
+}
+
+export interface TextDiffLine {
+  Kind: "add" | "context" | "remove";
+  Text: string;
+}
+
+export interface TextComparison {
+  Hunks: readonly TextDiffHunk[];
+}
 
 export interface CreateShareInput {
   FileId: string;
@@ -95,6 +127,11 @@ export interface FileBeltClient {
   suspendUser(UserId: string): Promise<void>;
   trashEntries(EntryIds: readonly string[]): Promise<void>;
   upload(Files: readonly UploadCandidate[]): Promise<void>;
+  compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison>;
+  getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }>;
+  listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage>;
+  setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void>;
+  updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }>;
 }
 
 const Now = "2026-08-06T12:00:00Z";
@@ -114,7 +151,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Id: Uuid("101"),
       HeadVersionId: null,
       Kind: "folder",
-      MarkdownEligibility: "ineligible",
+      TextEligibility: "ineligible",
       MediaType: null,
       ModifiedAt: "2026-08-06T09:24:00Z",
       Name: "Launch documents",
@@ -129,7 +166,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Id: Uuid("102"),
       HeadVersionId: Uuid("301"),
       Kind: "file",
-      MarkdownEligibility: "ineligible",
+      TextEligibility: "ineligible",
       MediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ModifiedAt: "2026-08-06T10:48:00Z",
       Name: "Q3 forecast.xlsx",
@@ -144,7 +181,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Id: Uuid("103"),
       HeadVersionId: Uuid("302"),
       Kind: "file",
-      MarkdownEligibility: "ineligible",
+      TextEligibility: "ineligible",
       MediaType: "application/pdf",
       ModifiedAt: "2026-08-05T16:12:00Z",
       Name: "Product brief.pdf",
@@ -159,7 +196,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Id: Uuid("104"),
       HeadVersionId: Uuid("303"),
       Kind: "file",
-      MarkdownEligibility: "editable",
+      TextEligibility: "editable",
       MediaType: "text/markdown",
       ModifiedAt: "2026-08-02T11:30:00Z",
       Name: "Archive notes.txt",
@@ -174,7 +211,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Id: Uuid("105"),
       HeadVersionId: Uuid("304"),
       Kind: "file",
-      MarkdownEligibility: "viewable",
+      TextEligibility: "viewable",
       MediaType: "text/markdown",
       ModifiedAt: "2026-08-06T08:05:00Z",
       Name: "‫خطة المشروع‬.pdf",
@@ -244,6 +281,37 @@ function CloneSnapshot(Snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
 export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   readonly #Snapshot = CloneSnapshot(InitialSnapshot);
   #Sequence = 1_000;
+  #TextPreferences: TextPreferences = { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 };
+  #TextPreferencesEtag = '"text-preferences-1"';
+
+  async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
+    return { Etag: this.#TextPreferencesEtag, Value: { ...this.#TextPreferences } };
+  }
+
+  async updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }> {
+    if (ExpectedEtag !== this.#TextPreferencesEtag) throw new Error("Text preferences changed elsewhere. Refresh and try again.");
+    if (Patch.InlineLimitBytes < Patch.EditLimitBytes) throw new Error("The inline limit must be at least the edit limit.");
+    this.#TextPreferences = { ...Patch };
+    this.#TextPreferencesEtag = `"text-preferences-${++this.#Sequence}"`;
+    return this.getTextPreferences();
+  }
+
+  async listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage> {
+    if (Cursor !== null) return { Items: [], NextCursor: null };
+    return { Items: this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId), NextCursor: null };
+  }
+
+  async compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison> {
+    const Versions = this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId);
+    if (!Versions.some(({ Id }) => Id === BaseVersionId) || !Versions.some(({ Id }) => Id === TargetVersionId)) throw new Error("The selected versions are unavailable.");
+    return { Hunks: [{ BaseLines: 1, BaseStart: 1, Lines: [{ Kind: "context", Text: "Mock comparison is available after the generated API client is connected." }], TargetLines: 1, TargetStart: 1 }] };
+  }
+
+  async setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void> {
+    const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
+    if (Entry === undefined) throw new Error("The selected file is unavailable.");
+    Entry.TextEligibility = ContentClass === "binary" ? "history-only" : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType);
+  }
 
   async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
     if (Signal?.aborted === true) {
@@ -259,7 +327,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         Id,
         HeadVersionId: Uuid(String(++this.#Sequence)),
         Kind: "file",
-        MarkdownEligibility: MarkdownEligibility(File.Name, File.Size, File.MediaType ?? null),
+        TextEligibility: TextEligibility(File.Name, File.Size, File.MediaType ?? null),
         MediaType: File.MediaType ?? null,
         ModifiedAt: new Date().toISOString(),
         Name: File.Name,
@@ -291,7 +359,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     if (Original?.HeadVersionId !== Input.SourceVersionId) throw new Error("The Office source version is unavailable.");
     const Id = Uuid(String(++this.#Sequence));
     const VersionId = Uuid(String(++this.#Sequence));
-    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, MarkdownEligibility: "editable", MediaType: "text/markdown", ModifiedAt: new Date().toISOString(), Name: Input.TargetName, Shared: false, Size: Input.Contents.size, Version: 1 });
+    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, TextEligibility: "editable", MediaType: "text/markdown", ModifiedAt: new Date().toISOString(), Name: Input.TargetName, Shared: false, Size: Input.Contents.size, Version: 1 });
     return VersionId;
   }
 
@@ -310,7 +378,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
     if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId) throw new VersionConflictError();
-    if (Entry.MarkdownEligibility !== "editable") throw new Error("This Markdown file is view-only.");
+    if (Entry.TextEligibility !== "editable") throw new Error("This text file is view-only.");
     Entry.HeadVersionId = Uuid(String(++this.#Sequence));
     Entry.ModifiedAt = new Date().toISOString();
     Entry.Size = Input.Contents.size;
@@ -425,8 +493,9 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 }
 
-function MarkdownEligibility(Name: string, Size: number, MediaType: string | null): FileEntry["MarkdownEligibility"] {
-  const IsMarkdown = MediaType === "text/markdown" || /\.(md|markdown|mdown|mkdn)$/i.test(Name);
-  if (!IsMarkdown || Size > 8 * 1024 * 1024) return "ineligible";
-  return Size <= 2 * 1024 * 1024 ? "editable" : "viewable";
+function TextEligibility(Name: string, Size: number, MediaType: string | null): FileEntry["TextEligibility"] {
+  const IsText = MediaType?.startsWith("text/") === true || /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(Name);
+  if (!IsText) return "ineligible";
+  if (Size > 100 * 1024 * 1024) return "history-only";
+  return Size <= 16 * 1024 * 1024 ? "editable" : "viewable";
 }

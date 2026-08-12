@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MarkdownPreview } from "./renderer.js";
-import { MarkdownSurface } from "./surface.js";
+import { MarkdownSurface, TextSurface } from "./surface.js";
 import { EnglishMarkdownStrings } from "./strings.js";
 import type { FileBeltOfficeAstV1, MarkdownSource } from "./types.js";
 
@@ -19,5 +19,11 @@ describe("Markdown isolation and accessibility", () => {
     expect(Surface).toContain('role="tablist"');
     expect(Surface).toContain("aria-controls=");
     expect(Surface).toContain('role="tabpanel"');
+  });
+
+  it("provides a language-neutral source-only surface", () => {
+    const Surface = renderToStaticMarkup(<TextSurface Disabled Source={Source} Strings={{ Edit: "Edit", SourceEditor: "Text source", View: "View source" }} />);
+    expect(Surface).toContain('data-filebelt-text-mode="view"');
+    expect(Surface).toContain("View source");
   });
 });

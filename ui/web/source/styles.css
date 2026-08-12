@@ -215,6 +215,57 @@ select:focus-visible,
   min-height: 24rem;
 }
 
+.fb-markdown-view [data-filebelt-text-editor="source"],
+[data-filebelt-text-mode] [data-filebelt-text-editor="source"] {
+  border: 1px solid var(--fb-border-subtle);
+  min-height: 24rem;
+}
+
+.fb-text-settings form,
+.fb-history-compare {
+  align-items: end;
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fb-space);
+  padding: var(--fb-space);
+}
+
+.fb-text-settings label,
+.fb-history-compare label {
+  display: grid;
+  gap: 6px;
+}
+
+.fb-history-row,
+.fb-text-diff code {
+  contain-intrinsic-size: auto 72px;
+  content-visibility: auto;
+}
+
+.fb-text-diff {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  max-height: 60dvh;
+  overflow: auto;
+  padding: var(--fb-space);
+}
+
+.fb-text-diff code {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.fb-text-diff .is-add {
+  background: color-mix(in srgb, var(--fb-success) 14%, transparent);
+}
+
+.fb-text-diff .is-remove {
+  background: color-mix(in srgb, var(--fb-danger) 14%, transparent);
+}
+
 .fb-markdown-view article {
   background: var(--fb-bg-surface-1);
   border: 1px solid var(--fb-border-subtle);

@@ -29,7 +29,10 @@ pub use source::{LineEnding, MarkdownSource, MarkdownSourceError};
 pub use wire::{FrameError, decode_frame, encode_frame, validate_awareness};
 
 pub const MARKDOWN_ROOT: &str = "source";
-pub const MAX_MARKDOWN_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+/// Initial Markdown collaboration source follows the shared per-user editor
+/// ceiling. Encoded Yjs state and retained-room limits remain independently
+/// bounded by `CollaborationLimitConfig`.
+pub const MAX_MARKDOWN_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomFreezeReason {

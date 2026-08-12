@@ -108,6 +108,12 @@ SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
 [[annotations]]
+path = ["adapters/git/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
 path = ["adapters/nfs/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"

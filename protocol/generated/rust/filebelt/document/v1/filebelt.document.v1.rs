@@ -345,6 +345,10 @@ pub struct ReceiveDocumentCallbackCommand {
     pub revision_kind: i32,
     #[prost(enumeration="DocumentParticipantActivity", tag="7")]
     pub activity: i32,
+    /// The exact provider-declared output extension. Core binds this to the
+    /// immutable source media type before allocating a revision.
+    #[prost(string, tag="8")]
+    pub output_file_type: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshDocumentSourceCommand {

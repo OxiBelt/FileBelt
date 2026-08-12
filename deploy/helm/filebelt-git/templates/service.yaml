@@ -1,0 +1,12 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt-git.name" . }}
+  labels:
+{{ include "filebelt-git.labels" . | indent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/name: filebelt-git, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: git-adapter}
+  ports:
+    - {name: mtls, port: 8092, targetPort: mtls, protocol: TCP}

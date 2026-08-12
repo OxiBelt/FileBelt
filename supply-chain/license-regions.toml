@@ -76,6 +76,11 @@ license = "AGPL-3.0-only"
 workspace = "adapter"
 
 [[regions]]
+path = "adapters/git"
+license = "GPL-2.0-only"
+workspace = "adapter"
+
+[[regions]]
 path = "adapters/nfs"
 license = "LGPL-3.0-or-later"
 workspace = "adapter"

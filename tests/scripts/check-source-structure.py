@@ -19,6 +19,7 @@ ADAPTER_ROOTS = {
     "adapters/smb": "GPL-3.0-or-later",
     "adapters/ftp-ftps": "GPL-3.0-or-later",
     "adapters/onlyoffice": "AGPL-3.0-only",
+    "adapters/git": "GPL-2.0-only",
     "adapters/nfs": "LGPL-3.0-or-later",
     "adapters/transcode": "GPL-3.0-or-later",
 }
@@ -33,6 +34,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/apps/filebelt-mcp-runner",
     "source/apps/filebelt-controller",
     "source/apps/filebelt-document",
+    "source/apps/filebelt-revision",
     "source/apps/filebeltctl",
     "source/apps/filebelt-vfs",
     "source/apps/filebelt-headscale-sync",
@@ -47,6 +49,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/crates/filebelt-storage-protocol",
     "source/crates/filebelt-vfs-protocol",
     "source/crates/filebelt-document-protocol",
+    "source/crates/filebelt-revision-protocol",
     "source/crates/filebelt-collaboration-protocol",
     "source/crates/filebelt-mcp-policy",
     "source/crates/filebelt-mcp-protocol",

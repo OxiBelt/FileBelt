@@ -24,7 +24,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use filebelt_capability_keyset::{
     ApiCollaborationGrantKeyset, ApiMcpDelegationKeyset, ApiStorageKeyset,
     CollaborationStorageKeyset, DocumentStorageKeyset, KeyPurpose as CoreKeyPurpose,
-    MediaStorageKeyset, MountStorageKeyset, encode_keyset,
+    MediaStorageKeyset, MountStorageKeyset, RevisionStorageKeyset, encode_keyset,
 };
 use filebelt_control_protocol::{Config, read_secret_string};
 use filebelt_database::Database;
@@ -261,6 +261,7 @@ enum KeyPurposeArg {
     ApiMcpDelegation,
     CollaborationStorage,
     DocumentStorage,
+    RevisionStorage,
     MountStorage,
     MediaStorage,
 }
@@ -273,6 +274,7 @@ impl From<KeyPurposeArg> for CoreKeyPurpose {
             KeyPurposeArg::ApiMcpDelegation => Self::ApiMcpDelegation,
             KeyPurposeArg::CollaborationStorage => Self::CollaborationStorage,
             KeyPurposeArg::DocumentStorage => Self::DocumentStorage,
+            KeyPurposeArg::RevisionStorage => Self::RevisionStorage,
             KeyPurposeArg::MountStorage => Self::MountStorage,
             KeyPurposeArg::MediaStorage => Self::MediaStorage,
         }
@@ -1038,6 +1040,7 @@ pub(crate) fn read_keyset(
         CoreKeyPurpose::DocumentStorage => entries!(DocumentStorageKeyset),
         CoreKeyPurpose::MountStorage => entries!(MountStorageKeyset),
         CoreKeyPurpose::MediaStorage => entries!(MediaStorageKeyset),
+        CoreKeyPurpose::RevisionStorage => entries!(RevisionStorageKeyset),
     })
 }
 
@@ -1079,6 +1082,9 @@ fn audit_keysets(configuration: &Config) -> Result<(), String> {
     }
     if let Some(key) = &configuration.documents.capability_signing {
         configured.push((CoreKeyPurpose::DocumentStorage, key));
+    }
+    if let Some(key) = &configuration.revisions.capability_signing {
+        configured.push((CoreKeyPurpose::RevisionStorage, key));
     }
     if let Some(key) = &configuration.mounts.capability_signing {
         configured.push((CoreKeyPurpose::MountStorage, key));
@@ -1143,6 +1149,116 @@ fn write_key_file(path: &Path, bytes: &[u8], mode: u32, force: bool) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audit_configuration(
+        directory: &Path,
+        revision_generation: u32,
+        duplicate_revision_key: bool,
+    ) -> Config {
+        let api_public = directory.join("api.pub");
+        let media_public = directory.join("media.pub");
+        let revision_public = directory.join("revision.pub");
+        let api_key = [1_u8; 32];
+        fs::write(
+            &api_public,
+            encode_keyset(CoreKeyPurpose::ApiStorage, &[(1, api_key)]).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &media_public,
+            encode_keyset(CoreKeyPurpose::MediaStorage, &[(1, [2; 32])]).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &revision_public,
+            encode_keyset(
+                CoreKeyPurpose::RevisionStorage,
+                &[(
+                    1,
+                    if duplicate_revision_key {
+                        api_key
+                    } else {
+                        [3; 32]
+                    },
+                )],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let config_path = directory.join("filebelt.toml");
+        fs::write(
+            &config_path,
+            format!(
+                r#"version = 9
+public_origin = "https://audit.example.test/"
+
+[deployment]
+mode = "development"
+
+[tenant]
+slug = "audit"
+administrator = [{{ issuer = "https://id.example.test/", subject = "audit-admin" }}]
+
+[database]
+url_file = "{directory}/database-url"
+
+[oidc]
+issuer = "http://127.0.0.1:8081/"
+client_id = "audit"
+client_secret_file = "{directory}/oidc-secret"
+development_allow_insecure = true
+
+[storage]
+root = "{directory}/payloads"
+backend_id = "10000000-0000-4000-8000-000000000001"
+
+[keys]
+digest_key_file = "{directory}/digest"
+digest_key_generation = 1
+
+[keys.api_storage]
+private_key_file = "{directory}/api.pk8"
+public_keyset_file = "{api_public}"
+current_generation = 1
+
+[media]
+enabled = false
+
+[media.capability_signing]
+private_key_file = "{directory}/media.pk8"
+public_keyset_file = "{media_public}"
+current_generation = 1
+
+[revisions]
+enabled = true
+database_url_file = "{directory}/revision-database-url"
+url = "http://127.0.0.1:8091/"
+adapter_url = "http://127.0.0.1:8092/"
+io_url = "http://127.0.0.1:8081/"
+client_certificate_chain_file = "{directory}/revision-client.crt"
+client_private_key_file = "{directory}/revision-client.key"
+server_ca_file = "{directory}/revision-server-ca.crt"
+adapter_client_certificate_chain_file = "{directory}/revision-adapter-client.crt"
+adapter_client_private_key_file = "{directory}/revision-adapter-client.key"
+adapter_server_ca_file = "{directory}/revision-adapter-ca.crt"
+io_client_certificate_chain_file = "{directory}/revision-io-client.crt"
+io_client_private_key_file = "{directory}/revision-io-client.key"
+io_server_ca_file = "{directory}/revision-io-ca.crt"
+
+[revisions.capability_signing]
+private_key_file = "{directory}/revision.pk8"
+public_keyset_file = "{revision_public}"
+current_generation = {revision_generation}
+"#,
+                directory = directory.display(),
+                api_public = api_public.display(),
+                media_public = media_public.display(),
+                revision_public = revision_public.display(),
+            ),
+        )
+        .unwrap();
+        Config::load(&config_path).expect("valid audit configuration")
+    }
 
     #[test]
     fn generated_key_pair_has_secure_private_mode_and_versioned_public_set() {
@@ -1215,6 +1331,33 @@ mod tests {
                 6
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn key_purpose_argument_includes_revision_storage() {
+        assert_eq!(
+            CoreKeyPurpose::from(KeyPurposeArg::RevisionStorage),
+            CoreKeyPurpose::RevisionStorage
+        );
+    }
+
+    #[test]
+    fn ordinary_key_audit_covers_revision_keysets_and_their_generation() {
+        let temporary = tempfile::tempdir().unwrap();
+        let configuration = audit_configuration(temporary.path(), 1, false);
+        assert!(audit_keysets(&configuration).is_ok());
+
+        let missing_generation = audit_configuration(temporary.path(), 2, false);
+        assert_eq!(
+            audit_keysets(&missing_generation),
+            Err("capability current generation is absent".into())
+        );
+
+        let duplicate_key = audit_configuration(temporary.path(), 1, true);
+        assert_eq!(
+            audit_keysets(&duplicate_key),
+            Err("capability public key material is reused across purposes".into())
         );
     }
 }

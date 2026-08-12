@@ -1,0 +1,50 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "filebelt-git.name" . }}
+  labels:
+{{ include "filebelt-git.labels" . | indent 4 }}
+spec:
+  serviceName: {{ include "filebelt-git.name" . }}
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt-git, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: git-adapter}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt-git.labels" . | indent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s:%s:%s" .Values.config.existingConfigMap .Values.config.key .Values.config.generation | sha256sum | quote }}
+        checksum/server-tls: {{ .Values.secrets.serverTls.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt-git.name" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.workload.terminationGracePeriodSeconds }}
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, fsGroupChangePolicy: OnRootMismatch, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: git-adapter
+          image: {{ include "filebelt-git.image" . }}
+          args: ["serve", "--config", "/etc/filebelt-git/adapter.toml"]
+          ports: [{name: mtls, containerPort: 8092, protocol: TCP}, {name: operations, containerPort: 9090, protocol: TCP}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}, privileged: false, readOnlyRootFilesystem: true, runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001}
+          resources:
+{{ toYaml .Values.workload.resources | indent 12 }}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, failureThreshold: 30, periodSeconds: 2, timeoutSeconds: 1}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 1}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 1}
+          volumeMounts:
+            - {name: config, mountPath: /etc/filebelt-git, readOnly: true}
+            - {name: server-tls, mountPath: /run/secrets/server-tls, readOnly: true}
+            - {name: git-repositories, mountPath: /var/lib/filebelt/git}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ .Values.config.existingConfigMap }}, defaultMode: 0444, items: [{key: {{ .Values.config.key }}, path: adapter.toml}]}
+        - name: server-tls
+          secret: {secretName: {{ .Values.secrets.serverTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.serverTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.serverTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.serverTls.caKey }}, path: client-ca.crt}]}
+        - name: git-repositories
+          persistentVolumeClaim: {claimName: {{ .Values.storage.existingClaim }}}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}

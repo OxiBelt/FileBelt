@@ -105,6 +105,53 @@ paths:
           description: Current session revoked and cookies expired.
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/preferences/text:
+    get:
+      operationId: getTextPreferences
+      description: Returns the authenticated user's server-persisted text editing and inline rendering limits.
+      responses:
+        "200":
+          description: Current text preferences.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TextPreferences"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateTextPreferences
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTextPreferences"
+      responses:
+        "200":
+          description: Text preferences updated at the returned generation.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TextPreferences"
+        "409":
+          description: The supplied preference generation is stale.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /api/v1/sessions:
     get:
       operationId: listSessions
@@ -459,6 +506,36 @@ paths:
       responses:
         "200":
           description: Node metadata authorized with READ_METADATA.
+          headers:
+            ETag:
+              $ref: "#/components/headers/GenerationEtag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy:
+    patch:
+      operationId: updateNodeContentClassPolicy
+      description: Sets the persistent auto-or-binary classification policy after SET_ATTRIBUTES authorization. Switching policy freezes incompatible live editors before it returns.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateContentClassPolicy"
+      responses:
+        "200":
+          description: Policy updated at the returned attribute generation.
           headers:
             ETag:
               $ref: "#/components/headers/GenerationEtag"
@@ -1199,6 +1276,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VersionPage"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}:
+    get:
+      operationId: compareTextVersions
+      description: Compares any two Git-backed versions of the same node after current READ_CONTENT authorization. Limits are atomic; partial diffs are never returned.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - name: base_version_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UuidV4"
+        - name: target_version_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UuidV4"
+      responses:
+        "200":
+          description: A bounded typed histogram diff with three context lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TextVersionComparison"
+        "413":
+          description: Either input exceeds the caller's inline limit or the atomic diff bounds.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore:
@@ -2843,6 +2952,36 @@ components:
           oneOf:
             - type: string
             - type: "null"
+    TextPreferences:
+      type: object
+      additionalProperties: false
+      required: [edit_limit_bytes, inline_limit_bytes, generation]
+      properties:
+        edit_limit_bytes:
+          type: integer
+          format: int64
+          enum: [1048576, 2097152, 4194304, 8388608, 16777216]
+        inline_limit_bytes:
+          type: integer
+          format: int64
+          enum: [8388608, 16777216, 33554432, 67108864, 104857600]
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+    UpdateTextPreferences:
+      type: object
+      additionalProperties: false
+      required: [edit_limit_bytes, inline_limit_bytes]
+      properties:
+        edit_limit_bytes:
+          type: integer
+          format: int64
+          enum: [1048576, 2097152, 4194304, 8388608, 16777216]
+        inline_limit_bytes:
+          type: integer
+          format: int64
+          enum: [8388608, 16777216, 33554432, 67108864, 104857600]
     MountOverview:
       type: object
       additionalProperties: false
@@ -3154,6 +3293,8 @@ components:
         - head_version_id
         - namespace_generation
         - acl_generation
+        - attribute_generation
+        - content_class_policy
         - trashed
         - updated_at
         - size_bytes
@@ -3185,6 +3326,13 @@ components:
           type: integer
           format: int64
           minimum: 1
+        attribute_generation:
+          type: integer
+          format: int64
+          minimum: 1
+        content_class_policy:
+          type: string
+          enum: [auto, binary]
         trashed:
           type: boolean
         updated_at:
@@ -3206,6 +3354,14 @@ components:
           oneOf:
             - $ref: "#/components/schemas/MediaType"
             - type: "null"
+    UpdateContentClassPolicy:
+      type: object
+      additionalProperties: false
+      required: [policy]
+      properties:
+        policy:
+          type: string
+          enum: [auto, binary]
     NodePage:
       type: object
       additionalProperties: false
@@ -4111,7 +4267,7 @@ components:
       properties:
         origin:
           type: string
-          enum: [upload, markdown_save, collaboration_checkpoint, import, restore, external_document]
+          enum: [upload, text_save, markdown_save, collaboration_checkpoint, import, restore, external_document, mount, nfs]
         source_version_id:
           oneOf:
             - $ref: "#/components/schemas/UuidV4"
@@ -4136,6 +4292,9 @@ components:
         - current
         - media_type
         - provenance
+        - observed_content_class
+        - revision_backend
+        - git_commit_oid
       properties:
         id:
           $ref: "#/components/schemas/UuidV4"
@@ -4164,6 +4323,18 @@ components:
           $ref: "#/components/schemas/MediaType"
         provenance:
           $ref: "#/components/schemas/VersionProvenance"
+        observed_content_class:
+          type: string
+          enum: [unclassified, text, office, binary]
+        revision_backend:
+          type: string
+          enum: [legacy_payload, git_sha256, shared_chunks]
+        git_commit_oid:
+          oneOf:
+            - type: string
+              pattern: "^[0-9a-f]{64}$"
+            - type: "null"
+          description: Full SHA-256 Git commit ID, returned only after current READ_CONTENT authorization.
     VersionPage:
       type: object
       additionalProperties: false
@@ -4177,6 +4348,79 @@ components:
           oneOf:
             - type: string
             - type: "null"
+    TextVersionComparison:
+      type: object
+      additionalProperties: false
+      required: [algorithm, context_lines, base_version_id, target_version_id, base_final_newline, target_final_newline, hunks]
+      properties:
+        algorithm:
+          type: string
+          const: git-histogram-v1
+        context_lines:
+          type: integer
+          const: 3
+        base_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        target_version_id:
+          $ref: "#/components/schemas/UuidV4"
+        base_final_newline:
+          type: boolean
+        target_final_newline:
+          type: boolean
+        hunks:
+          type: array
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/TextDiffHunk"
+    TextDiffHunk:
+      type: object
+      additionalProperties: false
+      required: [base_start, base_lines, target_start, target_lines, lines]
+      properties:
+        base_start:
+          type: integer
+          format: int64
+          minimum: 0
+        base_lines:
+          type: integer
+          format: int64
+          minimum: 0
+        target_start:
+          type: integer
+          format: int64
+          minimum: 0
+        target_lines:
+          type: integer
+          format: int64
+          minimum: 0
+        lines:
+          type: array
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/TextDiffLine"
+    TextDiffLine:
+      type: object
+      additionalProperties: false
+      required: [kind, base_line, target_line, text]
+      properties:
+        kind:
+          type: string
+          enum: [context, delete, add]
+        base_line:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+            - type: "null"
+        target_line:
+          oneOf:
+            - type: integer
+              format: int64
+              minimum: 1
+            - type: "null"
+        text:
+          type: string
+          maxLength: 1048576
     RestoreVersion:
       type: object
       additionalProperties: false

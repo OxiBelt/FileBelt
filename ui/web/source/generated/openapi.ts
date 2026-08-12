@@ -611,6 +611,23 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        /** @description Sets the persistent auto-or-binary classification policy after SET_ATTRIBUTES authorization. Switching policy freezes incompatible live editors before it returns. */
+        readonly patch: operations["updateNodeContentClassPolicy"];
+        readonly trace?: never;
+    };
     readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions": {
         readonly parameters: {
             readonly query?: never;
@@ -817,6 +834,23 @@ export interface paths {
             readonly cookie?: never;
         };
         readonly get: operations["listFileVersions"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Compares any two Git-backed versions of the same node after current READ_CONTENT authorization. Limits are atomic; partial diffs are never returned. */
+        readonly get: operations["compareTextVersions"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -1313,6 +1347,23 @@ export interface paths {
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/preferences/text": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns the authenticated user's server-persisted text editing and inline rendering limits. */
+        readonly get: operations["getTextPreferences"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["updateTextPreferences"];
         readonly trace?: never;
     };
     readonly "/api/v1/session": {
@@ -1970,13 +2021,19 @@ export interface components {
             readonly created_at: string;
             readonly created_by: components["schemas"]["UuidV4"];
             readonly current: boolean;
+            /** @description Full SHA-256 Git commit ID, returned only after current READ_CONTENT authorization. */
+            readonly git_commit_oid: string | null;
             readonly id: components["schemas"]["UuidV4"];
             readonly media_type: components["schemas"]["MediaType"];
             readonly node_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly observed_content_class: "unclassified" | "text" | "office" | "binary";
             /** Format: int64 */
             readonly ordinal: number;
             readonly provenance: components["schemas"]["VersionProvenance"];
             readonly restored_from_version_id: components["schemas"]["UuidV4"] | null;
+            /** @enum {string} */
+            readonly revision_backend: "legacy_payload" | "git_sha256" | "shared_chunks";
             /** Format: int64 */
             readonly size_bytes: number;
         };
@@ -2523,6 +2580,10 @@ export interface components {
         readonly Node: {
             /** Format: int64 */
             readonly acl_generation: number;
+            /** Format: int64 */
+            readonly attribute_generation: number;
+            /** @enum {string} */
+            readonly content_class_policy: "auto" | "binary";
             readonly display_name: string;
             readonly drive_id: components["schemas"]["UuidV4"];
             readonly head_media_type: components["schemas"]["MediaType"] | null;
@@ -2606,6 +2667,49 @@ export interface components {
             readonly issuer?: string | null;
             readonly return_path: string;
         };
+        readonly TextDiffHunk: {
+            /** Format: int64 */
+            readonly base_lines: number;
+            /** Format: int64 */
+            readonly base_start: number;
+            readonly lines: readonly components["schemas"]["TextDiffLine"][];
+            /** Format: int64 */
+            readonly target_lines: number;
+            /** Format: int64 */
+            readonly target_start: number;
+        };
+        readonly TextDiffLine: {
+            readonly base_line: number | null;
+            /** @enum {string} */
+            readonly kind: "context" | "delete" | "add";
+            readonly target_line: number | null;
+            readonly text: string;
+        };
+        readonly TextPreferences: {
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            readonly edit_limit_bytes: 1048576 | 2097152 | 4194304 | 8388608 | 16777216;
+            /** Format: int64 */
+            readonly generation: number;
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            readonly inline_limit_bytes: 8388608 | 16777216 | 33554432 | 67108864 | 104857600;
+        };
+        readonly TextVersionComparison: {
+            /** @constant */
+            readonly algorithm: "git-histogram-v1";
+            readonly base_final_newline: boolean;
+            readonly base_version_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly context_lines: 3;
+            readonly hunks: readonly components["schemas"]["TextDiffHunk"][];
+            readonly target_final_newline: boolean;
+            readonly target_version_id: components["schemas"]["UuidV4"];
+        };
         readonly UpdateAdminMcpServiceIdentity: {
             readonly display_name?: string;
             /** Format: uri */
@@ -2622,6 +2726,10 @@ export interface components {
             readonly endpoint_uri?: string;
             readonly trust_profile?: string;
         };
+        readonly UpdateContentClassPolicy: {
+            /** @enum {string} */
+            readonly policy: "auto" | "binary";
+        };
         readonly UpdateMcpRegistration: {
             readonly attachment_policy?: components["schemas"]["McpAttachmentPolicy"];
             readonly description?: string;
@@ -2629,6 +2737,18 @@ export interface components {
             /** Format: uri */
             readonly endpoint_uri?: string;
             readonly trust_profile?: string;
+        };
+        readonly UpdateTextPreferences: {
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            readonly edit_limit_bytes: 1048576 | 2097152 | 4194304 | 8388608 | 16777216;
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            readonly inline_limit_bytes: 8388608 | 16777216 | 33554432 | 67108864 | 104857600;
         };
         readonly UploadAllocation: {
             readonly chunk_size_bytes: number;
@@ -2680,7 +2800,7 @@ export interface components {
             readonly creator_display_name: string;
             readonly mcp_assisted: boolean;
             /** @enum {string} */
-            readonly origin: "upload" | "markdown_save" | "collaboration_checkpoint" | "import" | "restore" | "external_document";
+            readonly origin: "upload" | "text_save" | "markdown_save" | "collaboration_checkpoint" | "import" | "restore" | "external_document" | "mount" | "nfs";
             readonly source_version_id: components["schemas"]["UuidV4"] | null;
         };
     };
@@ -4170,6 +4290,42 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly updateNodeContentClassPolicy: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpdateContentClassPolicy"];
+            };
+        };
+        readonly responses: {
+            /** @description Policy updated at the returned attribute generation. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Node"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly listDocumentSessionsForNode: {
         readonly parameters: {
             readonly query?: {
@@ -4696,6 +4852,41 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["VersionPage"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly compareTextVersions: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly base_version_id: components["schemas"]["UuidV4"];
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+                readonly target_version_id: components["schemas"]["UuidV4"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description A bounded typed histogram diff with three context lines. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TextVersionComparison"];
+                };
+            };
+            /** @description Either input exceeds the caller's inline limit or the atomic diff bounds. */
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];
@@ -5704,6 +5895,69 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["MountPolicy"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getTextPreferences: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Current text preferences. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TextPreferences"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly updateTextPreferences: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                /** @description Exact opaque generation ETag from the most recent representation. */
+                readonly "If-Match": components["parameters"]["IfMatch"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["UpdateTextPreferences"];
+            };
+        };
+        readonly responses: {
+            /** @description Text preferences updated at the returned generation. */
+            readonly 200: {
+                headers: {
+                    readonly ETag: components["headers"]["GenerationEtag"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["TextPreferences"];
+                };
+            };
+            /** @description The supplied preference generation is stale. */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];

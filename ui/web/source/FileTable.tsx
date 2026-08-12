@@ -50,7 +50,7 @@ export function FileTable({
   };
 
   const OnRowKeyDown = (Event: KeyboardEvent<HTMLTableRowElement>, Entry: FileEntry, Index: number): void => {
-    if (Event.key === "Enter" && Entry.MarkdownEligibility !== "ineligible") {
+    if (Event.key === "Enter" && Entry.TextEligibility !== "ineligible" && Entry.TextEligibility !== "history-only") {
       Event.preventDefault();
       OnOpenEntry(Entry);
       return;
@@ -116,7 +116,7 @@ export function FileTable({
                 id={`file-row-${Entry.Id}`}
                 key={Entry.Id}
                 onClick={(Event) => OnRowClick(Event, Entry)}
-                onDoubleClick={() => { if (Entry.MarkdownEligibility !== "ineligible") OnOpenEntry(Entry); }}
+                onDoubleClick={() => { if (Entry.TextEligibility !== "ineligible" && Entry.TextEligibility !== "history-only") OnOpenEntry(Entry); }}
                 onContextMenu={(Event) => {
                   Event.preventDefault();
                   if (!Selected) DispatchSelection({ Id: Entry.Id, Type: "replace" });

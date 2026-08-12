@@ -5,27 +5,31 @@
 
 REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
   filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
-  filebelt_phase8, filebelt_security FROM PUBLIC;
+  filebelt_phase8, filebelt_security, filebelt_revision FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
   filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
-  filebelt_media, filebelt_phase8, filebelt_security
+  filebelt_media, filebelt_phase8, filebelt_security, filebelt_revision
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-       filebelt_document, filebelt_media;
+       filebelt_document, filebelt_media, filebelt_revision;
 REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
   filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
-  filebelt_media, filebelt_phase8, filebelt_security
+  filebelt_media, filebelt_phase8, filebelt_security, filebelt_revision
   FROM filebelt_api, filebelt_io, filebelt_maintenance,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-       filebelt_document, filebelt_media;
+       filebelt_document, filebelt_media, filebelt_revision;
+-- Converge databases that applied an earlier revision-role draft. The I/O
+-- worker receives signed physical locators and never queries revision metadata.
+REVOKE USAGE ON SCHEMA filebelt_revision FROM filebelt_io;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA filebelt_revision FROM filebelt_io;
 
 GRANT USAGE ON SCHEMA public
   TO filebelt_api, filebelt_io, filebelt_maintenance,
      filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
      filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
-     filebelt_document, filebelt_media;
+     filebelt_document, filebelt_media, filebelt_revision;
 GRANT USAGE ON SCHEMA filebelt_mcp
   TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
@@ -46,6 +50,52 @@ GRANT USAGE ON SCHEMA filebelt_phase8
   TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
      filebelt_collaboration, filebelt_vfs, filebelt_document, filebelt_media;
 GRANT USAGE ON SCHEMA filebelt_security TO filebelt_api, filebelt_recovery;
+GRANT USAGE ON SCHEMA filebelt_revision
+  TO filebelt_api, filebelt_maintenance, filebelt_recovery,
+     filebelt_collaboration, filebelt_vfs, filebelt_document, filebelt_revision;
+GRANT EXECUTE ON FUNCTION filebelt_revision.attach_legacy_content()
+  TO filebelt_api, filebelt_document, filebelt_collaboration, filebelt_revision;
+GRANT EXECUTE ON FUNCTION filebelt_revision.create_tenant_activation_state()
+  TO filebelt_api;
+
+GRANT SELECT ON filebelt_revision.contents, filebelt_revision.git_revisions,
+  filebelt_revision.git_repositories, filebelt_revision.chunk_manifests,
+  filebelt_revision.activation_state, filebelt_revision.holds
+  TO filebelt_api;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  filebelt_revision.contents, filebelt_revision.git_repositories,
+  filebelt_revision.git_revisions, filebelt_revision.chunk_objects,
+  filebelt_revision.chunk_manifests, filebelt_revision.chunk_members,
+  filebelt_revision.operations, filebelt_revision.backfill_jobs,
+  filebelt_revision.holds, filebelt_revision.activation_state
+  TO filebelt_revision;
+GRANT SELECT (id,slug) ON tenants TO filebelt_revision;
+GRANT SELECT (tenant_id,id,kind,generation,disabled_at) ON principals
+  TO filebelt_revision;
+GRANT SELECT (tenant_id,id,principal_id,status) ON users TO filebelt_revision;
+GRANT SELECT (tenant_id,id,user_id,principal_id,idle_expires_at,absolute_expires_at,revoked_at)
+  ON api_sessions TO filebelt_revision;
+GRANT SELECT ON groups, group_memberships, node_ancestry, acl_entries,
+  authorization_generations TO filebelt_revision;
+GRANT SELECT ON drives TO filebelt_revision;
+GRANT UPDATE (reserved_bytes,used_physical_bytes) ON drives TO filebelt_revision;
+GRANT SELECT ON nodes TO filebelt_revision;
+GRANT UPDATE (head_version_id,namespace_generation,updated_at)
+  ON nodes TO filebelt_revision;
+GRANT SELECT, INSERT ON file_versions, audit_events, outbox_events, jobs
+  TO filebelt_revision;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON filebelt_revision.chunk_objects,
+  filebelt_revision.chunk_manifests, filebelt_revision.chunk_members,
+  filebelt_revision.operations, filebelt_revision.backfill_jobs,
+  filebelt_revision.holds TO filebelt_maintenance;
+GRANT SELECT ON filebelt_revision.contents, filebelt_revision.git_repositories,
+  filebelt_revision.git_revisions, filebelt_revision.chunk_objects,
+  filebelt_revision.chunk_manifests, filebelt_revision.chunk_members,
+  filebelt_revision.operations, filebelt_revision.backfill_jobs,
+  filebelt_revision.holds, filebelt_revision.activation_state
+  TO filebelt_recovery;
 
 -- The API's public-schema privileges are intentionally explicit. Do not
 -- restore an ALL TABLES grant: it would silently expose future policy or

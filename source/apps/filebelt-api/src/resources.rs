@@ -17,6 +17,7 @@ use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
     CollaborationImportIntentInput,
 };
+use filebelt_database::revision::TextPreferencesRecord;
 use filebelt_database::{
     AdvancedAclEntryInput, AdvancedAclEntryRecord, AdvancedAclReplacementPreflight, DatabaseError,
     DirectShareRecord, DriveRecord, FileVersionRecord, NodeRecord, UploadRecord,
@@ -42,9 +43,17 @@ const CAPABILITY_AUDIENCE: &str = "filebelt-worker-io";
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
+        .route(
+            "/preferences/text",
+            routing::get(get_text_preferences).patch(update_text_preferences),
+        )
         .route("/drives", routing::get(list_drives))
         .route("/drives/{drive_id}", routing::get(get_drive))
         .route("/drives/{drive_id}/nodes/{node_id}", routing::get(get_node))
+        .route(
+            "/drives/{drive_id}/nodes/{node_id}/content-class-policy",
+            routing::patch(update_content_class_policy),
+        )
         .route(
             "/drives/{drive_id}/nodes/{node_id}/collaboration",
             routing::get(get_collaboration_summary).delete(discard_collaboration),
@@ -141,6 +150,8 @@ pub(crate) struct NodeResponse {
     head_version_id: Option<Uuid>,
     namespace_generation: i64,
     acl_generation: i64,
+    attribute_generation: i64,
+    content_class_policy: String,
     trashed: bool,
     updated_at: String,
     size_bytes: Option<i64>,
@@ -309,6 +320,27 @@ pub(crate) struct VersionResponse {
     current: bool,
     media_type: String,
     provenance: VersionProvenanceResponse,
+    observed_content_class: String,
+    revision_backend: String,
+    git_commit_oid: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TextPreferencesResponse {
+    edit_limit_bytes: i64,
+    inline_limit_bytes: i64,
+    generation: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct UpdateTextPreferencesRequest {
+    edit_limit_bytes: i64,
+    inline_limit_bytes: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct UpdateContentClassPolicyRequest {
+    policy: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -427,6 +459,144 @@ struct AclCollectionResponse {
 #[derive(Debug, Deserialize, Serialize)]
 struct NamespaceMutationRequest {
     expected_namespace_generation: i64,
+}
+
+async fn get_text_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let session = authenticate(&state, &headers).await?;
+    let preferences = state
+        .database
+        .text_preferences(state.tenant_id, session.record.user_id)
+        .await?;
+    text_preferences_response(StatusCode::OK, preferences)
+}
+
+async fn update_text_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateTextPreferencesRequest>,
+) -> Result<Response, ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let expected = parse_generation_etag(&headers, "fb-text-preferences")?;
+    let preferences = state
+        .database
+        .update_text_preferences(
+            state.tenant_id,
+            session.record.user_id,
+            expected,
+            request.edit_limit_bytes,
+            request.inline_limit_bytes,
+        )
+        .await
+        .map_err(|error| match error {
+            DatabaseError::InvalidPersistedValue => ApiError::bad_request(
+                "text_preferences.invalid",
+                "The requested text limits are not supported",
+            ),
+            other => ApiError::from(other),
+        })?;
+    text_preferences_response(StatusCode::OK, preferences)
+}
+
+async fn update_content_class_policy(
+    State(state): State<AppState>,
+    Path((drive_id, node_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateContentClassPolicyRequest>,
+) -> Result<Response, ApiError> {
+    let session = authenticate_mutation(&state, &headers).await?;
+    let key = idempotency_key(&headers)?;
+    let drive_id = parse_uuid_v4(&drive_id)?;
+    let node_id = parse_uuid_v4(&node_id)?;
+    if !matches!(request.policy.as_str(), "auto" | "binary") {
+        return Err(ApiError::bad_request(
+            "content_class.policy_invalid",
+            "The content-class policy must be auto or binary",
+        ));
+    }
+    let expected_etag = headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::conflict(
+                "content_class.etag_stale",
+                "The resource changed before the mutation was applied",
+            )
+        })?;
+    let request_fingerprint = fingerprint(&(drive_id, node_id, expected_etag, &request))?;
+    let route = "PATCH /api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy";
+    if let Some(response) =
+        replay::<NodeResponse>(&state, &session, route, key, &request_fingerprint).await?
+    {
+        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
+        let etag = node_response_etag(&response.1);
+        return json_with_etag(status, &response.1, etag);
+    }
+    let grant = authorize_session_bound(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        session.record.session_id,
+        drive_id,
+        node_id,
+        Action::SetAttributes,
+    )
+    .await?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    require_etag(&headers, &node_etag(&node), "content_class.etag_stale")?;
+    state
+        .database
+        .update_content_class_policy(
+            state.tenant_id,
+            session.record.principal_id,
+            session.record.session_id,
+            drive_id,
+            node_id,
+            node.attribute_generation,
+            &request.policy,
+            generation_i64(grant.membership_generation)?,
+            generation_i64(grant.drive_acl_generation)?,
+            generation_i64(grant.namespace_generation)?,
+            generation_i64(grant.resource_acl_generation)?,
+        )
+        .await?;
+    let updated = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    let body = NodeResponse::try_from(updated.clone())?;
+    let stored = store_idempotent(
+        &state,
+        &session,
+        route,
+        key,
+        &request_fingerprint,
+        StatusCode::OK,
+        &body,
+    )
+    .await?;
+    json_with_etag(StatusCode::OK, &stored, node_etag(&updated))
+}
+
+fn text_preferences_response(
+    status: StatusCode,
+    value: TextPreferencesRecord,
+) -> Result<Response, ApiError> {
+    let generation = value.generation;
+    json_with_etag(
+        status,
+        &TextPreferencesResponse {
+            edit_limit_bytes: value.edit_limit_bytes,
+            inline_limit_bytes: value.inline_limit_bytes,
+            generation,
+        },
+        format!("\"fb-text-preferences-{generation}\""),
+    )
 }
 
 async fn list_drives(
@@ -1166,7 +1336,13 @@ async fn begin_upload(
         .map(parse_uuid_v4)
         .transpose()?;
     let declared_media_type = request.declared_media_type.as_deref();
-    if declared_media_type == Some("text/markdown") && request.declared_size_bytes > 2_097_152
+    let preferences = state
+        .database
+        .text_preferences(state.tenant_id, session.record.user_id)
+        .await?;
+    if declared_media_type.is_some_and(|media_type| media_type.starts_with("text/"))
+        && request.declared_size_bytes
+            > u64::try_from(preferences.edit_limit_bytes).map_err(|_| ApiError::internal())?
         || collaboration_checkpoint_id.is_some() && import_intent_id.is_some()
         || collaboration_checkpoint_id.is_some() && node_id.is_none()
         || import_intent_id.is_some() && node_id.is_some()
@@ -1576,6 +1752,16 @@ async fn list_versions(
         Action::ReadMetadata,
     )
     .await?;
+    let disclose_git_oid = authorize(
+        &state.database,
+        state.tenant_id,
+        session.record.principal_id,
+        drive_id,
+        node_id,
+        Action::ReadContent,
+    )
+    .await
+    .is_ok();
     let limit = validated_limit(page.limit)?;
     let cursor = page
         .cursor
@@ -1601,6 +1787,11 @@ async fn list_versions(
     } else {
         None
     };
+    if !disclose_git_oid {
+        for version in &mut versions {
+            version.git_commit_oid = None;
+        }
+    }
     Ok(Json(Page {
         items: versions
             .into_iter()
@@ -2471,17 +2662,45 @@ fn advanced_acl_replacement_actions(
 }
 
 fn require_acl_etag(headers: &HeaderMap, expected: &str) -> Result<(), ApiError> {
+    require_etag(headers, expected, "acl.etag_stale")
+}
+
+fn require_etag(headers: &HeaderMap, expected: &str, code: &'static str) -> Result<(), ApiError> {
     if headers
         .get(header::IF_MATCH)
         .and_then(|value| value.to_str().ok())
         != Some(expected)
     {
         return Err(ApiError::conflict(
-            "acl.etag_stale",
-            "The ACL changed before the replacement was applied",
+            code,
+            "The resource changed before the mutation was applied",
         ));
     }
     Ok(())
+}
+
+fn parse_generation_etag(headers: &HeaderMap, prefix: &str) -> Result<i64, ApiError> {
+    let value = headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::conflict(
+                "preference.etag_stale",
+                "The preferences changed before the update was applied",
+            )
+        })?;
+    let generation = value
+        .strip_prefix(&format!("\"{prefix}-"))
+        .and_then(|value| value.strip_suffix('"'))
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|generation| *generation > 0)
+        .ok_or_else(|| {
+            ApiError::conflict(
+                "preference.etag_stale",
+                "The preferences changed before the update was applied",
+            )
+        })?;
+    Ok(generation)
 }
 
 fn acl_collection(entries: Vec<AdvancedAclEntryRecord>) -> AclCollectionResponse {
@@ -2784,8 +3003,15 @@ fn rfc3339(unix_seconds: i64) -> Result<String, ApiError> {
 
 fn node_etag(node: &NodeRecord) -> String {
     format!(
-        "\"fb-node-{}-{}-{}\"",
-        node.id, node.namespace_generation, node.acl_generation
+        "\"fb-node-{}-{}-{}-{}\"",
+        node.id, node.namespace_generation, node.acl_generation, node.attribute_generation
+    )
+}
+
+fn node_response_etag(node: &NodeResponse) -> String {
+    format!(
+        "\"fb-node-{}-{}-{}-{}\"",
+        node.id, node.namespace_generation, node.acl_generation, node.attribute_generation
     )
 }
 
@@ -2836,6 +3062,8 @@ impl TryFrom<NodeRecord> for NodeResponse {
             head_version_id: value.head_version_id,
             namespace_generation: value.namespace_generation,
             acl_generation: value.acl_generation,
+            attribute_generation: value.attribute_generation,
+            content_class_policy: value.content_class_policy,
             trashed: value.trashed,
             updated_at: postgres_timestamp(&value.updated_at)?,
             size_bytes: value.size_bytes,
@@ -2869,6 +3097,9 @@ impl TryFrom<FileVersionRecord> for VersionResponse {
                     .unwrap_or_else(|| value.created_by.to_string()),
                 mcp_assisted: value.mcp_assisted,
             },
+            observed_content_class: value.observed_content_class,
+            revision_backend: value.revision_backend,
+            git_commit_oid: value.git_commit_oid,
         })
     }
 }
@@ -3078,6 +3309,27 @@ mod tests {
     }
 
     #[test]
+    fn content_class_policy_authorizes_before_node_state_or_etag_is_observed() {
+        let source = include_str!("resources.rs");
+        let handler = source
+            .split_once("async fn update_content_class_policy")
+            .expect("content-class handler exists")
+            .1
+            .split_once("fn text_preferences_response")
+            .expect("text-preferences helper follows content-class handler")
+            .0;
+        let authorization = handler
+            .find("authorize_session_bound(")
+            .expect("session-bound authorization exists");
+        let node_lookup = handler
+            .find(".node(state.tenant_id, drive_id, node_id)")
+            .expect("node lookup exists");
+        let etag_check = handler.find("require_etag(").expect("ETag check exists");
+        assert!(authorization < node_lookup);
+        assert!(authorization < etag_check);
+    }
+
+    #[test]
     fn begin_upload_does_not_accept_mcp_provenance() {
         let source = include_str!("resources.rs");
         let begin_upload = source
@@ -3174,6 +3426,8 @@ mod tests {
             head_version_id: None,
             namespace_generation: 1,
             acl_generation: 1,
+            attribute_generation: 1,
+            content_class_policy: "auto".into(),
             trashed: false,
             updated_at: "2026-01-01T00:00:00Z".into(),
             size_bytes: None,
@@ -3199,6 +3453,8 @@ mod tests {
             head_version_id: Some(Uuid::new_v4()),
             namespace_generation: 1,
             acl_generation: 1,
+            attribute_generation: 1,
+            content_class_policy: "auto".into(),
             trashed: false,
             updated_at: "2026-08-06 12:30:00+00".into(),
             size_bytes: Some(1),

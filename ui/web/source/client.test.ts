@@ -49,7 +49,7 @@ describe("MockFileBeltClient", () => {
   it("reads an exact Markdown version and rejects stale replacement saves", async () => {
     const Client = new MockFileBeltClient();
     const Snapshot = await Client.getWorkspace();
-    const Markdown = Snapshot.Entries.find(({ MarkdownEligibility }) => MarkdownEligibility === "editable");
+    const Markdown = Snapshot.Entries.find(({ TextEligibility }) => TextEligibility === "editable");
     expect(Markdown?.HeadVersionId).not.toBeNull();
     if (Markdown?.HeadVersionId === null || Markdown === undefined) return;
 
@@ -67,6 +67,19 @@ describe("MockFileBeltClient", () => {
     if (Office?.HeadVersionId === null || Office === undefined) return;
     await Client.importMarkdown({ Contents: new Blob(["# Imported"], { type: "text/markdown" }), EntryId: Office.Id, SourceVersionId: Office.HeadVersionId, TargetName: "Q3 forecast.md" });
     const Imported = (await Client.getWorkspace()).Entries.find(({ Name }) => Name === "Q3 forecast.md");
-    expect(Imported).toMatchObject({ MarkdownEligibility: "editable", MediaType: "text/markdown", Version: 1 });
+    expect(Imported).toMatchObject({ TextEligibility: "editable", MediaType: "text/markdown", Version: 1 });
+  });
+
+  it("uses an ETag to preserve personal text-limit updates and exposes text history seams", async () => {
+    const Client = new MockFileBeltClient();
+    const Initial = await Client.getTextPreferences();
+    expect(Initial.Value).toEqual({ EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 });
+    const Updated = await Client.updateTextPreferences({ EditLimitBytes: 4_194_304, InlineLimitBytes: 8_388_608 }, Initial.Etag);
+    expect(Updated.Etag).not.toBe(Initial.Etag);
+    await expect(Client.updateTextPreferences(Initial.Value, Initial.Etag)).rejects.toThrow("Text preferences changed elsewhere");
+    const Entry = (await Client.getWorkspace()).Entries.find(({ Kind }) => Kind === "file");
+    if (Entry === undefined || Entry.HeadVersionId === null) return;
+    const Page = await Client.listTextVersions(Entry.Id, null);
+    expect(Page.NextCursor).toBeNull();
   });
 });

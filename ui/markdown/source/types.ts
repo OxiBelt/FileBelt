@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const FileBeltGfmProfile = "filebelt-gfm-v1" as const;
-export const MaximumEditableBytes = 2 * 1024 * 1024;
-export const MaximumViewableBytes = 8 * 1024 * 1024;
+/** The largest server-authorized text source the browser can edit. */
+export const MaximumEditableBytes = 16 * 1024 * 1024;
+/** The largest server-authorized text source the browser can render as source. */
+export const MaximumViewableBytes = 100 * 1024 * 1024;
 
 export type MarkdownMode = "source" | "split" | "preview";
 export type LineEnding = "crlf" | "lf" | "none";
@@ -17,6 +19,13 @@ export interface MarkdownSource {
   LineEnding: LineEnding;
   Text: string;
 }
+
+/**
+ * Language-neutral source representation. `MarkdownSource` remains exported
+ * for downstream Phase 5 callers while all text source consumers converge on
+ * this shape.
+ */
+export type TextSource = MarkdownSource;
 
 export interface MarkdownDocument {
   Ast: FileBeltOfficeAstV1;
@@ -190,4 +199,10 @@ export interface MarkdownStrings {
   Split: string;
   SourceEditor: string;
   UnsupportedFeature: string;
+}
+
+export interface TextStrings {
+  Edit: string;
+  SourceEditor: string;
+  View: string;
 }

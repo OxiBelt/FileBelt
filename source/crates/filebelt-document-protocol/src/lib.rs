@@ -89,4 +89,24 @@ mod tests {
             assert!(!name.contains("DATABASE"));
         }
     }
+
+    #[test]
+    fn callback_output_file_type_crosses_the_provider_neutral_boundary() {
+        let command = ReceiveDocumentCallbackCommand {
+            tenant_id: "tenant".into(),
+            document_session_id: "session".into(),
+            participant_id: "participant".into(),
+            provider_event_digest: vec![7; 32],
+            callback_kind: DocumentCallbackKind::OutputRequired as i32,
+            revision_kind: DocumentRevisionKind::FinalSave as i32,
+            activity: DocumentParticipantActivity::Unspecified as i32,
+            output_file_type: "odt".into(),
+        };
+        assert_eq!(
+            ReceiveDocumentCallbackCommand::decode(command.encode_to_vec().as_slice())
+                .unwrap()
+                .output_file_type,
+            "odt"
+        );
+    }
 }

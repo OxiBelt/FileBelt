@@ -205,6 +205,9 @@ message ReceiveDocumentCallbackCommand {
   DocumentCallbackKind callback_kind = 5;
   DocumentRevisionKind revision_kind = 6;
   DocumentParticipantActivity activity = 7;
+  // The exact provider-declared output extension. Core binds this to the
+  // immutable source media type before allocating a revision.
+  string output_file_type = 8;
 }
 
 message RefreshDocumentSourceCommand {

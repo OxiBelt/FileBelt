@@ -157,12 +157,33 @@ lifetimes are capped at seven days. A plaintext credential appears only in the
 create response and is absent from every later list, activity, log, audit, and
 error contract.
 
-## Markdown and collaboration contracts
+## Text revision, editing, and collaboration contracts
+
+Every validated text file uses the provider-neutral `filebelt.revision.v1`
+process contract and a SHA-256 bare Git repository owned by the separately
+licensed Git adapter. Classification is byte-based: the complete object must
+be valid UTF-8, contain no NUL byte, be no larger than 100 MiB, and have a
+text-capable registered media type or filename. `content_class_policy=binary`
+is the persistent, `SET_ATTRIBUTES`-authorized escape hatch; a declaration or
+filename alone never turns invalid bytes into text. Git exposes no wire
+protocol, worktree, user ref, author, or browser credential. Each immutable
+version maps to one unsigned commit with a single mode-`100644` `content` entry,
+a fixed FileBelt identity and message, and a full 64-lowercase-hex commit ID.
+
+Authenticated users persist edit limits of 1/2/4/8/16 MiB (default 2 MiB) and
+inline view limits of 8/16/32/64/100 MiB (default 8 MiB), with the inline limit
+never below the edit limit. The preference and content-class mutations require
+`If-Match`; the latter also freezes an incompatible live editor. Version pages
+are lazy and cursor-bound. Comparing any two Git-backed versions requires
+current `READ_CONTENT`, rechecks the authorization generation fence at the
+coordinator, and returns a typed Git histogram line diff with three context
+lines. A comparison fails atomically after 5 seconds, 50,000 lines, or 8 MiB;
+partial output is never returned.
 
 `filebelt-gfm-v1` accepts GitHub-Flavored Markdown with alerts, footnotes,
 Mermaid, and KaTeX. Raw HTML is rendered as literal text, not executed or
-sanitized HTML. Editable content is at most 2 MiB and viewable content is at
-most 8 MiB; invalid UTF-8 or a NUL byte is a fatal content error. The declared
+sanitized HTML. Markdown uses the same configured text limits; invalid UTF-8
+or a NUL byte is a fatal content error. The declared
 media type in `BeginUpload` is only a caller declaration. `Node.head_media_type`
 and `FileVersion.media_type` are trusted only after finalized bytes have been
 validated by the service.
@@ -197,7 +218,7 @@ that `import_intent_id` or a `collaboration_checkpoint_id`, never both. Its
 version response includes trusted media type and provenance: origin, optional
 source version, creator display name, and whether MCP assisted the operation.
 The browser conversion path accepts only CSV, DOCX, ODP, ODS, ODT, PPTX, RTF,
-and XLSX at most 8 MiB. It uses the `officeparser/slim` browser module with OCR,
+and XLSX at most the user's inline limit. It uses the `officeparser/slim` browser module with OCR,
 attachment extraction, and remote assets disabled; conversion warnings,
 truncation, non-UTF-8 output, and NUL output fail rather than becoming an
 implicit save. The resulting Markdown remains a proposed new sibling and uses

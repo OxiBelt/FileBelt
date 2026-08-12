@@ -4,7 +4,8 @@
 
 The adapter's direct Rust dependencies are pinned in its adapter-local
 `Cargo.lock`: `base64`, `hmac`, `prost`, `reqwest`, `rustls`, `serde`,
-`serde_json`, `sha2`, `subtle`, `tokio`, `toml`, and `url`. The Apache-2.0
+`quick-xml`, `serde_json`, `sha2`, `subtle`, `tokio`, `tokio-rustls`, `toml`,
+`url`, `x509-parser`, and `zip`. The Apache-2.0
 `filebelt-document-protocol` schema is consumed through the documented mTLS
 process boundary only; it has no reverse dependency on this AGPL adapter.
 Release SBOM

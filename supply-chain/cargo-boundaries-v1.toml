@@ -24,6 +24,7 @@ adapter_root = "adapters"
 # Adding an adapter manifest requires an explicit, license-reviewed registration.
 registered_adapter_manifests = [
   "adapters/ftp-ftps/Cargo.toml",
+  "adapters/git/Cargo.toml",
   "adapters/nfs/Cargo.toml",
   "adapters/onlyoffice/Cargo.toml",
   "adapters/smb/Cargo.toml",
@@ -208,6 +209,18 @@ filebelt-onlyoffice-adapter = []
 filebelt-document-protocol = []
 
 [[graph_profiles]]
+label = "GPL Git revision adapter"
+package = "filebelt-git-adapter"
+manifest = "adapters/git/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-git-adapter = []
+filebelt-revision-protocol = []
+
+[[graph_profiles]]
 label = "LGPL NFS bounded IPC bridge"
 package = "filebelt-nfs-bridge"
 manifest = "adapters/nfs/Cargo.toml"
@@ -317,6 +330,60 @@ forbidden_package_prefixes = []
 
 [graph_profiles.first_party_features]
 filebelt-document-protocol = []
+
+[[graph_profiles]]
+label = "revision protocol"
+package = "filebelt-revision-protocol"
+manifest = "source/crates/filebelt-revision-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-revision-protocol = []
+
+[[graph_profiles]]
+label = "revision coordinator"
+package = "filebelt-revision"
+manifest = "source/apps/filebelt-revision/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "oauth2",
+  "openidconnect",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-capability-keyset = []
+filebelt-control-protocol = []
+filebelt-database = []
+filebelt-deployment-diagnostics = []
+filebelt-domain = []
+filebelt-events-protocol = []
+filebelt-mcp-policy = []
+filebelt-revision = []
+filebelt-revision-protocol = []
+filebelt-runtime = []
+filebelt-storage-protocol = []
 
 [[graph_profiles]]
 label = "domain model"
@@ -720,6 +787,8 @@ packages = [
   "filebelt-mcp-policy",
   "filebelt-media-controller",
   "filebelt-runtime",
+  "filebelt-revision",
+  "filebelt-revision-protocol",
   "filebelt-secret-vault",
   "filebelt-storage",
   "filebelt-storage-protocol",
@@ -787,6 +856,7 @@ forbidden_paths = [
 label = "workers and collaboration cannot absorb API authentication or sessions"
 packages = [
   "filebelt-collaboration",
+  "filebelt-revision",
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
 ]
@@ -802,6 +872,7 @@ label = "protocol packages remain transport and persistence neutral"
 packages = [
   "filebelt-capability-keyset",
   "filebelt-document-protocol",
+  "filebelt-revision-protocol",
   "filebelt-collaboration-protocol",
   "filebelt-events-protocol",
   "filebelt-storage-protocol",
@@ -827,6 +898,26 @@ forbidden_paths = [
   "filebelt_ftp_ftps_gateway",
   "filebelt_smb_bridge",
   "filebelt_runtime",
+  "filebelt_storage",
+  "filebelt_vfs",
+  "filebelt_worker_io",
+  "filebelt_worker_maintenance",
+]
+
+[[source_boundaries]]
+label = "Git adapter remains outside Apache core and adapter implementations"
+packages = ["filebelt-git-adapter"]
+forbidden_paths = [
+  "filebelt_api",
+  "filebelt_authz",
+  "filebelt_control_protocol",
+  "filebelt_database",
+  "filebelt_document",
+  "filebelt_ftp_ftps_gateway",
+  "filebelt_onlyoffice_adapter",
+  "filebelt_revision",
+  "filebelt_runtime",
+  "filebelt_smb_bridge",
   "filebelt_storage",
   "filebelt_vfs",
   "filebelt_worker_io",
@@ -962,7 +1053,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["collaboration", "document", "mcp", "media", "mount"]
+public_modules = ["collaboration", "document", "mcp", "media", "mount", "revision"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -980,6 +1071,30 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-document-protocol"
 crate_root = "source/crates/filebelt-document-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-revision"
+crate_root = "source/apps/filebelt-revision/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-revision-protocol"
+crate_root = "source/crates/filebelt-revision-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = ["generated::*"]
+
+[[public_surfaces]]
+package = "filebelt-git-adapter"
+crate_root = "adapters/git/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-git-adapter"
+crate_root = "adapters/git/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

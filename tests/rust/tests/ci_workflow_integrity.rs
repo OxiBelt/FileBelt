@@ -160,13 +160,14 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-vfs",
         "filebelt-headscale-sync",
         "filebelt-nfs-relay",
+        "filebelt-revision",
     ] {
         assert!(
             release.contains(release_role),
             "release promotion must carry {release_role}"
         );
         assert!(
-            dry_run.contains("Build all fourteen Apache roles"),
+            dry_run.contains("Build all fifteen Apache roles"),
             "dry-run must build the complete Apache image plan"
         );
     }
@@ -174,6 +175,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "steps.subjects.outputs.vfs",
         "steps.subjects.outputs.headscale_sync",
         "steps.subjects.outputs.nfs_relay",
+        "steps.subjects.outputs.revision",
     ] {
         assert!(release.contains(output), "release must attest {output}");
     }
@@ -206,6 +208,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-headscale-sync",
         "filebelt-nfs-relay",
         "filebelt-document",
+        "filebelt-revision",
         "filebelt-web",
     ] {
         assert!(active_roles.contains(active));

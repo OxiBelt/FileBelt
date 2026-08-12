@@ -48,6 +48,15 @@ enum CapabilityOperation {
   // Finalize that same whole-object staging revision after its digest has been
   // verified by the I/O worker.
   CAPABILITY_OPERATION_FINALIZE_DOCUMENT_REVISION = 11;
+  // Publish, read, or retire one immutable drive-scoped shared chunk. Exact
+  // chunk/content identifiers remain opaque UUID fields in the claims.
+  CAPABILITY_OPERATION_WRITE_REVISION_CHUNK = 12;
+  CAPABILITY_OPERATION_READ_REVISION_CHUNK = 13;
+  CAPABILITY_OPERATION_DELETE_REVISION_CHUNK = 14;
+  // Read the exact old payload plane object while the coordinator backfills a
+  // manifest.  This operation is unavailable to API, document, collaboration,
+  // and mount keysets, and it never accepts a filesystem path.
+  CAPABILITY_OPERATION_READ_REVISION_LEGACY_PAYLOAD = 15;
 }
 
 message SignedCapability {

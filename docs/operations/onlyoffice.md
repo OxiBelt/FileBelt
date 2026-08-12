@@ -13,9 +13,13 @@ operator must preserve upstream branding, publish the provider's corresponding
 source and notices, record its exact image digest, and respect the Community
 20-simultaneous-connection limit.
 
-The initial format set is DOCX, XLSX, and PPTX, each at most 100 MiB. Sessions
-last at most 24 hours, reconnect for at most 100 seconds, and reauthorize within
-60 seconds. A conflict never overwrites the current FileBelt head.
+The supported format set is DOCX, XLSX, PPTX, ODT, ODS, and ODP, each at most
+100 MiB. File names must use the exact lower-case extension for their stored
+media type. The adapter configures `assemblyFormatAsOrigin=true`; the signed
+callback `filetype` must match the callback body, FileBelt source type, and
+validated save-back package before any commit. Sessions last at most 24 hours,
+reconnect for at most 100 seconds, and reauthorize within 60 seconds. A
+conflict never overwrites the current FileBelt head.
 
 ## Preflight
 
@@ -111,8 +115,11 @@ compatibility gate. Verify all of the following:
   `no-referrer`, and framing denial, and its CSP contains exactly `sandbox
   allow-scripts allow-same-origin allow-forms allow-downloads allow-popups`
   without a broader sandbox token;
-- real DOCX, XLSX, and PPTX editing plus provider download, print, and popup
-  behavior work under that fixed CSP in both browsers; and
+- real DOCX, XLSX, PPTX, ODT, ODS, and ODP editing plus provider download,
+  print, and popup behavior work under that fixed CSP in both browsers. Record
+  that save-back preserves each source format and that malformed/encrypted,
+  duplicate-path, macro-bearing, oversized, or format-mismatched ZIP output
+  fails without a FileBelt commit; and
 - removing every ONLYOFFICE component leaves login, Web files, Markdown, MCP,
   and ordinary upload/download behavior healthy.
 

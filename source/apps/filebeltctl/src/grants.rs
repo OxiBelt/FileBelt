@@ -23,6 +23,7 @@ const ROLES: &[&str] = &[
     "filebelt_headscale_sync",
     "filebelt_document",
     "filebelt_media",
+    "filebelt_revision",
 ];
 const SCHEMAS: &[&str] = &[
     "public",
@@ -35,6 +36,7 @@ const SCHEMAS: &[&str] = &[
     "filebelt_media",
     "filebelt_phase8",
     "filebelt_security",
+    "filebelt_revision",
 ];
 const TABLE_PRIVILEGES: &[&str] = &[
     "SELECT",
@@ -247,6 +249,16 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
                 | "filebelt_media"
         ),
         "filebelt_security" => matches!(role, "filebelt_api" | "filebelt_recovery"),
+        "filebelt_revision" => matches!(
+            role,
+            "filebelt_api"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_collaboration"
+                | "filebelt_vfs"
+                | "filebelt_document"
+                | "filebelt_revision"
+        ),
         _ => false,
     }
 }
@@ -391,6 +403,9 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
     if schema == "filebelt_security" {
         return false;
     }
+    if schema == "filebelt_revision" {
+        return expected_revision_table_privilege(role, table, privilege);
+    }
     if schema != "public" {
         return false;
     }
@@ -481,6 +496,71 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
                 || matches!(table, "audit_events" | "outbox_events" | "jobs")
                     && privilege == "INSERT"
         }
+        "filebelt_revision" => {
+            matches!(
+                table,
+                "groups"
+                    | "group_memberships"
+                    | "node_ancestry"
+                    | "acl_entries"
+                    | "authorization_generations"
+                    | "drives"
+                    | "nodes"
+                    | "file_versions"
+                    | "audit_events"
+                    | "outbox_events"
+                    | "jobs"
+            ) && privilege == "SELECT"
+                || matches!(
+                    table,
+                    "file_versions" | "audit_events" | "outbox_events" | "jobs"
+                ) && privilege == "INSERT"
+        }
+        _ => false,
+    }
+}
+
+fn expected_revision_table_privilege(role: &str, table: &str, privilege: &str) -> bool {
+    const TABLES: &[&str] = &[
+        "contents",
+        "git_repositories",
+        "git_revisions",
+        "chunk_objects",
+        "chunk_manifests",
+        "chunk_members",
+        "operations",
+        "backfill_jobs",
+        "holds",
+        "activation_state",
+    ];
+    match role {
+        "filebelt_api" => {
+            matches!(
+                table,
+                "contents"
+                    | "git_repositories"
+                    | "git_revisions"
+                    | "chunk_manifests"
+                    | "activation_state"
+                    | "holds"
+            ) && privilege == "SELECT"
+        }
+        "filebelt_revision" => {
+            TABLES.contains(&table)
+                && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
+        }
+        "filebelt_maintenance" => {
+            matches!(
+                table,
+                "chunk_objects"
+                    | "chunk_manifests"
+                    | "chunk_members"
+                    | "operations"
+                    | "backfill_jobs"
+                    | "holds"
+            ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
+        }
+        "filebelt_recovery" => TABLES.contains(&table) && privilege == "SELECT",
         _ => false,
     }
 }
@@ -1326,6 +1406,40 @@ fn expected_column_privilege(
             }
             _ => false,
         },
+        "filebelt_revision" => match privilege {
+            "SELECT" => match table {
+                "tenants" => matches!(column, "id" | "slug"),
+                "principals" => {
+                    matches!(
+                        column,
+                        "tenant_id" | "id" | "kind" | "generation" | "disabled_at"
+                    )
+                }
+                "users" => matches!(column, "tenant_id" | "id" | "principal_id" | "status"),
+                "api_sessions" => matches!(
+                    column,
+                    "tenant_id"
+                        | "id"
+                        | "user_id"
+                        | "principal_id"
+                        | "idle_expires_at"
+                        | "absolute_expires_at"
+                        | "revoked_at"
+                ),
+                _ => false,
+            },
+            "UPDATE" => match table {
+                "drives" => matches!(column, "reserved_bytes" | "used_physical_bytes"),
+                "nodes" => {
+                    matches!(
+                        column,
+                        "head_version_id" | "namespace_generation" | "updated_at"
+                    )
+                }
+                _ => false,
+            },
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -1364,9 +1478,16 @@ async fn verify_function_privileges(
 }
 
 fn expected_function_privilege(role: &str, function: &str) -> bool {
-    (function
-        == "filebelt_mcp.replace_registration_configuration_and_erase(uuid,uuid,uuid,bigint,text,text,text,text,text,jsonb)"
-        && role == "filebelt_mcp_broker")
+    (function == "filebelt_revision.attach_legacy_content()"
+        && matches!(
+            role,
+            "filebelt_api" | "filebelt_document" | "filebelt_collaboration" | "filebelt_revision"
+        ))
+        || (function == "filebelt_revision.create_tenant_activation_state()"
+            && role == "filebelt_api")
+        || (function
+            == "filebelt_mcp.replace_registration_configuration_and_erase(uuid,uuid,uuid,bigint,text,text,text,text,text,jsonb)"
+            && role == "filebelt_mcp_broker")
         || (function == "filebelt_document.create_session_principal(uuid,uuid)"
             && role == "filebelt_document")
         || (function == "filebelt_mount.create_session_principal(uuid,uuid)"
@@ -1732,6 +1853,69 @@ mod tests {
         assert!(!expected_function_privilege("filebelt_api", repair));
         assert!(!expected_function_privilege("filebelt_vfs", admission));
         assert!(!expected_function_privilege("filebelt_recovery", internal));
+    }
+
+    #[test]
+    fn revision_role_grants_are_complete_and_io_is_excluded() {
+        let grants = include_str!("../../../migrations/postgres/grants.sql");
+        assert!(ROLES.contains(&"filebelt_revision"));
+        assert!(SCHEMAS.contains(&"filebelt_revision"));
+        assert!(grants.contains("REVOKE USAGE ON SCHEMA filebelt_revision FROM filebelt_io"));
+        assert!(
+            grants.contains(
+                "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA filebelt_revision FROM filebelt_io"
+            )
+        );
+        assert!(!expected_schema_privilege(
+            "filebelt_io",
+            "filebelt_revision",
+            "USAGE"
+        ));
+        for table in [
+            "contents",
+            "git_repositories",
+            "git_revisions",
+            "chunk_objects",
+            "chunk_manifests",
+            "chunk_members",
+            "operations",
+            "backfill_jobs",
+            "holds",
+            "activation_state",
+        ] {
+            for privilege in TABLE_PRIVILEGES {
+                assert!(!expected_table_privilege(
+                    "filebelt_io",
+                    "filebelt_revision",
+                    table,
+                    privilege
+                ));
+            }
+            assert!(expected_table_privilege(
+                "filebelt_revision",
+                "filebelt_revision",
+                table,
+                "SELECT"
+            ));
+            assert!(expected_table_privilege(
+                "filebelt_recovery",
+                "filebelt_revision",
+                table,
+                "SELECT"
+            ));
+        }
+        assert!(expected_function_privilege(
+            "filebelt_revision",
+            "filebelt_revision.attach_legacy_content()"
+        ));
+        assert!(!expected_function_privilege(
+            "filebelt_io",
+            "filebelt_revision.attach_legacy_content()"
+        ));
+        assert!(!expected_function_privilege(
+            "filebelt_revision",
+            "filebelt_revision.prevent_referenced_content_rewrite()"
+        ));
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub enum KeyPurpose {
     ApiMcpDelegation,
     CollaborationStorage,
     DocumentStorage,
+    RevisionStorage,
     MountStorage,
     MediaStorage,
 }
@@ -37,6 +38,7 @@ impl KeyPurpose {
             Self::ApiMcpDelegation => "api-mcp-delegation",
             Self::CollaborationStorage => "collaboration-storage",
             Self::DocumentStorage => "document-storage",
+            Self::RevisionStorage => "revision-storage",
             Self::MountStorage => "mount-storage",
             Self::MediaStorage => "media-storage",
         }
@@ -59,6 +61,7 @@ impl FromStr for KeyPurpose {
             "api-mcp-delegation" => Ok(Self::ApiMcpDelegation),
             "collaboration-storage" => Ok(Self::CollaborationStorage),
             "document-storage" => Ok(Self::DocumentStorage),
+            "revision-storage" => Ok(Self::RevisionStorage),
             "mount-storage" => Ok(Self::MountStorage),
             "media-storage" => Ok(Self::MediaStorage),
             _ => Err(KeysetError::InvalidEncoding),
@@ -238,6 +241,7 @@ typed_keyset!(
 typed_keyset!(ApiMcpDelegationKeyset, KeyPurpose::ApiMcpDelegation);
 typed_keyset!(CollaborationStorageKeyset, KeyPurpose::CollaborationStorage);
 typed_keyset!(DocumentStorageKeyset, KeyPurpose::DocumentStorage);
+typed_keyset!(RevisionStorageKeyset, KeyPurpose::RevisionStorage);
 typed_keyset!(MountStorageKeyset, KeyPurpose::MountStorage);
 typed_keyset!(MediaStorageKeyset, KeyPurpose::MediaStorage);
 

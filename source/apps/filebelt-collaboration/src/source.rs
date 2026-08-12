@@ -130,4 +130,18 @@ mod tests {
             Err(MarkdownSourceError::ContainsNul)
         );
     }
+
+    #[test]
+    fn accepts_the_shared_sixteen_mib_editor_ceiling_exactly() {
+        let source = vec![b'x'; MAX_MARKDOWN_SOURCE_BYTES];
+        assert_eq!(
+            MarkdownSource::decode(&source).unwrap().text.len(),
+            MAX_MARKDOWN_SOURCE_BYTES
+        );
+        let oversized = vec![b'x'; MAX_MARKDOWN_SOURCE_BYTES + 1];
+        assert_eq!(
+            MarkdownSource::decode(&oversized),
+            Err(MarkdownSourceError::TooLarge)
+        );
+    }
 }

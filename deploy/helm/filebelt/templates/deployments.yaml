@@ -188,6 +188,9 @@ spec:
         {{- if .Values.documents.enabled }}
         checksum/document-client-tls: {{ .Values.secrets.apiDocumentClientTls.generation | sha256sum | quote }}
         {{- end }}
+        {{- if .Values.revisions.enabled }}
+        checksum/revision-client-tls: {{ .Values.secrets.apiRevisionClientTls.generation | sha256sum | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-api
       automountServiceAccountToken: false
@@ -248,6 +251,9 @@ spec:
             {{- end }}
             {{- if .Values.documents.enabled }}
             - {name: document-api-client-tls, mountPath: /run/secrets/document-api-client-tls, readOnly: true}
+            {{- end }}
+            {{- if .Values.revisions.enabled }}
+            - {name: revision-client-tls, mountPath: /run/secrets/revision-client-tls, readOnly: true}
             {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
@@ -314,6 +320,16 @@ spec:
               - {key: {{ .Values.secrets.apiDocumentClientTls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.secrets.apiDocumentClientTls.caKey }}, path: server-ca.crt}
         {{- end }}
+        {{- if .Values.revisions.enabled }}
+        - name: revision-client-tls
+          secret:
+            secretName: {{ .Values.secrets.apiRevisionClientTls.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.secrets.apiRevisionClientTls.certificateKey }}, path: tls.crt}
+              - {key: {{ .Values.secrets.apiRevisionClientTls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.secrets.apiRevisionClientTls.caKey }}, path: server-ca.crt}
+        {{- end }}
 {{ include "filebelt.tmpVolume" . | indent 8 }}
 ---
 {{- $quiescedReplicas = ternary 0 .Values.workloads.io.replicas .Values.deployment.quiesced }}
@@ -343,6 +359,9 @@ spec:
         {{- end }}
         {{- if .Values.documents.enabled }}
         checksum/document-storage: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.revisions.enabled }}
+        checksum/revision-storage: {{ .Values.secrets.revisionStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
         {{- end }}
         {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         checksum/mount-storage: {{ .Values.secrets.mountStorageCapabilityPublicKeyset.generation | sha256sum | quote }}
@@ -391,6 +410,9 @@ spec:
             {{- if .Values.documents.enabled }}
             - {name: document-storage-capability-public, mountPath: /run/secrets/document-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
+            {{- if .Values.revisions.enabled }}
+            - {name: revision-storage-capability-public, mountPath: /run/secrets/revision-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
+            {{- end }}
             {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
             - {name: mount-storage-capability-public, mountPath: /run/secrets/mount-storage-capability-public-keyset, subPath: public-keyset, readOnly: true}
             {{- end }}
@@ -410,6 +432,10 @@ spec:
         {{- if .Values.documents.enabled }}
         - name: document-storage-capability-public
           secret: {secretName: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.documentStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
+        {{- end }}
+        {{- if .Values.revisions.enabled }}
+        - name: revision-storage-capability-public
+          secret: {secretName: {{ .Values.secrets.revisionStorageCapabilityPublicKeyset.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.revisionStorageCapabilityPublicKeyset.key }}, path: public-keyset}]}
         {{- end }}
         {{- if (or .Values.mounts.smb.enabled .Values.mounts.ftpFtps.enabled .Values.mounts.nfs.enabled) }}
         - name: mount-storage-capability-public

@@ -336,8 +336,6 @@ const RoleDefinitions: readonly RoleDefinition[] = [
   },
 ];
 
-const ReleaseTagPattern =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
 const RevisionPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const CreatedPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
@@ -475,7 +473,56 @@ function Component(
 }
 
 export function IsReleaseTag(Value: string): boolean {
-  return ReleaseTagPattern.test(Value);
+  let Offset = ConsumeNumericIdentifier(Value, 0);
+  if (Offset === null || Value[Offset] !== ".") return false;
+  Offset = ConsumeNumericIdentifier(Value, Offset + 1);
+  if (Offset === null || Value[Offset] !== ".") return false;
+  Offset = ConsumeNumericIdentifier(Value, Offset + 1);
+  if (Offset === null) return false;
+  if (Offset === Value.length) return true;
+  if (Value[Offset] !== "-") return false;
+
+  Offset += 1;
+  while (Offset < Value.length) {
+    const Start: number = Offset;
+    let Numeric = true;
+    while (Offset < Value.length) {
+      const Character = Value.charCodeAt(Offset);
+      if (IsAsciiDigit(Character)) {
+        Offset += 1;
+      } else if (IsAsciiLetter(Character) || Character === 0x2d) {
+        Numeric = false;
+        Offset += 1;
+      } else {
+        break;
+      }
+    }
+    if (Offset === Start || (Numeric && Offset - Start > 1 && Value[Start] === "0")) {
+      return false;
+    }
+    if (Offset === Value.length) return true;
+    if (Value[Offset] !== ".") return false;
+    Offset += 1;
+  }
+  return false;
+}
+
+function ConsumeNumericIdentifier(Value: string, Offset: number): number | null {
+  if (Offset >= Value.length || !IsAsciiDigit(Value.charCodeAt(Offset))) return null;
+  if (Value[Offset] === "0") return Offset + 1;
+  do {
+    Offset += 1;
+  } while (Offset < Value.length && IsAsciiDigit(Value.charCodeAt(Offset)));
+  return Offset;
+}
+
+function IsAsciiDigit(Character: number): boolean {
+  return Character >= 0x30 && Character <= 0x39;
+}
+
+function IsAsciiLetter(Character: number): boolean {
+  return (Character >= 0x41 && Character <= 0x5a)
+    || (Character >= 0x61 && Character <= 0x7a);
 }
 
 export function CreateLocalBuildTag(Version: string, Revision: string): string {

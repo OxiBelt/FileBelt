@@ -263,12 +263,30 @@ test("archive validator license contract matches the immutable Rust image plan",
 });
 
 test("release plans accept exact stable and prerelease SemVer tags", () => {
-  for (const version of ["0.1.0", "1.2.3-rc.1", "1.2.3-alpha-beta.7"]) {
+  for (const version of [
+    "0.1.0",
+    "1.2.3-rc.1",
+    "1.2.3-alpha-beta.7",
+    `1.2.3-${"a".repeat(100_000)}`,
+  ]) {
     const source = buildSource({ ref: `refs/tags/${version}`, kind: "release" });
     assert.equal(CreateImagePlan({ Channel: "release", Version: version, Source: source }).tag, version);
   }
 
-  for (const invalid of ["v1.2.3", "01.2.3", "1.2", "1.2.3+build.1", "1.2.3-01"]) {
+  for (const invalid of [
+    "v1.2.3",
+    "01.2.3",
+    "1.02.3",
+    "1.2.03",
+    "1.2",
+    "1.2.3.4",
+    "1.2.3-",
+    "1.2.3-alpha..1",
+    "1.2.3-alpha_1",
+    "1.2.3-α",
+    "1.2.3+build.1",
+    "1.2.3-01",
+  ]) {
     assert.equal(IsReleaseTag(invalid), false, invalid);
   }
   assert.equal(IsReleaseTag("1.2.3"), true);
@@ -281,6 +299,32 @@ test("release plans accept exact stable and prerelease SemVer tags", () => {
         Source: buildSource({ kind: "release" }),
       }),
     /source ref refs\/tags\/1.2.3/,
+  );
+});
+
+test("release tag validation rejects adversarial prerelease input within a fixed deadline", () => {
+  const DistIndex = new URL("../dist/index.js", import.meta.url).href;
+  const AssertRejectedWithinDeadline = (Value, Description) => {
+    const Program = [
+      `import { IsReleaseTag } from ${JSON.stringify(DistIndex)};`,
+      `if (IsReleaseTag(${JSON.stringify(Value)})) process.exit(1);`,
+    ].join("\n");
+    assert.doesNotThrow(
+      () => execFileSync(process.execPath, ["--input-type=module", "--eval", Program], {
+        stdio: "pipe",
+        timeout: 2_000,
+      }),
+      Description,
+    );
+  };
+
+  AssertRejectedWithinDeadline(
+    `0.0.0--${"-".repeat(100_000)}!`,
+    "hyphen-heavy prerelease input must not cause polynomial backtracking",
+  );
+  AssertRejectedWithinDeadline(
+    `0.0.0-0.${"--.".repeat(32)}!`,
+    "dot-and-hyphen prerelease input must not cause exponential backtracking",
   );
 });
 

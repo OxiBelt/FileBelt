@@ -79,6 +79,7 @@ REQUIRED_LIVING_SPECS = (
 )
 SPDX_EXTENSIONS = {".cmake", ".js", ".md", ".py", ".rs", ".toml", ".ts", ".yaml", ".yml"}
 TOOL_OWNED_SPDX_FILES = {
+    ".serena/project.local.yml",
     "supply-chain/audits.toml",
     "supply-chain/config.toml",
     "supply-chain/imports.lock",

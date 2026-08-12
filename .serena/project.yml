@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # the name by which the project can be referenced within Serena/when chatting with the LLM.
 project_name: "FileBelt"
 

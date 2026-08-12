@@ -28,7 +28,7 @@ licenses and notices of its linked runtime and copied upstream contents.
 
 | Artifact/input | Composition rule | Boundary and evidence |
 | --- | --- | --- |
-| `filebelt-api`, `filebelt-worker-io`, `filebelt-collaboration`, `filebelt-document`, `filebelt-vfs`, and `filebelt-headscale-sync` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; ship exact upstream notices and inspect native linkage |
+| `filebelt-api`, `filebelt-worker-io`, `filebelt-collaboration`, `filebelt-document`, `filebelt-vfs`, `filebelt-headscale-sync`, and `filebelt-nfs-relay` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; ship exact upstream notices and inspect native linkage |
 | `filebelt-worker-maintenance` and `filebelt-tools` | `Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0` | Adds the exact Iggy client and its unmodified MPL helper; ship its license and corresponding-source pointer with SBOM evidence |
 | `filebelt-media-controller` and `filebelt-mcp-runner` | `Apache-2.0 AND MIT` | Apache FileBelt source plus the Rust/musl runtime; ship exact notices and inspect native linkage |
 | `filebelt-mcp-broker` and `filebelt-controller` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; the controller also contains the reviewed Sigstore verifier graph |

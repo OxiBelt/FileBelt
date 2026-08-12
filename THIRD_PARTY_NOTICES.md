@@ -19,7 +19,7 @@ components:
 The complete MIT license text is distributed as `LICENSES/MIT.txt`, and the
 Apache-2.0 text is distributed as `LICENSES/Apache-2.0.txt`. Rust role image
 labels include those terms. API, I/O worker, collaboration, MCP broker,
-controller, VFS, and Headscale-sync images also contain unmodified WebPKI
+controller, VFS, Headscale-sync, and NFS relay images also contain unmodified WebPKI
 certificate data under CDLA-Permissive-2.0. Maintenance and tools images
 contain the same WebPKI data and add unmodified `option-ext` code under MPL-2.0
 through the Apache Iggy client. Those images carry the applicable exact license

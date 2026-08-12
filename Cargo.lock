@@ -2088,6 +2088,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "filebelt-nfs-relay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "filebelt-deployment-diagnostics",
+ "filebelt-runtime",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "filebelt-repository-tests"
 version = "0.1.0"
 dependencies = [

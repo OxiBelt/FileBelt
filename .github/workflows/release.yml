@@ -57,7 +57,7 @@ jobs:
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
-      - name: Build and validate all thirteen Apache role contracts
+      - name: Build and validate all fourteen Apache role contracts
         run: >-
           tests/scripts/run-image-matrix.sh
           --plan artifacts/phase3/image-plan.json
@@ -300,6 +300,7 @@ jobs:
             tools:filebelt-tools \
             vfs:filebelt-vfs \
             headscale_sync:filebelt-headscale-sync \
+            nfs_relay:filebelt-nfs-relay \
             document:filebelt-document \
             web:filebelt-web; do
             key=${item%%:*}
@@ -378,6 +379,12 @@ jobs:
         with:
           subject-name: ghcr.io/oxibelt/filebelt-headscale-sync
           subject-digest: ${{ steps.subjects.outputs.headscale_sync }}
+          push-to-registry: false
+      - name: Attest NFS relay image index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/oxibelt/filebelt-nfs-relay
+          subject-digest: ${{ steps.subjects.outputs.nfs_relay }}
           push-to-registry: false
       - name: Attest document provider image index
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

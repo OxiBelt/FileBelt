@@ -36,6 +36,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/apps/filebeltctl",
     "source/apps/filebelt-vfs",
     "source/apps/filebelt-headscale-sync",
+    "source/apps/filebelt-nfs-relay",
     "source/crates/filebelt-build-identity",
     "source/crates/filebelt-domain",
     "source/crates/filebelt-authz",

@@ -594,6 +594,21 @@ filebelt-mcp-policy = []
 filebelt-runtime = []
 
 [[graph_profiles]]
+label = "opaque NFS TCP relay"
+package = "filebelt-nfs-relay"
+manifest = "source/apps/filebelt-nfs-relay/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-deployment-diagnostics = []
+filebelt-nfs-relay = []
+filebelt-runtime = []
+
+[[graph_profiles]]
 label = "control-plane API"
 package = "filebelt-api"
 manifest = "source/apps/filebelt-api/Cargo.toml"
@@ -1049,6 +1064,12 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-headscale-sync"
 crate_root = "source/apps/filebelt-headscale-sync/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-nfs-relay"
+crate_root = "source/apps/filebelt-nfs-relay/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

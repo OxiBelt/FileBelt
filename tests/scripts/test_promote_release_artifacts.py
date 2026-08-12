@@ -23,6 +23,7 @@ ACTIVE_ROLES = (
     "filebelt-tools",
     "filebelt-vfs",
     "filebelt-headscale-sync",
+    "filebelt-nfs-relay",
     "filebelt-document",
     "filebelt-web",
 )

@@ -46,7 +46,7 @@ function buildSource(overrides = {}) {
   };
 }
 
-test("build plan contains the thirteen fixed roles and immutable runtime contract", () => {
+test("build plan contains the fourteen fixed roles and immutable runtime contract", () => {
   const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
 
   assert.equal(plan.schemaVersion, 1);
@@ -74,6 +74,7 @@ test("build plan contains the thirteen fixed roles and immutable runtime contrac
       "filebelt-tools": RustIggyImageLicense,
       "filebelt-vfs": RustCdlaImageLicense,
       "filebelt-headscale-sync": RustCdlaImageLicense,
+      "filebelt-nfs-relay": RustCdlaImageLicense,
       "filebelt-web": WebImageLicense,
     }[image.role];
     assert.equal(image.license, expectedLicense);

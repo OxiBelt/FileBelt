@@ -156,19 +156,24 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(release.contains("sha256sum --check SHA256SUMS"));
     assert!(release.contains("refusing to replace existing Helm release"));
     assert!(release.contains("--verify-tag"));
-    for release_role in ["filebelt-vfs", "filebelt-headscale-sync"] {
+    for release_role in [
+        "filebelt-vfs",
+        "filebelt-headscale-sync",
+        "filebelt-nfs-relay",
+    ] {
         assert!(
             release.contains(release_role),
             "release promotion must carry {release_role}"
         );
         assert!(
-            dry_run.contains("Build all thirteen Apache roles"),
+            dry_run.contains("Build all fourteen Apache roles"),
             "dry-run must build the complete Apache image plan"
         );
     }
     for output in [
         "steps.subjects.outputs.vfs",
         "steps.subjects.outputs.headscale_sync",
+        "steps.subjects.outputs.nfs_relay",
     ] {
         assert!(release.contains(output), "release must attest {output}");
     }
@@ -199,6 +204,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
         "filebelt-tools",
         "filebelt-vfs",
         "filebelt-headscale-sync",
+        "filebelt-nfs-relay",
         "filebelt-document",
         "filebelt-web",
     ] {

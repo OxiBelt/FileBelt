@@ -30,7 +30,8 @@ The [living engineering specifications](docs/README.md),
 [supply-chain policy](docs/SupplyChain.md), and
 [runtime and deployment contract](docs/RuntimeAndDeployment.md) describe the
 current build, runtime, and release boundary. Pull-request validation remains
-read-only; authorized signed SemVer tags may promote the twelve active Apache images
+read-only; authorized signed SemVer tags may promote the thirteen active Apache
+images
 and Helm chart with attestations.
 
 ## Repository regions

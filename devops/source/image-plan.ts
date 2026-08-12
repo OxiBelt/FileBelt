@@ -28,6 +28,7 @@ export const ImageRoles = [
   "filebelt-tools",
   "filebelt-vfs",
   "filebelt-headscale-sync",
+  "filebelt-nfs-relay",
   "filebelt-web",
 ] as const;
 
@@ -313,6 +314,12 @@ const RoleDefinitions: readonly RoleDefinition[] = [
     RustCdlaImageLicense,
     WebpkiRuntimeComponents,
   ),
+  RustRole(
+    "filebelt-nfs-relay",
+    "filebelt-nfs-relay",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
   {
     Role: "filebelt-web",
     Dockerfile: "ui/web/Dockerfile",
@@ -347,6 +354,7 @@ const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-tools": "FileBelt command-line tools",
   "filebelt-vfs": "FileBelt VFS service",
   "filebelt-headscale-sync": "FileBelt Headscale synchronization service",
+  "filebelt-nfs-relay": "FileBelt opaque NFS TCP relay",
   "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };
 

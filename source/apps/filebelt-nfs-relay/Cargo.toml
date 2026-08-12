@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "filebelt-nfs-relay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+filebelt-deployment-diagnostics.workspace = true
+filebelt-runtime.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

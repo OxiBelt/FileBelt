@@ -4,7 +4,7 @@ use std::fs;
 
 use filebelt_repository_tests::repository_root;
 
-const ROLES: [&str; 13] = [
+const ROLES: [&str; 14] = [
     "filebelt-api",
     "filebelt-worker-io",
     "filebelt-worker-maintenance",
@@ -17,6 +17,7 @@ const ROLES: [&str; 13] = [
     "filebelt-tools",
     "filebelt-vfs",
     "filebelt-headscale-sync",
+    "filebelt-nfs-relay",
     "filebelt-web",
 ];
 

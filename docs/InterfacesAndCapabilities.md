@@ -501,6 +501,14 @@ rotating key and include export, node, and generation scope without exposing a
 physical locator. Current and immediately previous handle keys may validate;
 capability signing keys are not reused.
 
+The adapter-local `FsalCall` wrapper does not change VFS v1. Ganesha/FSAL is the
+trusted producer of its already-verified RPCSEC_GSS fields, but the bridge
+accepts that wrapper only over the fixed `10002:10002` peer identity. The
+reverse export-control channel accepts only bridge identity `10001:10001`.
+Both `0660` sockets are assigned to dedicated group `10003` and require exact
+socket metadata, `SO_PEERCRED`, and matching `SCM_CREDENTIALS`; group membership
+alone never authenticates a caller.
+
 Create, mkdir, and symlink carry an optional mode containing only `0777`
 permission bits; omission selects `0644`, `0755`, and `0777` respectively,
 while Core always derives UID/GID from the authenticated NFS projection. Lock

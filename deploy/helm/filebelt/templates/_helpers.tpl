@@ -430,6 +430,37 @@ runAsUser: {{ .Values.global.runAsUser }}
 runAsGroup: {{ .Values.global.runAsGroup }}
 {{- end -}}
 
+{{- define "filebelt.nfsPodSecurityContext" -}}
+runAsNonRoot: true
+fsGroup: {{ .Values.global.runAsGroup }}
+fsGroupChangePolicy: OnRootMismatch
+seccompProfile:
+  type: RuntimeDefault
+supplementalGroups: [{{ .Values.global.runAsGroup }}, 10003]
+{{- end -}}
+
+{{- define "filebelt.nfsGaneshaSecurityContext" -}}
+allowPrivilegeEscalation: false
+capabilities:
+  drop: ["ALL"]
+privileged: false
+readOnlyRootFilesystem: true
+runAsNonRoot: true
+runAsUser: 10002
+runAsGroup: 10002
+{{- end -}}
+
+{{- define "filebelt.nfsBridgeSecurityContext" -}}
+allowPrivilegeEscalation: false
+capabilities:
+  drop: ["ALL"]
+privileged: false
+readOnlyRootFilesystem: true
+runAsNonRoot: true
+runAsUser: 10001
+runAsGroup: 10001
+{{- end -}}
+
 {{- define "filebelt.tailscaledSecurityContext" -}}
 # Kernel-mode tailscaled needs only NET_ADMIN and the projected /dev/net/tun
 # character device; it deliberately remains non-privileged and rootfs read-only.

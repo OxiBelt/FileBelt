@@ -4,6 +4,7 @@
 
 use crate::config::BridgeConfig;
 use crate::control::{ControlError, ExportInstaller};
+use crate::ipc::{BRIDGE_UID, IPC_GID, socket_has_expected_metadata};
 use crate::vfs::{VfsClient, VfsClientError};
 use filebelt_vfs_protocol::vfs_request::Operation;
 use filebelt_vfs_protocol::{
@@ -728,8 +729,7 @@ pub fn healthy(config: &BridgeConfig) -> bool {
         && state.gateway_epoch > 0
         && state.feature_generation > 0
         && state.export_generation > 0
-        && fs::symlink_metadata(&config.ipc_socket)
-            .is_ok_and(|metadata| std::os::unix::fs::FileTypeExt::is_socket(&metadata.file_type()))
+        && socket_has_expected_metadata(&config.ipc_socket, BRIDGE_UID, IPC_GID)
 }
 
 pub(super) fn operation_is_mutation(operation: &Operation) -> bool {

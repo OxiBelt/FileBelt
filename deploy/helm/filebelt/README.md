@@ -33,6 +33,10 @@ operator-provided RWO tailstate claim. NFS does not render Headscale sync. It
 renders one single-active StatefulSet with Ganesha, its FileBelt bridge, and
 tailscaled, plus a NetworkPolicy-restricted ClusterIP Service on TCP 2049. VFS
 and Headscale sync never receive tailscaled, TUN, tailstate, or payload mounts.
+The bridge runs as fixed `10001:10001`, Ganesha as fixed `10002:10002`, and the
+Pod receives supplemental IPC group `10003`; only those two containers mount
+the Unix socket volume. The group permits access to exact `0660` sockets;
+direction-specific process and packet credentials provide authentication.
 
 The NFS topology fails closed until the operator supplies published non-zero
 NFS and tailscaled image digests, exact realm and idmap values, distinct

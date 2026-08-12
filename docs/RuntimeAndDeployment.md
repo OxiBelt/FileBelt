@@ -97,11 +97,14 @@ Other reserved adapter roles are future `filebelt-nfs-gateway` and
 prohibited until its exact FFmpeg composition has been reviewed and the
 license map, supply-chain evidence, and runtime contract are updated together.
 
-Every FileBelt process runs as numeric UID/GID `10001:10001` with a read-only
-root filesystem, no-new-privileges, dropped Linux capabilities, bounded
-writable temporary storage, and only role-specific ports, networks, secrets,
-and mounts. Liveness reports process health separately from dependency and
-storage readiness.
+Every FileBelt process normally runs as numeric UID/GID `10001:10001`. The NFS
+StatefulSet is the narrow exception: its bridge remains `10001:10001`, Ganesha
+runs as `10002:10002`, and both receive supplemental IPC group `10003` so exact
+peer credentials can distinguish the trusted FSAL from other Pod processes.
+All retain a read-only root filesystem, no-new-privileges, dropped Linux
+capabilities, bounded writable temporary storage, and only role-specific ports,
+networks, secrets, and mounts. Liveness reports process health separately from
+dependency and storage readiness.
 
 ## Descendant-share security cutover
 
@@ -439,9 +442,11 @@ Ganesha and bridge ConfigMaps, shell-free command/health/preStop argv, a static
 keytab, an exact `spiffe://filebelt/nfs-gateway/vfs` bridge identity, a VFS-only
 handle keyring, and distinct RWO tailstate/recovery claims before it renders the
 NFS listener. Ganesha and the bridge use the same pinned FileBelt image; the
-only Service is ClusterIP TCP 2049, and policy provides no KDC egress. Until
-that image ABI and protocol evidence are qualified, operators must leave NFS
-disabled.
+bridge runs as `10001:10001`, Ganesha runs as `10002:10002`, and their exact
+`10003`-group Unix sockets authenticate both connection and packet credentials
+in each direction. The only Service is ClusterIP TCP 2049, and policy provides
+no KDC egress. Until that image ABI and protocol evidence are qualified,
+operators must leave NFS disabled.
 
 The checked-in NFS qualification scaffold is read-only and deliberately fails
 its publication boundary. It rejects emulated builds, an image that retains the

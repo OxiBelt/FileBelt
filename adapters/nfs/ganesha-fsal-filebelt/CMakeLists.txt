@@ -2,6 +2,7 @@
 
 add_library(fsalfilebelt MODULE
   fsal_filebelt.c
+  filebelt_credentials.c
   filebelt_wire.c
   filebelt_control.c
   filebelt_protocol.c

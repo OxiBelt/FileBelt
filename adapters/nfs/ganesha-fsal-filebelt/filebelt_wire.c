@@ -5,6 +5,8 @@
 #endif
 
 #include "filebelt_wire.h"
+#include "filebelt_credentials.h"
+#include "filebelt_identity.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -389,7 +391,7 @@ static bool encode_authentication(
 	       filebelt_pb_uint64(authentication, 9, context->operation_index);
 }
 
-static int verified_bridge_socket(void)
+static int verified_bridge_socket(pid_t *peer_pid)
 {
 	struct sockaddr_un address = { .sun_family = AF_UNIX };
 	struct stat metadata;
@@ -397,10 +399,16 @@ static int verified_bridge_socket(void)
 	struct ucred peer;
 	socklen_t peer_length = sizeof(peer);
 	int descriptor;
+	int passcred = 1;
 
-	if (lstat(FILEBELT_BRIDGE_SOCKET, &metadata) != 0 ||
-	    !S_ISSOCK(metadata.st_mode) || metadata.st_uid != geteuid() ||
-	    (metadata.st_mode & 077U) != 0)
+	if (peer_pid == NULL ||
+	    !filebelt_process_identity_matches(
+		    geteuid(), getegid(), FILEBELT_GANESHA_UID,
+		    FILEBELT_GANESHA_GID) ||
+	    lstat(FILEBELT_BRIDGE_SOCKET, &metadata) != 0 ||
+	    !filebelt_socket_identity_matches(
+		    metadata.st_mode, metadata.st_uid, metadata.st_gid,
+		    FILEBELT_BRIDGE_UID))
 		return -1;
 	descriptor = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 	if (descriptor < 0)
@@ -413,11 +421,17 @@ static int verified_bridge_socket(void)
 		       sizeof(timeout)) != 0 ||
 	    setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout,
 		       sizeof(timeout)) != 0 ||
+	    setsockopt(descriptor, SOL_SOCKET, SO_PASSCRED, &passcred,
+		       sizeof(passcred)) != 0 ||
 	    connect(descriptor, (struct sockaddr *)&address, sizeof(address)) != 0 ||
 	    getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &peer,
 		       &peer_length) != 0 ||
-	    peer_length != sizeof(peer) || peer.uid != geteuid())
+	    peer_length != sizeof(peer) ||
+	    !filebelt_process_identity_matches(
+		    peer.uid, peer.gid, FILEBELT_BRIDGE_UID,
+		    FILEBELT_BRIDGE_GID))
 		goto fail;
+	*peer_pid = peer.pid;
 	return descriptor;
 fail:
 	(void)close(descriptor);
@@ -440,6 +454,7 @@ int filebelt_bridge_call(const struct filebelt_fsal_request_context *context,
 	struct filebelt_private_projection projection;
 	int descriptor = -1;
 	int result = -1;
+	pid_t peer_pid = -1;
 
 	if (context == NULL || operation == NULL || operation_length == 0 ||
 	    operation_length > FILEBELT_MAX_FRAME_BYTES || response == NULL ||
@@ -466,16 +481,16 @@ int filebelt_bridge_call(const struct filebelt_fsal_request_context *context,
 	packet[1] = (uint8_t)(payload_length >> 16);
 	packet[2] = (uint8_t)(payload_length >> 8);
 	packet[3] = (uint8_t)payload_length;
-	descriptor = verified_bridge_socket();
+	descriptor = verified_bridge_socket(&peer_pid);
 	if (descriptor < 0)
 		goto out;
 	sent = send(descriptor, packet,
 		    request.length + FILEBELT_FRAME_PREFIX_BYTES, MSG_NOSIGNAL);
 	if (sent < 0 || (size_t)sent != request.length + FILEBELT_FRAME_PREFIX_BYTES)
 		goto out;
-	received = recv(descriptor, packet,
-			FILEBELT_MAX_FRAME_BYTES + FILEBELT_FRAME_PREFIX_BYTES,
-			MSG_TRUNC);
+	received = filebelt_receive_authenticated_packet(
+		descriptor, peer_pid, FILEBELT_BRIDGE_UID, FILEBELT_BRIDGE_GID, packet,
+		FILEBELT_MAX_FRAME_BYTES + FILEBELT_FRAME_PREFIX_BYTES);
 	if (received < FILEBELT_FRAME_PREFIX_BYTES ||
 	    (size_t)received > FILEBELT_MAX_FRAME_BYTES + FILEBELT_FRAME_PREFIX_BYTES)
 		goto out;

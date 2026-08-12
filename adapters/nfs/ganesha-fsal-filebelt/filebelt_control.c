@@ -5,6 +5,8 @@
 #endif
 
 #include "filebelt_internal.h"
+#include "filebelt_credentials.h"
+#include "filebelt_identity.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -301,13 +303,20 @@ unlock:
 	return accepted;
 }
 
-static bool peer_is_local(int descriptor)
+static bool peer_is_bridge(int descriptor, pid_t *peer_pid)
 {
 	struct ucred peer;
 	socklen_t length = sizeof(peer);
 
-	return getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &peer, &length) == 0 &&
-	       length == sizeof(peer) && peer.uid == geteuid();
+	if (peer_pid == NULL ||
+	    getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 ||
+	    length != sizeof(peer) ||
+	    !filebelt_process_identity_matches(
+		    peer.uid, peer.gid, FILEBELT_BRIDGE_UID,
+		    FILEBELT_BRIDGE_GID))
+		return false;
+	*peer_pid = peer.pid;
+	return true;
 }
 
 static void serve_control_packet(struct filebelt_fsal_export *export,
@@ -319,15 +328,17 @@ static void serve_control_packet(struct filebelt_fsal_export *export,
 	ssize_t received;
 	size_t response_length;
 	uint32_t payload_length;
+	pid_t peer_pid = -1;
 
-	if (!peer_is_local(descriptor))
+	if (!peer_is_bridge(descriptor, &peer_pid))
 		return;
 	packet = malloc(FILEBELT_MAX_FRAME_BYTES + 4U);
 	response = malloc(FILEBELT_MAX_FRAME_BYTES + 4U);
 	if (packet == NULL || response == NULL)
 		goto out;
-	received = recv(descriptor, packet, FILEBELT_MAX_FRAME_BYTES + 4U,
-			MSG_TRUNC);
+	received = filebelt_receive_authenticated_packet(
+		descriptor, peer_pid, FILEBELT_BRIDGE_UID, FILEBELT_BRIDGE_GID,
+		packet, FILEBELT_MAX_FRAME_BYTES + 4U);
 	if (received < 4 || (size_t)received > FILEBELT_MAX_FRAME_BYTES + 4U ||
 	    filebelt_fsal_frame_length(packet, &payload_length) != 0 ||
 	    payload_length != (size_t)received - 4U ||
@@ -359,12 +370,18 @@ static void *control_thread_main(void *opaque)
 	while (!atomic_load_explicit(&export->control_stopping,
 					    memory_order_acquire)) {
 		int descriptor = accept4(export->control_listener, NULL, NULL,
-				 SOCK_CLOEXEC);
+					 SOCK_CLOEXEC);
+		int passcred = 1;
 
 		if (descriptor < 0) {
 			if (errno == EINTR)
 				continue;
 			break;
+		}
+		if (setsockopt(descriptor, SOL_SOCKET, SO_PASSCRED, &passcred,
+			       sizeof(passcred)) != 0) {
+			(void)close(descriptor);
+			continue;
 		}
 		serve_control_packet(export, descriptor);
 		(void)close(descriptor);
@@ -379,12 +396,18 @@ int filebelt_control_start(struct filebelt_fsal_export *export)
 	struct stat existing;
 	const char *parent_path = "/run/filebelt-nfs";
 	int descriptor;
+	int passcred = 1;
 
-	if (lstat(parent_path, &parent) != 0 || !S_ISDIR(parent.st_mode) ||
-	    (parent.st_mode & 002U) != 0 || parent.st_uid != geteuid())
+	if (!filebelt_process_identity_matches(
+		    geteuid(), getegid(), FILEBELT_GANESHA_UID,
+		    FILEBELT_GANESHA_GID) ||
+	    lstat(parent_path, &parent) != 0 || !S_ISDIR(parent.st_mode) ||
+	    (parent.st_mode & 007U) != 0 || parent.st_gid != FILEBELT_BRIDGE_GID)
 		return -1;
 	if (lstat(FILEBELT_CONTROL_SOCKET, &existing) == 0) {
-		if (!S_ISSOCK(existing.st_mode) || existing.st_uid != geteuid() ||
+		if (!filebelt_socket_identity_matches(
+			    existing.st_mode, existing.st_uid, existing.st_gid,
+			    FILEBELT_GANESHA_UID) ||
 		    unlink(FILEBELT_CONTROL_SOCKET) != 0)
 			return -1;
 	} else if (errno != ENOENT) {
@@ -396,7 +419,14 @@ int filebelt_control_start(struct filebelt_fsal_export *export)
 	memcpy(address.sun_path, FILEBELT_CONTROL_SOCKET,
 	       sizeof(FILEBELT_CONTROL_SOCKET));
 	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) != 0 ||
-	    chmod(FILEBELT_CONTROL_SOCKET, 0600) != 0 ||
+	    chown(FILEBELT_CONTROL_SOCKET, (uid_t)-1, FILEBELT_IPC_GID) != 0 ||
+	    chmod(FILEBELT_CONTROL_SOCKET, 0660) != 0 ||
+	    lstat(FILEBELT_CONTROL_SOCKET, &existing) != 0 ||
+	    !filebelt_socket_identity_matches(
+		    existing.st_mode, existing.st_uid, existing.st_gid,
+		    FILEBELT_GANESHA_UID) ||
+	    setsockopt(descriptor, SOL_SOCKET, SO_PASSCRED, &passcred,
+		       sizeof(passcred)) != 0 ||
 	    listen(descriptor, 16) != 0) {
 		(void)close(descriptor);
 		(void)unlink(FILEBELT_CONTROL_SOCKET);

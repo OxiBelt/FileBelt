@@ -3,7 +3,7 @@
 use filebelt_nfs_bridge::config::{BridgeConfig, DEFAULT_CONFIG_PATH};
 use filebelt_nfs_bridge::control::GaneshaControlClient;
 use filebelt_nfs_bridge::gateway::{Gateway, drain, healthy};
-use filebelt_nfs_bridge::ipc::SeqPacketListener;
+use filebelt_nfs_bridge::ipc::{SeqPacketListener, require_bridge_process_identity};
 use filebelt_nfs_bridge::vfs::VfsClient;
 use prost::Message;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,9 @@ fn main() {
 fn run() -> Result<(), String> {
     let (command, config_path) = arguments()?;
     let config = BridgeConfig::load(&config_path).map_err(|error| error.to_string())?;
+    if command != "check-config" {
+        require_bridge_process_identity().map_err(|error| error.to_string())?;
+    }
     match command.as_str() {
         "check-config" => Ok(()),
         "health" => healthy(&config)

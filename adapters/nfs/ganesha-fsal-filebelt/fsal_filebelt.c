@@ -11,6 +11,7 @@
  */
 
 #include "filebelt_fsal.h"
+#include "filebelt_identity.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -48,6 +49,7 @@ int filebelt_fsal_frame_length(
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #if FSAL_MAJOR_VERSION != 13 || FSAL_MINOR_VERSION != 0
 #error "FileBelt FSAL requires the NFS-Ganesha V6.5 FSAL 13.0 ABI"
@@ -171,6 +173,13 @@ MODULE_INIT void filebelt_fsal_init(void)
 {
 	struct fsal_module *module = &FILEBELT.module;
 
+	if (!filebelt_process_identity_matches(
+		    geteuid(), getegid(), FILEBELT_GANESHA_UID,
+		    FILEBELT_GANESHA_GID)) {
+		LogCrit(COMPONENT_FSAL,
+			"FILEBELT FSAL requires fixed Ganesha process identity");
+		return;
+	}
 	filebelt_handle_ops_init(&FILEBELT.handle_ops);
 
 	if (register_fsal(module, filebelt_fsal_name, FSAL_MAJOR_VERSION,

@@ -24,12 +24,18 @@ address, absolute context expiry, and a 32-byte opaque binding derived with
 authentication.
 
 The private bridge and FSAL channels are Unix `SOCK_SEQPACKET` sockets with
-length-prefixed frames bounded to 1,114,112 bytes. The bridge owns all VFS
-envelope authority: tenant and gateway identity, gateway epoch, mapped session
-and generation fences, and mutation request digests. FSAL input cannot supply
-those fields. The bridge uses TLS 1.3, a private CA, no ambient roots or proxy,
-an exact VFS endpoint path, and a client certificate whose leaf has exactly the
-URI SAN `spiffe://filebelt/nfs-gateway/vfs`.
+length-prefixed frames bounded to 1,114,112 bytes. The bridge runs only as
+`10001:10001`, Ganesha runs only as `10002:10002`, and both receive the dedicated
+supplemental IPC group `10003`. The callback socket is `10001:10003` and the
+reverse control socket is `10002:10003`; both have exact mode `0660`. Each
+endpoint verifies the socket metadata, the direction-specific `SO_PEERCRED`,
+and matching per-packet `SCM_CREDENTIALS` before decoding a frame. The shared
+group grants transport access but never authenticates a peer. The bridge owns
+all VFS envelope authority: tenant and gateway identity, gateway epoch, mapped
+session and generation fences, and mutation request digests. FSAL input cannot
+supply those fields. The bridge uses TLS 1.3, a private CA, no ambient roots or
+proxy, an exact VFS endpoint path, and a client certificate whose leaf has
+exactly the URI SAN `spiffe://filebelt/nfs-gateway/vfs`.
 
 ## Gateway lifecycle
 

@@ -94,6 +94,11 @@
   credentials, browser sessions, capability-signing keys, or KDC material not
   required by its container. Forged filehandles, stale stateids, replayed
   slots, old gateway epochs, and old filehandle-key generations fail closed.
+- Ganesha/FSAL is the trusted producer of the canonical principal and opaque
+  GSS binding derived from its verified RPCSEC_GSS context. Fixed distinct
+  process identities, exact `0660` socket ownership, connection credentials,
+  and packet credentials prevent any differently credentialed Pod process from
+  using the bridge or export-control channels as a deputy.
 - Hostile media cannot cause Internet/device access, parser widening, payload
   disclosure, unbounded resource consumption, or publication of partial
   output. The controller, job wrapper, FFmpeg process, I/O service, and
@@ -340,6 +345,11 @@ and separate broker/gateway authentication limit but do not eliminate that
 risk. A malicious admitted server can consume its assigned CPU, memory, and
 ephemeral storage and return adversarial data until its deadline; it cannot be
 made trustworthy by sandboxing.
+A compromise inside the trusted Ganesha/FSAL process can assert false GSS
+identity fields to the bridge. Distinct Unix identities exclude other Pod
+processes but do not make Ganesha independently attest itself; PostgreSQL
+mapping, generation, and Virtual ACL checks still contain the resulting
+authority to an active approved NFS principal.
 The mount topology remains disabled by default and is not production-ready in
 this revision: the SMB gateway has no reviewed Samba authentication/session IPC
 path, neither adapter has qualified release-image evidence, and the FTPS bridge

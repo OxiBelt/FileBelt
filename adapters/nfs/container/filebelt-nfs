@@ -16,26 +16,41 @@ if [ -n "$mode" ]; then
   shift
 fi
 
+require_identity() {
+  expected_uid=$1
+  expected_gid=$2
+  test "$(id -u)" = "$expected_uid" && test "$(id -g)" = "$expected_gid" || {
+    echo "filebelt-nfs: mode $mode requires uid:gid ${expected_uid}:${expected_gid}" >&2
+    exit 77
+  }
+}
+
 case "$mode" in
   bridge)
+    require_identity 10001 10001
     exec /usr/local/bin/filebelt-nfs-bridge serve --config /etc/filebelt-nfs/bridge.toml "$@"
     ;;
   bridge-health)
+    require_identity 10001 10001
     exec /usr/local/bin/filebelt-nfs-bridge health --config /etc/filebelt-nfs/bridge.toml "$@"
     ;;
   bridge-drain)
+    require_identity 10001 10001
     exec /usr/local/bin/filebelt-nfs-bridge drain --config /etc/filebelt-nfs/bridge.toml "$@"
     ;;
   ganesha)
+    require_identity 10002 10002
     exec /usr/bin/ganesha.nfsd -F -L STDERR -p /run/filebelt-nfs/ganesha.pid -f /etc/ganesha/ganesha.conf "$@"
     ;;
   ganesha-health)
+    require_identity 10002 10002
     test -r /run/filebelt-nfs/ganesha.pid
     pid=$(sed -n '1p' /run/filebelt-nfs/ganesha.pid)
     case "$pid" in *[!0-9]*|'') exit 1 ;; esac
     kill -0 "$pid"
     ;;
   ganesha-drain)
+    require_identity 10002 10002
     test -r /run/filebelt-nfs/ganesha.pid
     pid=$(sed -n '1p' /run/filebelt-nfs/ganesha.pid)
     case "$pid" in *[!0-9]*|'') exit 1 ;; esac

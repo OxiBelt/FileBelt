@@ -23,6 +23,7 @@ prost = "=0.14.4"
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls-webpki-roots-no-provider"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "=1.0.229", features = ["derive"] }
+socket2 = { version = "=0.6.5", features = ["all"] }
 thiserror = "=2.0.18"
 toml = "=1.1.4"
 uuid = { version = "=1.24.0", features = ["v4"] }

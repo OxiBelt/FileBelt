@@ -262,7 +262,7 @@ spec:
       enableServiceLinks: false
       terminationGracePeriodSeconds: {{ .Values.mounts.nfs.terminationGracePeriodSeconds }}
       securityContext:
-{{ include "filebelt.podSecurityContext" . | indent 8 }}
+{{ include "filebelt.nfsPodSecurityContext" . | indent 8 }}
       containers:
         - name: ganesha
           image: {{ $nfsImage }}
@@ -301,7 +301,7 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
           securityContext:
-{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+{{ include "filebelt.nfsGaneshaSecurityContext" . | indent 12 }}
           resources:
 {{ toYaml .Values.mounts.nfs.ganesha.resources | indent 12 }}
           volumeMounts:
@@ -343,7 +343,7 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
           securityContext:
-{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+{{ include "filebelt.nfsBridgeSecurityContext" . | indent 12 }}
           resources:
 {{ toYaml .Values.mounts.nfs.bridge.resources | indent 12 }}
           volumeMounts:

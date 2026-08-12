@@ -8,6 +8,11 @@ test -f "$root/ganesha-fsal-filebelt/fsal_filebelt.c"
 test -f "$root/ganesha-fsal-filebelt/abi_probe.c"
 test -f "$root/ganesha-fsal-filebelt/filebelt_projection.c"
 test -f "$root/ganesha-fsal-filebelt/projection_test.c"
+test -f "$root/ganesha-fsal-filebelt/filebelt_identity.h"
+test -f "$root/ganesha-fsal-filebelt/identity_test.c"
+test -f "$root/ganesha-fsal-filebelt/filebelt_credentials.h"
+test -f "$root/ganesha-fsal-filebelt/filebelt_credentials.c"
+test -f "$root/ganesha-fsal-filebelt/credentials_test.c"
 test -f "$root/patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch"
 test -f "$root/patches/0003-delegate-mdcache-test-access.patch"
 test -f "$root/patches/0004-project-authoritative-owner-group-names.patch"
@@ -21,6 +26,20 @@ rg -q 'NFS-Ganesha `6.5-8`' "$root/README.md"
 rg -q 'libntirpc `6.3-4`' "$root/README.md"
 rg -q 'filebelt.dev.qualification="abi-probe-only"' "$root/Dockerfile"
 rg -q 'ERR_FSAL_NOTSUPP' "$root/ganesha-fsal-filebelt/filebelt_export.c"
+rg -Fq 'FILEBELT_BRIDGE_UID = 10001' \
+  "$root/ganesha-fsal-filebelt/filebelt_identity.h"
+rg -Fq 'FILEBELT_GANESHA_UID = 10002' \
+  "$root/ganesha-fsal-filebelt/filebelt_identity.h"
+rg -Fq 'FILEBELT_IPC_GID = 10003' \
+  "$root/ganesha-fsal-filebelt/filebelt_identity.h"
+rg -Fq 'filebelt_receive_authenticated_packet' \
+  "$root/ganesha-fsal-filebelt/filebelt_wire.c"
+rg -Fq 'filebelt_receive_authenticated_packet' \
+  "$root/ganesha-fsal-filebelt/filebelt_control.c"
+rg -Fq 'SCM_CREDENTIALS' \
+  "$root/ganesha-fsal-filebelt/filebelt_credentials.c"
+rg -Fq 'require_identity 10001 10001' "$root/container/filebelt-nfs"
+rg -Fq 'require_identity 10002 10002' "$root/container/filebelt-nfs"
 rg -q 'GSS_C_PRF_KEY_FULL' "$root/patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch"
 rg -Fq 'gd->sec.mech == GSS_C_NO_OID' \
   "$root/patches/0001-expose-minimal-filebelt-rpcsec-gss-identity.patch"

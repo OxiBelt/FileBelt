@@ -98,7 +98,10 @@ rootfs marker is provisioned with the admitted client image and its exact value
 must match `rootfsDigest`. The Ganesha container alone
 receives its acceptor keytab. The bridge, Unix IPC, logs, uploaded artifacts,
 and evidence JSON receive no ticket, keytab, private key, cookie, capability,
-or credential bytes.
+or credential bytes. Attestation must also record bridge identity
+`10001:10001`, Ganesha identity `10002:10002`, supplemental IPC group `10003`,
+callback socket `10001:10003/0660`, control socket `10002:10003/0660`, and
+successful rejection of swapped, wrong-GID, and same-group wrong-UID peers.
 
 The administrative driver receives exactly:
 

@@ -246,6 +246,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "serde",
+ "socket2",
  "thiserror",
  "toml",
  "uuid",

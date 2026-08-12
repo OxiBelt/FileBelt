@@ -188,6 +188,27 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
   assert.equal(plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary, "filebeltctl");
 });
 
+test("Rust Docker targets match their image-plan descriptions", () => {
+  const Plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
+  const Dockerfile = readFileSync(
+    new URL("../../source/ops/Dockerfile.roles", import.meta.url),
+    "utf8",
+  );
+
+  for (const Image of Plan.images.filter(({ artifact }) => artifact.kind === "rust-binary")) {
+    assert.equal(Image.build.dockerfile, "source/ops/Dockerfile.roles");
+    const StageHeader = `FROM runtime-files AS ${Image.build.target}\n`;
+    const StageStart = Dockerfile.indexOf(StageHeader);
+    assert.notEqual(StageStart, -1, `${Image.role} must have a Docker target`);
+    const NextStage = Dockerfile.indexOf("\nFROM ", StageStart + StageHeader.length);
+    const Stage = Dockerfile.slice(StageStart, NextStage === -1 ? undefined : NextStage);
+    assert.ok(
+      Stage.includes(`org.opencontainers.image.description="${Image.description}"`),
+      `${Image.role} Docker description must match the immutable image plan`,
+    );
+  }
+});
+
 test("copyleft adapter evidence remains outside the Apache core image plan", () => {
   assert.equal(AdapterImagePlanSchemaVersion, 1);
   assert.deepEqual(

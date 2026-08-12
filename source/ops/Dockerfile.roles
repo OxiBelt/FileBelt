@@ -294,7 +294,7 @@ ARG FILEBELT_BUILD_KIND
 ARG FILEBELT_CREATED
 COPY --from=role-builder --chmod=0755 /out/filebelt /usr/local/bin/filebelt-revision
 LABEL org.opencontainers.image.title="filebelt-revision" \
-      org.opencontainers.image.description="FileBelt revision coordinator" \
+      org.opencontainers.image.description="FileBelt immutable revision coordinator" \
       org.opencontainers.image.source="https://github.com/OxiBelt/FileBelt" \
       org.opencontainers.image.url="https://github.com/OxiBelt/FileBelt" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \

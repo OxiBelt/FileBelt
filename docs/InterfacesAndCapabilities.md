@@ -588,7 +588,7 @@ signers occur only in enabled feature blocks; media storage is always
 provisioned for administrative preflight and recovery. Strict
 `filebelt-capability-keyset-v2` files contain `purpose=<name>`, a current key,
 and at most one retiring key. Public-key bytes are globally disjoint and every
-fresh v8 purpose begins at local generation 1.
+newly provisioned purpose begins at local generation 1.
 
 `filebeltctl` creates capability signing material and keyed-digest material as
 versioned generations. The current capability generation signs new envelopes;
@@ -602,7 +602,7 @@ Runtime configuration is typed and versioned in `filebelt.toml`, with narrow
 invalid public origins, missing or inconsistent key generations, exposed
 listeners, unsafe timing relationships, and inconsistent limits. Configuration
 changes take effect through a graceful restart, not untracked hot reload.
-The current format is version 8; older versions are rejected. API `fbcap1`,
+The current format is version 9; older versions are rejected. API `fbcap1`,
 collaboration `fbcap1`, document, and mount `fbcap2` signing keys use distinct
 purpose-local private keys; I/O receives only API-storage and enabled
 storage-purpose public keysets. `mcp.enabled`

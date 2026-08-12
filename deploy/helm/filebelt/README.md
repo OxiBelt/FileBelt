@@ -2,7 +2,7 @@
 
 # FileBelt Helm chart
 
-This chart deploys the supported Phase 8 FileBelt application boundary on
+This chart deploys the supported Phase 9 FileBelt application boundary on
 Kubernetes `1.34` through `1.36`. It deliberately does not install PostgreSQL,
 Iggy, an OIDC provider, an OIDC egress gateway, an ingress controller, storage,
 cert-manager, an MCP egress gateway, or a monitoring stack. Install it in a
@@ -107,7 +107,7 @@ all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
 
-The default `filebelt.toml` is version 8 in Kubernetes mode and configures the
+The default `filebelt.toml` is version 9 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
 logs, Prometheus, and the OIDC egress proxy. Replace the example origin,
 issuer, tenant, administrator, backend UUID, certificate identities, and edge
@@ -252,7 +252,7 @@ For a fresh installation:
 
 For an upgrade, run `migrate` without changing the existing workload images or
 configuration, apply `grants.sql`, run `verify-grants`, and run `keys-audit`
-against the complete candidate version-8 public keyset inventory. Only after
+against the complete candidate version-9 public keyset inventory. Only after
 all three steps pass should a separate release roll out new image/config
 digests. The
 chart gives no database-owner credential to a Job, never runs migrations from
@@ -299,7 +299,7 @@ reopens direct-share or MCP data-grant admission.
 
 Keyset audit, recovery checkpoint, and recovery verification require quiesced
 workloads. `keys-audit` receives all configured public keysets and no private
-key or database credential; its success is required before any version-8
+key or database credential; its success is required before any version-9
 traffic admission. Capture the
 checkpoint Job's stdout. To verify it, store that sensitive operational JSON in
 an operator-owned Secret and set `operation.checkpoint.secretName`; the chart

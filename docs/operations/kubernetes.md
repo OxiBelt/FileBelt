@@ -205,8 +205,9 @@ window.
 1. Leave `media.enabled`, `mounts.nfs.enabled`, and
    `collaboration.webtransport.enabled` false. Apply migrations 000007 through
    000009 and the reviewed grants.
-2. Roll every long-running and administrative role to a configuration-version-8
-   compatible image and verify its fresh compatibility advertisement.
+2. Roll every long-running and administrative role to an image compatible with
+   the current configuration format and verify its fresh compatibility
+   advertisement.
 3. Quiesce writers and take the coordinated PostgreSQL/payload checkpoint.
 4. Run `filebeltctl phase8 activate` once. Retain its audit identifier and
    compatibility inventory with the change evidence.
@@ -316,8 +317,8 @@ registry artifacts are never cleanup targets.
 For failures during an upgrade, follow
 [the Kubernetes rollback runbook](kubernetes-rollback.md). For backups and
 restore rehearsals, follow [Kubernetes recovery](kubernetes-recovery.md).
-For v8, create independent, immutable Secret objects for each purpose-private
-and purpose-public keyset. Record every exact Secret generation before rollout;
+Create independent, immutable Secret objects for each purpose-private and
+purpose-public keyset. Record every exact Secret generation before rollout;
 the chart rolls only workloads that project that material. The API owns enabled
 API pairs, I/O receives only API-storage plus enabled storage-purpose public
 sets, and no runtime media workload receives media material.

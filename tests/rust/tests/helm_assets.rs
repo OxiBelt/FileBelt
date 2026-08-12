@@ -54,7 +54,8 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
         .map(str::to_owned)
         .collect()
     );
-    assert!(metadata.contains("filebelt.dev/phase: \"8\""));
+    assert!(metadata.contains("filebelt.dev/phase: \"9\""));
+    assert_eq!(schema["title"], "FileBelt Phase 9 Kubernetes deployment");
     assert!(metadata.contains("kubeVersion: \">=1.34.0-0 <1.37.0-0\""));
     for role in [
         "filebelt-api",

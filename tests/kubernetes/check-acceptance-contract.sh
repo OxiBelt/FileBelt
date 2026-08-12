@@ -8,7 +8,7 @@ workflow="${repo_root}/.github/workflows/check-filebelt.yml"
 kind_script="${repo_root}/tests/scripts/run-kubernetes-kind-compatibility.sh"
 network_script="${repo_root}/tests/scripts/run-kubernetes-network-policy.sh"
 chart_helpers="${repo_root}/deploy/helm/filebelt/templates/_helpers.tpl"
-readonly FILEBELT_CONFIGURATION_VERSION="8"
+readonly FILEBELT_CONFIGURATION_VERSION="9"
 
 die() {
   echo "Kubernetes acceptance contract: $*" >&2

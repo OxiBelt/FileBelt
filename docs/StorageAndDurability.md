@@ -664,7 +664,7 @@ The current checkpoint and verification formats are
 `filebelt.recovery.checkpoint.v4` and `filebelt.recovery.verification.v4`.
 Version 4 records every purpose name, digest generation, and local signer
 generation in its `capability_keysets` inventory; version 2 remains offline-only
-and cannot admit a v8 deployment.
+and cannot admit the current deployment.
 It retains collaboration room/manifest/checkpoint inventory and dirty-room
 retention deadlines, plus MCP registration, deletion-tombstone, active
 runner-slot, secret-envelope, and OAuth attempt inventories. It records every
@@ -676,7 +676,7 @@ counts, operations, backfill jobs, holds, and activation fences. The checkpoint
 remains bounded to 1 MiB. Restore verification fails when a revision,
 collaboration inventory or retention
 deadline, MCP inventory or KEK generation, migration checksum, audit watermark,
-or payload manifest differs. Operators must restore purpose-specific v8 public
+or payload manifest differs. Operators must restore purpose-specific public
 keysets, digest generation, and local signer generations before enabling I/O,
 collaboration, document, or mount reads, and must restore MCP and mount vault KEK
 generations before enabling the broker or any MCP or mount authentication flow.

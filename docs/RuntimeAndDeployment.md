@@ -385,7 +385,7 @@ projected client credentials. Bootstrap tokens are immutable, invocation-bound,
 after the relay hello. The server container receives only the runner shim,
 memory-backed socket, bounded temporary storage, and loopback proxy variables.
 
-Kubernetes mode uses `filebelt.toml` version 8; earlier versions are rejected. It
+Kubernetes mode uses `filebelt.toml` version 9; earlier versions are rejected. It
 requires backend mTLS, HTTPS OIDC through the egress gateway, JSON logs, and
 Prometheus metrics. Enabled collaboration additionally requires the
 collaboration database URL/TLS identity, purpose-specific API-storage and
@@ -435,7 +435,7 @@ or a UDP/WebTransport port.
 
 ## Phase 8 deployment and rollout
 
-Configuration version 8 retains disabled-by-default media, NFS, and collaboration
+Configuration version 9 retains disabled-by-default media, NFS, and collaboration
 WebTransport sections. Unknown fields, mutable image tags, missing Secret keys,
 unbounded resources, unsupported protocol modes, and incomplete network peers
 fail startup or Helm validation. Phase 8 uses one coordinated version, but
@@ -623,10 +623,10 @@ credential rotation, broker rollout, and runner activation.
 
 Rollback disables runner admission first, cancels active invocations, waits for
 the controller to remove one-shot Pods and bootstrap Secrets, and then disables
-the broker. After v8 admission, configuration and keyset repair is forward-only:
-retain purpose-specific immutable Secret generations and use a compatible v8
+the broker. After v9 admission, configuration and keyset repair is forward-only:
+retain purpose-specific immutable Secret generations and use a compatible v9
 ConfigMap revision only. Do not drop `filebelt_mcp` or `filebelt_mcp_vault`, run
-a down migration, roll back to a v7 configuration, or remove a KEK generation
+a down migration, roll back to a v8 configuration, or remove a KEK generation
 referenced by a `filebelt.recovery.checkpoint.v4` document.
 
 When compatibility cannot be proved, remain quiesced and restore the last

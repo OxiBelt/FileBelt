@@ -9,6 +9,7 @@ import { HttpDocumentSessionClient } from "./document-http-client.js";
 import { HttpMcpSettingsClient } from "./mcp-http-client.js";
 import { HttpMountSettingsClient } from "./mount-http-client.js";
 import { HttpNfsAdminClient } from "./nfs-admin-http-client.js";
+import { HttpNfsTargetClient } from "./nfs-target-http-client.js";
 import { PublicShareApp, TakePublicShareFragment } from "./PublicShareApp.js";
 import "./styles.css";
 
@@ -23,11 +24,12 @@ const DocumentClient = new HttpDocumentSessionClient();
 const McpClient = new HttpMcpSettingsClient();
 const MountClient = new HttpMountSettingsClient();
 const NfsClient = new HttpNfsAdminClient();
+const NfsTargetClient = new HttpNfsTargetClient();
 const IsPublicShare = window.location.pathname.startsWith("/public/share");
 const FragmentToken = IsPublicShare ? TakePublicShareFragment() : "";
 
 createRoot(Root).render(
   <StrictMode>
-    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} DocumentClient={DocumentClient} McpClient={McpClient} MountClient={MountClient} NfsClient={NfsClient} />}
+    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} DocumentClient={DocumentClient} McpClient={McpClient} MountClient={MountClient} NfsClient={NfsClient} NfsTargetClient={NfsTargetClient} />}
   </StrictMode>,
 );

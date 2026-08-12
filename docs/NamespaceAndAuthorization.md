@@ -84,10 +84,11 @@ quotas, but does not bypass Virtual ACL or confer private-drive content access.
 Local suspension is authoritative: it prevents login, revokes local sessions,
 and blocks identity linkage even if IdP disablement is not observable.
 
-The current public API exposes user-owned session management but no
-tenant-administrator mutation endpoints. UI administration controls that lack a
-server contract remain unavailable; their presence must not be mistaken for an
-implemented authority path.
+The current public API exposes user-owned session management and only the
+bounded feature-administration contracts described in this specification.
+General tenant-administrator user, group, and drive mutation endpoints remain
+unavailable. UI controls that lack a server contract must not be mistaken for
+an implemented authority path.
 
 Local groups are flat. A membership is either `member` or `manager`. Managers
 maintain membership and exercise the fixed owner authority of a group-owned
@@ -351,17 +352,37 @@ projections needed to preserve previously reachable objects. It does not
 weaken an existing deny or disclose an otherwise hidden sibling.
 
 NFS authenticates with RPCSEC_GSS `krb5p` against an operator-managed external
-KDC. A tenant administrator explicitly maps each Kerberos principal to one
-FileBelt user. One user may retain multiple Kerberos aliases, but all aliases
-share one append-only tenant-unique POSIX name, non-zero UID, primary group,
-and GID; revoking an alias does not release or reassign that identity. The
-forward migration rejects an existing user's inconsistent alias identities
-with an actionable inventory instead of choosing one silently. Flat local
-groups remain explicit. `AUTH_SYS`, host ownership, Kerberos root, and numeric
-ID zero confer no authority. The immutable NFS `other` projection contains all
-mapped NFS users in the tenant. Mapping mutations require recent OIDC
-authentication, advance their generation, audit the exact change, and close
-affected sessions.
+KDC. A tenant administrator may propose that one exact Kerberos principal map
+to one FileBelt user, but cannot activate the binding. Every target user,
+including the proposing administrator or a self-mapped user, must approve the
+exact principal, POSIX projection, and drive set after OIDC authentication no
+more than ten minutes old. A proposal expires after 24 hours. Only one immutable
+pending proposal may exist for a tenant and Kerberos principal; changing any
+field requires cancellation and a new proposal. The settings inbox polls
+PostgreSQL-backed state and is the only notification surface in this release.
+
+Approval rechecks that the proposer is an active tenant administrator and that
+both proposer and target currently hold `READ_METADATA` on every proposed
+drive. The proposal does not depend on the proposer's original browser session
+remaining live. Approval is durable only for the exact binding. Removing a
+drive attenuates an active alias without new approval, while adding a drive or
+changing another binding field requires a new proposal and target approval.
+The target may revoke an alias after recent OIDC authentication. Approval,
+attenuation, and revocation advance the affected generations, record the exact
+audit change, and close affected NFS sessions.
+
+One user may retain multiple independently approved Kerberos aliases. All
+aliases share one append-only tenant-unique POSIX name, non-zero UID, primary
+group, and GID, but each alias retains its own approved drive ceiling. The
+shared user NFS policy is the sorted union of active alias ceilings; admission
+intersects that policy with the authenticated alias ceiling, applied exports,
+and current Virtual ACL. Revoking one alias does not widen another and does not
+release or reassign the POSIX identity. The forward migration rejects an
+existing user's inconsistent alias identities with an actionable inventory
+instead of choosing one silently. Flat local groups remain explicit.
+`AUTH_SYS`, host ownership, Kerberos root, and numeric ID zero confer no
+authority. The immutable NFS `other` projection contains all approved mapped
+NFS users in the tenant.
 
 One export represents one selected drive at `/filebelt/<drive_uuid>`. Mode and
 NFSv4 ACL changes replace only tagged NFS-managed ACL rows and are rejected

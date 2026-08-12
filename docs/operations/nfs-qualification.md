@@ -7,7 +7,9 @@ still carries `filebelt.dev.qualification=abi-probe-only`, the repository has no
 configured native RISC-V runner or six-platform NFS client fleet, and the
 read-only qualification workflow deliberately ends at a failing publication
 boundary. Do not use a successful contract test or native image build as NFS
-delivery evidence.
+delivery evidence. Database and API tests for target-approved identity bindings
+also do not qualify the Ganesha ABI, image, KDC, client matrix, or live protocol
+path.
 
 The manual workflow must be dispatched from the exact release tag, never from
 a branch plus a tag-name input. The executable contract is split among:
@@ -38,9 +40,10 @@ configuration:
    10 on both architectures. Record an immutable root-filesystem digest for
    every client; a mutable distribution tag is insufficient.
 3. An isolated external KDC/realm fixture, exact AES SHA-2 configuration,
-   service principal, ordinary mapped principal, `root@REALM` principal, and a
-   principal in a second realm. The KDC is test infrastructure, not an NFS Pod
-   dependency, and the deployed gateway must retain no KDC egress.
+   service principal, an ordinary principal exercised in unapproved,
+   target-approved, and revoked states, `root@REALM` principal, and a principal
+   in a second realm. The KDC is test infrastructure, not an NFS Pod dependency,
+   and the deployed gateway must retain no KDC egress.
 4. A root-owned administrative driver for the chosen qualification cluster.
    Its revision and digest must be reviewed with the fixture. The driver owns
    only deterministic setup, Ganesha restart, admission drain/resume, gateway
@@ -116,12 +119,15 @@ Secret, or fault/restore contents.
 
 Every Ubuntu, Debian, and RHEL 10 client on AMD64 and ARM64 performs the same
 suite against the same image-index digest. The positive path authenticates with
-`krb5p` and covers list, immutable read, write plus `fsync` commit, rename with
-an open handle, user extended attributes, NFSv4 ACLs, sparse data/hole
-preservation, restart lock reclaim, admission drain, gateway fence, and stale
-handle rejection. Negative controls require failed mounts for `AUTH_SYS`,
-`root@REALM`, and the cross-realm principal. The complete label also requires
-create/mkdir/symlink/readlink, projected mode and prohibited-bit/chown checks,
+`krb5p` through an exact target-approved alias and covers list, immutable read,
+write plus `fsync` commit, rename with an open handle, user extended attributes,
+NFSv4 ACLs, sparse data/hole preservation, restart lock reclaim, admission
+drain, gateway fence, and stale handle rejection. Negative controls require
+failed mounts for a pending or quarantined alias, a target-revoked alias,
+`AUTH_SYS`, `root@REALM`, and the cross-realm principal. Alias-scope attenuation
+must close affected sessions without widening a sibling alias. The complete
+label also requires create/mkdir/symlink/readlink, projected mode and
+prohibited-bit/chown checks,
 xattr list/remove and namespace rejection, conflicting/unlock/to-EOF/LOCKT
 locks, open-unlinked completion, truncate/allocate/punch/SEEK_DATA/SEEK_HOLE,
 readdir-cookie resume, ACL deny/attenuation, Web-versus-NFS conflict-copy, and

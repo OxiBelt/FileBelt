@@ -52,6 +52,8 @@ pub struct ReconcileReport {
     pub expired_uploads: u64,
     pub expired_nfs_writers_enqueued: u64,
     pub expired_nfs_write_conflicts_enqueued: u64,
+    pub expired_nfs_mapping_proposals: u64,
+    pub purged_nfs_mapping_proposals: u64,
     pub orphan_jobs_created: u64,
     pub finalized_staging_sets_removed: u64,
     pub mount_staging_sets_removed: u64,
@@ -137,6 +139,20 @@ impl Maintenance {
             .len()
             .try_into()
             .map_err(|_| MaintenanceError::InvalidJob)?;
+        let expired_nfs_mapping_proposals = self
+            .database
+            .expire_nfs_mapping_proposals(
+                self.tenant_id,
+                i32::try_from(RECONCILE_BATCH_SIZE).expect("reconcile batch fits i32"),
+            )
+            .await?;
+        let purged_nfs_mapping_proposals = self
+            .database
+            .purge_nfs_mapping_proposals(
+                self.tenant_id,
+                i32::try_from(RECONCILE_BATCH_SIZE).expect("reconcile batch fits i32"),
+            )
+            .await?;
         let expired_nfs_write_conflicts_enqueued = self
             .database
             .sweep_expired_nfs_write_conflicts(
@@ -182,6 +198,8 @@ impl Maintenance {
             expired_uploads,
             expired_nfs_writers_enqueued,
             expired_nfs_write_conflicts_enqueued,
+            expired_nfs_mapping_proposals,
+            purged_nfs_mapping_proposals,
             orphan_jobs_created,
             finalized_staging_sets_removed,
             mount_staging_sets_removed,

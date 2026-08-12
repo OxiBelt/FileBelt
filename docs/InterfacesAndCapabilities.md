@@ -431,11 +431,11 @@ durably verified its receipt.
 ## Phase 8 NFS and WebTransport contracts
 
 The mount protocol enum adds `NFS`; password-credential endpoints reject it.
-Tenant-administrator feature, export, POSIX-group, and identity-mapping
-endpoints live below `/api/v1/admin/mounts/nfs/`. They require recent OIDC
-authentication, generation preconditions, idempotency keys, exact tenant
-confirmation for every mutation client, tenant uniqueness, and audit. The NFS
-overview returns the exact configured tenant slug; browsers require the
+Tenant-administrator feature, export, POSIX-group, proposal, active-mapping,
+and quarantine endpoints live below `/api/v1/admin/mounts/nfs/`. They require
+recent OIDC authentication, generation preconditions, idempotency keys, exact
+tenant confirmation for every mutation client, tenant uniqueness, and audit.
+The NFS overview returns the exact configured tenant slug; browsers require the
 administrator to type that value without trimming, normalization, or case
 folding and clear it after one mutation. The API validates the confirmation
 before idempotency replay and binds it into every new request fingerprint. For
@@ -443,6 +443,44 @@ the bounded 24-hour rollout window, an existing receipt may replay only when
 the supplied confirmation is exact and the receipt fingerprint equals that
 route's exact pre-confirmation request projection; the legacy fingerprint is
 never written for a new request.
+
+The NFS binding workflow has these public routes:
+
+- `GET|POST /api/v1/admin/mounts/nfs/mapping-proposals` lists and creates exact
+  immutable proposals;
+- `DELETE /api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}` cancels one
+  pending proposal;
+- `GET /api/v1/admin/mounts/nfs/quarantined-mappings` lists legacy mappings
+  that require a fresh proposal;
+- `GET /api/v1/admin/mounts/nfs/mappings` lists approved active mappings, and
+  `PUT /api/v1/admin/mounts/nfs/mappings/{credential_id}/scope` may only remove
+  drives from an alias ceiling; the existing administrator `DELETE` revokes an
+  approved active mapping;
+- `GET /api/v1/mounts/nfs` returns the authenticated user's pending proposals
+  and active aliases;
+- `POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval` and
+  `POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline` consume the
+  expected proposal generation; and
+- `DELETE /api/v1/mounts/nfs/mappings/{credential_id}` lets the target revoke
+  an active alias with its expected generation.
+
+The former direct-activation `POST /api/v1/admin/mounts/nfs/mappings` always
+returns `409 mount.nfs.target_approval_required`. Proposal creation never
+creates a credential, policy, session, or NFS authority. A proposal expires
+after 24 hours, only its exact recently reauthenticated target may approve or
+decline it, and changed fields require cancellation and a new proposal.
+Approval atomically rechecks the proposal, target, proposer administrator
+status, and both principals' current `READ_METADATA` on every drive. The
+browser submits only the expected proposal generation on approval or decline;
+it does not echo mapping fields or a server digest.
+
+Proposal displays contain the exact Kerberos principal, target and proposer,
+UID/GID and primary POSIX-group projection, expiry, and server-derived drive
+labels and UUIDs. Labels are untrusted display text; UUIDs and other server-held
+identifiers remain the authority inputs. The target Mount Settings inbox polls
+this state. There is no email, push, or Iggy-dependent approval channel. All NFS
+binding mutations retain the ordinary CSRF, exact Origin, Fetch Metadata,
+idempotency, generation, and stable stale/expired/conflict problem contracts.
 
 `GET /api/v1/admin/mounts/nfs/conflicts` lists only the authenticated
 principal's unresolved, unexpired retained writes. `POST

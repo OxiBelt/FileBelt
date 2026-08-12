@@ -19,6 +19,8 @@ import type { components, paths } from "./generated/openapi.js";
 type SessionResponse = components["schemas"]["Session"];
 type NfsOverviewResponse = components["schemas"]["NfsAdminOverview"];
 type NfsConflictResponse = components["schemas"]["NfsWriteConflict"];
+type NfsMappingProposalResponse = components["schemas"]["NfsMappingProposal"];
+type NfsQuarantinedMappingResponse = components["schemas"]["NfsQuarantinedMapping"];
 type NfsConflictCopyInput = Parameters<NfsAdminClient["copyConflict"]>[1];
 
 export class NfsReauthenticationRequiredError extends Error {
@@ -71,13 +73,17 @@ export class HttpNfsAdminClient implements NfsAdminClient {
   }
 
   async getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot> {
-    const [OverviewResult, ConflictsResult] = await Promise.all([
+    const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all([
       this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
       this.#Api.GET("/api/v1/admin/mounts/nfs/conflicts", SignalInit(Signal)),
+      this.#Api.GET("/api/v1/admin/mounts/nfs/mapping-proposals", SignalInit(Signal)),
+      this.#Api.GET("/api/v1/admin/mounts/nfs/quarantined-mappings", SignalInit(Signal)),
     ]);
     return Snapshot(
       RequireData<NfsOverviewResponse>(OverviewResult),
       RequireData<NfsConflictResponse[]>(ConflictsResult),
+      RequireData<NfsMappingProposalResponse[]>(ProposalsResult),
+      RequireData<NfsQuarantinedMappingResponse[]>(QuarantinedResult),
     );
   }
 
@@ -122,18 +128,37 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     }));
   }
 
-  async upsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/mappings", {
+  async proposeMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void> {
+    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/mapping-proposals", {
       body: {
         allowed_drive_ids: Input.AllowedDriveIds,
         confirm_tenant: ConfirmTenant,
-        expected_generation: Input.ExpectedGeneration,
         kerberos_principal: Input.KerberosPrincipal,
         principal_id: Input.PrincipalId,
         projected_gid: Input.ProjectedGid,
         projected_uid: Input.ProjectedUid,
       },
       params: { header: await this.#mutationHeaders() },
+    }));
+  }
+
+  async cancelProposal(ProposalId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
+    RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}", {
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { proposal_id: ProposalId },
+        query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
+      },
+    }));
+  }
+
+  async attenuateMappingScope(CredentialId: string, AllowedDriveIds: readonly string[], ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
+    RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope", {
+      body: { allowed_drive_ids: AllowedDriveIds, confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { credential_id: CredentialId },
+      },
     }));
   }
 
@@ -187,7 +212,12 @@ export class HttpNfsAdminClient implements NfsAdminClient {
   }
 }
 
-function Snapshot(Response: NfsOverviewResponse, Conflicts: NfsConflictResponse[]): NfsAdminSnapshot {
+function Snapshot(
+  Response: NfsOverviewResponse,
+  Conflicts: NfsConflictResponse[],
+  Proposals: NfsMappingProposalResponse[],
+  QuarantinedMappings: NfsQuarantinedMappingResponse[],
+): NfsAdminSnapshot {
   return {
     Conflicts: Conflicts.map((Conflict) => ({
       BaseVersionId: Conflict.base_version_id,
@@ -233,10 +263,35 @@ function Snapshot(Response: NfsOverviewResponse, Conflicts: NfsConflictResponse[
       ProjectedGid: Mapping.projected_gid,
       ProjectedUid: Mapping.projected_uid,
     })),
+    PendingProposals: Proposals.filter(({ state: State }) => State === "pending").map((Proposal) => ({
+      AllowedDriveIds: Proposal.allowed_drive_ids,
+      CreatedAt: Proposal.created_at,
+      DecidedAt: Proposal.decided_at ?? null,
+      ExpiresAt: Proposal.expires_at,
+      Generation: Proposal.generation,
+      Id: Proposal.id,
+      KerberosPrincipal: Proposal.kerberos_principal,
+      PrincipalId: Proposal.principal_id,
+      ProjectedGid: Proposal.projected_gid,
+      ProjectedUid: Proposal.projected_uid,
+      ProposerPrincipalId: Proposal.proposer_principal_id,
+      State: Proposal.state,
+    })),
     PosixGroups: Response.posix_groups.map((Group) => ({
       GroupId: Group.group_id,
       PosixName: Group.posix_name,
       ProjectedGid: Group.projected_gid,
+    })),
+    QuarantinedMappings: QuarantinedMappings.map((Mapping) => ({
+      ...(Mapping.allowed_drive_ids === undefined ? {} : { AllowedDriveIds: Mapping.allowed_drive_ids }),
+      CredentialId: Mapping.credential_id,
+      Generation: Mapping.generation,
+      KerberosPrincipal: Mapping.kerberos_principal,
+      PrincipalId: Mapping.principal_id,
+      ProjectedGid: Mapping.projected_gid,
+      ProjectedUid: Mapping.projected_uid,
+      QuarantinedAt: Mapping.quarantined_at,
+      QuarantineReason: Mapping.quarantine_reason,
     })),
     Realm: Response.realm,
     TenantSlug: Response.tenant_slug,

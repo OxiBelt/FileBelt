@@ -620,6 +620,7 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
     const VFS_READ_ONLY: &[&str] = &[
         "headscale_devices",
         "nfs_principal_mappings",
+        "nfs_approved_active_mappings",
         "nfs_feature_state",
         "nfs_exports",
         "nfs_posix_groups",
@@ -654,6 +655,8 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
         "write_chunks",
         "deletion_tombstones",
         "nfs_principal_mappings",
+        "nfs_mapping_proposals",
+        "nfs_approved_active_mappings",
         "nfs_feature_state",
         "nfs_exports",
         "nfs_posix_groups",
@@ -683,6 +686,10 @@ fn expected_mount_table_privilege(role: &str, table: &str, privilege: &str) -> b
                     | "nfs_principal_mappings"
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
                 || matches!(table, "headscale_devices" | "sessions") && privilege == "SELECT"
+                || matches!(
+                    table,
+                    "nfs_mapping_proposals" | "nfs_approved_active_mappings"
+                ) && privilege == "SELECT"
                 || table == "nfs_write_conflicts" && privilege == "SELECT"
                 || matches!(
                     table,
@@ -1367,6 +1374,18 @@ fn expected_function_privilege(role: &str, function: &str) -> bool {
         || (function == "filebelt_mount.fence_nfs_mapping_sessions(uuid,uuid,uuid,bigint,text)"
             && role == "filebelt_api")
         || (function
+            == "filebelt_mount.create_nfs_mapping_proposal(uuid,uuid,uuid,uuid,uuid,text,text,uuid,bigint,bigint,uuid[],uuid,bigint,bytea)"
+            && role == "filebelt_api")
+        || (function == "filebelt_mount.approve_nfs_mapping_proposal(uuid,uuid,uuid,uuid,bigint)"
+            && role == "filebelt_api")
+        || (function
+            == "filebelt_mount.transition_nfs_mapping_proposal(uuid,uuid,uuid,uuid,bigint,text)"
+            && role == "filebelt_api")
+        || (function == "filebelt_mount.expire_nfs_mapping_proposals(uuid,integer)"
+            && role == "filebelt_maintenance")
+        || (function == "filebelt_mount.purge_nfs_mapping_proposals(uuid,integer)"
+            && role == "filebelt_maintenance")
+        || (function
             == "filebelt_mount.create_nfs_session(uuid,text,bytea,text,bigint,inet,timestamp with time zone,uuid,uuid)"
             && role == "filebelt_vfs")
         || (function
@@ -1909,6 +1928,24 @@ mod tests {
         assert!(!expected_function_privilege(
             "filebelt_vfs",
             "filebelt_mount.advance_nfs_restore_generation(uuid,bigint)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_api",
+            "filebelt_mount.approve_nfs_mapping_proposal(uuid,uuid,uuid,uuid,bigint)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_maintenance",
+            "filebelt_mount.expire_nfs_mapping_proposals(uuid,integer)"
+        ));
+        assert!(!expected_mount_table_privilege(
+            "filebelt_io",
+            "nfs_approved_active_mappings",
+            "SELECT"
+        ));
+        assert!(expected_mount_table_privilege(
+            "filebelt_recovery",
+            "nfs_mapping_proposals",
+            "SELECT"
         ));
         assert!(expected_mount_table_privilege(
             "filebelt_vfs",

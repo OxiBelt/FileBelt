@@ -273,6 +273,41 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/admin/mounts/nfs/mapping-proposals": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists current and retained NFS binding proposals for a recently reauthenticated tenant administrator. */
+        readonly get: operations["listNfsMappingProposals"];
+        readonly put?: never;
+        /** @description Creates one immutable 24-hour proposal. It creates no credential, mapping, policy, session, or NFS authority. */
+        readonly post: operations["createNfsMappingProposal"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Cancels one still-pending proposal by generation. */
+        readonly delete: operations["cancelNfsMappingProposal"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/admin/mounts/nfs/mappings": {
         readonly parameters: {
             readonly query?: never;
@@ -283,6 +318,7 @@ export interface paths {
         /** @description Lists exact RPCSEC_GSS principal projections for a recently reauthenticated tenant administrator. */
         readonly get: operations["listNfsPrincipalMappings"];
         readonly put?: never;
+        /** @description Deprecated direct-activation endpoint. It always returns `409 mount.nfs.target_approval_required`; administrators must create an immutable proposal instead. */
         readonly post: operations["upsertNfsPrincipalMapping"];
         readonly delete?: never;
         readonly options?: never;
@@ -306,6 +342,23 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** @description Removes drives from an approved alias ceiling. Widening requires a new proposal and approval. */
+        readonly put: operations["attenuateNfsMappingScope"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/admin/mounts/nfs/posix-groups": {
         readonly parameters: {
             readonly query?: never;
@@ -317,6 +370,23 @@ export interface paths {
         readonly put?: never;
         /** @description Registers one existing FileBelt group as a tenant-unique POSIX group projection. */
         readonly post: operations["registerNfsPosixGroup"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/admin/mounts/nfs/quarantined-mappings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Lists legacy mappings disabled at the target-approval cutover. */
+        readonly get: operations["listQuarantinedNfsMappings"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1160,6 +1230,74 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/mounts/nfs": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Returns only the authenticated user's pending NFS binding proposals and approved active aliases. */
+        readonly get: operations["getNfsTargetOverview"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Approves the exact server-held proposal after recent OIDC authentication; no mapping fields are accepted from the browser. */
+        readonly post: operations["approveNfsMappingProposal"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Terminally declines the exact proposal after recent OIDC authentication. */
+        readonly post: operations["declineNfsMappingProposal"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/nfs/mappings/{credential_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Revokes one approved alias owned by the authenticated target after recent OIDC authentication. */
+        readonly delete: operations["revokeOwnNfsMapping"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/mounts/policies/{protocol}": {
         readonly parameters: {
             readonly query?: never;
@@ -1492,6 +1630,12 @@ export interface components {
              */
             readonly scope: "once" | "session";
         };
+        readonly AttenuateNfsMappingScope: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
+            /** Format: int64 */
+            readonly expected_generation: number;
+        };
         readonly BeginUpload: {
             /** @description Durable collaboration checkpoint to consume for this immutable version. It is bound to this node and expected head. */
             readonly collaboration_checkpoint_id?: components["schemas"]["UuidV4"] | null;
@@ -1682,6 +1826,16 @@ export interface components {
             readonly protocol: "smb" | "ftps";
             /** @constant */
             readonly read_only: true;
+        };
+        readonly CreateNfsMappingProposal: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
+            readonly kerberos_principal: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly projected_gid: number;
+            /** Format: int64 */
+            readonly projected_uid: number;
         };
         readonly CreateShare: {
             /** @enum {string} */
@@ -2256,6 +2410,30 @@ export interface components {
             readonly expected_generation: number;
             readonly target_state: components["schemas"]["NfsFeatureState"];
         };
+        readonly NfsMappingProposal: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly allowed_drives: readonly components["schemas"]["NfsProposalDrive"][];
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly decided_at: string | null;
+            /** Format: date-time */
+            readonly expires_at: string;
+            /** Format: int64 */
+            readonly generation: number;
+            readonly id: components["schemas"]["UuidV4"];
+            readonly kerberos_principal: string;
+            readonly posix_group_id: components["schemas"]["UuidV4"];
+            readonly posix_group_name: string;
+            readonly posix_name: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly projected_gid: number;
+            /** Format: int64 */
+            readonly projected_uid: number;
+            readonly proposer_principal_id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly state: "pending" | "approved" | "declined" | "cancelled" | "expired";
+        };
         readonly NfsPosixGroup: {
             readonly group_id: components["schemas"]["UuidV4"];
             readonly posix_name: string;
@@ -2281,6 +2459,34 @@ export interface components {
             readonly projected_gid: number;
             /** Format: int64 */
             readonly projected_uid: number;
+        };
+        readonly NfsProposalDecision: {
+            /** Format: int64 */
+            readonly expected_generation: number;
+        };
+        readonly NfsProposalDrive: {
+            readonly display_name: string;
+            readonly id: components["schemas"]["UuidV4"];
+        };
+        readonly NfsQuarantinedMapping: {
+            readonly allowed_drive_ids: readonly components["schemas"]["UuidV4"][];
+            readonly credential_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly generation: number;
+            readonly kerberos_principal: string;
+            readonly principal_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly projected_gid: number;
+            /** Format: int64 */
+            readonly projected_uid: number;
+            /** @constant */
+            readonly quarantine_reason: "target_approval_cutover";
+            /** Format: date-time */
+            readonly quarantined_at: string;
+        };
+        readonly NfsTargetOverview: {
+            readonly mappings: readonly components["schemas"]["NfsPrincipalMapping"][];
+            readonly proposals: readonly components["schemas"]["NfsMappingProposal"][];
         };
         /** @description Exact case-sensitive configured tenant slug. The server compares this value without trimming, normalization, or case folding before idempotency replay. */
         readonly NfsTenantConfirmation: string;
@@ -2569,6 +2775,7 @@ export interface components {
         readonly MountCredentialId: components["schemas"]["UuidV4"];
         readonly MountProtocol: "smb" | "ftps";
         readonly NfsConflictId: components["schemas"]["UuidV4"];
+        readonly NfsProposalId: components["schemas"]["UuidV4"];
         readonly NodeId: components["schemas"]["UuidV4"];
         readonly Origin: string;
         readonly ParentId: components["schemas"]["UuidV4"];
@@ -3282,6 +3489,86 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly listNfsMappingProposals: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description NFS binding proposals. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["NfsMappingProposal"][];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createNfsMappingProposal: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateNfsMappingProposal"];
+            };
+        };
+        readonly responses: {
+            /** @description Immutable pending proposal. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsMappingProposal"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly cancelNfsMappingProposal: {
+        readonly parameters: {
+            readonly query: {
+                readonly confirm_tenant: components["schemas"]["NfsTenantConfirmation"];
+                readonly expected_generation: number;
+            };
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly proposal_id: components["parameters"]["NfsProposalId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Proposal cancelled without creating NFS authority. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly listNfsPrincipalMappings: {
         readonly parameters: {
             readonly query?: never;
@@ -3321,22 +3608,13 @@ export interface operations {
             };
         };
         readonly responses: {
-            /** @description Existing mapping advanced by its expected generation. */
-            readonly 200: {
+            /** @description Direct activation is forbidden because the target user must approve an exact proposal. */
+            readonly 409: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
-                };
-            };
-            /** @description New exact Kerberos principal mapping. */
-            readonly 201: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];
@@ -3372,6 +3650,38 @@ export interface operations {
             readonly default: components["responses"]["Problem"];
         };
     };
+    readonly attenuateNfsMappingScope: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly credential_id: components["schemas"]["UuidV4"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["AttenuateNfsMappingScope"];
+            };
+        };
+        readonly responses: {
+            /** @description Alias scope attenuated and affected sessions fenced. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
     readonly registerNfsPosixGroup: {
         readonly parameters: {
             readonly query?: never;
@@ -3397,6 +3707,27 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["NfsPosixGroup"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listQuarantinedNfsMappings: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Quarantined legacy mappings requiring a new proposal. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["NfsQuarantinedMapping"][];
                 };
             };
             readonly default: components["responses"]["Problem"];
@@ -5226,6 +5557,117 @@ export interface operations {
         readonly requestBody?: never;
         readonly responses: {
             /** @description Credential and its active sessions revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getNfsTargetOverview: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Target-owned NFS consent state. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsTargetOverview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly approveNfsMappingProposal: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly proposal_id: components["parameters"]["NfsProposalId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsProposalDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Proposal approved and exact alias authority activated atomically. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NfsPrincipalMapping"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly declineNfsMappingProposal: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly proposal_id: components["parameters"]["NfsProposalId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["NfsProposalDecision"];
+            };
+        };
+        readonly responses: {
+            /** @description Proposal declined without creating NFS authority. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly revokeOwnNfsMapping: {
+        readonly parameters: {
+            readonly query: {
+                readonly expected_generation: number;
+            };
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly credential_id: components["schemas"]["UuidV4"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Alias and sessions revoked; remaining alias authority is unchanged. */
             readonly 204: {
                 headers: {
                     readonly [name: string]: unknown;

@@ -12,11 +12,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::{Json, Router, routing};
 use filebelt_control_protocol::{Config, DeploymentMode};
 use filebelt_database::mount::{
-    CopyNfsWriteConflictInput, MountCredentialRecord, MountDeviceRecord, MountPolicyRecord,
-    MountSessionSummary, NfsAdminIdempotency, NfsAdminIdempotentWrite, NfsExportRecord,
-    NfsExportState, NfsFeatureState, NfsFeatureStateRecord, NfsMutationAuthorization,
-    NfsPosixGroupRecord, NfsPrincipalMapping, NfsWriteConflictCopyRecord, NfsWriteConflictRecord,
-    UpsertNfsPrincipalMappingInput,
+    CopyNfsWriteConflictInput, CreateNfsMappingProposalInput, MountCredentialRecord,
+    MountDeviceRecord, MountPolicyRecord, MountSessionSummary, NfsAdminIdempotency,
+    NfsAdminIdempotentWrite, NfsExportRecord, NfsExportState, NfsFeatureState,
+    NfsFeatureStateRecord, NfsMappingProposal, NfsMutationAuthorization, NfsPosixGroupRecord,
+    NfsPrincipalMapping, NfsQuarantinedMapping, NfsWriteConflictCopyRecord, NfsWriteConflictRecord,
 };
 use filebelt_domain::{Action, NormalizedName};
 use reqwest::{Certificate, Client, Identity};
@@ -108,6 +108,37 @@ struct NfsMappingInput {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct CreateNfsMappingProposalRequest {
+    confirm_tenant: String,
+    principal_id: Uuid,
+    kerberos_principal: String,
+    projected_uid: i64,
+    projected_gid: i64,
+    allowed_drive_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct NfsProposalDecisionInput {
+    expected_generation: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttenuateNfsMappingScopeInput {
+    confirm_tenant: String,
+    allowed_drive_ids: Vec<Uuid>,
+    expected_generation: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TargetGenerationQuery {
+    expected_generation: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct NfsFeatureTransitionInput {
     confirm_tenant: String,
     target_state: String,
@@ -137,16 +168,6 @@ struct NfsPosixGroupRegistrationInput {
     group_id: Uuid,
     posix_name: String,
     projected_gid: i64,
-}
-
-#[derive(Serialize)]
-struct LegacyNfsMappingInput<'a> {
-    principal_id: Uuid,
-    kerberos_principal: &'a str,
-    projected_uid: i64,
-    projected_gid: i64,
-    allowed_drive_ids: &'a [Uuid],
-    expected_generation: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -363,6 +384,85 @@ impl From<NfsPrincipalMapping> for NfsMappingResponse {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct NfsMappingProposalResponse {
+    id: Uuid,
+    proposer_principal_id: Uuid,
+    principal_id: Uuid,
+    kerberos_principal: String,
+    posix_name: String,
+    posix_group_id: Uuid,
+    posix_group_name: String,
+    projected_uid: i64,
+    projected_gid: i64,
+    allowed_drive_ids: Vec<Uuid>,
+    allowed_drives: Vec<NfsProposalDriveResponse>,
+    state: String,
+    generation: i64,
+    created_at: String,
+    expires_at: String,
+    decided_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct NfsProposalDriveResponse {
+    id: Uuid,
+    display_name: String,
+}
+
+impl From<NfsMappingProposal> for NfsMappingProposalResponse {
+    fn from(record: NfsMappingProposal) -> Self {
+        Self {
+            id: record.id,
+            proposer_principal_id: record.proposer_principal_id,
+            principal_id: record.principal_id,
+            kerberos_principal: record.kerberos_principal,
+            posix_name: record.posix_name,
+            posix_group_id: record.posix_group_id,
+            posix_group_name: record.posix_group_name,
+            projected_uid: record.projected_uid,
+            projected_gid: record.projected_gid,
+            allowed_drives: record
+                .allowed_drive_ids
+                .iter()
+                .copied()
+                .zip(record.allowed_drive_labels)
+                .map(|(id, display_name)| NfsProposalDriveResponse { id, display_name })
+                .collect(),
+            allowed_drive_ids: record.allowed_drive_ids,
+            state: record.state,
+            generation: record.generation,
+            created_at: record.created_at,
+            expires_at: record.expires_at,
+            decided_at: record.decided_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct NfsQuarantinedMappingResponse {
+    #[serde(flatten)]
+    mapping: NfsMappingResponse,
+    quarantined_at: String,
+    quarantine_reason: String,
+}
+
+impl From<NfsQuarantinedMapping> for NfsQuarantinedMappingResponse {
+    fn from(record: NfsQuarantinedMapping) -> Self {
+        Self {
+            mapping: record.mapping.into(),
+            quarantined_at: record.quarantined_at,
+            quarantine_reason: record.quarantine_reason,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct NfsTargetOverview {
+    proposals: Vec<NfsMappingProposalResponse>,
+    mappings: Vec<NfsMappingResponse>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GenerationQuery {
@@ -459,6 +559,35 @@ pub(crate) fn router() -> Router<AppState> {
         .route(
             "/admin/mounts/nfs/mappings/{credential_id}",
             routing::delete(revoke_nfs_mapping),
+        )
+        .route(
+            "/admin/mounts/nfs/mappings/{credential_id}/scope",
+            routing::put(attenuate_nfs_mapping_scope),
+        )
+        .route(
+            "/admin/mounts/nfs/mapping-proposals",
+            routing::get(list_nfs_mapping_proposals).post(create_nfs_mapping_proposal),
+        )
+        .route(
+            "/admin/mounts/nfs/mapping-proposals/{proposal_id}",
+            routing::delete(cancel_nfs_mapping_proposal),
+        )
+        .route(
+            "/admin/mounts/nfs/quarantined-mappings",
+            routing::get(list_quarantined_nfs_mappings),
+        )
+        .route("/mounts/nfs", routing::get(get_nfs_target_overview))
+        .route(
+            "/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+            routing::post(approve_nfs_mapping_proposal),
+        )
+        .route(
+            "/mounts/nfs/mapping-proposals/{proposal_id}/decline",
+            routing::post(decline_nfs_mapping_proposal),
+        )
+        .route(
+            "/mounts/nfs/mappings/{credential_id}",
+            routing::delete(revoke_own_nfs_mapping),
         )
         .route(
             "/admin/mounts/nfs/conflicts",
@@ -688,54 +817,309 @@ async fn upsert_nfs_mapping(
     headers: HeaderMap,
     Json(input): Json<NfsMappingInput>,
 ) -> Result<(StatusCode, Json<NfsMappingResponse>), ApiError> {
+    require_nfs_admin(&state, &headers, true).await?;
+    require_nfs_tenant_confirmation(&state, &input.confirm_tenant)?;
+    Err(ApiError::conflict(
+        "mount.nfs.target_approval_required",
+        "The target user must approve an exact NFS mapping proposal",
+    ))
+}
+
+async fn list_nfs_mapping_proposals(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<NfsMappingProposalResponse>>, ApiError> {
+    require_nfs_admin(&state, &headers, false).await?;
+    Ok(Json(
+        state
+            .database
+            .list_nfs_mapping_proposals(state.tenant_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    ))
+}
+
+async fn create_nfs_mapping_proposal(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateNfsMappingProposalRequest>,
+) -> Result<(StatusCode, Json<NfsMappingProposalResponse>), ApiError> {
     let session = require_nfs_admin(&state, &headers, true).await?;
     require_nfs_tenant_confirmation(&state, &input.confirm_tenant)?;
     validate_nfs_kerberos_principal(&input.kerberos_principal, configured_nfs_realm(&state)?)?;
-    validate_nfs_mapping_input(&input)?;
-    let key = crate::resources::idempotency_key(&headers)?;
-    let fingerprint = crate::resources::fingerprint(&input)?;
-    let legacy_fingerprint = crate::resources::fingerprint(&LegacyNfsMappingInput {
-        principal_id: input.principal_id,
-        kerberos_principal: &input.kerberos_principal,
-        projected_uid: input.projected_uid,
-        projected_gid: input.projected_gid,
-        allowed_drive_ids: &input.allowed_drive_ids,
-        expected_generation: input.expected_generation,
-    })?;
-    const ROUTE: &str = "POST /api/v1/admin/mounts/nfs/mappings";
-    let status = if input.expected_generation.is_none() {
-        StatusCode::CREATED
-    } else {
-        StatusCode::OK
-    };
+    validate_nfs_mapping_fields(
+        input.projected_uid,
+        input.projected_gid,
+        &input.allowed_drive_ids,
+    )?;
     validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
-    let (status, mapping) = nfs_admin_idempotent_response(
+    validate_drive_selection_for_principal(&state, input.principal_id, &input.allowed_drive_ids)
+        .await?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint = crate::resources::fingerprint(&input)?;
+    let server_fingerprint = nfs_server_fingerprint(&state)?;
+    const ROUTE: &str = "POST /api/v1/admin/mounts/nfs/mapping-proposals";
+    let (status, proposal) = nfs_admin_idempotent_response(
         state
             .database
-            .upsert_nfs_principal_mapping_idempotent(
-                &UpsertNfsPrincipalMappingInput {
+            .create_nfs_mapping_proposal_idempotent(
+                &CreateNfsMappingProposalInput {
                     tenant_id: state.tenant_id,
-                    actor_principal_id: session.record.principal_id,
+                    proposer_principal_id: session.record.principal_id,
+                    proposer_api_session_id: session.record.session_id,
                     principal_id: input.principal_id,
                     kerberos_principal: &input.kerberos_principal,
                     projected_uid: input.projected_uid,
                     projected_gid: input.projected_gid,
                     allowed_drive_ids: &input.allowed_drive_ids,
-                    expected_generation: input.expected_generation,
+                    server_fingerprint: &server_fingerprint,
                 },
                 &NfsAdminIdempotency {
                     principal_id: session.record.principal_id,
                     route: ROUTE,
                     key,
-                    request_fingerprint: &fingerprint,
-                    legacy_request_fingerprint: Some(&legacy_fingerprint),
-                    response_status: i32::from(status.as_u16()),
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::CREATED.as_u16()),
+                },
+                |record| serde_json::to_value(NfsMappingProposalResponse::from(record.clone())),
+            )
+            .await?,
+    )?;
+    ensure_replay_status(status.as_u16(), StatusCode::CREATED)?;
+    Ok((status, Json(proposal)))
+}
+
+async fn cancel_nfs_mapping_proposal(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<Uuid>,
+    Query(query): Query<GenerationQuery>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    let session = require_nfs_admin(&state, &headers, true).await?;
+    require_nfs_tenant_confirmation(&state, &query.confirm_tenant)?;
+    require_positive_generation(query.expected_generation)?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint = crate::resources::fingerprint(&(
+        proposal_id,
+        query.expected_generation,
+        &query.confirm_tenant,
+    ))?;
+    const ROUTE: &str = "DELETE /api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}";
+    let (status, ()): (StatusCode, ()) = nfs_admin_idempotent_response(
+        state
+            .database
+            .transition_nfs_mapping_proposal_idempotent(
+                state.tenant_id,
+                proposal_id,
+                session.record.principal_id,
+                session.record.session_id,
+                query.expected_generation,
+                "cancelled",
+                &NfsAdminIdempotency {
+                    principal_id: session.record.principal_id,
+                    route: ROUTE,
+                    key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::NO_CONTENT.as_u16()),
+                },
+                || serde_json::to_value(()),
+            )
+            .await?,
+    )?;
+    ensure_replay_status(status.as_u16(), StatusCode::NO_CONTENT)?;
+    Ok(status)
+}
+
+async fn list_quarantined_nfs_mappings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<NfsQuarantinedMappingResponse>>, ApiError> {
+    require_nfs_admin(&state, &headers, false).await?;
+    Ok(Json(
+        state
+            .database
+            .list_quarantined_nfs_mappings(state.tenant_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    ))
+}
+
+async fn attenuate_nfs_mapping_scope(
+    State(state): State<AppState>,
+    Path(credential_id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(input): Json<AttenuateNfsMappingScopeInput>,
+) -> Result<Json<NfsMappingResponse>, ApiError> {
+    let session = require_nfs_admin(&state, &headers, true).await?;
+    require_nfs_tenant_confirmation(&state, &input.confirm_tenant)?;
+    require_positive_generation(input.expected_generation)?;
+    validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint = crate::resources::fingerprint(&(credential_id, &input))?;
+    const ROUTE: &str = "PUT /api/v1/admin/mounts/nfs/mappings/{credential_id}/scope";
+    let (status, mapping) = nfs_admin_idempotent_response(
+        state
+            .database
+            .attenuate_nfs_principal_mapping_idempotent(
+                state.tenant_id,
+                session.record.principal_id,
+                credential_id,
+                input.expected_generation,
+                &input.allowed_drive_ids,
+                &NfsAdminIdempotency {
+                    principal_id: session.record.principal_id,
+                    route: ROUTE,
+                    key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::OK.as_u16()),
                 },
                 |record| serde_json::to_value(NfsMappingResponse::from(record.clone())),
             )
             .await?,
     )?;
+    ensure_replay_status(status.as_u16(), StatusCode::OK)?;
+    Ok(Json(mapping))
+}
+
+async fn get_nfs_target_overview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<NfsTargetOverview>, ApiError> {
+    require_nfs_enabled(&state)?;
+    let session = authenticate(&state, &headers).await?;
+    let (proposals, mappings) = tokio::try_join!(
+        state
+            .database
+            .list_own_nfs_mapping_proposals(state.tenant_id, session.record.principal_id,),
+        state
+            .database
+            .list_own_nfs_principal_mappings(state.tenant_id, session.record.principal_id,),
+    )?;
+    Ok(Json(NfsTargetOverview {
+        proposals: proposals.into_iter().map(Into::into).collect(),
+        mappings: mappings.into_iter().map(Into::into).collect(),
+    }))
+}
+
+async fn approve_nfs_mapping_proposal(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(input): Json<NfsProposalDecisionInput>,
+) -> Result<(StatusCode, Json<NfsMappingResponse>), ApiError> {
+    require_nfs_enabled(&state)?;
+    let session = require_recent_mutation(&state, &headers).await?;
+    require_positive_generation(input.expected_generation)?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint = crate::resources::fingerprint(&(proposal_id, &input))?;
+    let server_fingerprint = nfs_server_fingerprint(&state)?;
+    const ROUTE: &str = "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval";
+    let (status, mapping) = nfs_admin_idempotent_response(
+        state
+            .database
+            .approve_nfs_mapping_proposal_idempotent(
+                state.tenant_id,
+                proposal_id,
+                session.record.principal_id,
+                session.record.session_id,
+                input.expected_generation,
+                &server_fingerprint,
+                &NfsAdminIdempotency {
+                    principal_id: session.record.principal_id,
+                    route: ROUTE,
+                    key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::CREATED.as_u16()),
+                },
+                |record| serde_json::to_value(NfsMappingResponse::from(record.clone())),
+            )
+            .await?,
+    )?;
+    ensure_replay_status(status.as_u16(), StatusCode::CREATED)?;
     Ok((status, Json(mapping)))
+}
+
+async fn decline_nfs_mapping_proposal(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(input): Json<NfsProposalDecisionInput>,
+) -> Result<StatusCode, ApiError> {
+    require_nfs_enabled(&state)?;
+    let session = require_recent_mutation(&state, &headers).await?;
+    require_positive_generation(input.expected_generation)?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint = crate::resources::fingerprint(&(proposal_id, &input))?;
+    const ROUTE: &str = "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline";
+    let (status, ()): (StatusCode, ()) = nfs_admin_idempotent_response(
+        state
+            .database
+            .transition_nfs_mapping_proposal_idempotent(
+                state.tenant_id,
+                proposal_id,
+                session.record.principal_id,
+                session.record.session_id,
+                input.expected_generation,
+                "declined",
+                &NfsAdminIdempotency {
+                    principal_id: session.record.principal_id,
+                    route: ROUTE,
+                    key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::NO_CONTENT.as_u16()),
+                },
+                || serde_json::to_value(()),
+            )
+            .await?,
+    )?;
+    ensure_replay_status(status.as_u16(), StatusCode::NO_CONTENT)?;
+    Ok(status)
+}
+
+async fn revoke_own_nfs_mapping(
+    State(state): State<AppState>,
+    Path(credential_id): Path<Uuid>,
+    Query(query): Query<TargetGenerationQuery>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    require_nfs_enabled(&state)?;
+    let session = require_recent_mutation(&state, &headers).await?;
+    require_positive_generation(query.expected_generation)?;
+    let key = crate::resources::idempotency_key(&headers)?;
+    let request_fingerprint =
+        crate::resources::fingerprint(&(credential_id, query.expected_generation))?;
+    const ROUTE: &str = "DELETE /api/v1/mounts/nfs/mappings/{credential_id}";
+    let (status, ()): (StatusCode, ()) = nfs_admin_idempotent_response(
+        state
+            .database
+            .revoke_own_nfs_principal_mapping_idempotent(
+                state.tenant_id,
+                session.record.principal_id,
+                credential_id,
+                query.expected_generation,
+                &NfsAdminIdempotency {
+                    principal_id: session.record.principal_id,
+                    route: ROUTE,
+                    key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: i32::from(StatusCode::NO_CONTENT.as_u16()),
+                },
+                || serde_json::to_value(()),
+            )
+            .await?,
+    )?;
+    ensure_replay_status(status.as_u16(), StatusCode::NO_CONTENT)?;
+    Ok(status)
 }
 
 async fn revoke_nfs_mapping(
@@ -918,6 +1302,19 @@ async fn require_nfs_admin(
     Ok(session)
 }
 
+fn require_nfs_enabled(state: &AppState) -> Result<(), ApiError> {
+    if state.config.mounts.nfs.enabled {
+        configured_nfs_realm(state)?;
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "mount.nfs.disabled",
+            "NFS access is not enabled for this deployment",
+        ))
+    }
+}
+
 fn require_nfs_tenant_confirmation(state: &AppState, confirmation: &str) -> Result<(), ApiError> {
     require_exact_nfs_tenant_confirmation(&state.config.tenant.slug, confirmation)
 }
@@ -955,6 +1352,14 @@ fn configured_nfs_realm(state: &AppState) -> Result<&str, ApiError> {
                 "NFS administration is not configured for this deployment",
             )
         })
+}
+
+fn nfs_server_fingerprint(state: &AppState) -> Result<[u8; 32], ApiError> {
+    crate::resources::fingerprint(&(
+        state.tenant_id,
+        &state.config.tenant.slug,
+        configured_nfs_realm(state)?,
+    ))
 }
 
 fn parse_nfs_feature_state(value: &str) -> Result<NfsFeatureState, ApiError> {
@@ -1021,19 +1426,37 @@ fn nfs_admin_idempotent_response<T: DeserializeOwned>(
     Ok((status, body))
 }
 
+#[cfg(test)]
 fn validate_nfs_mapping_input(input: &NfsMappingInput) -> Result<(), ApiError> {
-    if !valid_nfs_projected_id(input.projected_uid)
-        || !valid_nfs_projected_id(input.projected_gid)
-        || input.allowed_drive_ids.is_empty()
-        || input.allowed_drive_ids.len() > 256
-        || input
-            .allowed_drive_ids
+    validate_nfs_mapping_fields(
+        input.projected_uid,
+        input.projected_gid,
+        &input.allowed_drive_ids,
+    )?;
+    if input.expected_generation.is_some_and(|value| value <= 0) {
+        return Err(ApiError::bad_request(
+            "mount.nfs.mapping_invalid",
+            "The NFS mapping request is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_nfs_mapping_fields(
+    projected_uid: i64,
+    projected_gid: i64,
+    allowed_drive_ids: &[Uuid],
+) -> Result<(), ApiError> {
+    if !valid_nfs_projected_id(projected_uid)
+        || !valid_nfs_projected_id(projected_gid)
+        || allowed_drive_ids.is_empty()
+        || allowed_drive_ids.len() > 256
+        || allowed_drive_ids
             .iter()
             .copied()
             .collect::<HashSet<_>>()
             .len()
-            != input.allowed_drive_ids.len()
-        || input.expected_generation.is_some_and(|value| value <= 0)
+            != allowed_drive_ids.len()
     {
         return Err(ApiError::bad_request(
             "mount.nfs.mapping_invalid",
@@ -1322,6 +1745,28 @@ async fn validate_drive_selection(
     Ok(())
 }
 
+async fn validate_drive_selection_for_principal(
+    state: &AppState,
+    principal_id: Uuid,
+    selected: &[Uuid],
+) -> Result<(), ApiError> {
+    let accessible = state
+        .database
+        .list_drives(state.tenant_id, principal_id)
+        .await?
+        .into_iter()
+        .map(|drive| drive.id)
+        .collect::<HashSet<_>>();
+    if selected.iter().all(|drive| accessible.contains(drive)) {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "mount.drive_selection_denied",
+            "The target cannot read metadata for every selected drive",
+        ))
+    }
+}
+
 fn unavailable() -> ApiError {
     ApiError::new(
         StatusCode::SERVICE_UNAVAILABLE,
@@ -1525,12 +1970,47 @@ mod tests {
             "\"/admin/mounts/nfs/exports/{drive_id}\"",
             "\"/admin/mounts/nfs/posix-groups\"",
             "\"/admin/mounts/nfs/mappings\"",
+            "\"/admin/mounts/nfs/mapping-proposals\"",
+            "\"/admin/mounts/nfs/mapping-proposals/{proposal_id}\"",
+            "\"/admin/mounts/nfs/quarantined-mappings\"",
+            "\"/admin/mounts/nfs/mappings/{credential_id}/scope\"",
+            "\"/mounts/nfs\"",
+            "\"/mounts/nfs/mapping-proposals/{proposal_id}/approval\"",
+            "\"/mounts/nfs/mapping-proposals/{proposal_id}/decline\"",
+            "\"/mounts/nfs/mappings/{credential_id}\"",
             "\"/admin/mounts/nfs/conflicts\"",
             "\"/admin/mounts/nfs/conflicts/{conflict_id}/copy\"",
             "\"/admin/mounts/nfs/conflicts/{conflict_id}\"",
         ] {
             assert!(source.contains(route), "missing route {route}");
         }
+        for handler in [
+            "async fn create_nfs_mapping_proposal",
+            "async fn cancel_nfs_mapping_proposal",
+            "async fn attenuate_nfs_mapping_scope",
+            "async fn approve_nfs_mapping_proposal",
+            "async fn decline_nfs_mapping_proposal",
+            "async fn revoke_own_nfs_mapping",
+        ] {
+            let handler_source = source
+                .split_once(handler)
+                .expect("NFS approval mutation handler exists")
+                .1
+                .split_once("\nasync fn ")
+                .expect("next handler exists")
+                .0;
+            assert!(handler_source.contains("idempotency_key(&headers)"));
+            assert!(handler_source.contains("_idempotent("));
+        }
+        let legacy_activation = source
+            .split_once("async fn upsert_nfs_mapping")
+            .expect("legacy direct-activation handler exists")
+            .1
+            .split_once("\nasync fn ")
+            .expect("next handler exists")
+            .0;
+        assert!(legacy_activation.contains("mount.nfs.target_approval_required"));
+        assert!(!legacy_activation.contains("upsert_nfs_principal_mapping"));
         for (handler, next_handler) in [
             (
                 "async fn transition_nfs_feature",
@@ -1545,7 +2025,6 @@ mod tests {
                 "async fn register_nfs_posix_group",
                 "async fn list_nfs_mappings",
             ),
-            ("async fn upsert_nfs_mapping", "async fn revoke_nfs_mapping"),
             ("async fn revoke_nfs_mapping", "async fn list_nfs_conflicts"),
             (
                 "async fn copy_nfs_conflict",
@@ -1584,7 +2063,6 @@ mod tests {
                 "async fn stage_nfs_export",
                 "async fn register_nfs_posix_group",
             ),
-            ("async fn upsert_nfs_mapping", "async fn revoke_nfs_mapping"),
         ] {
             let handler_source = source
                 .split_once(handler)

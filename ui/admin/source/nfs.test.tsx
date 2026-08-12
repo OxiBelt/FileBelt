@@ -54,10 +54,35 @@ const Snapshot: NfsAdminSnapshot = {
     ProjectedGid: 2001,
     ProjectedUid: 1001,
   }],
+  PendingProposals: [{
+    AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
+    CreatedAt: "2026-08-11T00:00:00Z",
+    DecidedAt: null,
+    ExpiresAt: "2026-08-12T00:00:00Z",
+    Generation: 1,
+    Id: "00000000-0000-4000-8000-000000000110",
+    KerberosPrincipal: "bob@EXAMPLE.TEST",
+    PrincipalId: "00000000-0000-4000-8000-000000000111",
+    ProjectedGid: 2002,
+    ProjectedUid: 1002,
+    ProposerPrincipalId: "00000000-0000-4000-8000-000000000112",
+    State: "pending",
+  }],
   PosixGroups: [{
     GroupId: "00000000-0000-4000-8000-000000000104",
     PosixName: "engineering.platform",
     ProjectedGid: 2001,
+  }],
+  QuarantinedMappings: [{
+    AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
+    CredentialId: "00000000-0000-4000-8000-000000000113",
+    Generation: 3,
+    KerberosPrincipal: "legacy@EXAMPLE.TEST",
+    PrincipalId: "00000000-0000-4000-8000-000000000114",
+    ProjectedGid: 2001,
+    ProjectedUid: 1003,
+    QuarantinedAt: "2026-08-11T01:00:00Z",
+    QuarantineReason: "target_approval_cutover",
   }],
   Realm: "EXAMPLE.TEST",
   TenantSlug: "acme",
@@ -68,6 +93,8 @@ describe("NfsAdminOverviewView", () => {
     const Markup = renderToStaticMarkup(
       <NfsAdminOverviewView
         Busy={false}
+        OnAttenuateMapping={async () => undefined}
+        OnCancelProposal={async () => undefined}
         OnCopyConflict={async () => undefined}
         OnDiscardConflict={async () => undefined}
         OnRegisterExport={async () => undefined}
@@ -75,7 +102,7 @@ describe("NfsAdminOverviewView", () => {
         OnRevokeMapping={async () => undefined}
         OnTransitionExport={async () => undefined}
         OnTransitionFeature={async () => undefined}
-        OnUpsertMapping={async () => undefined}
+        OnProposeMapping={async () => undefined}
         Snapshot={Snapshot}
       />,
     );
@@ -87,7 +114,7 @@ describe("NfsAdminOverviewView", () => {
     expect(Markup).toContain("user@EXAMPLE.TEST");
     expect(Markup).toContain("Configured Kerberos realm");
     expect(Markup).toContain("I reviewed the manifest generations");
-    expect(Markup).toContain("I confirm this complete principal mapping");
+    expect(Markup).toContain("target user must approve");
     expect(Markup).toContain("I confirm this mapping should be revoked");
     expect(Markup).toMatch(/<button[^>]*disabled=""[^>]*>Transition to disabled<\/button>/);
     expect(Markup).toContain("Register POSIX group");
@@ -96,6 +123,11 @@ describe("NfsAdminOverviewView", () => {
     expect(Markup).toContain("Retained NFS write conflict");
     expect(Markup).toContain("Copy conflict");
     expect(Markup).toContain("Discard conflict");
+    expect(Markup).toContain("Pending target approvals");
+    expect(Markup).toContain("bob@EXAMPLE.TEST");
+    expect(Markup).toContain("Quarantined legacy mappings");
+    expect(Markup).toContain("legacy@EXAMPLE.TEST");
+    expect(Markup).toContain("Reduce allowed exports");
   });
 
   it("does not allow disable before the draining generation is applied", () => {
@@ -122,6 +154,8 @@ describe("NfsAdminOverviewView", () => {
     const Markup = renderToStaticMarkup(
       <NfsAdminOverviewView
         Busy={false}
+        OnAttenuateMapping={async () => undefined}
+        OnCancelProposal={async () => undefined}
         OnCopyConflict={async () => undefined}
         OnDiscardConflict={async () => undefined}
         OnRegisterExport={async () => undefined}
@@ -129,7 +163,7 @@ describe("NfsAdminOverviewView", () => {
         OnRevokeMapping={async () => undefined}
         OnTransitionExport={async () => undefined}
         OnTransitionFeature={async () => undefined}
-        OnUpsertMapping={async () => undefined}
+        OnProposeMapping={async () => undefined}
         Snapshot={LegacySnapshot}
       />,
     );

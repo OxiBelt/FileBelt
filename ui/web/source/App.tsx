@@ -63,6 +63,7 @@ import { IsOfficeDocumentCandidate } from "./document-eligibility.js";
 import { FileTable } from "./FileTable.js";
 import type { FileEntry, RouteId, WorkspaceSnapshot } from "./model.js";
 import type { MountSettingsClient } from "./mount-http-client.js";
+import type { NfsTargetClient } from "./nfs-target-http-client.js";
 import { EmptySelection, SelectionReducer } from "./selection.js";
 import { En } from "./strings.js";
 
@@ -211,6 +212,7 @@ interface AppProps {
   McpClient?: McpSettingsClient;
   MountClient?: MountSettingsClient;
   NfsClient?: NfsAdminClient;
+  NfsTargetClient?: NfsTargetClient;
 }
 
 export function OidcLoginHref(): string {
@@ -227,7 +229,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
-export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient }: AppProps): ReactNode {
+export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient, NfsTargetClient }: AppProps): ReactNode {
   const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
@@ -429,7 +431,7 @@ export function App({ Client, DocumentClient, McpClient, MountClient, NfsClient 
               {Route === "privacy" ? <PrivacyView Events={Snapshot.Privacy} onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)} Strings={En} /> : null}
               {Route === "mcp" && McpClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><McpSettings Client={McpClient} IsTenantAdmin={Snapshot.CurrentUser.IsTenantAdmin} /></Suspense> : null}
               {Route === "mcp" && McpClient === undefined ? <div className="fb-error" role="alert">MCP settings are unavailable.</div> : null}
-              {Route === "mounts" && MountClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><MountSettings Client={MountClient} /></Suspense> : null}
+              {Route === "mounts" && MountClient !== undefined ? <Suspense fallback={<Spinner label={En.loading} />}><MountSettings Client={MountClient} NfsClient={NfsTargetClient} /></Suspense> : null}
               {Route === "mounts" && MountClient === undefined ? <div className="fb-error" role="alert">Mount settings are unavailable.</div> : null}
               {Route === "markdown" && MarkdownEntry?.Kind === "file" && MarkdownEntry.MarkdownEligibility !== "ineligible" ? <Suspense fallback={<Spinner label={En.markdownLoading} />}><MarkdownFileView Client={Client} Entry={MarkdownEntry} {...(McpClient === undefined ? {} : { McpClient })} OnClose={() => Navigate("drive")} OnFileBeltLink={OpenFileBeltReference} OnNavigationGuardChange={SetNavigationGuard} OnSaved={() => void Refresh()} /></Suspense> : null}
               {Route === "markdown" && (MarkdownEntry === undefined || MarkdownEntry.Kind !== "file" || MarkdownEntry.MarkdownEligibility === "ineligible") ? <div className="fb-error" role="alert">{En.markdownUnavailable}</div> : null}

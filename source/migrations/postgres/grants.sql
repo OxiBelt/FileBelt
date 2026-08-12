@@ -391,6 +391,8 @@ GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
 GRANT SELECT, INSERT, UPDATE ON filebelt_mount.nfs_principal_mappings
   TO filebelt_api;
 GRANT SELECT ON
+  filebelt_mount.nfs_mapping_proposals,
+  filebelt_mount.nfs_approved_active_mappings,
   filebelt_mount.nfs_feature_state,
   filebelt_mount.nfs_exports,
   filebelt_mount.nfs_posix_groups,
@@ -404,6 +406,13 @@ GRANT INSERT (tenant_id,group_id,posix_name,projected_gid)
   ON filebelt_mount.nfs_posix_groups TO filebelt_api;
 GRANT EXECUTE ON FUNCTION filebelt_mount.fence_nfs_mapping_sessions(
   uuid,uuid,uuid,bigint,text
+) TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.create_nfs_mapping_proposal(
+  uuid,uuid,uuid,uuid,uuid,text,text,uuid,bigint,bigint,uuid[],uuid,bigint,bytea
+), filebelt_mount.approve_nfs_mapping_proposal(
+  uuid,uuid,uuid,uuid,bigint
+), filebelt_mount.transition_nfs_mapping_proposal(
+  uuid,uuid,uuid,uuid,bigint,text
 ) TO filebelt_api;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   filebelt_mount.nfs_reclaim_records TO filebelt_vfs;
@@ -420,6 +429,7 @@ GRANT SELECT (
 ) ON filebelt_mount.nfs_principal_mappings TO filebelt_io;
 GRANT SELECT ON
   filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_approved_active_mappings,
   filebelt_mount.nfs_feature_state,
   filebelt_mount.nfs_exports,
   filebelt_mount.nfs_posix_groups,
@@ -440,8 +450,13 @@ GRANT SELECT ON
   filebelt_mount.nfs_replay_slots,
   filebelt_mount.nfs_write_operations,
   filebelt_mount.nfs_io_receipts TO filebelt_maintenance;
+GRANT EXECUTE ON FUNCTION filebelt_mount.expire_nfs_mapping_proposals(uuid,integer),
+  filebelt_mount.purge_nfs_mapping_proposals(uuid,integer)
+  TO filebelt_maintenance;
 GRANT SELECT ON
   filebelt_mount.nfs_principal_mappings,
+  filebelt_mount.nfs_mapping_proposals,
+  filebelt_mount.nfs_approved_active_mappings,
   filebelt_mount.nfs_feature_state,
   filebelt_mount.nfs_exports,
   filebelt_mount.nfs_posix_groups,

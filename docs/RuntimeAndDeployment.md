@@ -479,6 +479,15 @@ drains workloads, and restores previous compatible image digests. It preserves
 Phase 8 schemas, conflict data, recovery claims, key generations, and cache
 metadata. A binary downgrade uses the recorded pre-activation restore.
 
+The NFS identity-approval cutover runs only while NFS admission and gateways
+are disabled. Apply `000015_nfs_mapping_target_approval.sql` and its reviewed
+grants, verify that every formerly active mapping is quarantined and every
+dependent credential, policy, and session is fenced, then roll only binaries
+that use the approved-active mapping projection. Administrators must create
+fresh proposals and targets must approve them through Mount Settings; there is
+no grandfathering, override, email, push, or notification-service dependency.
+Do not restore an older direct-activation API binary after the migration.
+
 ## Administration, observability, and recovery
 
 Database migration, grants verification, tenant bootstrap, storage probe,
@@ -500,21 +509,25 @@ drain connections, fence rooms, and preserve dirty manifests
 for review; never
 acknowledge an update from an event or in-memory replica state.
 
-Phase 6 mount rollout remains gated. Apply migrations `000004` and `000005`
-and reviewed VFS/Headscale grants first, provision `mount-storage` signing and
-mount-vault secrets, render the chart with all protocol flags false, and verify
-that API/I/O have no new payload or database authority. Do not enable the
+Phase 6 mount rollout remains gated. Apply the forward migration series through
+`000015` with reviewed VFS, Headscale, and NFS-approval grants first. Provision
+`mount-storage` signing and mount-vault secrets, render the chart with all
+protocol flags false, and verify that API/I/O have no new payload or database
+authority. Verify the NFS legacy-mapping quarantine and approved-active
+projection before any gateway rollout. Do not enable the
 preview until separately reviewed GPL image builds, corresponding-source
 offers, Samba authentication/session IPC, explicit-FTPS listener integration,
 two-user Virtual ACL/revocation tests, tailnet device fencing, and live
 Calico/Cilium policy tests all pass. NFS additionally requires the qualified
-single-active image ABI, stable-handle/reclaim evidence, automatic preStop
-drain, recovery-state restoration, and exact gateway attestation tests.
+single-active image ABI, target-approval and revocation evidence,
+stable-handle/reclaim evidence, automatic preStop drain, recovery-state
+restoration, and exact gateway attestation tests.
 Rollback disables gateway admission first, advances gateway epochs, closes
 sessions/handles/locks, then scales the selected gateways, VFS, and (when
 present) Headscale sync to zero. Keep the additive schemas, KEKs, and every admitted
 `mount-storage` public key while retained state or recovery evidence references
-them.
+them. Keep proposal and approval history and the database approval gate;
+rollback never restores direct mapping activation.
 
 Phase 7 document rollout is also staged and disabled by default. First apply
 migration `000006`, expand built-in ACL presets under the statement-scoped

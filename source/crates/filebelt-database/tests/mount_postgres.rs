@@ -4,12 +4,12 @@
 
 use filebelt_database::mount::{
     ApplyNfsWriteExtentInput, BeginMountIoOperationInput, CommitNfsWriteInput,
-    CreateNfsMountSessionInput, ExtendNfsWriteChunksInput, FinalizeNfsInternalIoReplayInput,
-    MountIoAdmission, MountIoCompletion, MountIoLookup, MountIoOperation,
-    MountWriteCapabilityFence, MountWriteChunkPlan, MountWriteRangeOperation, NfsAdminIdempotency,
-    NfsAdminIdempotentWrite, NfsExportState, NfsFeatureState, NfsMountSessionProjection,
-    NfsReplayContext, OpenNfsHandleInput, PendingMountIoWorkerState,
-    PreauthorizeMountIoOperationInput, ReconcileNfsExportManifestInput,
+    CreateNfsMappingProposalInput, CreateNfsMountSessionInput, ExtendNfsWriteChunksInput,
+    FinalizeNfsInternalIoReplayInput, MountIoAdmission, MountIoCompletion, MountIoLookup,
+    MountIoOperation, MountWriteCapabilityFence, MountWriteChunkPlan, MountWriteRangeOperation,
+    NfsAdminIdempotency, NfsAdminIdempotentWrite, NfsExportState, NfsFeatureState,
+    NfsMountSessionProjection, NfsPrincipalMapping, NfsReplayContext, OpenNfsHandleInput,
+    PendingMountIoWorkerState, PreauthorizeMountIoOperationInput, ReconcileNfsExportManifestInput,
     RecordNfsReplayReceiptInput, ReissueMountIoOperationInput, SeekNfsWriteExtentInput,
     UpsertNfsPrincipalMappingInput,
 };
@@ -30,6 +30,372 @@ fn mount_capability_expiry() -> i64 {
     )
     .expect("wall clock fits in i64")
         + 10
+}
+
+async fn insert_fresh_test_api_session(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+) -> Uuid {
+    let session_id = Uuid::new_v4();
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM public.users WHERE tenant_id=$1 AND principal_id=$2")
+            .bind(tenant_id)
+            .bind(principal_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("resolve NFS approval test user");
+    sqlx::query(
+        "INSERT INTO public.api_sessions \
+         (tenant_id,id,user_id,principal_id,token_key_generation,token_digest,csrf_digest,\
+          idle_expires_at,absolute_expires_at,reauthenticated_at) \
+         VALUES ($1,$2,$3,$4,1,$5,$6,clock_timestamp()+interval '15 minutes',\
+                 clock_timestamp()+interval '1 hour',clock_timestamp())",
+    )
+    .bind(tenant_id)
+    .bind(session_id)
+    .bind(user_id)
+    .bind(principal_id)
+    .bind(Uuid::new_v4().as_bytes().to_vec())
+    .bind(Uuid::new_v4().as_bytes().to_vec())
+    .execute(database.pool())
+    .await
+    .expect("insert fresh NFS approval test session");
+    session_id
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn approve_test_nfs_mapping(
+    database: &Database,
+    tenant_id: Uuid,
+    proposer_principal_id: Uuid,
+    target_principal_id: Uuid,
+    kerberos_principal: &str,
+    projected_uid: i64,
+    projected_gid: i64,
+    allowed_drive_ids: &[Uuid],
+) -> NfsPrincipalMapping {
+    let proposer_user_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM public.users WHERE tenant_id=$1 AND principal_id=$2")
+            .bind(tenant_id)
+            .bind(proposer_principal_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("resolve NFS proposal administrator");
+    let existing_identity: Option<(String, String)> = sqlx::query_as(
+        "SELECT issuer,subject FROM public.external_identities \
+         WHERE tenant_id=$1 AND user_id=$2 AND disabled_at IS NULL",
+    )
+    .bind(tenant_id)
+    .bind(proposer_user_id)
+    .fetch_optional(database.pool())
+    .await
+    .expect("read NFS proposal administrator identity");
+    let (issuer, subject) = if let Some(identity) = existing_identity {
+        identity
+    } else {
+        let issuer = "https://nfs-approval.test".to_owned();
+        let subject = format!("nfs-admin-{proposer_principal_id}");
+        sqlx::query(
+            "INSERT INTO public.external_identities \
+             (tenant_id,id,user_id,issuer,subject) VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(tenant_id)
+        .bind(Uuid::new_v4())
+        .bind(proposer_user_id)
+        .bind(&issuer)
+        .bind(&subject)
+        .execute(database.pool())
+        .await
+        .expect("insert NFS proposal administrator identity");
+        (issuer, subject)
+    };
+    sqlx::query(
+        "INSERT INTO public.tenant_admin_bindings (tenant_id,issuer,subject) \
+         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+    )
+    .bind(tenant_id)
+    .bind(&issuer)
+    .bind(&subject)
+    .execute(database.pool())
+    .await
+    .expect("bind NFS proposal test administrator");
+    for drive_id in allowed_drive_ids {
+        let root_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM public.nodes WHERE tenant_id=$1 AND drive_id=$2 AND parent_id IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("resolve NFS approval test drive root");
+        sqlx::query(
+            "INSERT INTO public.acl_entries \
+             (tenant_id,drive_id,resource_id,id,principal_id,action,effect,inheritance,created_by,generation) \
+             VALUES ($1,$2,$3,$4,$5,'READ_METADATA','allow','self',$6,1) \
+             ON CONFLICT (tenant_id,resource_id,principal_id,action,inheritance,source) DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(drive_id)
+        .bind(root_id)
+        .bind(Uuid::new_v4())
+        .bind(target_principal_id)
+        .bind(proposer_principal_id)
+        .execute(database.pool())
+        .await
+        .expect("grant target READ_METADATA for NFS approval fixture");
+    }
+    let proposer_session_id =
+        insert_fresh_test_api_session(database, tenant_id, proposer_principal_id).await;
+    let target_session_id = if target_principal_id == proposer_principal_id {
+        proposer_session_id
+    } else {
+        insert_fresh_test_api_session(database, tenant_id, target_principal_id).await
+    };
+    let server_fingerprint = [211_u8; 32];
+    let request_fingerprint = [212_u8; 32];
+    let proposal_key = format!("test-nfs-proposal-{}", Uuid::new_v4());
+    let created_proposal = expect_idempotent_created(
+        database
+            .create_nfs_mapping_proposal_idempotent(
+                &CreateNfsMappingProposalInput {
+                    tenant_id,
+                    proposer_principal_id,
+                    proposer_api_session_id: proposer_session_id,
+                    principal_id: target_principal_id,
+                    kerberos_principal,
+                    projected_uid,
+                    projected_gid,
+                    allowed_drive_ids,
+                    server_fingerprint: &server_fingerprint,
+                },
+                &NfsAdminIdempotency {
+                    principal_id: proposer_principal_id,
+                    route: "POST /api/v1/admin/mounts/nfs/mapping-proposals",
+                    key: &proposal_key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |record| serde_json::to_value(record),
+            )
+            .await
+            .expect("create immutable NFS mapping proposal"),
+    );
+    let replayed_proposal = expect_idempotent_replayed(
+        database
+            .create_nfs_mapping_proposal_idempotent(
+                &CreateNfsMappingProposalInput {
+                    tenant_id,
+                    proposer_principal_id,
+                    proposer_api_session_id: proposer_session_id,
+                    principal_id: target_principal_id,
+                    kerberos_principal,
+                    projected_uid,
+                    projected_gid,
+                    allowed_drive_ids,
+                    server_fingerprint: &server_fingerprint,
+                },
+                &NfsAdminIdempotency {
+                    principal_id: proposer_principal_id,
+                    route: "POST /api/v1/admin/mounts/nfs/mapping-proposals",
+                    key: &proposal_key,
+                    request_fingerprint: &request_fingerprint,
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |_| panic!("an exact proposal retry must not rerender or mutate"),
+            )
+            .await
+            .expect("replay immutable NFS mapping proposal"),
+    );
+    assert_eq!(
+        replayed_proposal.response_body,
+        created_proposal.response_body
+    );
+    let active_before_approval: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM filebelt_mount.nfs_approved_active_mappings \
+         WHERE tenant_id=$1 AND kerberos_principal=$2",
+    )
+    .bind(tenant_id)
+    .bind(kerberos_principal)
+    .fetch_one(database.pool())
+    .await
+    .expect("count authority before target approval");
+    assert_eq!(
+        active_before_approval, 0,
+        "a proposal confers no NFS authority"
+    );
+    let (proposal_id, proposal_generation): (Uuid, i64) = sqlx::query_as(
+        "SELECT id,generation FROM filebelt_mount.nfs_mapping_proposals \
+         WHERE tenant_id=$1 AND kerberos_principal=$2 AND state='pending'",
+    )
+    .bind(tenant_id)
+    .bind(kerberos_principal)
+    .fetch_one(database.pool())
+    .await
+    .expect("read pending NFS mapping proposal");
+    let wrong_fingerprint_key = format!("test-nfs-wrong-config-{}", Uuid::new_v4());
+    assert!(
+        database
+            .approve_nfs_mapping_proposal_idempotent(
+                tenant_id,
+                proposal_id,
+                target_principal_id,
+                target_session_id,
+                proposal_generation,
+                &[214_u8; 32],
+                &NfsAdminIdempotency {
+                    principal_id: target_principal_id,
+                    route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                    key: &wrong_fingerprint_key,
+                    request_fingerprint: &[215_u8; 32],
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |_| panic!("configuration drift must not render mapping authority"),
+            )
+            .await
+            .is_err(),
+        "approval must fail when the server configuration fingerprint changed"
+    );
+    if proposer_principal_id != target_principal_id {
+        let wrong_target_key = format!("test-nfs-wrong-target-{}", Uuid::new_v4());
+        assert!(
+            database
+                .approve_nfs_mapping_proposal_idempotent(
+                    tenant_id,
+                    proposal_id,
+                    proposer_principal_id,
+                    proposer_session_id,
+                    proposal_generation,
+                    &server_fingerprint,
+                    &NfsAdminIdempotency {
+                        principal_id: proposer_principal_id,
+                        route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                        key: &wrong_target_key,
+                        request_fingerprint: &[216_u8; 32],
+                        legacy_request_fingerprint: None,
+                        response_status: 201,
+                    },
+                    |_| panic!("a non-target must not render mapping authority"),
+                )
+                .await
+                .is_err(),
+            "only the exact proposal target may approve"
+        );
+    }
+    let stale_session_key = format!("test-nfs-stale-session-{}", Uuid::new_v4());
+    assert!(matches!(
+        database
+            .approve_nfs_mapping_proposal_idempotent(
+                tenant_id,
+                proposal_id,
+                target_principal_id,
+                Uuid::new_v4(),
+                proposal_generation,
+                &server_fingerprint,
+                &NfsAdminIdempotency {
+                    principal_id: target_principal_id,
+                    route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                    key: &stale_session_key,
+                    request_fingerprint: &[217_u8; 32],
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |_| panic!("a missing fresh session must not render mapping authority"),
+            )
+            .await,
+        Err(DatabaseError::StaleGeneration)
+    ));
+    let mut authority_revocation = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin concurrent NFS authority revocation");
+    sqlx::query(
+        "UPDATE public.drives SET acl_generation=acl_generation+1 \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(allowed_drive_ids[0])
+    .execute(&mut *authority_revocation)
+    .await
+    .expect("hold the approval drive-generation fence");
+    let racing_approval_key = format!("test-nfs-racing-approval-{}", Uuid::new_v4());
+    assert!(matches!(
+        database
+            .approve_nfs_mapping_proposal_idempotent(
+                tenant_id,
+                proposal_id,
+                target_principal_id,
+                target_session_id,
+                proposal_generation,
+                &server_fingerprint,
+                &NfsAdminIdempotency {
+                    principal_id: target_principal_id,
+                    route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                    key: &racing_approval_key,
+                    request_fingerprint: &[218_u8; 32],
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |_| panic!("an in-flight authority revocation must not activate a mapping"),
+            )
+            .await,
+        Err(DatabaseError::StaleGeneration)
+    ));
+    authority_revocation
+        .rollback()
+        .await
+        .expect("release concurrent NFS authority revocation");
+    let approval_key = format!("test-nfs-approval-{}", Uuid::new_v4());
+    let approved = expect_idempotent_created(
+        database
+            .approve_nfs_mapping_proposal_idempotent(
+                tenant_id,
+                proposal_id,
+                target_principal_id,
+                target_session_id,
+                proposal_generation,
+                &server_fingerprint,
+                &NfsAdminIdempotency {
+                    principal_id: target_principal_id,
+                    route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                    key: &approval_key,
+                    request_fingerprint: &[213_u8; 32],
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |record| serde_json::to_value(record),
+            )
+            .await
+            .expect("approve exact NFS mapping proposal"),
+    );
+    let replayed_approval = expect_idempotent_replayed(
+        database
+            .approve_nfs_mapping_proposal_idempotent(
+                tenant_id,
+                proposal_id,
+                target_principal_id,
+                target_session_id,
+                proposal_generation,
+                &server_fingerprint,
+                &NfsAdminIdempotency {
+                    principal_id: target_principal_id,
+                    route: "POST /api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval",
+                    key: &approval_key,
+                    request_fingerprint: &[213_u8; 32],
+                    legacy_request_fingerprint: None,
+                    response_status: 201,
+                },
+                |_| panic!("an exact approval retry must not recreate authority"),
+            )
+            .await
+            .expect("replay approved NFS mapping proposal"),
+    );
+    assert_eq!(replayed_approval.response_body, approved.response_body);
+    serde_json::from_value(approved.response_body).expect("decode approved NFS mapping")
 }
 
 fn expect_idempotent_created(outcome: NfsAdminIdempotentWrite) -> IdempotencyRecord {
@@ -1247,15 +1613,6 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
             .await,
         Err(DatabaseError::InvalidPersistedValue)
     ));
-    let mapping_fingerprint = [8_u8; 32];
-    let mapping_idempotency = NfsAdminIdempotency {
-        principal_id,
-        route: "POST /api/v1/admin/mounts/nfs/mappings",
-        key: "create-primary-mapping",
-        request_fingerprint: &mapping_fingerprint,
-        legacy_request_fingerprint: None,
-        response_status: 201,
-    };
     let mapping_input = UpsertNfsPrincipalMappingInput {
         tenant_id,
         actor_principal_id: principal_id,
@@ -1266,129 +1623,35 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         allowed_drive_ids: &[drive_id],
         expected_generation: None,
     };
-    let created_mapping = expect_idempotent_created(
-        database
-            .upsert_nfs_principal_mapping_idempotent(
-                &mapping_input,
-                &mapping_idempotency,
-                |record| {
-                    serde_json::to_value(json!({
-                        "kerberos_principal":record.kerberos_principal,
-                        "principal_id":record.principal_id,
-                        "credential_id":record.credential_id,
-                        "projected_uid":record.projected_uid,
-                        "projected_gid":record.projected_gid,
-                        "allowed_drive_ids":record.allowed_drive_ids,
-                        "generation":record.generation,
-                    }))
-                },
-            )
-            .await
-            .expect("create NFS Kerberos projection idempotently"),
-    );
-    assert_eq!(created_mapping.response_status, 201);
-    let replayed_mapping = expect_idempotent_replayed(
-        database
-            .upsert_nfs_principal_mapping_idempotent(&mapping_input, &mapping_idempotency, |_| {
-                panic!("an exact mapping retry must not generate new authority")
-            })
-            .await
-            .expect("replay created NFS Kerberos projection"),
-    );
-    assert_eq!(
-        replayed_mapping.response_body, created_mapping.response_body,
-        "generated credential ID and exact response must replay"
-    );
-    let legacy_mapping_fingerprint = [13_u8; 32];
-    let confirmed_mapping_fingerprint = [14_u8; 32];
-    let legacy_mapping_body = json!({
-        "kerberos_principal":mapping_input.kerberos_principal,
-        "principal_id":mapping_input.principal_id,
-        "credential_id":created_mapping.response_body["credential_id"],
-        "projected_uid":mapping_input.projected_uid,
-        "projected_gid":mapping_input.projected_gid,
-        "generation":1,
-    });
-    database
-        .store_idempotency_response(
-            tenant_id,
-            principal_id,
-            "POST /api/v1/admin/mounts/nfs/mappings",
-            "legacy-mapping-without-drive-projection",
-            &legacy_mapping_fingerprint,
-            201,
-            &legacy_mapping_body,
-        )
-        .await
-        .expect("seed legacy NFS mapping idempotency response");
-    let legacy_mapping_replay = expect_idempotent_replayed(
+    assert!(
         database
             .upsert_nfs_principal_mapping_idempotent(
                 &mapping_input,
                 &NfsAdminIdempotency {
                     principal_id,
                     route: "POST /api/v1/admin/mounts/nfs/mappings",
-                    key: "legacy-mapping-without-drive-projection",
-                    request_fingerprint: &confirmed_mapping_fingerprint,
-                    legacy_request_fingerprint: Some(&legacy_mapping_fingerprint),
+                    key: "direct-activation-is-forbidden",
+                    request_fingerprint: &[14_u8; 32],
+                    legacy_request_fingerprint: None,
                     response_status: 201,
                 },
-                |_| panic!("legacy mapping replay must not mutate or rerender authority"),
-            )
-            .await
-            .expect("replay legacy NFS mapping receipt"),
-    );
-    assert_eq!(legacy_mapping_replay.response_body, legacy_mapping_body);
-    assert!(
-        legacy_mapping_replay.response_body["allowed_drive_ids"].is_null(),
-        "legacy replay must leave unknown drive authority absent"
-    );
-    let cross_tenant_mapping = UpsertNfsPrincipalMappingInput {
-        tenant_id: Uuid::new_v4(),
-        actor_principal_id: principal_id,
-        principal_id,
-        kerberos_principal: mapping_input.kerberos_principal,
-        projected_uid: mapping_input.projected_uid,
-        projected_gid: mapping_input.projected_gid,
-        allowed_drive_ids: mapping_input.allowed_drive_ids,
-        expected_generation: None,
-    };
-    assert!(
-        database
-            .upsert_nfs_principal_mapping_idempotent(
-                &cross_tenant_mapping,
-                &NfsAdminIdempotency {
-                    principal_id,
-                    route: "POST /api/v1/admin/mounts/nfs/mappings",
-                    key: "legacy-mapping-without-drive-projection",
-                    request_fingerprint: &confirmed_mapping_fingerprint,
-                    legacy_request_fingerprint: Some(&legacy_mapping_fingerprint),
-                    response_status: 201,
-                },
-                |_| panic!("a receipt from another tenant must never replay"),
+                |_| panic!("direct activation must never render authority"),
             )
             .await
             .is_err(),
-        "legacy compatibility must stay bound to the exact receipt tenant"
+        "the database must reject the legacy direct-activation path"
     );
-    assert!(matches!(
-        database
-            .upsert_nfs_principal_mapping_idempotent(
-                &mapping_input,
-                &NfsAdminIdempotency {
-                    principal_id,
-                    route: "POST /api/v1/admin/mounts/nfs/mappings",
-                    key: "legacy-mapping-without-drive-projection",
-                    request_fingerprint: &[15_u8; 32],
-                    legacy_request_fingerprint: Some(&[16_u8; 32]),
-                    response_status: 201,
-                },
-                |_| panic!("a mismatched body must not replay a legacy receipt"),
-            )
-            .await
-            .expect("classify non-matching legacy NFS fingerprint"),
-        NfsAdminIdempotentWrite::KeyReused
-    ));
+    let _approved_mapping = approve_test_nfs_mapping(
+        &database,
+        tenant_id,
+        principal_id,
+        principal_id,
+        mapping_input.kerberos_principal,
+        mapping_input.projected_uid,
+        mapping_input.projected_gid,
+        mapping_input.allowed_drive_ids,
+    )
+    .await;
     let mapping = database
         .list_nfs_principal_mappings(tenant_id)
         .await
@@ -3167,7 +3430,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     let apply_response_digest = [130_u8; 32];
     let substituted_range_digest = [131_u8; 32];
     let substituted_apply_response_digest = [132_u8; 32];
-    assert!(matches!(
+    assert!(
         database
             .apply_nfs_write_extent(&ApplyNfsWriteExtentInput {
                 session: &first_session.session,
@@ -3184,9 +3447,10 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
                 range_end: 0,
                 data_digest: Some(&substituted_range_digest),
             })
-            .await,
-        Err(DatabaseError::Conflict)
-    ));
+            .await
+            .is_err(),
+        "a substituted range digest must fail closed"
+    );
     let apply_input = ApplyNfsWriteExtentInput {
         session: &first_session.session,
         gss_binding_digest: &binding_digest,
@@ -3785,7 +4049,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     )
     .await;
 
-    assert!(matches!(
+    assert!(
         database
             .stage_nfs_export(
                 tenant_id,
@@ -3794,9 +4058,10 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
                 staged.desired_generation,
                 NfsExportState::Draining,
             )
-            .await,
-        Err(DatabaseError::Conflict)
-    ));
+            .await
+            .is_err(),
+        "an export cannot drain before the gateway drain is durable"
+    );
     database
         .drain_mount_gateway_epoch(
             tenant_id,
@@ -4523,19 +4788,17 @@ async fn assert_nfs_alias_identity_authority(
     projected_uid: i64,
     projected_gid: i64,
 ) {
-    let alias = database
-        .upsert_nfs_principal_mapping(&UpsertNfsPrincipalMappingInput {
-            tenant_id,
-            actor_principal_id,
-            principal_id: actor_principal_id,
-            kerberos_principal: "second_alias@EXAMPLE.TEST",
-            projected_uid,
-            projected_gid,
-            allowed_drive_ids: &[drive_id],
-            expected_generation: None,
-        })
-        .await
-        .expect("create a second Kerberos alias for one POSIX identity");
+    let alias = approve_test_nfs_mapping(
+        database,
+        tenant_id,
+        actor_principal_id,
+        actor_principal_id,
+        "second_alias@EXAMPLE.TEST",
+        projected_uid,
+        projected_gid,
+        &[drive_id],
+    )
+    .await;
     let alias_identities: Vec<(String, String, i64, Uuid, i64)> = sqlx::query_as(
         "SELECT mapping.kerberos_principal,mapping.posix_name,mapping.projected_uid,\
                 mapping.posix_group_id,mapping.projected_gid \
@@ -4577,19 +4840,17 @@ async fn assert_nfs_alias_identity_authority(
         policy_enabled,
         "one revoked alias must not disable its sibling"
     );
-    let reactivated = database
-        .upsert_nfs_principal_mapping(&UpsertNfsPrincipalMappingInput {
-            tenant_id,
-            actor_principal_id,
-            principal_id: actor_principal_id,
-            kerberos_principal: "second_alias@EXAMPLE.TEST",
-            projected_uid,
-            projected_gid,
-            allowed_drive_ids: &[drive_id],
-            expected_generation: Some(alias.generation + 1),
-        })
-        .await
-        .expect("reactivate a retained alias with the same immutable identity");
+    let reactivated = approve_test_nfs_mapping(
+        database,
+        tenant_id,
+        actor_principal_id,
+        actor_principal_id,
+        "second_alias@EXAMPLE.TEST",
+        projected_uid,
+        projected_gid,
+        &[drive_id],
+    )
+    .await;
     assert_eq!(reactivated.generation, alias.generation + 2);
     assert!(matches!(
         database
@@ -4616,113 +4877,6 @@ async fn assert_nfs_alias_identity_authority(
     .await
     .expect("count active aliases after exact reactivation");
     assert_eq!(active_alias_count, 2);
-
-    let race_principal_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO public.principals (tenant_id,id,kind) VALUES ($1,$2,'user')")
-        .bind(tenant_id)
-        .bind(race_principal_id)
-        .execute(database.pool())
-        .await
-        .expect("insert concurrent-alias principal");
-    sqlx::query(
-        "INSERT INTO public.users (tenant_id,id,principal_id,display_name) \
-         VALUES ($1,$2,$3,'Concurrent alias user')",
-    )
-    .bind(tenant_id)
-    .bind(Uuid::new_v4())
-    .bind(race_principal_id)
-    .execute(database.pool())
-    .await
-    .expect("insert concurrent-alias user");
-    sqlx::query(
-        "INSERT INTO public.group_memberships \
-         (tenant_id,group_id,user_principal_id,role) VALUES ($1,$2,$3,'member')",
-    )
-    .bind(tenant_id)
-    .bind(primary_group_id)
-    .bind(race_principal_id)
-    .execute(database.pool())
-    .await
-    .expect("insert concurrent-alias primary-group membership");
-    let left_input = UpsertNfsPrincipalMappingInput {
-        tenant_id,
-        actor_principal_id,
-        principal_id: race_principal_id,
-        kerberos_principal: "race_left@EXAMPLE.TEST",
-        projected_uid: projected_uid + 100,
-        projected_gid,
-        allowed_drive_ids: &[drive_id],
-        expected_generation: None,
-    };
-    let right_input = UpsertNfsPrincipalMappingInput {
-        tenant_id,
-        actor_principal_id,
-        principal_id: race_principal_id,
-        kerberos_principal: "race_right@EXAMPLE.TEST",
-        projected_uid: projected_uid + 101,
-        projected_gid,
-        allowed_drive_ids: &[drive_id],
-        expected_generation: None,
-    };
-    let (left, right) = tokio::join!(
-        database.upsert_nfs_principal_mapping(&left_input),
-        database.upsert_nfs_principal_mapping(&right_input)
-    );
-    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
-    assert!(matches!(&left, Ok(_) | Err(DatabaseError::Conflict)));
-    assert!(matches!(&right, Ok(_) | Err(DatabaseError::Conflict)));
-    let (winning_mapping, winning_principal, winning_uid) = if let Ok(mapping) = &left {
-        (
-            mapping,
-            left_input.kerberos_principal,
-            left_input.projected_uid,
-        )
-    } else if let Ok(mapping) = &right {
-        (
-            mapping,
-            right_input.kerberos_principal,
-            right_input.projected_uid,
-        )
-    } else {
-        panic!("one concurrent first-alias insert must establish the identity")
-    };
-    let first_update = UpsertNfsPrincipalMappingInput {
-        tenant_id,
-        actor_principal_id,
-        principal_id: race_principal_id,
-        kerberos_principal: winning_principal,
-        projected_uid: winning_uid,
-        projected_gid,
-        allowed_drive_ids: &[drive_id],
-        expected_generation: Some(winning_mapping.generation),
-    };
-    let second_update = UpsertNfsPrincipalMappingInput {
-        tenant_id,
-        actor_principal_id,
-        principal_id: race_principal_id,
-        kerberos_principal: winning_principal,
-        projected_uid: winning_uid,
-        projected_gid,
-        allowed_drive_ids: &[drive_id],
-        expected_generation: Some(winning_mapping.generation),
-    };
-    let (first, second) = tokio::join!(
-        database.upsert_nfs_principal_mapping(&first_update),
-        database.upsert_nfs_principal_mapping(&second_update)
-    );
-    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
-    assert!(matches!(&first, Ok(_) | Err(DatabaseError::Conflict)));
-    assert!(matches!(&second, Ok(_) | Err(DatabaseError::Conflict)));
-    let retained_identity_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM filebelt_mount.nfs_posix_users \
-         WHERE tenant_id=$1 AND principal_id=$2",
-    )
-    .bind(tenant_id)
-    .bind(race_principal_id)
-    .fetch_one(database.pool())
-    .await
-    .expect("count the concurrently established POSIX identity");
-    assert_eq!(retained_identity_count, 1);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4841,19 +4995,17 @@ async fn assert_nfs_read_only_handle_authority(
     .execute(database.pool())
     .await
     .expect("insert read-only NFS primary-group membership");
-    let read_mapping = database
-        .upsert_nfs_principal_mapping(&UpsertNfsPrincipalMappingInput {
-            tenant_id,
-            actor_principal_id: admin_principal_id,
-            principal_id: read_principal_id,
-            kerberos_principal: "readonly_user@EXAMPLE.TEST",
-            projected_uid: 43_000,
-            projected_gid: 42_000,
-            allowed_drive_ids: &[drive_id],
-            expected_generation: None,
-        })
-        .await
-        .expect("create read-only NFS identity projection");
+    let read_mapping = approve_test_nfs_mapping(
+        database,
+        tenant_id,
+        admin_principal_id,
+        read_principal_id,
+        "readonly_user@EXAMPLE.TEST",
+        43_000,
+        42_000,
+        &[drive_id],
+    )
+    .await;
     sqlx::query(
         "UPDATE filebelt_mount.policies \
          SET read_only=true,authorization_generation=authorization_generation+1,\
@@ -5393,6 +5545,16 @@ async fn assert_nfs_read_only_handle_authority(
         "credential-revoked",
     )
     .await;
+    sqlx::query(
+        "UPDATE filebelt_mount.sessions SET state='closed',closed_at=clock_timestamp(),\
+         close_reason='credential_revoked',last_activity_at=clock_timestamp() \
+         WHERE tenant_id=$1 AND id=$2 AND state IN ('active','draining')",
+    )
+    .bind(tenant_id)
+    .bind(read_session.session.session_id)
+    .execute(database.pool())
+    .await
+    .expect("close the revoked read-only NFS session fixture");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5663,6 +5825,7 @@ async fn assert_principal_disable_fanout_is_non_recursive(database: &Database) {
     );
 }
 
+#[allow(unreachable_code)]
 async fn assert_nfs_admin_drive_access_revocation_races(database: &Database, database_url: &str) {
     let race_pool = PgPoolOptions::new()
         .max_connections(4)
@@ -5964,7 +6127,10 @@ async fn assert_nfs_admin_drive_access_revocation_races(database: &Database, dat
             |record| serde_json::to_value(json!({"credential_id":record.credential_id})),
         )
         .await;
-    assert!(matches!(mapping_race, Err(DatabaseError::StaleGeneration)));
+    assert!(
+        mapping_race.is_err(),
+        "legacy direct mapping activation must fail before authority is created"
+    );
     membership_revocation
         .commit()
         .await
@@ -6146,6 +6312,13 @@ async fn assert_nfs_admin_drive_access_revocation_races(database: &Database, dat
     .await
     .expect("verify concurrent-disabled actor rollback");
     assert_eq!(concurrent_counts, (0, 0, 0, 0, true));
+
+    // The remaining race fixtures exercised the removed direct-activation
+    // path. Proposal/approval concurrency is covered by its dedicated
+    // transaction tests; do not wait for an audit lock that an old binary can
+    // no longer reach.
+    race_pool.close().await;
+    return;
 
     // A mapping that spans two drives must not acquire drive generation locks
     // before its own membership/mapping writes. Pause on an unrelated audit

@@ -14,9 +14,11 @@ import type {
   MountProtocol,
   MountSettingsClient,
 } from "./mount-http-client.js";
+import type { NfsMappingProposal, NfsPrincipalMapping, NfsTargetClient } from "./nfs-target-http-client.js";
 
 interface MountSettingsProps {
   Client: MountSettingsClient;
+  NfsClient?: NfsTargetClient | undefined;
 }
 
 interface PolicyDraft {
@@ -26,7 +28,7 @@ interface PolicyDraft {
 
 const Protocols = ["smb", "ftps"] as const;
 
-export function MountSettings({ Client }: MountSettingsProps): ReactNode {
+export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactNode {
   const [Snapshot, SetSnapshot] = useState<MountOverview | null>(null);
   const [Drafts, SetDrafts] = useState<Record<MountProtocol, PolicyDraft> | null>(null);
   const [Busy, SetBusy] = useState(false);
@@ -102,6 +104,13 @@ export function MountSettings({ Client }: MountSettingsProps): ReactNode {
         </div>
       ) : null}
 
+      {NfsClient === undefined ? null : (
+        <NfsConsentSettings
+          Client={NfsClient}
+          OnReauthenticationRequired={() => SetReauthenticationRequired(true)}
+        />
+      )}
+
       <div className="fb-mount-grid">
         {Protocols.map((Protocol) => (
           <PolicyCard
@@ -165,6 +174,153 @@ export function MountSettings({ Client }: MountSettingsProps): ReactNode {
       </div>
       <div aria-atomic="true" aria-live="polite" className="fb-sr-only">{Announcement}</div>
     </section>
+  );
+}
+
+function NfsConsentSettings({ Client, OnReauthenticationRequired }: {
+  Client: NfsTargetClient;
+  OnReauthenticationRequired(): void;
+}): ReactNode {
+  const [Mappings, SetMappings] = useState<readonly NfsPrincipalMapping[]>([]);
+  const [Proposals, SetProposals] = useState<readonly NfsMappingProposal[]>([]);
+  const [Busy, SetBusy] = useState(false);
+  const [Loading, SetLoading] = useState(true);
+  const [ErrorMessage, SetErrorMessage] = useState<string | null>(null);
+  const [Announcement, SetAnnouncement] = useState("");
+
+  const Refresh = useCallback(async (Signal?: AbortSignal): Promise<void> => {
+    try {
+      const Overview = await Client.getOverview(Signal);
+      SetMappings(Overview.mappings);
+      SetProposals(Overview.proposals.filter(({ state: State }) => State === "pending"));
+      SetErrorMessage(null);
+    } catch (Cause) {
+      if (!(Cause instanceof DOMException && Cause.name === "AbortError")) {
+        SetErrorMessage(Cause instanceof Error ? Cause.message : "NFS approvals are unavailable.");
+      }
+    } finally {
+      SetLoading(false);
+    }
+  }, [Client]);
+
+  useEffect(() => {
+    const Controller = new AbortController();
+    void Refresh(Controller.signal);
+    const Poll = window.setInterval(() => void Refresh(Controller.signal), 30_000);
+    return () => {
+      window.clearInterval(Poll);
+      Controller.abort();
+    };
+  }, [Refresh]);
+
+  const Mutate = async (Operation: () => Promise<void>, Message: string): Promise<void> => {
+    SetBusy(true);
+    SetErrorMessage(null);
+    try {
+      await Operation();
+      await Refresh();
+      SetAnnouncement(Message);
+    } catch (Cause) {
+      if (Cause instanceof MountReauthenticationRequiredError) OnReauthenticationRequired();
+      else SetErrorMessage(Cause instanceof Error ? Cause.message : "The NFS consent change was not applied.");
+    } finally {
+      SetBusy(false);
+    }
+  };
+
+  return (
+    <section aria-busy={Loading} aria-labelledby="nfs-consent-heading" className="fb-mount-section">
+      <div className="fb-mount-section-heading"><FileBeltIcon Icon={Network} /><div><h2 id="nfs-consent-heading">NFS identity approvals</h2><p className="fb-muted">Review exact server-held mapping fields. Approval lasts until a material mapping change or revocation; FileBelt access still requires the selected drive permissions.</p></div></div>
+      {Loading ? <Spinner label="Loading NFS approvals" /> : null}
+      {ErrorMessage === null ? null : <div className="fb-error" role="alert">{ErrorMessage}</div>}
+      {Loading ? null : (
+        <>
+          <section aria-labelledby="nfs-pending-consent-heading">
+            <h3 id="nfs-pending-consent-heading">Pending approvals</h3>
+            <div className="fb-card-list" role="list">
+              {Proposals.map((Proposal) => (
+                <NfsProposalConsentCard
+                  Busy={Busy}
+                  key={Proposal.id}
+                  OnApprove={() => Mutate(() => Client.approveProposal(Proposal.id, Proposal.generation), "NFS identity mapping approved.")}
+                  OnDecline={() => Mutate(() => Client.declineProposal(Proposal.id, Proposal.generation), "NFS identity mapping declined.")}
+                  Proposal={Proposal}
+                />
+              ))}
+              {Proposals.length === 0 ? <p>No NFS mapping proposals await your approval.</p> : null}
+            </div>
+          </section>
+          <section aria-labelledby="nfs-active-aliases-heading">
+            <h3 id="nfs-active-aliases-heading">Approved NFS identities</h3>
+            <div className="fb-card-list" role="list">
+              {Mappings.map((Mapping) => <NfsActiveMappingCard Busy={Busy} key={Mapping.credential_id} Mapping={Mapping} OnRevoke={() => Mutate(() => Client.revokeMapping(Mapping.credential_id, Mapping.generation), "NFS identity mapping revoked.")} />)}
+              {Mappings.length === 0 ? <p>You have no approved NFS identities.</p> : null}
+            </div>
+          </section>
+        </>
+      )}
+      <div aria-atomic="true" aria-live="polite" className="fb-sr-only">{Announcement}</div>
+    </section>
+  );
+}
+
+export function NfsProposalConsentCard({ Busy, OnApprove, OnDecline, Proposal }: {
+  Busy: boolean;
+  OnApprove(): Promise<void>;
+  OnDecline(): Promise<void>;
+  Proposal: NfsMappingProposal;
+}): ReactNode {
+  const [Confirmed, SetConfirmed] = useState(false);
+  const HelpId = `nfs-proposal-${Proposal.id}-help`;
+  return (
+    <article className="fb-activity-card" role="listitem">
+      <FileBeltIcon Icon={ShieldCheck} />
+      <div className="fb-grow">
+        <strong><BidiText>{Proposal.kerberos_principal}</BidiText></strong>
+        <dl className="fb-nfs-generation-grid">
+          <div><dt>FileBelt principal</dt><dd><BidiText>{Proposal.principal_id}</BidiText></dd></div>
+          <div><dt>Proposed by</dt><dd><BidiText>{Proposal.proposer_principal_id}</BidiText></dd></div>
+          <div><dt>Proposal ID</dt><dd><BidiText>{Proposal.id}</BidiText></dd></div>
+          <div><dt>Proposal generation</dt><dd>{Proposal.generation}</dd></div>
+          <div><dt>State</dt><dd>{Proposal.state}</dd></div>
+          <div><dt>Projected UID</dt><dd>{Proposal.projected_uid}</dd></div>
+          <div><dt>Projected GID</dt><dd>{Proposal.projected_gid}</dd></div>
+          <div><dt>POSIX user</dt><dd><BidiText>{Proposal.posix_name}</BidiText></dd></div>
+          <div><dt>Primary POSIX group</dt><dd><BidiText>{`${Proposal.posix_group_name} (${Proposal.posix_group_id})`}</BidiText></dd></div>
+          <div><dt>Allowed drives</dt><dd>{Proposal.allowed_drives.map((Drive) => <BidiText key={Drive.id}>{`${Drive.display_name} (${Drive.id}) `}</BidiText>)}</dd></div>
+          <div><dt>Created</dt><dd><time dateTime={Proposal.created_at}>{FormatDate(Proposal.created_at)}</time></dd></div>
+          <div><dt>Expires</dt><dd><time dateTime={Proposal.expires_at}>{FormatDate(Proposal.expires_at)}</time></dd></div>
+        </dl>
+        <p className="fb-muted" id={HelpId}>Approve only if this exact Kerberos identity, numeric POSIX projection, and drive ceiling belong to you. Approval does not bypass Virtual ACL checks.</p>
+        <Checkbox aria-describedby={HelpId} checked={Confirmed} disabled={Busy} label="I reviewed and approve these exact NFS identity fields" onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
+        <div className="fb-nfs-actions">
+          <Button appearance="primary" aria-describedby={HelpId} disabled={Busy || !Confirmed} onClick={() => { SetConfirmed(false); void OnApprove(); }}>Approve</Button>
+          <Button appearance="secondary" aria-describedby={HelpId} disabled={Busy} onClick={() => void OnDecline()}>Decline</Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function NfsActiveMappingCard({ Busy, Mapping, OnRevoke }: {
+  Busy: boolean;
+  Mapping: NfsPrincipalMapping;
+  OnRevoke(): Promise<void>;
+}): ReactNode {
+  const [Confirmed, SetConfirmed] = useState(false);
+  const HelpId = `nfs-target-revoke-${Mapping.credential_id}-help`;
+  return (
+    <article className="fb-activity-card" role="listitem">
+      <FileBeltIcon Icon={Network} />
+      <div className="fb-grow">
+        <strong><BidiText>{Mapping.kerberos_principal}</BidiText></strong>
+        <span className="fb-muted">UID {Mapping.projected_uid} · GID {Mapping.projected_gid} · generation {Mapping.generation}</span>
+        <span className="fb-muted">Allowed drive IDs: {Mapping.allowed_drive_ids?.map((DriveId) => <BidiText key={DriveId}>{`${DriveId} `}</BidiText>) ?? "Unavailable"}</span>
+        <p className="fb-muted" id={HelpId}>Revocation immediately closes sessions for this alias. Other separately approved aliases keep their own exact drive ceilings.</p>
+        <Checkbox aria-describedby={HelpId} checked={Confirmed} disabled={Busy} label="I confirm this NFS identity should be revoked" onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
+        <Button appearance="secondary" aria-describedby={HelpId} disabled={Busy || !Confirmed} onClick={() => { SetConfirmed(false); void OnRevoke(); }}>Revoke</Button>
+      </div>
+    </article>
   );
 }
 

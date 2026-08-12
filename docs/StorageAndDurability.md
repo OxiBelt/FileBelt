@@ -392,6 +392,41 @@ identical. An upgrade from the preceding schema stops with a deterministic
 conflict inventory when existing aliases disagree; it never rewrites or
 chooses an identity during migration.
 
+Forward migration `000015_nfs_mapping_target_approval.sql` adds immutable
+`filebelt_mount.nfs_mapping_proposals`, target-approval receipts, exact alias
+drive ceilings, and the `filebelt_mount.nfs_approved_active_mappings` authority
+view. A proposal binds the tenant, exact Kerberos principal, proposer and
+target, POSIX projection, sorted drive UUIDs, expected mapping generation,
+creation and 24-hour expiry, and terminal state. At most one pending proposal
+exists per tenant and Kerberos principal. Pending proposals are cancelled rather
+than edited. States are `pending`, `approved`, `declined`, `cancelled`, and
+`expired`. Maintenance purges declined, cancelled, and expired unapproved
+proposals after 30 days; approved receipts remain with mapping history, while
+audit records retain their ordinary deadline.
+
+Only `filebelt_mount.nfs_approved_active_mappings` can authorize an NFS session,
+managed POSIX projection, or derived user policy. Every active mapping records
+its `approved_proposal_id`; database constraints and triggers reject a direct
+insert or reactivation that lacks an exact approved proposal, including from an
+older binary. Approval locks and consumes the proposal, rechecks the target's
+recent OIDC authentication, proposer administration, both principals' current
+`READ_METADATA` on every drive, user state, POSIX identity, realm, mapping
+generation, and exact stored fields, then creates the credential, mapping,
+derived policy, approval receipt, audit, outbox, and session fences in one
+transaction. Each alias retains an independent approved ceiling. The shared
+user policy is recomputed as the sorted union of active alias ceilings; drive
+attenuation, approval, and revocation advance generations and close affected
+sessions atomically. Mapping revocation preserves its `revocation_reason`.
+
+The migration quarantines every active legacy mapping without grandfathering
+or administrator override. It records `target_approval_cutover`, advances
+mapping and credential generations, revokes the credential, disables affected
+NFS policy, closes sessions with `nfs_mapping_approval_required`, and writes
+audit and outbox evidence in the same transaction. Previously revoked mappings
+and append-only POSIX identities are preserved. No target proposal is invented
+without a current revalidatable administrator; an administrator must create a
+fresh proposal after cutover.
+
 `filebeltctl phase8 deactivate` retains the expanded schema and readable state;
 it is not a down migration. NFS uses its tenant-scoped feature state to stop new
 sessions and writers, drain the applied gateway, and reconcile exports to the
@@ -599,11 +634,15 @@ or payload manifest differs. Operators must restore purpose-specific v8 public
 keysets, digest generation, and local signer generations before enabling I/O,
 collaboration, document, or mount reads, and must restore MCP and mount vault KEK
 generations before enabling the broker or any MCP or mount authentication flow.
-Mount policy, credential, device, gateway, session, handle, and lock rows are
-part of the same quiesced PostgreSQL recovery boundary. After restore, keep
-mount gateways disabled, advance every gateway epoch, expire restored sessions,
-handles, and locks, run Headscale synchronization, and only then admit new
-credentials and sessions.
+Mount proposal, approval, quarantine, alias-ceiling, policy, credential, device,
+gateway, session, handle, and lock rows are part of the same quiesced PostgreSQL
+recovery boundary. After restore, keep mount gateways disabled, advance every
+gateway epoch, expire restored sessions, handles, and locks, verify that every
+active NFS mapping still has its exact approval receipt, run Headscale
+synchronization, and only then admit new credentials and sessions. Rollback of
+the approval migration is forward-only: disable NFS admission and gateways and
+retain the expanded schema. Never restore a binary that can bypass the database
+approval gate while NFS state is present.
 
 FileBelt does not currently promise online backup, PITR, high availability, or
 numeric RPO/RTO. The detailed procedures are

@@ -1149,6 +1149,46 @@ pub struct NfsPrincipalMapping {
     pub generation: i64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NfsMappingProposal {
+    pub id: Uuid,
+    pub proposer_principal_id: Uuid,
+    pub principal_id: Uuid,
+    pub kerberos_principal: String,
+    pub posix_name: String,
+    pub posix_group_id: Uuid,
+    pub posix_group_name: String,
+    pub projected_uid: i64,
+    pub projected_gid: i64,
+    pub allowed_drive_ids: Vec<Uuid>,
+    pub allowed_drive_labels: Vec<String>,
+    pub state: String,
+    pub generation: i64,
+    pub created_at: String,
+    pub expires_at: String,
+    pub decided_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NfsQuarantinedMapping {
+    pub mapping: NfsPrincipalMapping,
+    pub quarantined_at: String,
+    pub quarantine_reason: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CreateNfsMappingProposalInput<'a> {
+    pub tenant_id: Uuid,
+    pub proposer_principal_id: Uuid,
+    pub proposer_api_session_id: Uuid,
+    pub principal_id: Uuid,
+    pub kerberos_principal: &'a str,
+    pub projected_uid: i64,
+    pub projected_gid: i64,
+    pub allowed_drive_ids: &'a [Uuid],
+    pub server_fingerprint: &'a [u8; 32],
+}
+
 #[derive(Clone, Debug)]
 pub struct UpsertNfsPrincipalMappingInput<'a> {
     pub tenant_id: Uuid,
@@ -1751,10 +1791,10 @@ impl Database {
             "SELECT mapping.kerberos_principal,mapping.principal_id,mapping.credential_id,\
                     mapping.projected_uid,mapping.projected_gid,mapping.generation,\
                     credential.allowed_drive_ids \
-             FROM filebelt_mount.nfs_principal_mappings AS mapping \
+             FROM filebelt_mount.nfs_approved_active_mappings AS mapping \
              JOIN filebelt_mount.credentials AS credential \
                ON credential.tenant_id=mapping.tenant_id AND credential.id=mapping.credential_id \
-             WHERE mapping.tenant_id=$1 AND mapping.revoked_at IS NULL \
+             WHERE mapping.tenant_id=$1 \
              ORDER BY mapping.kerberos_principal,mapping.principal_id",
         )
         .bind(tenant_id)
@@ -1772,6 +1812,534 @@ impl Database {
                 generation: row.get("generation"),
             })
             .collect())
+    }
+
+    pub async fn list_nfs_mapping_proposals(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<NfsMappingProposal>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT id,proposer_principal_id,target_principal_id,kerberos_principal,\
+                    posix_name,posix_group_id,(SELECT posix_name FROM filebelt_mount.nfs_posix_groups \
+                      WHERE tenant_id=proposal.tenant_id AND group_id=proposal.posix_group_id) AS posix_group_name,\
+                    projected_uid,projected_gid,allowed_drive_ids,state,generation,\
+                    ARRAY(SELECT drive.display_name FROM unnest(allowed_drive_ids) WITH ORDINALITY AS item(id,ordinality) \
+                      JOIN public.drives AS drive ON drive.tenant_id=proposal.tenant_id AND drive.id=item.id ORDER BY item.ordinality) AS allowed_drive_labels,\
+                    created_at::text,expires_at::text,COALESCE(approved_at,terminal_at)::text AS decided_at \
+             FROM filebelt_mount.nfs_mapping_proposals AS proposal WHERE tenant_id=$1 \
+               AND (state='pending' OR terminal_at>clock_timestamp()-interval '30 days') \
+             ORDER BY created_at DESC,id",
+        )
+        .bind(tenant_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.iter().map(nfs_mapping_proposal_from_row).collect())
+    }
+
+    pub async fn list_own_nfs_mapping_proposals(
+        &self,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+    ) -> Result<Vec<NfsMappingProposal>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT id,proposer_principal_id,target_principal_id,kerberos_principal,\
+                    posix_name,posix_group_id,(SELECT posix_name FROM filebelt_mount.nfs_posix_groups \
+                      WHERE tenant_id=proposal.tenant_id AND group_id=proposal.posix_group_id) AS posix_group_name,\
+                    projected_uid,projected_gid,allowed_drive_ids,state,generation,\
+                    ARRAY(SELECT drive.display_name FROM unnest(allowed_drive_ids) WITH ORDINALITY AS item(id,ordinality) \
+                      JOIN public.drives AS drive ON drive.tenant_id=proposal.tenant_id AND drive.id=item.id ORDER BY item.ordinality) AS allowed_drive_labels,\
+                    created_at::text,expires_at::text,COALESCE(approved_at,terminal_at)::text AS decided_at \
+             FROM filebelt_mount.nfs_mapping_proposals AS proposal \
+             WHERE tenant_id=$1 AND target_principal_id=$2 AND state='pending' \
+               AND expires_at>clock_timestamp() ORDER BY created_at,id",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.iter().map(nfs_mapping_proposal_from_row).collect())
+    }
+
+    pub async fn list_own_nfs_principal_mappings(
+        &self,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+    ) -> Result<Vec<NfsPrincipalMapping>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT mapping.kerberos_principal,mapping.principal_id,mapping.credential_id,\
+                    mapping.projected_uid,mapping.projected_gid,mapping.generation,\
+                    credential.allowed_drive_ids \
+             FROM filebelt_mount.nfs_approved_active_mappings AS mapping \
+             JOIN filebelt_mount.credentials AS credential \
+               ON credential.tenant_id=mapping.tenant_id AND credential.id=mapping.credential_id \
+             WHERE mapping.tenant_id=$1 AND mapping.principal_id=$2 \
+             ORDER BY mapping.kerberos_principal,mapping.credential_id",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.iter().map(nfs_principal_mapping_from_row).collect())
+    }
+
+    pub async fn list_quarantined_nfs_mappings(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<NfsQuarantinedMapping>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT mapping.kerberos_principal,mapping.principal_id,mapping.credential_id,\
+                    mapping.projected_uid,mapping.projected_gid,mapping.generation,\
+                    credential.allowed_drive_ids,mapping.updated_at::text AS quarantined_at,\
+                    mapping.revocation_reason AS quarantine_reason \
+             FROM filebelt_mount.nfs_principal_mappings AS mapping \
+             JOIN filebelt_mount.credentials AS credential \
+               ON credential.tenant_id=mapping.tenant_id AND credential.id=mapping.credential_id \
+             WHERE mapping.tenant_id=$1 AND mapping.approved_proposal_id IS NULL \
+               AND mapping.revocation_reason='target_approval_cutover' \
+             ORDER BY mapping.updated_at DESC,mapping.kerberos_principal",
+        )
+        .bind(tenant_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| NfsQuarantinedMapping {
+                mapping: nfs_principal_mapping_from_row(row),
+                quarantined_at: row.get("quarantined_at"),
+                quarantine_reason: row.get("quarantine_reason"),
+            })
+            .collect())
+    }
+
+    pub async fn create_nfs_mapping_proposal_idempotent<F>(
+        &self,
+        input: &CreateNfsMappingProposalInput<'_>,
+        idempotency: &NfsAdminIdempotency<'_>,
+        render_response: F,
+    ) -> Result<NfsAdminIdempotentWrite, DatabaseError>
+    where
+        F: FnOnce(&NfsMappingProposal) -> Result<Value, serde_json::Error>,
+    {
+        idempotency.validate_actor(input.proposer_principal_id)?;
+        let derived_posix_name = nfs_posix_user_name(input.kerberos_principal)?;
+        let mut allowed_drive_ids = input.allowed_drive_ids.to_vec();
+        allowed_drive_ids.sort_unstable();
+        allowed_drive_ids.dedup();
+        if allowed_drive_ids.is_empty()
+            || allowed_drive_ids.len() != input.allowed_drive_ids.len()
+            || allowed_drive_ids.len() > 256
+            || !valid_nfs_projected_id(input.projected_uid)
+            || !valid_nfs_projected_id(input.projected_gid)
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool().begin().await?;
+        let reservation = idempotency.reservation_input();
+        match reserve_idempotency(&mut transaction, input.tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::Replayed(record));
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::KeyReused);
+            }
+            IdempotencyReservation::Created => {}
+        }
+        let group = sqlx::query(
+            "SELECT posix_group.group_id FROM filebelt_mount.nfs_posix_groups posix_group \
+             JOIN group_memberships membership ON membership.tenant_id=posix_group.tenant_id \
+               AND membership.group_id=posix_group.group_id \
+             WHERE posix_group.tenant_id=$1 AND posix_group.projected_gid=$2 \
+               AND membership.user_principal_id=$3",
+        )
+        .bind(input.tenant_id)
+        .bind(input.projected_gid)
+        .bind(input.principal_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+        let posix_group_id: Uuid = group.get("group_id");
+        let registered_identity = sqlx::query(
+            "SELECT posix_name,posix_group_id,projected_uid,projected_gid \
+             FROM filebelt_mount.nfs_posix_users \
+             WHERE tenant_id=$1 AND principal_id=$2",
+        )
+        .bind(input.tenant_id)
+        .bind(input.principal_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let registered_posix_name = if let Some(identity) = registered_identity {
+            if identity.get::<Uuid, _>("posix_group_id") != posix_group_id
+                || identity.get::<i64, _>("projected_uid") != input.projected_uid
+                || identity.get::<i64, _>("projected_gid") != input.projected_gid
+            {
+                return Err(DatabaseError::Conflict);
+            }
+            identity.get::<String, _>("posix_name")
+        } else {
+            derived_posix_name.clone()
+        };
+        let existing = sqlx::query(
+            "SELECT credential_id,generation,posix_name,posix_group_id,projected_uid,projected_gid \
+             FROM filebelt_mount.nfs_principal_mappings \
+             WHERE tenant_id=$1 AND kerberos_principal=$2",
+        )
+        .bind(input.tenant_id)
+        .bind(input.kerberos_principal)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let (expected_credential_id, expected_mapping_generation, posix_name) =
+            if let Some(row) = existing {
+                if row.get::<Uuid, _>("posix_group_id") != posix_group_id
+                    || row.get::<i64, _>("projected_uid") != input.projected_uid
+                    || row.get::<i64, _>("projected_gid") != input.projected_gid
+                {
+                    return Err(DatabaseError::Conflict);
+                }
+                (
+                    Some(row.get::<Uuid, _>("credential_id")),
+                    Some(row.get::<i64, _>("generation")),
+                    row.get::<Option<String>, _>("posix_name")
+                        .unwrap_or_else(|| registered_posix_name.clone()),
+                )
+            } else {
+                (None, None, registered_posix_name)
+            };
+        let proposal_id = Uuid::new_v4();
+        sqlx::query_scalar::<_, i64>(
+            "SELECT filebelt_mount.create_nfs_mapping_proposal(\
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        )
+        .bind(input.tenant_id)
+        .bind(proposal_id)
+        .bind(input.proposer_principal_id)
+        .bind(input.proposer_api_session_id)
+        .bind(input.principal_id)
+        .bind(input.kerberos_principal)
+        .bind(&posix_name)
+        .bind(posix_group_id)
+        .bind(input.projected_uid)
+        .bind(input.projected_gid)
+        .bind(&allowed_drive_ids)
+        .bind(expected_credential_id)
+        .bind(expected_mapping_generation)
+        .bind(input.server_fingerprint.as_slice())
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(map_nfs_approval_error)?;
+        insert_audit(
+            &mut transaction,
+            input.tenant_id,
+            Some(input.proposer_principal_id),
+            Some(input.principal_id),
+            Some(proposal_id),
+            "mount.nfs.mapping_proposal.create",
+            "allowed",
+            "tenant_admin_proposal",
+            true,
+            json!({"kerberos_principal":input.kerberos_principal}),
+        )
+        .await?;
+        insert_outbox(
+            &mut transaction,
+            input.tenant_id,
+            "filebelt.v1.mount.nfs.mapping_proposal.changed",
+            "nfs_mapping_proposal",
+            proposal_id,
+            1,
+        )
+        .await?;
+        let row = sqlx::query(
+            "SELECT id,proposer_principal_id,target_principal_id,kerberos_principal,\
+                    posix_name,posix_group_id,(SELECT posix_name FROM filebelt_mount.nfs_posix_groups \
+                      WHERE tenant_id=proposal.tenant_id AND group_id=proposal.posix_group_id) AS posix_group_name,\
+                    projected_uid,projected_gid,allowed_drive_ids,state,generation,\
+                    ARRAY(SELECT drive.display_name FROM unnest(allowed_drive_ids) WITH ORDINALITY AS item(id,ordinality) \
+                      JOIN public.drives AS drive ON drive.tenant_id=proposal.tenant_id AND drive.id=item.id ORDER BY item.ordinality) AS allowed_drive_labels,\
+                    created_at::text,expires_at::text,COALESCE(approved_at,terminal_at)::text AS decided_at \
+             FROM filebelt_mount.nfs_mapping_proposals AS proposal WHERE tenant_id=$1 AND id=$2",
+        )
+        .bind(input.tenant_id)
+        .bind(proposal_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let proposal = nfs_mapping_proposal_from_row(&row);
+        let response =
+            render_response(&proposal).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+        let record = finalize_idempotency(
+            &mut transaction,
+            input.tenant_id,
+            &reservation,
+            idempotency.response_status,
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsAdminIdempotentWrite::Created(record))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn transition_nfs_mapping_proposal_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        proposal_id: Uuid,
+        actor_principal_id: Uuid,
+        actor_api_session_id: Uuid,
+        expected_generation: i64,
+        state: &str,
+        idempotency: &NfsAdminIdempotency<'_>,
+        render_response: F,
+    ) -> Result<NfsAdminIdempotentWrite, DatabaseError>
+    where
+        F: FnOnce() -> Result<Value, serde_json::Error>,
+    {
+        idempotency.validate_actor(actor_principal_id)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool().begin().await?;
+        match reserve_idempotency(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::Replayed(record));
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::KeyReused);
+            }
+            IdempotencyReservation::Created => {}
+        }
+        sqlx::query_scalar::<_, i64>(
+            "SELECT filebelt_mount.transition_nfs_mapping_proposal($1,$2,$3,$4,$5,$6)",
+        )
+        .bind(tenant_id)
+        .bind(proposal_id)
+        .bind(actor_principal_id)
+        .bind(actor_api_session_id)
+        .bind(expected_generation)
+        .bind(state)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(map_nfs_approval_error)?;
+        let response = render_response().map_err(|_| DatabaseError::InvalidPersistedValue)?;
+        let record = finalize_idempotency(
+            &mut transaction,
+            tenant_id,
+            &reservation,
+            idempotency.response_status,
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsAdminIdempotentWrite::Created(record))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn approve_nfs_mapping_proposal_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        proposal_id: Uuid,
+        principal_id: Uuid,
+        api_session_id: Uuid,
+        expected_generation: i64,
+        current_server_fingerprint: &[u8; 32],
+        idempotency: &NfsAdminIdempotency<'_>,
+        render_response: F,
+    ) -> Result<NfsAdminIdempotentWrite, DatabaseError>
+    where
+        F: FnOnce(&NfsPrincipalMapping) -> Result<Value, serde_json::Error>,
+    {
+        if expected_generation <= 0 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        idempotency.validate_actor(principal_id)?;
+        let mut transaction = self.pool().begin().await?;
+        let reservation = idempotency.reservation_input();
+        match reserve_idempotency(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::Replayed(record));
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::KeyReused);
+            }
+            IdempotencyReservation::Created => {}
+        }
+        let stored_server_fingerprint: Vec<u8> = sqlx::query_scalar(
+            "SELECT server_fingerprint FROM filebelt_mount.nfs_mapping_proposals \
+             WHERE tenant_id=$1 AND id=$2 AND state='pending' AND generation=$3 FOR SHARE",
+        )
+        .bind(tenant_id)
+        .bind(proposal_id)
+        .bind(expected_generation)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::StaleGeneration)?;
+        if stored_server_fingerprint.as_slice() != current_server_fingerprint {
+            return Err(DatabaseError::Conflict);
+        }
+        sqlx::query_scalar::<_, i64>(
+            "SELECT filebelt_mount.approve_nfs_mapping_proposal($1,$2,$3,$4,$5)",
+        )
+        .bind(tenant_id)
+        .bind(proposal_id)
+        .bind(principal_id)
+        .bind(api_session_id)
+        .bind(expected_generation)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(map_nfs_approval_error)?;
+        let proposal = sqlx::query(
+            "SELECT target_principal_id,kerberos_principal,posix_name,posix_group_id,\
+                    projected_uid,projected_gid,allowed_drive_ids,expected_credential_id,\
+                    expected_mapping_generation \
+             FROM filebelt_mount.nfs_mapping_proposals \
+             WHERE tenant_id=$1 AND id=$2 AND state='approved' FOR KEY SHARE",
+        )
+        .bind(tenant_id)
+        .bind(proposal_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let target_principal_id: Uuid = proposal.get("target_principal_id");
+        let kerberos_principal: String = proposal.get("kerberos_principal");
+        let posix_name: String = proposal.get("posix_name");
+        let posix_group_id: Uuid = proposal.get("posix_group_id");
+        let projected_uid: i64 = proposal.get("projected_uid");
+        let projected_gid: i64 = proposal.get("projected_gid");
+        let allowed_drive_ids: Vec<Uuid> = proposal.get("allowed_drive_ids");
+        let expected_credential_id: Option<Uuid> = proposal.get("expected_credential_id");
+        let expected_mapping_generation: Option<i64> = proposal.get("expected_mapping_generation");
+        let (credential_id, generation) = if let Some(credential_id) = expected_credential_id {
+            sqlx::query(
+                "UPDATE filebelt_mount.credentials SET allowed_drive_ids=$3,\
+                 credential_generation=credential_generation+1,\
+                 authorization_generation=authorization_generation+1 \
+                 WHERE tenant_id=$1 AND id=$2 AND principal_id=$4 AND protocol='nfs' \
+                   AND revoked_at IS NOT NULL",
+            )
+            .bind(tenant_id)
+            .bind(credential_id)
+            .bind(&allowed_drive_ids)
+            .bind(target_principal_id)
+            .execute(&mut *transaction)
+            .await?;
+            let generation: i64 = sqlx::query_scalar(
+                "UPDATE filebelt_mount.nfs_principal_mappings \
+                 SET approved_proposal_id=$4,revoked_at=NULL,revocation_reason=NULL,\
+                     generation=generation+1,updated_at=clock_timestamp() \
+                 WHERE tenant_id=$1 AND credential_id=$2 AND generation=$3 \
+                   AND revoked_at IS NOT NULL RETURNING generation",
+            )
+            .bind(tenant_id)
+            .bind(credential_id)
+            .bind(expected_mapping_generation.ok_or(DatabaseError::InvalidPersistedValue)?)
+            .bind(proposal_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(DatabaseError::StaleGeneration)?;
+            (credential_id, generation)
+        } else {
+            let credential_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO filebelt_mount.credentials \
+                 (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,\
+                  allowed_drive_ids,expires_at,revoked_at) \
+                 VALUES ($1,$2,$3,'nfs',$4,'kerberos_principal',false,$5,\
+                         'infinity'::timestamptz,clock_timestamp())",
+            )
+            .bind(tenant_id)
+            .bind(credential_id)
+            .bind(target_principal_id)
+            .bind(credential_id.to_string())
+            .bind(&allowed_drive_ids)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+            sqlx::query(
+                "INSERT INTO filebelt_mount.nfs_principal_mappings \
+                 (tenant_id,kerberos_principal,principal_id,credential_id,posix_name,\
+                  posix_group_id,projected_uid,projected_gid,approved_proposal_id) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            )
+            .bind(tenant_id)
+            .bind(&kerberos_principal)
+            .bind(target_principal_id)
+            .bind(credential_id)
+            .bind(&posix_name)
+            .bind(posix_group_id)
+            .bind(projected_uid)
+            .bind(projected_gid)
+            .bind(proposal_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(map_conflict)?;
+            (credential_id, 1)
+        };
+        let activated = sqlx::query(
+            "UPDATE filebelt_mount.credentials SET revoked_at=NULL \
+             WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NOT NULL",
+        )
+        .bind(tenant_id)
+        .bind(credential_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if activated != 1 {
+            return Err(DatabaseError::StaleGeneration);
+        }
+        recompute_nfs_policy_tx(&mut transaction, tenant_id, target_principal_id).await?;
+        sqlx::query_scalar::<_, i64>(
+            "SELECT filebelt_mount.fence_nfs_mapping_sessions($1,$2,$3,$4,'nfs_mapping_changed')",
+        )
+        .bind(tenant_id)
+        .bind(target_principal_id)
+        .bind(credential_id)
+        .bind(generation)
+        .fetch_one(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            tenant_id,
+            Some(principal_id),
+            Some(target_principal_id),
+            Some(credential_id),
+            "mount.nfs.mapping.activate",
+            "allowed",
+            "target_user_approval",
+            true,
+            json!({"proposal_id":proposal_id,"kerberos_principal":kerberos_principal,"generation":generation}),
+        )
+        .await?;
+        insert_outbox(
+            &mut transaction,
+            tenant_id,
+            "filebelt.v1.mount.nfs.mapping.changed",
+            "nfs_mapping",
+            credential_id,
+            generation,
+        )
+        .await?;
+        let mapping = NfsPrincipalMapping {
+            kerberos_principal,
+            principal_id: target_principal_id,
+            credential_id,
+            projected_uid,
+            projected_gid,
+            allowed_drive_ids,
+            generation,
+        };
+        let response =
+            render_response(&mapping).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+        let record = finalize_idempotency(
+            &mut transaction,
+            tenant_id,
+            &reservation,
+            idempotency.response_status,
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsAdminIdempotentWrite::Created(record))
     }
 
     /// Creates or generation-fences an explicit Kerberos identity projection.
@@ -1862,6 +2430,196 @@ impl Database {
         .await?;
         transaction.commit().await?;
         Ok(())
+    }
+
+    pub async fn revoke_own_nfs_principal_mapping_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+        credential_id: Uuid,
+        expected_generation: i64,
+        idempotency: &NfsAdminIdempotency<'_>,
+        render_response: F,
+    ) -> Result<NfsAdminIdempotentWrite, DatabaseError>
+    where
+        F: FnOnce() -> Result<Value, serde_json::Error>,
+    {
+        if expected_generation <= 0 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        idempotency.validate_actor(principal_id)?;
+        let mut transaction = self.pool().begin().await?;
+        let reservation = idempotency.reservation_input();
+        match reserve_idempotency(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::Replayed(record));
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::KeyReused);
+            }
+            IdempotencyReservation::Created => {}
+        }
+        let owned: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM filebelt_mount.nfs_approved_active_mappings \
+             WHERE tenant_id=$1 AND principal_id=$2 AND credential_id=$3)",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(credential_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !owned {
+            return Err(DatabaseError::NotFound);
+        }
+        revoke_nfs_principal_mapping_tx(
+            &mut transaction,
+            tenant_id,
+            principal_id,
+            credential_id,
+            expected_generation,
+        )
+        .await?;
+        let response = render_response().map_err(|_| DatabaseError::InvalidPersistedValue)?;
+        let record = finalize_idempotency(
+            &mut transaction,
+            tenant_id,
+            &reservation,
+            idempotency.response_status,
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsAdminIdempotentWrite::Created(record))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn attenuate_nfs_principal_mapping_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        credential_id: Uuid,
+        expected_generation: i64,
+        allowed_drive_ids: &[Uuid],
+        idempotency: &NfsAdminIdempotency<'_>,
+        render_response: F,
+    ) -> Result<NfsAdminIdempotentWrite, DatabaseError>
+    where
+        F: FnOnce(&NfsPrincipalMapping) -> Result<Value, serde_json::Error>,
+    {
+        let mut requested = allowed_drive_ids.to_vec();
+        requested.sort_unstable();
+        requested.dedup();
+        if requested.is_empty()
+            || requested.len() != allowed_drive_ids.len()
+            || requested.len() > 256
+            || expected_generation <= 0
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        idempotency.validate_actor(actor_principal_id)?;
+        let mut transaction = self.pool().begin().await?;
+        let reservation = idempotency.reservation_input();
+        match reserve_idempotency(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::Replayed(record));
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                return Ok(NfsAdminIdempotentWrite::KeyReused);
+            }
+            IdempotencyReservation::Created => {}
+        }
+        let row = sqlx::query(
+            "SELECT mapping.kerberos_principal,mapping.principal_id,\
+                    mapping.projected_uid,mapping.projected_gid,mapping.generation,\
+                    credential.allowed_drive_ids \
+             FROM filebelt_mount.nfs_approved_active_mappings AS mapping \
+             JOIN filebelt_mount.credentials AS credential \
+               ON credential.tenant_id=mapping.tenant_id AND credential.id=mapping.credential_id \
+             WHERE mapping.tenant_id=$1 AND mapping.credential_id=$2 FOR UPDATE OF credential",
+        )
+        .bind(tenant_id)
+        .bind(credential_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+        if row.get::<i64, _>("generation") != expected_generation {
+            return Err(DatabaseError::StaleGeneration);
+        }
+        let current: Vec<Uuid> = row.get("allowed_drive_ids");
+        if !requested.iter().all(|drive_id| current.contains(drive_id)) {
+            return Err(DatabaseError::Conflict);
+        }
+        let generation: i64 = sqlx::query_scalar(
+            "UPDATE filebelt_mount.nfs_principal_mappings \
+             SET generation=generation+1,updated_at=clock_timestamp() \
+             WHERE tenant_id=$1 AND credential_id=$2 AND generation=$3 \
+             RETURNING generation",
+        )
+        .bind(tenant_id)
+        .bind(credential_id)
+        .bind(expected_generation)
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE filebelt_mount.credentials SET allowed_drive_ids=$3,\
+             credential_generation=credential_generation+1,\
+             authorization_generation=authorization_generation+1 \
+             WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(credential_id)
+        .bind(&requested)
+        .execute(&mut *transaction)
+        .await?;
+        let principal_id: Uuid = row.get("principal_id");
+        recompute_nfs_policy_tx(&mut transaction, tenant_id, principal_id).await?;
+        sqlx::query_scalar::<_, i64>(
+            "SELECT filebelt_mount.fence_nfs_mapping_sessions($1,$2,$3,$4,'nfs_mapping_changed')",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(credential_id)
+        .bind(generation)
+        .fetch_one(&mut *transaction)
+        .await?;
+        insert_audit(
+            &mut transaction,
+            tenant_id,
+            Some(actor_principal_id),
+            Some(principal_id),
+            Some(credential_id),
+            "mount.nfs.mapping.attenuate",
+            "allowed",
+            "tenant_admin_scope_attenuation",
+            true,
+            json!({"generation":generation,"allowed_drive_ids":requested}),
+        )
+        .await?;
+        let mapping = NfsPrincipalMapping {
+            kerberos_principal: row.get("kerberos_principal"),
+            principal_id,
+            credential_id,
+            projected_uid: row.get("projected_uid"),
+            projected_gid: row.get("projected_gid"),
+            allowed_drive_ids: requested,
+            generation,
+        };
+        let response =
+            render_response(&mapping).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+        let record = finalize_idempotency(
+            &mut transaction,
+            tenant_id,
+            &reservation,
+            idempotency.response_status,
+            &response,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(NfsAdminIdempotentWrite::Created(record))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5097,6 +5855,40 @@ impl Database {
             .collect()
     }
 
+    pub async fn expire_nfs_mapping_proposals(
+        &self,
+        tenant_id: Uuid,
+        limit: i32,
+    ) -> Result<u64, DatabaseError> {
+        if tenant_id.is_nil() || !(1..=1000).contains(&limit) {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let changed: i64 =
+            sqlx::query_scalar("SELECT filebelt_mount.expire_nfs_mapping_proposals($1,$2)")
+                .bind(tenant_id)
+                .bind(limit)
+                .fetch_one(self.pool())
+                .await?;
+        u64::try_from(changed).map_err(|_| DatabaseError::InvalidPersistedValue)
+    }
+
+    pub async fn purge_nfs_mapping_proposals(
+        &self,
+        tenant_id: Uuid,
+        limit: i32,
+    ) -> Result<u64, DatabaseError> {
+        if tenant_id.is_nil() || !(1..=1000).contains(&limit) {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let changed: i64 =
+            sqlx::query_scalar("SELECT filebelt_mount.purge_nfs_mapping_proposals($1,$2)")
+                .bind(tenant_id)
+                .bind(limit)
+                .fetch_one(self.pool())
+                .await?;
+        u64::try_from(changed).map_err(|_| DatabaseError::InvalidPersistedValue)
+    }
+
     /// Expires retained conflicts at their fixed seven-day boundary, releases
     /// quota exactly once, fences the writer, and enqueues physical cleanup.
     pub async fn sweep_expired_nfs_write_conflicts(
@@ -7888,18 +8680,20 @@ async fn revoke_nfs_principal_mapping_tx(
     credential_id: Uuid,
     expected_generation: i64,
 ) -> Result<(), DatabaseError> {
-    let row = sqlx::query("UPDATE filebelt_mount.nfs_principal_mappings SET revoked_at=clock_timestamp(),generation=generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND credential_id=$2 AND generation=$3 AND revoked_at IS NULL RETURNING principal_id,credential_id,kerberos_principal,generation")
+    let row = sqlx::query("UPDATE filebelt_mount.nfs_principal_mappings SET revoked_at=clock_timestamp(),revocation_reason='mapping_revoked',generation=generation+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND credential_id=$2 AND generation=$3 AND revoked_at IS NULL RETURNING principal_id,credential_id,kerberos_principal,generation")
         .bind(tenant_id).bind(credential_id).bind(expected_generation).fetch_optional(&mut **transaction).await?.ok_or(DatabaseError::Conflict)?;
     let principal_id: Uuid = row.get("principal_id");
     let credential_id: Uuid = row.get("credential_id");
     let kerberos_principal: String = row.get("kerberos_principal");
     let generation: i64 = row.get("generation");
+    let reason_code = if actor_principal_id == principal_id {
+        "target_user_revocation"
+    } else {
+        "tenant_admin_mapping"
+    };
     sqlx::query("UPDATE filebelt_mount.credentials SET revoked_at=clock_timestamp(),credential_generation=credential_generation+1,authorization_generation=authorization_generation+1 WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NULL")
         .bind(tenant_id).bind(credential_id).execute(&mut **transaction).await?;
-    // A policy is shared by every Kerberos alias of one FileBelt user. Revoking
-    // one credential must not disable the remaining active aliases.
-    sqlx::query("UPDATE filebelt_mount.policies SET enabled=false,authorization_generation=authorization_generation+1,revision=revision+1,updated_at=clock_timestamp() WHERE tenant_id=$1 AND principal_id=$2 AND protocol='nfs' AND NOT EXISTS (SELECT 1 FROM filebelt_mount.nfs_principal_mappings mapping WHERE mapping.tenant_id=$1 AND mapping.principal_id=$2 AND mapping.revoked_at IS NULL)")
-        .bind(tenant_id).bind(principal_id).execute(&mut **transaction).await?;
+    recompute_nfs_policy_tx(transaction, tenant_id, principal_id).await?;
     sqlx::query(
         "UPDATE filebelt_mount.credentials AS credential \
          SET authorization_generation=policy.authorization_generation \
@@ -7930,7 +8724,7 @@ async fn revoke_nfs_principal_mapping_tx(
         Some(credential_id),
         "mount.nfs.mapping.revoke",
         "allowed",
-        "tenant_admin_mapping",
+        reason_code,
         false,
         json!({"kerberos_principal":kerberos_principal,"generation":generation}),
     )
@@ -7943,6 +8737,51 @@ async fn revoke_nfs_principal_mapping_tx(
         credential_id,
         generation,
     )
+    .await?;
+    Ok(())
+}
+
+async fn recompute_nfs_policy_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+) -> Result<(), DatabaseError> {
+    let allowed_drive_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT COALESCE(array_agg(DISTINCT drive_id ORDER BY drive_id),ARRAY[]::uuid[]) \
+         FROM filebelt_mount.nfs_approved_active_mappings AS mapping \
+         CROSS JOIN LATERAL unnest(mapping.allowed_drive_ids) AS drive_id \
+         WHERE mapping.tenant_id=$1 AND mapping.principal_id=$2",
+    )
+    .bind(tenant_id)
+    .bind(principal_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO filebelt_mount.policies \
+         (tenant_id,principal_id,protocol,enabled,read_only,allowed_drive_ids) \
+         VALUES ($1,$2,'nfs',$3,false,$4) \
+         ON CONFLICT (tenant_id,principal_id,protocol) DO UPDATE SET \
+           enabled=EXCLUDED.enabled,read_only=false,allowed_drive_ids=EXCLUDED.allowed_drive_ids,\
+           authorization_generation=filebelt_mount.policies.authorization_generation+1,\
+           revision=filebelt_mount.policies.revision+1,updated_at=clock_timestamp()",
+    )
+    .bind(tenant_id)
+    .bind(principal_id)
+    .bind(!allowed_drive_ids.is_empty())
+    .bind(&allowed_drive_ids)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE filebelt_mount.credentials AS credential \
+         SET authorization_generation=policy.authorization_generation \
+         FROM filebelt_mount.policies AS policy \
+         WHERE credential.tenant_id=$1 AND credential.principal_id=$2 \
+           AND credential.protocol='nfs' AND policy.tenant_id=credential.tenant_id \
+           AND policy.principal_id=credential.principal_id AND policy.protocol='nfs'",
+    )
+    .bind(tenant_id)
+    .bind(principal_id)
+    .execute(&mut **transaction)
     .await?;
     Ok(())
 }
@@ -8158,6 +8997,39 @@ fn nfs_posix_group_from_row(row: &sqlx::postgres::PgRow) -> NfsPosixGroupRecord 
         group_id: row.get("group_id"),
         posix_name: row.get("posix_name"),
         projected_gid: row.get("projected_gid"),
+    }
+}
+
+fn nfs_mapping_proposal_from_row(row: &sqlx::postgres::PgRow) -> NfsMappingProposal {
+    NfsMappingProposal {
+        id: row.get("id"),
+        proposer_principal_id: row.get("proposer_principal_id"),
+        principal_id: row.get("target_principal_id"),
+        kerberos_principal: row.get("kerberos_principal"),
+        posix_name: row.get("posix_name"),
+        posix_group_id: row.get("posix_group_id"),
+        posix_group_name: row.get("posix_group_name"),
+        projected_uid: row.get("projected_uid"),
+        projected_gid: row.get("projected_gid"),
+        allowed_drive_ids: row.get("allowed_drive_ids"),
+        allowed_drive_labels: row.get("allowed_drive_labels"),
+        state: row.get("state"),
+        generation: row.get("generation"),
+        created_at: row.get("created_at"),
+        expires_at: row.get("expires_at"),
+        decided_at: row.get("decided_at"),
+    }
+}
+
+fn nfs_principal_mapping_from_row(row: &sqlx::postgres::PgRow) -> NfsPrincipalMapping {
+    NfsPrincipalMapping {
+        kerberos_principal: row.get("kerberos_principal"),
+        principal_id: row.get("principal_id"),
+        credential_id: row.get("credential_id"),
+        projected_uid: row.get("projected_uid"),
+        projected_gid: row.get("projected_gid"),
+        allowed_drive_ids: row.get("allowed_drive_ids"),
+        generation: row.get("generation"),
     }
 }
 
@@ -10614,6 +11486,25 @@ fn map_nfs_mutation_error(error: sqlx::Error) -> DatabaseError {
     }
 }
 
+fn map_nfs_approval_error(error: sqlx::Error) -> DatabaseError {
+    match &error {
+        sqlx::Error::Database(database)
+            if matches!(
+                database.code().as_deref(),
+                Some("40001" | "42501" | "23503" | "55P03")
+            ) =>
+        {
+            DatabaseError::StaleGeneration
+        }
+        sqlx::Error::Database(database)
+            if matches!(database.code().as_deref(), Some("23505" | "23514")) =>
+        {
+            DatabaseError::Conflict
+        }
+        _ => map_conflict(error),
+    }
+}
+
 fn valid_nfs_projected_id(value: i64) -> bool {
     (1..=NFS_MAX_PROJECTED_ID).contains(&value) && value != NFS_NOBODY_PROJECTED_ID
 }
@@ -10810,6 +11701,21 @@ mod tests {
         assert!(migration.contains("p_gss_expires_at<=clock_timestamp()"));
         assert!(migration.contains("clock_timestamp()+interval '4 hours',p_gss_expires_at"));
         assert!(!migration.contains("filebelt_phase8.activation_state"));
+
+        let approval_migration =
+            include_str!("../../../migrations/postgres/000015_nfs_mapping_target_approval.sql");
+        for invariant in [
+            "filebelt_mount.nfs_mapping_proposals",
+            "filebelt_mount.nfs_approved_active_mappings",
+            "target_approval_cutover",
+            "nfs_mapping_approval_required",
+            "new NFS credential must remain revoked until its mapping is approved",
+            "live NFS session requires an approved active mapping",
+        ] {
+            assert!(approval_migration.contains(invariant));
+        }
+        assert!(approval_migration.contains("v_now+interval '24 hours'"));
+        assert!(approval_migration.contains("FOR SHARE NOWAIT"));
     }
 
     #[test]

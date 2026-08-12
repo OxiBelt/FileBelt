@@ -2,7 +2,7 @@
 
 # Phase 8 Media, NFS, WebTransport, and Existing Platform Threat Model
 
-- Date: 2026-08-09
+- Date: 2026-08-12
 - Owner: `@PiQuark6046`
 - Scope: repository and image supply chain, OIDC and browser sessions, tenant
   administration, namespace and Virtual ACL, REST and authenticated sharing,
@@ -84,9 +84,12 @@
   JWTs, callback status mapping, editor assets, branding, and network source
   access remain outside the Apache process and bundle.
 - Kerberos and numeric POSIX projections cannot become FileBelt authority by
-  implication. Every NFS principal is explicitly tenant-mapped, every path
-  component is authorized through `TRAVERSE`, every mutation rechecks current
-  Virtual ACL, and neither AUTH_SYS nor Kerberos root has a bypass.
+  implication. An administrator can propose but cannot activate an external
+  identity binding; the recently reauthenticated target approves the exact
+  principal, POSIX projection, and drive ceiling. Every NFS principal is
+  explicitly tenant-mapped, every path component is authorized through
+  `TRAVERSE`, every mutation rechecks current Virtual ACL, and neither AUTH_SYS
+  nor Kerberos root has a bypass.
 - A compromised Ganesha/FSAL or bridge cannot obtain payload paths, database
   credentials, browser sessions, capability-signing keys, or KDC material not
   required by its container. Forged filehandles, stale stateids, replayed
@@ -294,6 +297,7 @@ from every workload except the runner controller's narrowly authorized Pod.
 | Pull request or manual run publishes an untrusted image | Read-only validation workflows; tag-only promotion job consumes validated archives, verifies an authorized signed tag, attests and reads back immutable digests | Workflow-integrity and release dry-run tests |
 | Promotion rebuilds or moves a tag after validation | Promotion cannot build; it assembles validated per-platform archives, publishes only version tags, verifies manifest/chart digests, and emits attestations | Release artifact/digest tests |
 | Apache core imports an adapter implementation or a same-name local, registry, or Git package substitutes a reviewed first-party identity | Manifest-bound metadata and locked-tree identity enforcement; workspace-inherited dependency resolution; generic protocol process boundary | Dependency-boundary identity and adapter-path regression tests |
+| Administrator maps a Kerberos principal to another user or silently widens an approved alias | Immutable 24-hour proposal; exact recently reauthenticated target approval including self-bindings; proposer administrator and bilateral `READ_METADATA` recheck; approved-active database gate; attenuation-only scope update; target revocation; legacy mapping quarantine | Cross-user/self approval, non-target and missing-session rejection, configuration drift, approval/revocation lock race, exact replay, alias revoke/reactivate, raw-writer rejection, and migration quarantine assertions |
 | Kerberos, AUTH_SYS, or projected UID/GID bypasses Virtual ACL | `krb5p` only; explicit tenant mapping; AUTH_SYS disabled; zero/root has no privilege; every component requires current `TRAVERSE` and the exact operation action | Real KDC, spoofed AUTH_SYS, unmapped/root, ACL-revoke, and path-component tests |
 | Forged NFS handle, replay, or stale gateway commits bytes | Dedicated rotating handle MAC; current/previous key only; export/node/generation binding; PostgreSQL gateway epoch, replay receipt, expected head, quota, and authorization recheck before immutable commit | Handle fuzzing, key rotation, restart/grace, slot replay, stale epoch, and expected-head tests |
 | Open-unlinked or conflicting NFS writes resurrect or overwrite a name | Tombstoned handle state, immutable base, final-close fence, seven-day retained conflict, separately authorized conflict copy, and no automatic abandoned commit | Open-unlink, concurrent Web/NFS writer, crash, retention, and no-resurrection tests |
@@ -304,12 +308,13 @@ from every workload except the runner controller's narrowly authorized Pod.
 
 ## Audit and privacy
 
-Audit all authentication/session/administrator activity, mutations, ACL/share
-changes, download starts, conflicts, corruption, and
-denials. Do not emit routine list results or chunk progress. Records contain
-stable IDs and reason codes, not raw credentials or payload content. The
-default durable retention is 365 days and the user-visible privacy subset is
-90 days; operator configuration remains within the bounds in
+Audit all authentication/session/administrator activity, NFS binding proposals,
+approvals, declines and revocations, mutations, ACL/share changes, download
+starts, conflicts, corruption, and denials. Do not emit routine list results or
+chunk progress. Records contain stable IDs and reason codes, not raw credentials
+or payload content. The default durable retention is 365 days and the
+user-visible privacy subset is 90 days; operator configuration remains within
+the bounds in
 [Namespace and Authorization](NamespaceAndAuthorization.md).
 
 ## Residual risk

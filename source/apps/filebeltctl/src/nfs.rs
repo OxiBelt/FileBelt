@@ -10,13 +10,15 @@ use filebelt_control_protocol::{Config, read_secret_string};
 use filebelt_database::Database;
 use filebelt_database::mount::{
     NfsExportRecord, NfsExportState, NfsFeatureState, NfsFeatureStateRecord, NfsPosixGroupRecord,
-    NfsPrincipalMapping, UpsertNfsPrincipalMappingInput,
+    NfsPrincipalMapping,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 const DEFAULT_CONFIG: &str = "/etc/filebelt/filebelt.toml";
+#[cfg(test)]
 const MAX_PROJECTED_ID: i64 = 4_294_967_294;
+#[cfg(test)]
 const NOBODY_PROJECTED_ID: i64 = 65_534;
 
 #[derive(Debug, Subcommand)]
@@ -269,45 +271,11 @@ pub async fn execute(command: Command) -> Result<String, String> {
                     config,
                     actor_principal_id,
                     confirm_tenant,
-                    principal_id,
-                    kerberos_principal,
-                    projected_uid,
-                    projected_gid,
-                    allowed_drive_id,
-                    expected_generation,
+                    ..
                 },
         } => {
-            let (configuration, database, tenant_id, realm) =
-                mutation_context(&config, actor_principal_id, &confirm_tenant).await?;
-            validate_mapping(
-                &kerberos_principal,
-                &realm,
-                projected_uid,
-                projected_gid,
-                &allowed_drive_id,
-                expected_generation,
-            )?;
-            require_accessible_drives(&database, tenant_id, actor_principal_id, &allowed_drive_id)
-                .await?;
-            let record = database
-                .upsert_nfs_principal_mapping(&UpsertNfsPrincipalMappingInput {
-                    tenant_id,
-                    actor_principal_id,
-                    principal_id,
-                    kerberos_principal: &kerberos_principal,
-                    projected_uid,
-                    projected_gid,
-                    allowed_drive_ids: &allowed_drive_id,
-                    expected_generation,
-                })
-                .await
-                .map_err(|error| error.to_string())?;
-            pretty(json!({
-                "schema": "filebelt.nfs.mapping.v1",
-                "tenant_slug": configuration.tenant.slug,
-                "realm": realm,
-                "mapping": mapping_json(&record),
-            }))
+            mutation_context(&config, actor_principal_id, &confirm_tenant).await?;
+            Err("mount.nfs.target_approval_required: create the mapping proposal through the authenticated NFS administration API so the target user can approve it".into())
         }
         Command::Mapping {
             command:
@@ -465,30 +433,7 @@ fn configured_realm(configuration: &Config) -> Result<&str, String> {
         .ok_or_else(|| "NFS Kerberos realm is absent from configuration".to_owned())
 }
 
-fn validate_mapping(
-    kerberos_principal: &str,
-    realm: &str,
-    projected_uid: i64,
-    projected_gid: i64,
-    allowed_drive_ids: &[Uuid],
-    expected_generation: Option<i64>,
-) -> Result<(), String> {
-    validate_kerberos_principal(kerberos_principal, realm)?;
-    if !valid_projected_id(projected_uid) || !valid_projected_id(projected_gid) {
-        return Err("projected UID and GID must be non-reserved 32-bit positive values".into());
-    }
-    if allowed_drive_ids.is_empty()
-        || allowed_drive_ids.len() > 256
-        || allowed_drive_ids.iter().collect::<HashSet<_>>().len() != allowed_drive_ids.len()
-    {
-        return Err("allowed drive IDs must contain 1 through 256 unique values".into());
-    }
-    if expected_generation.is_some_and(|generation| generation <= 0) {
-        return Err("expected generation must be positive".into());
-    }
-    Ok(())
-}
-
+#[cfg(test)]
 fn validate_kerberos_principal(principal: &str, realm: &str) -> Result<(), String> {
     let invalid = || {
         format!(
@@ -517,6 +462,7 @@ fn validate_kerberos_principal(principal: &str, realm: &str) -> Result<(), Strin
     Ok(())
 }
 
+#[cfg(test)]
 fn valid_posix_name(value: &str) -> bool {
     let mut bytes = value.bytes();
     matches!(bytes.next(), Some(b'a'..=b'z' | b'_'))
@@ -526,6 +472,7 @@ fn valid_posix_name(value: &str) -> bool {
         })
 }
 
+#[cfg(test)]
 fn valid_projected_id(value: i64) -> bool {
     (1..=MAX_PROJECTED_ID).contains(&value) && value != NOBODY_PROJECTED_ID
 }

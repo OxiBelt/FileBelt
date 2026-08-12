@@ -48,6 +48,28 @@ export interface NfsMappingView {
   ProjectedUid: number;
 }
 
+export type NfsMappingProposalState = "approved" | "cancelled" | "declined" | "expired" | "pending";
+
+export interface NfsMappingProposalView {
+  AllowedDriveIds: readonly string[];
+  CreatedAt: string;
+  DecidedAt: string | null;
+  ExpiresAt: string;
+  Generation: number;
+  Id: string;
+  KerberosPrincipal: string;
+  PrincipalId: string;
+  ProjectedGid: number;
+  ProjectedUid: number;
+  ProposerPrincipalId: string;
+  State: NfsMappingProposalState;
+}
+
+export interface NfsQuarantinedMappingView extends NfsMappingView {
+  QuarantineReason: string;
+  QuarantinedAt: string;
+}
+
 export interface NfsConflictView {
   BaseVersionId: string | null;
   ConflictCopyNodeId: string | null;
@@ -69,7 +91,9 @@ export interface NfsAdminSnapshot {
   Exports: readonly NfsExportView[];
   Feature: NfsFeatureView;
   Mappings: readonly NfsMappingView[];
+  PendingProposals: readonly NfsMappingProposalView[];
   PosixGroups: readonly NfsPosixGroupView[];
+  QuarantinedMappings: readonly NfsQuarantinedMappingView[];
   Realm: string;
   TenantSlug: string;
 }
@@ -85,14 +109,16 @@ export interface NfsPosixGroupRegistration {
   ProjectedGid: number;
 }
 
-export interface NfsMappingUpsert {
+export interface NfsMappingProposalCreate {
   AllowedDriveIds: readonly string[];
-  ExpectedGeneration: number | null;
   KerberosPrincipal: string;
   PrincipalId: string;
   ProjectedGid: number;
   ProjectedUid: number;
 }
+
+/** @deprecated Direct mapping upserts are disabled; use this shape to create a proposal. */
+export type NfsMappingUpsert = NfsMappingProposalCreate;
 
 export interface NfsConflictCopy {
   DisplayName: string;
@@ -102,6 +128,8 @@ export interface NfsConflictCopy {
 }
 
 export interface NfsAdminClient {
+  attenuateMappingScope(CredentialId: string, AllowedDriveIds: readonly string[], ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
+  cancelProposal(ProposalId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
   getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot>;
   copyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
   discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
@@ -110,7 +138,7 @@ export interface NfsAdminClient {
   revokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
   transitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState, ConfirmTenant: string): Promise<void>;
   transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void>;
-  upsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void>;
+  proposeMapping(Input: NfsMappingProposalCreate, ConfirmTenant: string): Promise<void>;
 }
 
 export class NfsReauthenticationRequiredError extends Error {
@@ -216,10 +244,12 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
         OnDiscardConflict={(ConflictId, ConfirmTenant) => Mutate(() => Client.discardConflict(ConflictId, ConfirmTenant), Strings.nfsConflictDiscarded)}
         OnRegisterExport={(Input, ConfirmTenant) => Mutate(() => Client.registerExport(Input, ConfirmTenant), Strings.nfsExportRegistered)}
         OnRegisterPosixGroup={(Input, ConfirmTenant) => Mutate(() => Client.registerPosixGroup(Input, ConfirmTenant), Strings.nfsGroupRegistered)}
+        OnAttenuateMapping={(CredentialId, DriveIds, Generation, ConfirmTenant) => Mutate(() => Client.attenuateMappingScope(CredentialId, DriveIds, Generation, ConfirmTenant), Strings.nfsMappingAttenuated)}
+        OnCancelProposal={(ProposalId, Generation, ConfirmTenant) => Mutate(() => Client.cancelProposal(ProposalId, Generation, ConfirmTenant), Strings.nfsProposalCancelled)}
+        OnProposeMapping={(Input, ConfirmTenant) => Mutate(() => Client.proposeMapping(Input, ConfirmTenant), Strings.nfsProposalCreated)}
         OnRevokeMapping={(CredentialId, Generation, ConfirmTenant) => Mutate(() => Client.revokeMapping(CredentialId, Generation, ConfirmTenant), Strings.nfsMappingRevoked)}
         OnTransitionExport={(DriveId, Generation, State, ConfirmTenant) => Mutate(() => Client.transitionExport(DriveId, Generation, State, ConfirmTenant), Strings.nfsExportTransitioned)}
         OnTransitionFeature={(Generation, State, ConfirmTenant) => Mutate(() => Client.transitionFeature(Generation, State, ConfirmTenant), Strings.nfsFeatureTransitioned)}
-        OnUpsertMapping={(Input, ConfirmTenant) => Mutate(() => Client.upsertMapping(Input, ConfirmTenant), Strings.nfsMappingSaved)}
         Snapshot={Snapshot}
       />
       <div aria-atomic="true" aria-live="polite" className="fb-sr-only">{Announcement}</div>
@@ -229,6 +259,8 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
 
 interface OverviewProps {
   Busy: boolean;
+  OnAttenuateMapping(CredentialId: string, AllowedDriveIds: readonly string[], ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
+  OnCancelProposal(ProposalId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
   OnCopyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
   OnDiscardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
   OnRegisterExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void>;
@@ -236,12 +268,14 @@ interface OverviewProps {
   OnRevokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void>;
   OnTransitionExport(DriveId: string, ExpectedGeneration: number, TargetState: NfsExportState, ConfirmTenant: string): Promise<void>;
   OnTransitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void>;
-  OnUpsertMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void>;
+  OnProposeMapping(Input: NfsMappingProposalCreate, ConfirmTenant: string): Promise<void>;
   Snapshot: NfsAdminSnapshot;
 }
 
 export function NfsAdminOverviewView({
   Busy,
+  OnAttenuateMapping,
+  OnCancelProposal,
   OnCopyConflict,
   OnDiscardConflict,
   OnRegisterExport,
@@ -249,7 +283,7 @@ export function NfsAdminOverviewView({
   OnRevokeMapping,
   OnTransitionExport,
   OnTransitionFeature,
-  OnUpsertMapping,
+  OnProposeMapping,
   Snapshot,
 }: OverviewProps): ReactNode {
   const [TenantConfirmation, SetTenantConfirmation] = useState("");
@@ -339,13 +373,31 @@ export function NfsAdminOverviewView({
         </div>
       </section>
 
-      <MappingForm Busy={Busy} Exports={Snapshot.Exports} MutationEnabled={TenantConfirmed} OnUpsert={(Input) => ConfirmedMutation((Confirmation) => OnUpsertMapping(Input, Confirmation))} Realm={Snapshot.Realm} />
+      <MappingProposalForm Busy={Busy} Exports={Snapshot.Exports} MutationEnabled={TenantConfirmed} OnPropose={(Input) => ConfirmedMutation((Confirmation) => OnProposeMapping(Input, Confirmation))} Realm={Snapshot.Realm} />
+
+      <section aria-labelledby="nfs-proposals-heading" className="fb-nfs-section">
+        <div><h3 id="nfs-proposals-heading">{Strings.nfsPendingProposals}</h3><p className="fb-muted">{Strings.nfsPendingProposalsHelp}</p></div>
+        <div className="fb-card-list" role="list">
+          {Snapshot.PendingProposals.map((Proposal) => (
+            <ProposalCard Busy={Busy} key={Proposal.Id} MutationEnabled={TenantConfirmed} OnCancel={(ProposalId, Generation) => ConfirmedMutation((Confirmation) => OnCancelProposal(ProposalId, Generation, Confirmation))} Proposal={Proposal} />
+          ))}
+          {Snapshot.PendingProposals.length === 0 ? <p>{Strings.nfsNoPendingProposals}</p> : null}
+        </div>
+      </section>
+
+      <section aria-labelledby="nfs-quarantine-heading" className="fb-nfs-section">
+        <div><h3 id="nfs-quarantine-heading">{Strings.nfsQuarantinedMappings}</h3><p className="fb-muted">{Strings.nfsQuarantinedMappingsHelp}</p></div>
+        <div className="fb-card-list" role="list">
+          {Snapshot.QuarantinedMappings.map((Mapping) => <QuarantinedMappingCard key={Mapping.CredentialId} Mapping={Mapping} />)}
+          {Snapshot.QuarantinedMappings.length === 0 ? <p>{Strings.nfsNoQuarantinedMappings}</p> : null}
+        </div>
+      </section>
 
       <section aria-labelledby="nfs-mappings-heading" className="fb-nfs-section">
         <div><h3 id="nfs-mappings-heading">{Strings.nfsMappings}</h3><p className="fb-muted">{Strings.nfsMappingsHelp}</p></div>
         <div className="fb-card-list" role="list">
           {Snapshot.Mappings.map((Mapping) => (
-            <MappingCard Busy={Busy} key={Mapping.CredentialId} Mapping={Mapping} MutationEnabled={TenantConfirmed} OnRevoke={(CredentialId, Generation) => ConfirmedMutation((Confirmation) => OnRevokeMapping(CredentialId, Generation, Confirmation))} />
+            <MappingCard Busy={Busy} Exports={Snapshot.Exports} key={Mapping.CredentialId} Mapping={Mapping} MutationEnabled={TenantConfirmed} OnAttenuate={(CredentialId, DriveIds, Generation) => ConfirmedMutation((Confirmation) => OnAttenuateMapping(CredentialId, DriveIds, Generation, Confirmation))} OnRevoke={(CredentialId, Generation) => ConfirmedMutation((Confirmation) => OnRevokeMapping(CredentialId, Generation, Confirmation))} />
           ))}
           {Snapshot.Mappings.length === 0 ? <p>{Strings.nfsNoMappings}</p> : null}
         </div>
@@ -475,12 +527,11 @@ function PosixGroupRegistrationForm({ Busy, MutationEnabled, OnRegister }: { Bus
   );
 }
 
-function MappingForm({ Busy, Exports, MutationEnabled, OnUpsert, Realm }: { Busy: boolean; Exports: readonly NfsExportView[]; MutationEnabled: boolean; OnUpsert(Input: NfsMappingUpsert): Promise<void>; Realm: string }): ReactNode {
+function MappingProposalForm({ Busy, Exports, MutationEnabled, OnPropose, Realm }: { Busy: boolean; Exports: readonly NfsExportView[]; MutationEnabled: boolean; OnPropose(Input: NfsMappingProposalCreate): Promise<void>; Realm: string }): ReactNode {
   const [PrincipalId, SetPrincipalId] = useState("");
   const [KerberosPrincipal, SetKerberosPrincipal] = useState("");
   const [ProjectedUid, SetProjectedUid] = useState("");
   const [ProjectedGid, SetProjectedGid] = useState("");
-  const [ExpectedGeneration, SetExpectedGeneration] = useState("");
   const [AllowedDriveIds, SetAllowedDriveIds] = useState<ReadonlySet<string>>(() => new Set());
   const [Confirmed, SetConfirmed] = useState(false);
   const ToggleDrive = (DriveId: string, Checked: boolean): void => {
@@ -496,13 +547,11 @@ function MappingForm({ Busy, Exports, MutationEnabled, OnUpsert, Realm }: { Busy
     if (!MutationEnabled) return;
     const Uid = ProjectedId(ProjectedUid);
     const Gid = ProjectedId(ProjectedGid);
-    const Generation = ExpectedGeneration.length === 0 ? null : PositiveInteger(ExpectedGeneration);
-    if (Uid === null || Gid === null || (ExpectedGeneration.length > 0 && Generation === null)) return;
+    if (Uid === null || Gid === null) return;
     if (!Confirmed) return;
     SetConfirmed(false);
-    void OnUpsert({
+    void OnPropose({
       AllowedDriveIds: [...AllowedDriveIds],
-      ExpectedGeneration: Generation,
       KerberosPrincipal: KerberosPrincipal.trim(),
       PrincipalId: PrincipalId.trim(),
       ProjectedGid: Gid,
@@ -511,7 +560,7 @@ function MappingForm({ Busy, Exports, MutationEnabled, OnUpsert, Realm }: { Busy
   };
   return (
     <section aria-labelledby="nfs-map-principal-heading" className="fb-nfs-section">
-      <div><h3 id="nfs-map-principal-heading">{Strings.nfsMapPrincipal}</h3><p className="fb-muted">{Strings.nfsExactRealmHelp} {Strings.nfsConfiguredRealm}: <bdi dir="auto">{Realm}</bdi>.</p></div>
+      <div><h3 id="nfs-map-principal-heading">{Strings.nfsProposeMapping}</h3><p className="fb-muted">{Strings.nfsExactRealmHelp} {Strings.nfsConfiguredRealm}: <bdi dir="auto">{Realm}</bdi>.</p></div>
       <form className="fb-nfs-card fb-nfs-form" onSubmit={Submit}>
         <label>{Strings.nfsPrincipalId}<Input disabled={Busy} onChange={(Ignored, Data) => SetPrincipalId(Data.value)} required value={PrincipalId} /></label>
         <label>{Strings.nfsKerberosPrincipal}<Input aria-describedby="nfs-exact-realm-help" disabled={Busy} onChange={(Ignored, Data) => SetKerberosPrincipal(Data.value)} placeholder={`user@${Realm}`} required value={KerberosPrincipal} /></label>
@@ -519,37 +568,90 @@ function MappingForm({ Busy, Exports, MutationEnabled, OnUpsert, Realm }: { Busy
         <div className="fb-nfs-form-row">
           <label>{Strings.nfsProjectedUid}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetProjectedUid(Data.value)} required type="number" value={ProjectedUid} /></label>
           <label>{Strings.nfsProjectedGid}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetProjectedGid(Data.value)} required type="number" value={ProjectedGid} /></label>
-          <label>{Strings.nfsExpectedGeneration}<Input disabled={Busy} inputMode="numeric" onChange={(Ignored, Data) => SetExpectedGeneration(Data.value)} type="number" value={ExpectedGeneration} /></label>
         </div>
         <fieldset className="fb-mount-drives">
           <legend>{Strings.nfsAllowedExports}</legend>
           {Exports.map((Export) => <Checkbox checked={AllowedDriveIds.has(Export.DriveId)} disabled={Busy} key={Export.DriveId} label={`${Export.ExportPath} (${Export.DriveId})`} onChange={(Ignored, Data) => ToggleDrive(Export.DriveId, Data.checked === true)} />)}
           {Exports.length === 0 ? <p>{Strings.nfsNoExportsForMapping}</p> : null}
         </fieldset>
-        <p className="fb-muted" id="nfs-mapping-authority-help"><ShieldCheck aria-hidden="true" size={16} /> {Strings.nfsMappingUpdateHelp}</p>
-        <Checkbox aria-describedby="nfs-mapping-authority-help" checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmMappingChange} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
-        <Button aria-describedby="nfs-mapping-authority-help" appearance="primary" disabled={Busy || !MutationEnabled || !Confirmed || PrincipalId.trim().length === 0 || KerberosPrincipal.trim().length === 0 || ProjectedId(ProjectedUid) === null || ProjectedId(ProjectedGid) === null || AllowedDriveIds.size === 0} type="submit">{ExpectedGeneration.length === 0 ? Strings.nfsCreateMapping : Strings.nfsUpdateMapping}</Button>
+        <p className="fb-muted" id="nfs-mapping-authority-help"><ShieldCheck aria-hidden="true" size={16} /> {Strings.nfsProposalHelp}</p>
+        <Checkbox aria-describedby="nfs-mapping-authority-help" checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmProposal} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
+        <Button aria-describedby="nfs-mapping-authority-help" appearance="primary" disabled={Busy || !MutationEnabled || !Confirmed || PrincipalId.trim().length === 0 || KerberosPrincipal.trim().length === 0 || ProjectedId(ProjectedUid) === null || ProjectedId(ProjectedGid) === null || AllowedDriveIds.size === 0} type="submit">{Strings.nfsCreateProposal}</Button>
       </form>
     </section>
   );
 }
 
-function MappingCard({ Busy, Mapping, MutationEnabled, OnRevoke }: {
+function MappingCard({ Busy, Exports, Mapping, MutationEnabled, OnAttenuate, OnRevoke }: {
   Busy: boolean;
+  Exports: readonly NfsExportView[];
   Mapping: NfsMappingView;
   MutationEnabled: boolean;
+  OnAttenuate(CredentialId: string, AllowedDriveIds: readonly string[], ExpectedGeneration: number): Promise<void>;
   OnRevoke(CredentialId: string, ExpectedGeneration: number): Promise<void>;
 }): ReactNode {
   const [Confirmed, SetConfirmed] = useState(false);
+  const [AllowedDriveIds, SetAllowedDriveIds] = useState<ReadonlySet<string>>(() => new Set(Mapping.AllowedDriveIds ?? []));
   const HelpId = `nfs-revoke-${Mapping.CredentialId}-help`;
+  const CurrentDriveIds = Mapping.AllowedDriveIds ?? [];
+  const IsStrictAttenuation = AllowedDriveIds.size > 0
+    && AllowedDriveIds.size < CurrentDriveIds.length
+    && [...AllowedDriveIds].every((DriveId) => CurrentDriveIds.includes(DriveId));
+  const ToggleDrive = (DriveId: string, Checked: boolean): void => SetAllowedDriveIds((Current) => {
+    const Next = new Set(Current);
+    if (Checked) Next.add(DriveId);
+    else Next.delete(DriveId);
+    return Next;
+  });
   return (
     <article className="fb-nfs-card" role="listitem">
       <div className="fb-nfs-card-heading"><div><strong><bdi dir="auto">{Mapping.KerberosPrincipal}</bdi></strong><p className="fb-muted">{Strings.nfsPrincipalId} <bdi dir="auto">{Mapping.PrincipalId}</bdi></p></div><Badge appearance="tint">{Strings.nfsGeneration} {Mapping.Generation}</Badge></div>
       <span>{Strings.nfsProjectedUid} {Mapping.ProjectedUid} · {Strings.nfsProjectedGid} {Mapping.ProjectedGid}</span>
       <span className="fb-muted">{Strings.nfsAllowedExports}: {Mapping.AllowedDriveIds === undefined ? Strings.nfsAllowedExportsUnknown : Mapping.AllowedDriveIds.map((DriveId) => <bdi dir="auto" key={DriveId}>{DriveId} </bdi>)}</span>
+      {Mapping.AllowedDriveIds === undefined ? null : (
+        <fieldset className="fb-mount-drives">
+          <legend>{Strings.nfsAttenuateScope}</legend>
+          {Exports.filter(({ DriveId }) => CurrentDriveIds.includes(DriveId)).map((Export) => <Checkbox checked={AllowedDriveIds.has(Export.DriveId)} disabled={Busy} key={Export.DriveId} label={`${Export.ExportPath} (${Export.DriveId})`} onChange={(Ignored, Data) => ToggleDrive(Export.DriveId, Data.checked === true)} />)}
+          <Button appearance="secondary" disabled={Busy || !MutationEnabled || !IsStrictAttenuation} onClick={() => void OnAttenuate(Mapping.CredentialId, [...AllowedDriveIds], Mapping.Generation)}>{Strings.nfsSaveAttenuatedScope}</Button>
+        </fieldset>
+      )}
       <p className="fb-muted" id={HelpId}>{Strings.nfsRevokeMappingHelp}</p>
       <Checkbox aria-describedby={HelpId} checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmMappingRevoke} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
       <Button aria-describedby={HelpId} appearance="secondary" disabled={Busy || !MutationEnabled || !Confirmed} onClick={() => { SetConfirmed(false); void OnRevoke(Mapping.CredentialId, Mapping.Generation); }}>{Strings.revoke}</Button>
+    </article>
+  );
+}
+
+function ProposalCard({ Busy, MutationEnabled, OnCancel, Proposal }: {
+  Busy: boolean;
+  MutationEnabled: boolean;
+  OnCancel(ProposalId: string, ExpectedGeneration: number): Promise<void>;
+  Proposal: NfsMappingProposalView;
+}): ReactNode {
+  const [Confirmed, SetConfirmed] = useState(false);
+  const HelpId = `nfs-cancel-proposal-${Proposal.Id}-help`;
+  return (
+    <article className="fb-nfs-card" role="listitem">
+      <div className="fb-nfs-card-heading"><div><strong><bdi dir="auto">{Proposal.KerberosPrincipal}</bdi></strong><p className="fb-muted">{Strings.nfsPrincipalId} <bdi dir="auto">{Proposal.PrincipalId}</bdi></p></div><Badge appearance="tint" color="warning">{Proposal.State}</Badge></div>
+      <span>{Strings.nfsProjectedUid} {Proposal.ProjectedUid} · {Strings.nfsProjectedGid} {Proposal.ProjectedGid}</span>
+      <span className="fb-muted">{Strings.nfsProposalId} <bdi dir="auto">{Proposal.Id}</bdi> · {Strings.nfsProposedBy} <bdi dir="auto">{Proposal.ProposerPrincipalId}</bdi></span>
+      <span className="fb-muted">{Strings.nfsAllowedExports}: {Proposal.AllowedDriveIds.map((DriveId) => <bdi dir="auto" key={DriveId}>{DriveId} </bdi>)}</span>
+      <span className="fb-muted">{Strings.nfsProposalCreatedAt} <time dateTime={Proposal.CreatedAt}>{Proposal.CreatedAt}</time> · {Strings.nfsProposalExpires} <time dateTime={Proposal.ExpiresAt}>{Proposal.ExpiresAt}</time> · {Strings.nfsGeneration} {Proposal.Generation}</span>
+      <p className="fb-muted" id={HelpId}>{Strings.nfsCancelProposalHelp}</p>
+      <Checkbox aria-describedby={HelpId} checked={Confirmed} disabled={Busy} label={Strings.nfsConfirmProposalCancel} onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)} />
+      <Button appearance="secondary" aria-describedby={HelpId} disabled={Busy || !MutationEnabled || !Confirmed} onClick={() => { SetConfirmed(false); void OnCancel(Proposal.Id, Proposal.Generation); }}>{Strings.cancel}</Button>
+    </article>
+  );
+}
+
+function QuarantinedMappingCard({ Mapping }: { Mapping: NfsQuarantinedMappingView }): ReactNode {
+  return (
+    <article className="fb-nfs-card" role="listitem">
+      <div className="fb-nfs-card-heading"><div><strong><bdi dir="auto">{Mapping.KerberosPrincipal}</bdi></strong><p className="fb-muted">{Strings.nfsPrincipalId} <bdi dir="auto">{Mapping.PrincipalId}</bdi></p></div><Badge appearance="tint" color="danger">{Strings.nfsQuarantined}</Badge></div>
+      <span>{Strings.nfsProjectedUid} {Mapping.ProjectedUid} · {Strings.nfsProjectedGid} {Mapping.ProjectedGid}</span>
+      <span className="fb-muted">{Strings.nfsAllowedExports}: {Mapping.AllowedDriveIds?.map((DriveId) => <bdi dir="auto" key={DriveId}>{DriveId} </bdi>) ?? Strings.nfsAllowedExportsUnknown}</span>
+      <span className="fb-muted">{Strings.nfsQuarantinedAt} <time dateTime={Mapping.QuarantinedAt}>{Mapping.QuarantinedAt}</time></span>
+      <span className="fb-muted">{Strings.nfsQuarantineReason}: <bdi dir="auto">{Mapping.QuarantineReason}</bdi></span>
     </article>
   );
 }

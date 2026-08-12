@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains thirteen Apache-region images on
+The current build matrix contains fourteen Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -57,6 +57,7 @@ The current build matrix contains thirteen Apache-region images on
 | `filebelt-mcp-runner` | Active and publishable. Supplies the trusted relay/shim injected into one-shot curated server Pods; it receives no FileBelt database, payload, session, or vault credential. |
 | `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs `mount-storage` `fbcap2` reads to I/O. It has no payload mount. |
 | `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
+| `filebelt-nfs-relay` | Active and publishable, but NFS delivery is disabled by default. Opaquely forwards bounded TCP/2049 streams from the tailnet edge to one chart-pinned Ganesha backend. It has no Ganesha keytab, bridge TLS identity, VFS route, payload mount, or authority over NFS identities. |
 
 Format-8 deployment material is purpose-scoped and operator-created. API mounts
 only its enabled API private/public pairs; I/O mounts API-storage plus enabled
@@ -233,14 +234,19 @@ runner ServiceAccount in the pre-created runner namespace, and permits one-shot
 runner Pods there. SMB, FTP/FTPS, and NFS are independent disabled-by-default
 mount flags. Any enabled protocol renders VFS. SMB or FTP/FTPS also renders
 Headscale sync and the selected gateway StatefulSet with an operator-provided
-RWO tailstate claim. NFS instead renders one single-active
-Ganesha/bridge/tailscaled StatefulSet, its own tailstate and recovery claims,
-and a NetworkPolicy-restricted ClusterIP Service on TCP 2049; it does not force
-Headscale sync. Rendering is rejected unless kernel tailnet networking, exact
-tailnet-control and ingress peers, and the selected protocol's fail-closed
-inputs are present. Separately licensed adapters remain production-gated on
-published images and protocol acceptance evidence. The tools image runs
-explicit bounded administrative Jobs. FileBelt deploys no HPA.
+RWO tailstate claim. NFS instead renders two single-active StatefulSets. The
+tailnet StatefulSet contains `tailscaled` and the Apache
+`filebelt-nfs-relay`; the backend StatefulSet contains only Ganesha and its
+authenticated bridge. The tailstate claim and TUN device exist only in the
+relay Pod, while recovery state, the keytab, VFS client identity, and Unix IPC
+exist only in the backend Pod. A stable ClusterIP Service selects the relay and
+a second pinned-ClusterIP Service is private to relay-to-Ganesha TCP 2049.
+NFS does not force Headscale sync. Rendering is rejected unless kernel tailnet
+networking, exact tailnet-control and ingress peers, pinned VFS/backend Service
+addresses, and the selected protocol's fail-closed inputs are present.
+Separately licensed adapters remain production-gated on published images and
+protocol acceptance evidence. The tools image runs explicit bounded
+administrative Jobs. FileBelt deploys no HPA.
 
 `documents.enabled=true` additionally renders the Apache document coordinator
 Deployment and Service only after migration 000006, grants verification, the
@@ -275,9 +281,10 @@ ownership, and no-follow probe. Only I/O, maintenance, and explicit storage or
 recovery Jobs mount the claim; API and web never do. FileBelt never changes or
 deletes the claim.
 
-Production chart values select all twelve deployable Apache workload images by
+Production chart values select all thirteen deployable Apache workload images by
 lowercase `sha256:` digest: API, I/O, maintenance, tools, web, collaboration,
-broker, controller, runner, VFS, Headscale sync, and document coordinator. Registry mirrors may
+broker, controller, runner, VFS, Headscale sync, document coordinator, and NFS
+relay. Registry mirrors may
 replace only the registry authority; they do not
 change repository, role, digest, authorization, or license semantics. A
 catalog server image is separately pinned by digest and admitted only after its
@@ -317,9 +324,11 @@ egress-default-deny. NetworkPolicy permits only:
 - VFS to its PostgreSQL role and the I/O mount-read endpoint only, and I/O
   ingress from the exact VFS identity only when mount preview is enabled;
 - Headscale sync to its PostgreSQL role and the exact external Headscale peer;
-- tailnet ingress to the two gateway listeners and gateway-application egress
-  to VFS only; their `tailscaled` sidecars additionally need configured DNS and
-  the exact external Headscale peer;
+- tailnet ingress to the SMB, FTP/FTPS, and NFS relay listeners. SMB and
+  FTP/FTPS application containers receive VFS-only egress while their
+  `tailscaled` sidecars share configured DNS and exact Headscale egress. The
+  NFS relay Pod receives DNS, Headscale, and its backend path only; the separate
+  NFS backend receives VFS-only egress;
 - configured DNS, monitoring, and OTLP peers;
 - API access to the operator-managed OIDC CONNECT gateway;
 - broker access to PostgreSQL, API/I/O, the controller when enabled, and the
@@ -398,8 +407,8 @@ additionally requires VFS and Headscale database URLs, the distinct
 distinct mount-vault keyring, API/VFS/I/O mTLS projections, external Headscale
 URL/token/CA and exact OIDC issuer, and kernel tailnet networking for the
 gateways. VFS and Headscale sync do not run tailscaled and receive no TUN
-device; only gateway sidecars receive `NET_ADMIN`, `/dev/net/tun`, and separate
-tailstate claims. Development mode may use plaintext Compose backends
+device; only tailnet gateway Pods receive `NET_ADMIN`, `/dev/net/tun`, and
+separate tailstate claims. Development mode may use plaintext Compose backends
 but never enables the Kubernetes runner controller. Configuration is
 restart-only and stored in content-addressed immutable ConfigMaps. Existing
 Secret content is projected by named key; an explicit generation change
@@ -422,9 +431,12 @@ fail startup or Helm validation. Phase 8 uses one coordinated version, but
 Apache, LGPL, and GPL images remain independently built, evidenced, and
 published repositories pinned by digest in the chart.
 
-The NFS release target is a single-active fenced StatefulSet containing
+The NFS backend release target is a single-active fenced StatefulSet containing
 NFS-Ganesha `6.5-8` from the Ubuntu 26.04 snapshot dated 2026-08-09, a thin
 dynamic FileBelt FSAL, and an adapter-local Rust bridge over bounded Unix IPC.
+Its separate single-active tailnet StatefulSet contains `tailscaled` and the
+purpose-bound Apache TCP relay; the relay does not parse NFS, terminate TLS,
+add PROXY framing, or receive NFS/VFS authority Secrets.
 The current tree contains the generic schema/state model, opaque keyed handles,
 bounded bridge framing, an unqualified candidate FSAL callback/control surface,
 and portable C boundary checks. Exact-header syntax evidence is not an ABI/link
@@ -437,15 +449,22 @@ the lower FSAL project authoritative owner/group names through GETATTR and
 READDIR without host idmapper fallback. These patches are necessary security
 contracts, but patch application and header compilation alone do not establish
 ABI/link compatibility or live owner/group enforcement.
-The chart therefore requires an explicit published image digest, operator-owned
+The chart therefore requires explicit published gateway, relay, and tailscaled
+image digests, operator-owned
 Ganesha and bridge ConfigMaps, shell-free command/health/preStop argv, a static
 keytab, an exact `spiffe://filebelt/nfs-gateway/vfs` bridge identity, a VFS-only
-handle keyring, and distinct RWO tailstate/recovery claims before it renders the
-NFS listener. Ganesha and the bridge use the same pinned FileBelt image; the
+handle keyring, pinned existing VFS and new backend ClusterIPs, and distinct
+RWO tailstate/recovery claims before it renders the NFS listener. The backend
+maps only the canonical `filebelt-vfs.<namespace>.svc` hostname to the pinned
+VFS address; bridge startup rejects any other URL host, and backend policy has
+no DNS or Headscale route. Ganesha and the bridge use the same pinned FileBelt image; the
 bridge runs as `10001:10001`, Ganesha runs as `10002:10002`, and their exact
 `10003`-group Unix sockets authenticate both connection and packet credentials
-in each direction. The only Service is ClusterIP TCP 2049, and policy provides
-no KDC egress. Until that image ABI and protocol evidence are qualified,
+in each direction. The relay accepts at most 4,096 connections and 64 per
+observed source by default, uses five-second connect and five-minute inactivity
+timeouts, and drains for at most 180 seconds. Policy provides no backend DNS,
+Headscale, KDC, or default egress. Until the adapter image ABI and protocol
+evidence are qualified,
 operators must leave NFS disabled.
 
 The checked-in NFS qualification scaffold is read-only and deliberately fails
@@ -483,6 +502,16 @@ coordinated. Rollback disables admissions first, fences gateways/jobs/sessions,
 drains workloads, and restores previous compatible image digests. It preserves
 Phase 8 schemas, conflict data, recovery claims, key generations, and cache
 metadata. A binary downgrade uses the recorded pre-activation restore.
+
+An existing NFS gateway upgrades only through a quiesced outage. First drain
+and fence NFS, set `deployment.quiesced=true`, and wait for the old Pod and RWO
+tailstate attachment to terminate. Record the existing VFS Service ClusterIP,
+apply the split topology while both StatefulSets remain at zero, verify its
+generation-bound selectors and PVC ownership, then unquiesce. Relay-only
+restart does not advance the gateway epoch; backend restart retains the
+existing drain and epoch behavior. A failed cutover leaves NFS disabled or
+quiesced with both PVCs retained. Rolling back to the co-located topology with
+NFS enabled is unsupported.
 
 The NFS identity-approval cutover runs only while NFS admission and gateways
 are disabled. Apply `000015_nfs_mapping_target_approval.sql` and its reviewed

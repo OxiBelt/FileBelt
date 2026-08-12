@@ -77,6 +77,10 @@ images:
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
     license: LGPL-3.0-or-later
     source: https://github.com/OxiBelt/FileBelt/tree/main/adapters/nfs
+  filebelt-nfs-relay:
+    repository: oxibelt/filebelt-nfs-relay
+    registryMirror: ""
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   tailscaled:
     repository: tailscale/tailscale
     registryMirror: ""
@@ -879,6 +883,9 @@ mounts:
     oidcIssuer: https://issuer.example.invalid/
     syncSeconds: 15
   vfs:
+    # Record the existing VFS Service IP before enabling NFS so the
+    # secret-bearing NFS backend can resolve VFS without cluster DNS.
+    clusterIP: ""
     replicas: 2
     resources:
       requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
@@ -912,7 +919,8 @@ mounts:
     graceSeconds: 90
     tailstateClaim: ""
     recoveryClaim: ""
-    terminationGracePeriodSeconds: 180
+    backendClusterIP: ""
+    terminationGracePeriodSeconds: 210
     ganesha:
       # The pinned adapter image ABI is not yet published. Enabling NFS requires
       # explicit shell-free argv and an operator-owned configuration projection.
@@ -937,6 +945,15 @@ mounts:
       resources:
         requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 128Mi}
         limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 512Mi}
+    relay:
+      maxConnections: 4096
+      maxConnectionsPerSource: 64
+      connectTimeoutSeconds: 5
+      inactivityTimeoutSeconds: 300
+      drainTimeoutSeconds: 180
+      resources:
+        requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+        limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 256Mi}
 
 networkPolicy:
   publicIngress:

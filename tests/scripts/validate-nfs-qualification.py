@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import re
 import subprocess
@@ -195,6 +196,57 @@ def validate(evidence: Any, artifact_root: Path, repository_root: Path) -> dict[
             failures.append("runtimeImage.bridgeHasKeytab must be false")
         if image.get("ipcCarriesSecrets") is not False:
             failures.append("runtimeImage.ipcCarriesSecrets must be false")
+        require_match(image, "relayImageDigest", DIGEST, failures)
+        require_match(image, "tailscaledImageDigest", DIGEST, failures)
+        if image.get("relayRevision") != release_revision:
+            failures.append("runtimeImage.relayRevision must match the signed release revision")
+        if not isinstance(image.get("topologyGeneration"), str) or re.fullmatch(
+            r"[0-9a-f]{16}", image["topologyGeneration"]
+        ) is None:
+            failures.append("runtimeImage.topologyGeneration must be a 16-character digest")
+        for key in ("vfsClusterIP", "backendClusterIP"):
+            try:
+                ipaddress.ip_address(image.get(key, ""))
+            except ValueError:
+                failures.append(f"runtimeImage.{key} must be a valid IP address")
+        if image.get("vfsClusterIP") == image.get("backendClusterIP"):
+            failures.append("runtimeImage VFS and backend ClusterIPs must be distinct")
+        for key in ("tailstateClaim", "recoveryClaim"):
+            value = image.get(key)
+            if not isinstance(value, str) or re.fullmatch(
+                r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", value
+            ) is None:
+                failures.append(f"runtimeImage.{key} must be a DNS label")
+        if image.get("tailstateClaim") == image.get("recoveryClaim"):
+            failures.append("runtimeImage tailstate and recovery claims must be distinct")
+        for key, expected in (
+            ("relayHasTailstate", False),
+            ("relayHasTun", False),
+            ("relayHasAuthoritySecrets", False),
+            ("tailscaledHasTailstate", True),
+            ("backendHasDnsEgress", False),
+            ("backendHasHeadscaleEgress", False),
+        ):
+            if image.get(key) is not expected:
+                failures.append(f"runtimeImage.{key} must be {str(expected).lower()}")
+        network_policy = require_list(image, "networkPolicyEvidence", failures, "runtimeImage")
+        observed_cnis: set[str] = set()
+        if network_policy is not None:
+            for index, item in enumerate(network_policy):
+                prefix = f"runtimeImage.networkPolicyEvidence[{index}]"
+                if not isinstance(item, dict):
+                    failures.append(f"{prefix} must be an object")
+                    continue
+                cni = item.get("cni")
+                if cni not in {"calico", "cilium"} or cni in observed_cnis:
+                    failures.append(f"{prefix}.cni must be one unique required CNI")
+                else:
+                    observed_cnis.add(cni)
+                if item.get("passed") is not True:
+                    failures.append(f"{prefix}.passed must be true")
+                check_artifact(item, "log", artifact_root, failures, prefix, secret_free=True)
+        if observed_cnis != {"calico", "cilium"}:
+            failures.append("runtimeImage.networkPolicyEvidence must cover Calico and Cilium")
 
     licensing = require_object(evidence, "licensing", failures)
     if licensing is not None:
@@ -255,6 +307,20 @@ def validate(evidence: Any, artifact_root: Path, repository_root: Path) -> dict[
                     "ganeshaImageDigest": release_digest,
                     "ganeshaRevision": release_revision,
                     "ipcCarriesSecrets": False,
+                    "relayHasAuthoritySecrets": False,
+                    "relayHasTailstate": False,
+                    "relayHasTun": False,
+                    "relayImageDigest": image.get("relayImageDigest") if image else None,
+                    "relayRevision": release_revision,
+                    "tailscaledHasTailstate": True,
+                    "tailscaledImageDigest": image.get("tailscaledImageDigest") if image else None,
+                    "topologyGeneration": image.get("topologyGeneration") if image else None,
+                    "vfsClusterIP": image.get("vfsClusterIP") if image else None,
+                    "backendClusterIP": image.get("backendClusterIP") if image else None,
+                    "tailstateClaim": image.get("tailstateClaim") if image else None,
+                    "recoveryClaim": image.get("recoveryClaim") if image else None,
+                    "backendHasDnsEgress": False,
+                    "backendHasHeadscaleEgress": False,
                     "samePinnedImage": True,
                 }
                 if runtime_attestation != expected_runtime:

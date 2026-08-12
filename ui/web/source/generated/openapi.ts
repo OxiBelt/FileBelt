@@ -2343,7 +2343,8 @@ export interface components {
             /** Format: date-time */
             readonly last_activity_at: string;
             /** @enum {string} */
-            readonly protocol: "smb" | "ftps";
+            readonly protocol: "smb" | "ftps" | "nfs";
+            /** @description Immediate transport peer address. For relayed NFS this is the relay peer, not an authoritative client identity. */
             readonly source_address: string;
             /** @enum {string} */
             readonly state: "active" | "draining" | "closed" | "revoked";

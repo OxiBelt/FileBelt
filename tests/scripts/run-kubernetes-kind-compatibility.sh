@@ -91,7 +91,7 @@ server_validate() {
     kubectl_cmd apply --server-side --dry-run=server --field-manager=filebelt-acceptance \
       --filename - >"${output}"
 
-  if [[ "${operation}" != "base" && "${operation}" != "mcp" && "${operation}" != "mounts" ]]; then
+  if [[ "${operation}" != "base" && "${operation}" != "mcp" && "${operation}" != "mounts" && "${operation}" != "nfs" ]]; then
     grep -E '^job\.batch/filebelt-' "${output}" >/dev/null \
       || die "${operation} did not produce an API-valid operation Job"
   fi
@@ -271,6 +271,34 @@ server_validate mounts \
   --set mounts.ftpFtps.enabled=true \
   --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]' \
   --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"filebelt-tailnet"}}}]'
+
+# NFS renders a split relay/backend topology. Keep the release quiesced so
+# server-side validation proves the current Kubernetes API accepts its
+# StatefulSets, fixed ClusterIP Services, and NetworkPolicies without pulling
+# the unqualified Ganesha image or claiming operator-owned RWO storage.
+nfs_validation_values=(
+  --set mounts.nfs.enabled=true
+  --set-string images.filebelt-nfs-gateway.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+  --set-string images.filebelt-nfs-relay.digest=sha256:3333333333333333333333333333333333333333333333333333333333333333
+  --set-string images.tailscaled.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
+  --set-string mounts.vfs.clusterIP=10.96.20.10
+  --set-string mounts.nfs.backendClusterIP=10.96.20.11
+  --set-string mounts.nfs.realm=EXAMPLE.TEST
+  --set-string mounts.nfs.idmapDomain=example.test
+  --set-string mounts.nfs.tailstateClaim=filebelt-nfs-tailstate
+  --set-string mounts.nfs.recoveryClaim=filebelt-nfs-recovery
+  --set-json 'mounts.nfs.ganesha.command=["/contract/ganesha"]'
+  --set-json 'mounts.nfs.ganesha.healthCommand=["/contract/ganesha-health"]'
+  --set-json 'mounts.nfs.ganesha.preStopCommand=["/contract/ganesha-drain"]'
+  --set-string mounts.nfs.ganesha.configMap.name=filebelt-nfs-ganesha-config
+  --set-json 'mounts.nfs.bridge.command=["/contract/bridge"]'
+  --set-json 'mounts.nfs.bridge.healthCommand=["/contract/bridge-health"]'
+  --set-json 'mounts.nfs.bridge.preStopCommand=["/contract/bridge-drain"]'
+  --set-string mounts.nfs.bridge.configMap.name=filebelt-nfs-bridge-config
+  --set-json 'networkPolicy.headscale.to=[{"ipBlock":{"cidr":"192.0.2.10/32"}}]'
+  --set-json 'networkPolicy.mountIngress.from=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"filebelt-tailnet"}}}]'
+)
+server_validate nfs "${nfs_validation_values[@]}"
 helm --kubeconfig "${KUBECONFIG}" upgrade --install "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${NAMESPACE}" \
   --values "${ci_values}" \

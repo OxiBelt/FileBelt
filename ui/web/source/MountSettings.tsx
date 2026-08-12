@@ -170,11 +170,15 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
 
       <div className="fb-mount-grid">
         <SummaryList Heading="Tailnet devices" Icon={Laptop} Items={Snapshot.devices.map((Device) => ({ Detail: Device.tailnet_addresses.join(", "), Id: Device.id, Name: Device.display_name, State: Device.revoked_at === null ? "Current" : "Revoked" }))} />
-        <SummaryList Heading="Recent mount sessions" Icon={Network} Items={Snapshot.sessions.map((Session) => ({ Detail: `${Session.protocol.toUpperCase()} · ${Session.source_address} · ${FormatDate(Session.last_activity_at)}`, Id: Session.id, Name: Session.gateway_id, State: Session.state }))} />
+        <SummaryList Heading="Recent mount sessions" Icon={Network} Items={Snapshot.sessions.map((Session) => ({ Detail: FormatMountSessionDetail(Session), Id: Session.id, Name: Session.gateway_id, State: Session.state }))} />
       </div>
       <div aria-atomic="true" aria-live="polite" className="fb-sr-only">{Announcement}</div>
     </section>
   );
+}
+
+export function FormatMountSessionDetail(Session: MountOverview["sessions"][number]): string {
+  return `${Session.protocol.toUpperCase()} · transport/relay peer ${Session.source_address} · ${FormatDate(Session.last_activity_at)}`;
 }
 
 function NfsConsentSettings({ Client, OnReauthenticationRequired }: {

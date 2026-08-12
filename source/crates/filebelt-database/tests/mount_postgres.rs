@@ -1862,6 +1862,22 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         retried_session.absolute_expires_at_unix_seconds,
         "retrying one GSS context must not extend its absolute session lifetime"
     );
+    let rescheduled_relay_session = database
+        .create_nfs_mount_session(&CreateNfsMountSessionInput {
+            tenant_id,
+            kerberos_principal: "Nfs_User@EXAMPLE.TEST",
+            gss_binding_digest: &binding_digest,
+            gateway_id: "nfs-gateway-0",
+            gateway_epoch,
+            source_address: "192.0.2.44",
+            gss_expires_at_unix_seconds: 2_000_000_000,
+        })
+        .await
+        .expect("create a fresh session after the observed relay peer changes");
+    assert_ne!(
+        first_session.session.session_id, rescheduled_relay_session.session.session_id,
+        "the immediate relay peer remains a conservative session-reuse fence"
+    );
     assert_eq!(first_session.session.allowed_drive_ids, vec![drive_id]);
     assert_eq!(first_session.allowed_export_ids, vec![7]);
     assert_eq!(first_session.posix_name, "nfs_user");

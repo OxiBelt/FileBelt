@@ -22,6 +22,25 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s/%s@%s" $registry $image.repository $image.digest -}}
 {{- end -}}
 
+{{- define "filebelt.nfsVfsHostname" -}}
+{{- printf "%s-vfs.%s.svc" (include "filebelt.name" .) .Release.Namespace -}}
+{{- end -}}
+
+{{- define "filebelt.nfsBackendAddress" -}}
+{{- if contains ":" .Values.mounts.nfs.backendClusterIP -}}
+{{- printf "[%s]:2049" .Values.mounts.nfs.backendClusterIP -}}
+{{- else -}}
+{{- printf "%s:2049" .Values.mounts.nfs.backendClusterIP -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "filebelt.nfsTopologyGeneration" -}}
+{{- $images := dict "gateway" (index .Values.images "filebelt-nfs-gateway").digest "relay" (index .Values.images "filebelt-nfs-relay").digest "tailscaled" .Values.images.tailscaled.digest -}}
+{{- $secrets := dict "ganeshaKeytab" .Values.secrets.nfsGaneshaKeytab.generation "bridgeTls" .Values.secrets.nfsBridgeVfsClientTls.generation -}}
+{{- $inputs := dict "format" 2 "images" $images "secrets" $secrets "tailnet" .Values.mounts.tailnet "vfsClusterIP" .Values.mounts.vfs.clusterIP "nfs" .Values.mounts.nfs -}}
+{{- toJson $inputs | sha256sum | trunc 16 -}}
+{{- end -}}
+
 {{- define "filebelt.filebeltConfigName" -}}
 {{- $configuration := include "filebelt.renderedFilebeltConfiguration" . -}}
 {{- printf "%s-config-%s" (include "filebelt.name" . | trunc 42 | trimSuffix "-") ($configuration | sha256sum | trunc 12) -}}
@@ -296,7 +315,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "disabled FTP/FTPS must not carry a previous gateway URI SAN" -}}
 {{- end -}}
 {{- if not .Values.mounts.nfs.enabled -}}
-{{- if or (ne .Values.mounts.nfs.previousGatewayUriSan "") (ne .Values.mounts.nfs.realm "") (ne .Values.mounts.nfs.idmapDomain "") (ne .Values.mounts.nfs.tailstateClaim "") (ne .Values.mounts.nfs.recoveryClaim "") (ne (int .Values.mounts.nfs.handleKeyGeneration) 1) (ne (int .Values.mounts.nfs.graceSeconds) 90) -}}
+{{- if or (ne .Values.mounts.nfs.previousGatewayUriSan "") (ne .Values.mounts.nfs.realm "") (ne .Values.mounts.nfs.idmapDomain "") (ne .Values.mounts.nfs.tailstateClaim "") (ne .Values.mounts.nfs.recoveryClaim "") (ne .Values.mounts.nfs.backendClusterIP "") (ne (int .Values.mounts.nfs.handleKeyGeneration) 1) (ne (int .Values.mounts.nfs.graceSeconds) 90) -}}
 {{- fail "disabled NFS must not carry a previous gateway URI SAN or authority overrides" -}}
 {{- end -}}
 {{- end -}}
@@ -337,14 +356,23 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- if .Values.mounts.nfs.enabled -}}
 {{- $zeroDigest := "sha256:0000000000000000000000000000000000000000000000000000000000000000" -}}
-{{- if or (eq (index .Values.images "filebelt-nfs-gateway").digest $zeroDigest) (eq .Values.images.tailscaled.digest $zeroDigest) -}}
-{{- fail "mounts.nfs.enabled requires published non-sentinel NFS gateway and tailscaled image digests" -}}
+{{- if or (eq (index .Values.images "filebelt-nfs-gateway").digest $zeroDigest) (eq (index .Values.images "filebelt-nfs-relay").digest $zeroDigest) (eq .Values.images.tailscaled.digest $zeroDigest) -}}
+{{- fail "mounts.nfs.enabled requires published non-sentinel NFS gateway, relay, and tailscaled image digests" -}}
 {{- end -}}
-{{- if or (eq .Values.mounts.nfs.realm "") (eq .Values.mounts.nfs.idmapDomain "") (eq .Values.mounts.nfs.tailstateClaim "") (eq .Values.mounts.nfs.recoveryClaim "") -}}
-{{- fail "mounts.nfs.enabled requires an exact realm, idmap domain, and distinct operator-owned RWO tailstate and recovery claims" -}}
+{{- if or (eq .Values.mounts.nfs.realm "") (eq .Values.mounts.nfs.idmapDomain "") (eq .Values.mounts.nfs.tailstateClaim "") (eq .Values.mounts.nfs.recoveryClaim "") (eq .Values.mounts.nfs.backendClusterIP "") (eq .Values.mounts.vfs.clusterIP "") -}}
+{{- fail "mounts.nfs.enabled requires an exact realm, idmap domain, VFS and backend ClusterIPs, and distinct operator-owned RWO tailstate and recovery claims" -}}
 {{- end -}}
 {{- if eq .Values.mounts.nfs.tailstateClaim .Values.mounts.nfs.recoveryClaim -}}
 {{- fail "NFS tailstate and recovery claims must be distinct" -}}
+{{- end -}}
+{{- if eq .Values.mounts.vfs.clusterIP .Values.mounts.nfs.backendClusterIP -}}
+{{- fail "NFS VFS and backend Services must use distinct ClusterIPs" -}}
+{{- end -}}
+{{- if gt (int .Values.mounts.nfs.relay.maxConnectionsPerSource) (int .Values.mounts.nfs.relay.maxConnections) -}}
+{{- fail "NFS relay per-source connection limit must not exceed its total connection limit" -}}
+{{- end -}}
+{{- if ge (int .Values.mounts.nfs.relay.drainTimeoutSeconds) (int .Values.mounts.nfs.terminationGracePeriodSeconds) -}}
+{{- fail "NFS relay drain timeout must be shorter than its Pod termination grace period" -}}
 {{- end -}}
 {{- if or (eq (len .Values.mounts.nfs.ganesha.command) 0) (eq (len .Values.mounts.nfs.ganesha.healthCommand) 0) (eq (len .Values.mounts.nfs.ganesha.preStopCommand) 0) (eq .Values.mounts.nfs.ganesha.configMap.name "") (eq (len .Values.mounts.nfs.bridge.command) 0) (eq (len .Values.mounts.nfs.bridge.healthCommand) 0) (eq (len .Values.mounts.nfs.bridge.preStopCommand) 0) (eq .Values.mounts.nfs.bridge.configMap.name "") -}}
 {{- fail "mounts.nfs.enabled requires explicit Ganesha and bridge command, health, preStop, and ConfigMap ABI contracts" -}}

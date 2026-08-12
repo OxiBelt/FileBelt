@@ -117,8 +117,8 @@ KEK generations through the rollback verification window.
 
 ## Mount preview rollback
 
-The supported rollback is to keep `mounts.enabled=false`. If a test deployment
-rendered the preview, stop listener admission, advance both gateway epochs,
+The supported rollback is to keep every mount protocol disabled. If a test deployment
+rendered the preview, stop listener admission, advance the affected gateway epochs,
 revoke active credentials as required, close sessions/handles/locks in
 PostgreSQL, and scale gateway, VFS, and Headscale-sync workloads to zero before
 rolling API or I/O. Retain both gateway RWO tailstate claims for incident
@@ -126,6 +126,13 @@ evidence; do not attach them to another gateway identity. The additive
 `filebelt_mount` and `filebelt_mount_vault` schemas, mount KEKs, and admitted
 `mount-storage` verification keys remain in place until no retained recovery
 evidence references them.
+
+For a split NFS cutover failure, retain both the relay tailstate claim and the
+backend recovery claim. An older chart may be restored only with NFS disabled;
+restoring the co-located Ganesha/bridge/`tailscaled` Pod with NFS enabled would
+reopen the DNS and Headscale egress boundary. Relay-only rollback does not
+advance the gateway epoch. A backend rollback uses the normal drain/fence path
+and only a previously qualified digest within the split topology.
 
 ## Incompatible schema or inconsistent state
 

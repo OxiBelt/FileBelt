@@ -453,6 +453,8 @@ pub struct NfsAuthenticateRequest {
     pub kerberos_principal: ::prost::alloc::string::String,
     #[prost(bytes="vec", tag="2")]
     pub gss_binding_digest: ::prost::alloc::vec::Vec<u8>,
+    /// This is the immediate NFS transport peer. A relay peer address is
+    /// non-authoritative observability and conservative session-reuse input only.
     #[prost(string, tag="3")]
     pub source_address: ::prost::alloc::string::String,
     #[prost(enumeration="RpcsecGssProtection", tag="4")]

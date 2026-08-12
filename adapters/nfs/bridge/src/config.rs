@@ -12,6 +12,7 @@ use thiserror::Error;
 pub const CONFIG_FORMAT: u32 = 1;
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/filebelt-nfs/bridge.toml";
 pub const REQUIRED_GATEWAY_URI_SAN: &str = "spiffe://filebelt/nfs-gateway/vfs";
+pub const EXPECTED_VFS_HOSTNAME_ENV: &str = "FILEBELT_NFS_EXPECTED_VFS_HOSTNAME";
 const MAX_CONFIG_BYTES: u64 = 65_536;
 
 const REQUIRED_IPC_SOCKET: &str = "/run/filebelt-nfs/bridge.sock";
@@ -73,6 +74,15 @@ impl BridgeConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        let expected_hostname =
+            required_expected_vfs_hostname(std::env::var(EXPECTED_VFS_HOSTNAME_ENV))?;
+        self.validate_against_expected_hostname(&expected_hostname)
+    }
+
+    fn validate_against_expected_hostname(
+        &self,
+        expected_hostname: &str,
+    ) -> Result<(), ConfigError> {
         if self.format != CONFIG_FORMAT
             || !valid_tenant_slug(&self.tenant_slug)
             || !valid_realm(&self.kerberos_realm)
@@ -93,6 +103,7 @@ impl BridgeConfig {
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
             || endpoint.path() != "/internal/v1/vfs/execute"
+            || !endpoint_matches_expected_hostname(&self.vfs_url, &endpoint, &expected_hostname)
         {
             return Err(ConfigError::Invalid);
         }
@@ -172,6 +183,68 @@ fn stable_revision(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
 }
 
+fn valid_expected_vfs_hostname(value: &str) -> bool {
+    let mut labels = value.split('.');
+    labels.next() == Some("filebelt-vfs")
+        && labels.next().is_some_and(valid_dns_label)
+        && labels.next() == Some("svc")
+        && labels.next().is_none()
+}
+
+fn required_expected_vfs_hostname(
+    value: Result<String, std::env::VarError>,
+) -> Result<String, ConfigError> {
+    let value = value.map_err(|_| ConfigError::Invalid)?;
+    valid_expected_vfs_hostname(&value)
+        .then_some(value)
+        .ok_or(ConfigError::Invalid)
+}
+
+fn valid_dns_label(value: &str) -> bool {
+    (1..=63).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
+fn endpoint_matches_expected_hostname(
+    encoded: &str,
+    endpoint: &reqwest::Url,
+    expected_hostname: &str,
+) -> bool {
+    // `Url` normalizes case, trailing dots, and IDNA. Compare both its domain
+    // variant and the literal authority host so an alternate spelling cannot
+    // enter the mTLS trust boundary.
+    endpoint.domain() == Some(expected_hostname)
+        && raw_authority_hostname(encoded) == Some(expected_hostname)
+}
+
+fn raw_authority_hostname(encoded: &str) -> Option<&str> {
+    let authority = encoded
+        .strip_prefix("https://")?
+        .split(['/', '?', '#'])
+        .next()?;
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    match authority.rsplit_once(':') {
+        Some((hostname, port)) if !hostname.is_empty() && !port.is_empty() => port
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then_some(hostname),
+        Some(_) => None,
+        None => Some(authority),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,16 +269,28 @@ mod tests {
 
     #[test]
     fn accepts_only_the_pinned_runtime_shape() {
-        valid().validate().expect("valid config");
+        valid()
+            .validate_against_expected_hostname("filebelt-vfs.filebelt.svc")
+            .expect("valid config");
         for invalid in ["Tenant", "tenant-", "-tenant", "tenant_one", ""] {
             let mut config = valid();
             config.tenant_slug = invalid.into();
-            assert!(config.validate().is_err(), "tenant slug {invalid:?}");
+            assert!(
+                config
+                    .validate_against_expected_hostname("filebelt-vfs.filebelt.svc")
+                    .is_err(),
+                "tenant slug {invalid:?}"
+            );
         }
         for invalid in ["example.com", "EXAMPLE_COM", ".EXAMPLE", "EXAMPLE."] {
             let mut config = valid();
             config.kerberos_realm = invalid.into();
-            assert!(config.validate().is_err(), "realm {invalid:?}");
+            assert!(
+                config
+                    .validate_against_expected_hostname("filebelt-vfs.filebelt.svc")
+                    .is_err(),
+                "realm {invalid:?}"
+            );
         }
     }
 
@@ -219,11 +304,71 @@ mod tests {
         ] {
             let mut config = valid();
             config.vfs_url = endpoint.into();
-            assert!(config.validate().is_err(), "endpoint {endpoint:?}");
+            assert!(
+                config
+                    .validate_against_expected_hostname("filebelt-vfs.filebelt.svc")
+                    .is_err(),
+                "endpoint {endpoint:?}"
+            );
         }
         let mut config = valid();
         config.tls.private_key_file = "/tmp/key.pem".into();
-        assert!(config.validate().is_err());
+        assert!(
+            config
+                .validate_against_expected_hostname("filebelt-vfs.filebelt.svc")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn vfs_endpoint_requires_the_exact_injected_service_hostname() {
+        let expected = "filebelt-vfs.filebelt.svc";
+        valid()
+            .validate_against_expected_hostname(expected)
+            .expect("exact service hostname");
+        for hostname in [
+            "filebelt-vfs",
+            "127.0.0.1",
+            "filebelt-vfs.filebelt.svc.",
+            "FILEBELT-VFS.filebelt.svc",
+            "filebelt-vfs.other.svc",
+            "xn--filebelt-vfs-9za.filebelt.svc",
+        ] {
+            let mut config = valid();
+            config.vfs_url = format!("https://{hostname}:8087/internal/v1/vfs/execute");
+            assert!(
+                config.validate_against_expected_hostname(expected).is_err(),
+                "endpoint hostname {hostname:?}"
+            );
+        }
+        for invalid in [
+            "filebelt-vfs",
+            "127.0.0.1",
+            "filebelt-vfs.filebelt.svc.",
+            "FILEBELT-VFS.filebelt.svc",
+            "filebelt-vfs.filebelt.cluster.local",
+        ] {
+            assert!(
+                !valid_expected_vfs_hostname(invalid),
+                "expected hostname {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn expected_vfs_hostname_environment_is_required_and_service_shaped() {
+        assert!(matches!(
+            required_expected_vfs_hostname(Err(std::env::VarError::NotPresent)),
+            Err(ConfigError::Invalid)
+        ));
+        assert_eq!(
+            required_expected_vfs_hostname(Ok("filebelt-vfs.filebelt.svc".into())).unwrap(),
+            "filebelt-vfs.filebelt.svc"
+        );
+        assert!(matches!(
+            required_expected_vfs_hostname(Ok("filebelt-vfs".into())),
+            Err(ConfigError::Invalid)
+        ));
     }
 
     #[test]

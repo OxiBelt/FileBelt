@@ -12,9 +12,9 @@ opt-ins and disabled by default; the controller creates bounded one-shot runner
 Pods. The chart does not deploy PostgreSQL, OIDC, Iggy, either egress gateway,
 certificate issuer, monitoring stack, or persistent volume. SMB, FTP/FTPS, and
 NFS are independent opt-ins and all default off. Any selected protocol renders
-VFS; only SMB or FTP/FTPS renders Headscale sync. NFS renders a single-active
-Ganesha/bridge/tailscaled StatefulSet and a NetworkPolicy-restricted ClusterIP
-Service on TCP 2049. Separately licensed adapter delivery remains gated on its
+VFS; only SMB or FTP/FTPS renders Headscale sync. NFS renders separate
+single-active tailnet relay and Ganesha/bridge backend StatefulSets with an
+exact NetworkPolicy-restricted TCP 2049 path between them. Separately licensed adapter delivery remains gated on its
 published image and protocol acceptance evidence.
 
 Operators provide:
@@ -75,8 +75,14 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
    Keep every protocol flag false unless that protocol's evidence is approved.
    For NFS, verify the exact `spiffe://filebelt/nfs-gateway/vfs` bridge
    certificate, Secret separation, static keytab, no-KDC egress policy,
-   single-active recovery claim, and automatic preStop drain before exposing
-   TCP 2049.
+   single-active recovery claim, and automatic preStop drain. Record the
+   already-created VFS Service ClusterIP in `mounts.vfs.clusterIP`, reserve a
+   distinct `mounts.nfs.backendClusterIP`, and verify that the bridge URL and
+   VFS certificate use exactly `filebelt-vfs.<namespace>.svc`. Inspect the
+   rendered split Pods: only `nfs-relay` may contain `tailscaled`, tailstate,
+   TUN, or tailnet auth; only the backend may contain the keytab, VFS client
+   key, recovery claim, or IPC sockets. Its policy must contain no DNS or
+   Headscale egress before exposing TCP 2049.
 8. While workloads remain quiesced, run the chart's `keys-audit` operation with
    all configured purpose public keysets projected. Require successful proof
    that every current generation is present and no public key bytes occur in
@@ -87,6 +93,17 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 
 Keep rendered output and Helm values protected. Secret bytes must not appear in
 values, ConfigMaps, command lines, logs, or retained CI artifacts.
+
+### Existing NFS preview cutover
+
+Upgrade an existing co-located NFS preview only through a fail-closed outage.
+Drain and fence gateway admission, set `deployment.quiesced=true`, and wait for
+the old Pod to terminate and detach its tailstate claim. Apply the new chart
+while both NFS StatefulSets remain at zero, confirm the recovery claim stays on
+the backend and tailstate moves to the relay, then unquiesce. Confirm both Pods
+are ready before exposing tailnet ingress; relay connections fail closed while
+the backend is unavailable. If any check fails, leave NFS disabled or quiesced;
+do not re-enable the previous co-located revision.
 
 ## First installation
 

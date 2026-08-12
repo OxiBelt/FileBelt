@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { NfsActiveMappingCard, NfsProposalConsentCard } from "./MountSettings.js";
+import { FormatMountSessionDetail, NfsActiveMappingCard, NfsProposalConsentCard } from "./MountSettings.js";
 import type { NfsMappingProposal, NfsPrincipalMapping } from "./nfs-target-http-client.js";
 
 const DriveId = "00000000-0000-4000-8000-000000000141";
@@ -37,7 +37,24 @@ const Mapping: NfsPrincipalMapping = {
   projected_uid: Proposal.projected_uid,
 };
 
+const NfsSession = {
+  absolute_expires_at: "2026-08-11T01:00:00Z",
+  close_reason: null,
+  created_at: "2026-08-11T00:00:00Z",
+  gateway_id: "nfs-gateway-0",
+  id: "00000000-0000-4000-8000-000000000147",
+  idle_expires_at: "2026-08-11T00:15:00Z",
+  last_activity_at: "2026-08-11T00:01:00Z",
+  protocol: "nfs",
+  source_address: "192.0.2.7",
+  state: "active",
+} as const;
+
 describe("NFS target approval controls", () => {
+  it("labels NFS session addresses as a transport or relay peer", () => {
+    expect(FormatMountSessionDetail(NfsSession)).toContain("NFS · transport/relay peer 192.0.2.7");
+  });
+
   it("shows every server-held consent field and gates approval on explicit review", () => {
     const Markup = renderToStaticMarkup(<NfsProposalConsentCard Busy={false} OnApprove={async () => undefined} OnDecline={async () => undefined} Proposal={Proposal} />);
 

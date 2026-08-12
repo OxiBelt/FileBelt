@@ -8,6 +8,7 @@ import argparse
 import errno
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 import platform
@@ -27,7 +28,8 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 REQUIRED_ADMIN_OPERATIONS = (
     "prepare",
     "attest",
-    "restart",
+    "relay-restart",
+    "backend-restart",
     "drain",
     "resume",
     "fence",
@@ -98,7 +100,14 @@ def load_configuration(path: Path) -> dict[str, Any]:
         "rootfsDigestFile",
         "rootfsDigest",
         "imageIndexDigest",
+        "relayImageDigest",
+        "tailscaledImageDigest",
         "releaseRevision",
+        "topologyGeneration",
+        "vfsClusterIP",
+        "backendClusterIP",
+        "tailstateClaim",
+        "recoveryClaim",
     )
     for key in required_strings:
         if not isinstance(configuration.get(key), str) or not configuration[key]:
@@ -117,11 +126,25 @@ def load_configuration(path: Path) -> dict[str, Any]:
         raise SystemExit("fixtureRelativePath must stay below the export")
     if re.fullmatch(r"[0-9a-f]{64}", configuration["fixtureSha256"]) is None:
         raise SystemExit("fixtureSha256 must be a lowercase SHA-256 value")
-    for key in ("rootfsDigest", "imageIndexDigest"):
+    for key in ("rootfsDigest", "imageIndexDigest", "relayImageDigest", "tailscaledImageDigest"):
         if DIGEST.fullmatch(configuration[key]) is None:
             raise SystemExit(f"{key} must be a lowercase sha256 digest")
     if re.fullmatch(r"[0-9a-f]{40}", configuration["releaseRevision"]) is None:
         raise SystemExit("releaseRevision must be a lowercase 40-character Git revision")
+    if re.fullmatch(r"[0-9a-f]{16}", configuration["topologyGeneration"]) is None:
+        raise SystemExit("topologyGeneration must be a lowercase 16-character digest")
+    for key in ("vfsClusterIP", "backendClusterIP"):
+        try:
+            ipaddress.ip_address(configuration[key])
+        except ValueError as error:
+            raise SystemExit(f"{key} must be a valid IP address") from error
+    if configuration["vfsClusterIP"] == configuration["backendClusterIP"]:
+        raise SystemExit("vfsClusterIP and backendClusterIP must be distinct")
+    for key in ("tailstateClaim", "recoveryClaim"):
+        if re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", configuration[key]) is None:
+            raise SystemExit(f"{key} must be a DNS label")
+    if configuration["tailstateClaim"] == configuration["recoveryClaim"]:
+        raise SystemExit("tailstateClaim and recoveryClaim must be distinct")
     timeout = configuration.get("fenceTimeoutSeconds", 300)
     if not isinstance(timeout, int) or not 30 <= timeout <= 300:
         raise SystemExit("fenceTimeoutSeconds must be an integer from 30 through 300")
@@ -228,7 +251,12 @@ def run_suite(
             check=True,
             timeout=300,
         )
-        if operation not in ("attest", "assert-clean") and (result.stdout or result.stderr):
+        if operation not in (
+            "attest",
+            "relay-restart",
+            "backend-restart",
+            "assert-clean",
+        ) and (result.stdout or result.stderr):
             raise RuntimeError(f"admin driver {operation} emitted forbidden output")
         if result.stderr:
             raise RuntimeError(f"admin driver {operation} emitted forbidden stderr")
@@ -248,6 +276,20 @@ def run_suite(
             "ganeshaImageDigest": configuration["imageIndexDigest"],
             "ganeshaRevision": configuration["releaseRevision"],
             "ipcCarriesSecrets": False,
+            "relayHasAuthoritySecrets": False,
+            "relayHasTailstate": False,
+            "relayHasTun": False,
+            "relayImageDigest": configuration["relayImageDigest"],
+            "relayRevision": configuration["releaseRevision"],
+            "tailscaledHasTailstate": True,
+            "tailscaledImageDigest": configuration["tailscaledImageDigest"],
+            "topologyGeneration": configuration["topologyGeneration"],
+            "vfsClusterIP": configuration["vfsClusterIP"],
+            "backendClusterIP": configuration["backendClusterIP"],
+            "tailstateClaim": configuration["tailstateClaim"],
+            "recoveryClaim": configuration["recoveryClaim"],
+            "backendHasDnsEgress": False,
+            "backendHasHeadscaleEgress": False,
             "samePinnedImage": True,
         }
         if attestation != expected_attestation:
@@ -430,11 +472,46 @@ def run_suite(
             fcntl.lockf(handle.fileno(), fcntl.LOCK_EX)
             handle.write(payload)
             os.fsync(handle.fileno())
-            admin("restart")
+            relay_restart = json.loads(admin("relay-restart").stdout)
+            expected_relay_restart = {
+                "activeTransferPreserved": True,
+                "idleConnectionRecovered": True,
+                "gatewayEpochStable": True,
+                "relayPeerChanged": True,
+                "sessionChanged": True,
+                "twoClientGssBindingsDistinct": True,
+                "twoClientRelayPeerEqual": True,
+            }
+            if relay_restart != expected_relay_restart:
+                raise RuntimeError("admin driver relay restart evidence is incomplete")
+            cases["relay_restart_active"] = True
+            cases["relay_restart_idle"] = True
+            cases["relay_restart_session_fence"] = True
+            cases["relay_restart_epoch_stable"] = True
+            cases["two_clients_shared_relay_peer"] = True
+            backend_restart = json.loads(admin("backend-restart").stdout)
+            if backend_restart != {
+                "gatewayEpochAdvanced": True,
+                "recoveryClaimRetained": True,
+                "tailstateClaimRetained": True,
+            }:
+                raise RuntimeError("admin driver backend restart evidence is incomplete")
             handle.seek(0)
-            cases["restart_reclaim"] = handle.read() == payload
+            cases["backend_restart_reclaim"] = handle.read() == payload
+            cases["backend_restart_epoch_advance"] = True
+            cases["split_claims_retained"] = True
             fcntl.lockf(handle.fileno(), fcntl.LOCK_UN)
-        require_pass(cases, "restart_reclaim")
+        for case in (
+            "relay_restart_active",
+            "relay_restart_idle",
+            "relay_restart_session_fence",
+            "relay_restart_epoch_stable",
+            "two_clients_shared_relay_peer",
+            "backend_restart_reclaim",
+            "backend_restart_epoch_advance",
+            "split_claims_retained",
+        ):
+            require_pass(cases, case)
 
         unmount(mountpoint)
         mounted = False

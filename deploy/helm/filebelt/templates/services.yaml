@@ -74,6 +74,7 @@ spec:
 {{- if .Values.collaboration.enabled }}{{- $metricsComponents = append $metricsComponents "collaboration" -}}{{- end }}
 {{- if .Values.mcp.enabled }}{{- $metricsComponents = append $metricsComponents "mcp-broker" -}}{{- end }}
 {{- if .Values.mcp.runners.enabled }}{{- $metricsComponents = append $metricsComponents "controller" -}}{{- end }}
+{{- if .Values.mounts.nfs.enabled }}{{- $metricsComponents = append $metricsComponents "nfs-relay" -}}{{- end }}
 {{- range $component := $metricsComponents }}
 apiVersion: v1
 kind: Service

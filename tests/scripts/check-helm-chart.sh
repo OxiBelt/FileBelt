@@ -704,7 +704,10 @@ assert_not_contains "${temporary}/mounts.yaml" 'TS_USERSPACE'
 nfs_values=(
   --set mounts.nfs.enabled=true
   --set-string images.filebelt-nfs-gateway.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+  --set-string images.filebelt-nfs-relay.digest=sha256:3333333333333333333333333333333333333333333333333333333333333333
   --set-string images.tailscaled.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
+  --set-string mounts.vfs.clusterIP=10.96.20.10
+  --set-string mounts.nfs.backendClusterIP=10.96.20.11
   --set-string mounts.nfs.realm=EXAMPLE.TEST
   --set-string mounts.nfs.idmapDomain=example.test
   --set-string mounts.nfs.tailstateClaim=filebelt-nfs-tailstate
@@ -724,15 +727,19 @@ helm template phase8-nfs "${chart}" --kube-version 1.36.0 \
   "${nfs_values[@]}" >"${temporary}/nfs.yaml"
 assert_rendered_toml "${temporary}/nfs.yaml" filebelt.toml
 assert_count "${temporary}/nfs.yaml" '^kind: Deployment$' 5
-assert_count "${temporary}/nfs.yaml" '^kind: StatefulSet$' 1
-assert_count "${temporary}/nfs.yaml" '^kind: PodDisruptionBudget$' 5
-assert_count "${temporary}/nfs.yaml" '^kind: NetworkPolicy$' 13
+assert_count "${temporary}/nfs.yaml" '^kind: StatefulSet$' 2
+assert_count "${temporary}/nfs.yaml" '^kind: PodDisruptionBudget$' 6
+assert_count "${temporary}/nfs.yaml" '^kind: NetworkPolicy$' 15
 assert_count "${temporary}/nfs.yaml" '^          image: ghcr.io/oxibelt/filebelt-nfs-gateway@sha256:1111111111111111111111111111111111111111111111111111111111111111$' 2
 assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'replicas: 1'
 assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'filebelt.dev/gateway-uri-san: "spiffe://filebelt/nfs-gateway/vfs"'
 assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'supplementalGroups: [10001, 10003]'
 assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'claimName: filebelt-nfs-recovery'
-assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'claimName: filebelt-nfs-tailstate'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'claimName: filebelt-nfs-tailstate'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'name: tailscaled'
+assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'hostPath: {path: /dev/net/tun, type: CharDevice}'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'filebelt.dev/nfs-zone: backend'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'hostnames: ["filebelt-vfs.default.svc"]'
 assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'KRB5_KTNAME'
 assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway 'nfs-handle-keyring'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'name: ganesha-keytab'
@@ -744,13 +751,27 @@ assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gatew
 assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'add: ["NET_BIND_SERVICE"]'
 assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway ganesha 'bridge-vfs-client-tls'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'name: bridge-vfs-client-tls'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'FILEBELT_NFS_EXPECTED_VFS_HOSTNAME'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge '/contract/bridge-drain'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'drop: ["ALL"]'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'runAsUser: 10001'
 assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'runAsGroup: 10001'
 assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'ganesha-keytab'
 assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway bridge 'name: recovery'
-assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-gateway tailscaled 'name: bridge-socket'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay 'filebelt.dev/nfs-zone: relay'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay 'claimName: filebelt-nfs-tailstate'
+assert_document_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay 'hostPath: {path: /dev/net/tun, type: CharDevice}'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay 'ghcr.io/oxibelt/filebelt-nfs-relay@sha256:3333333333333333333333333333333333333333333333333333333333333333'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay '10.96.20.11:2049'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay '0.0.0.0:9090'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay 'TS_AUTHKEY'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay 'claimName:'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay '/dev/net/tun'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay 'ganesha-keytab'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay relay 'bridge-vfs-client-tls'
+assert_container_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay tailscaled 'bridge-vfs-client-tls'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay tailscaled 'TS_HOSTNAME'
+assert_container_contains "${temporary}/nfs.yaml" StatefulSet filebelt-nfs-relay tailscaled 'filebelt-nfs-gateway-0'
 assert_document_contains "${temporary}/nfs.yaml" Deployment filebelt-vfs 'mountPath: /run/secrets/nfs-handle-keyring.json'
 assert_document_not_contains "${temporary}/nfs.yaml" Deployment filebelt-headscale-sync 'name: filebelt-headscale-sync'
 assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-smb-gateway 'name: filebelt-smb-gateway'
@@ -758,11 +779,22 @@ assert_document_not_contains "${temporary}/nfs.yaml" StatefulSet filebelt-ftp-ft
 assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'type: ClusterIP'
 assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'port: 2049'
 assert_document_not_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'clusterIP: None'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-gateway 'filebelt.dev/nfs-zone: relay'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-backend 'clusterIP: "10.96.20.11"'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-nfs-backend 'filebelt.dev/nfs-zone: backend'
+assert_document_contains "${temporary}/nfs.yaml" Service filebelt-vfs 'clusterIP: "10.96.20.10"'
 assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-ingress 'port: nfs'
-assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 443'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-ingress 'filebelt.dev/nfs-zone: relay'
 assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'app.kubernetes.io/component: vfs'
+assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 443'
+assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 53'
 assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 88'
 assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-gateway-egress 'port: 464'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-relay-ingress 'kubernetes.io/metadata.name: tailnet'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-relay-egress 'port: 443'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-relay-egress 'port: 53'
+assert_document_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-relay-egress 'filebelt.dev/nfs-zone: backend'
+assert_document_not_contains "${temporary}/nfs.yaml" NetworkPolicy filebelt-nfs-relay-egress 'app.kubernetes.io/component: vfs'
 assert_not_contains "${temporary}/nfs.yaml" 'kind: PersistentVolumeClaim'
 python3 - "${temporary}/nfs.yaml" <<'PY'
 import sys
@@ -911,6 +943,16 @@ expect_failure disabled_smb_previous_identity \
 expect_failure disabled_nfs_authority --set-string mounts.nfs.realm=EXAMPLE.TEST
 expect_failure nfs_without_runtime_contract --set mounts.nfs.enabled=true
 expect_failure nfs_kdc_egress "${nfs_values[@]}" --set networkPolicy.headscale.port=88
+expect_failure nfs_without_vfs_cluster_ip "${nfs_values[@]}" --set-string mounts.vfs.clusterIP=
+expect_failure nfs_without_backend_cluster_ip "${nfs_values[@]}" --set-string mounts.nfs.backendClusterIP=
+expect_failure nfs_with_shared_service_ip "${nfs_values[@]}" \
+  --set-string mounts.nfs.backendClusterIP=10.96.20.10
+expect_failure nfs_without_relay_image "${nfs_values[@]}" \
+  --set-string images.filebelt-nfs-relay.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000
+expect_failure nfs_relay_per_source_exceeds_total "${nfs_values[@]}" \
+  --set mounts.nfs.relay.maxConnections=32
+expect_failure nfs_relay_drain_exceeds_grace "${nfs_values[@]}" \
+  --set mounts.nfs.terminationGracePeriodSeconds=180
 expect_failure runners_without_kubernetes_api \
   --set mcp.enabled=true \
   --set mcp.runners.enabled=true \

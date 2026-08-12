@@ -120,6 +120,9 @@ metadata:
 {{ include "filebelt.componentLabels" (dict "root" $root "component" "vfs") | indent 4 }}
 spec:
   type: ClusterIP
+  {{- if $root.Values.mounts.vfs.clusterIP }}
+  clusterIP: {{ $root.Values.mounts.vfs.clusterIP | quote }}
+  {{- end }}
   selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
   ports: [{name: vfs, port: 8087, targetPort: vfs, protocol: TCP}]
 ---
@@ -234,6 +237,8 @@ spec:
 {{- end }}
 {{- if .Values.mounts.nfs.enabled }}
 {{- $nfsImage := include "filebelt.image" (dict "root" . "role" "filebelt-nfs-gateway") -}}
+{{- $relayImage := include "filebelt.image" (dict "root" . "role" "filebelt-nfs-relay") -}}
+{{- $topologyGeneration := include "filebelt.nfsTopologyGeneration" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -251,16 +256,21 @@ spec:
     metadata:
       labels:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-gateway") | indent 8 }}
+        filebelt.dev/nfs-zone: backend
+        filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}
       annotations:
         filebelt.dev/adapter-license: {{ (index .Values.images "filebelt-nfs-gateway").license | quote }}
         filebelt.dev/adapter-source: {{ (index .Values.images "filebelt-nfs-gateway").source | quote }}
         filebelt.dev/gateway-uri-san: "spiffe://filebelt/nfs-gateway/vfs"
-        checksum/secrets: {{ printf "%s:%s:%s" .Values.secrets.nfsGaneshaKeytab.generation .Values.secrets.nfsBridgeVfsClientTls.generation .Values.mounts.tailnet.authKeySecret.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s" .Values.secrets.nfsGaneshaKeytab.generation .Values.secrets.nfsBridgeVfsClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-nfs-gateway
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: {{ .Values.mounts.nfs.terminationGracePeriodSeconds }}
+      hostAliases:
+        - ip: {{ .Values.mounts.vfs.clusterIP | quote }}
+          hostnames: [{{ include "filebelt.nfsVfsHostname" . | quote }}]
       securityContext:
 {{ include "filebelt.nfsPodSecurityContext" . | indent 8 }}
       containers:
@@ -317,6 +327,8 @@ spec:
 {{ toYaml .Values.mounts.nfs.bridge.command | indent 12 }}
           args:
 {{ toYaml .Values.mounts.nfs.bridge.args | indent 12 }}
+          env:
+            - {name: FILEBELT_NFS_EXPECTED_VFS_HOSTNAME, value: {{ include "filebelt.nfsVfsHostname" . | quote }}}
           lifecycle:
             preStop:
               exec:
@@ -351,21 +363,6 @@ spec:
             - {name: bridge-vfs-client-tls, mountPath: /run/secrets/nfs-bridge-vfs-client-tls, readOnly: true}
             - {name: bridge-socket, mountPath: /run/filebelt-nfs}
             - {name: bridge-tmp, mountPath: /tmp}
-        - name: tailscaled
-          image: {{ $tailscaledImage }}
-          imagePullPolicy: IfNotPresent
-          env:
-            - {name: TS_AUTHKEY, valueFrom: {secretKeyRef: {name: {{ .Values.mounts.tailnet.authKeySecret.name }}, key: {{ .Values.mounts.tailnet.authKeySecret.key }}}}}
-            - {name: TS_LOGIN_SERVER, value: {{ .Values.mounts.tailnet.address | quote }}}
-            - {name: TS_STATE_DIR, value: /var/lib/tailscale}
-          securityContext:
-{{ include "filebelt.tailscaledSecurityContext" . | indent 12 }}
-          resources:
-{{ toYaml .Values.mounts.nfs.tailscaled.resources | indent 12 }}
-          volumeMounts:
-            - {name: tailstate, mountPath: {{ $tailstateMount }}}
-            - {name: tun, mountPath: /dev/net/tun}
-            - {name: tailscale-tmp, mountPath: /tmp}
       volumes:
         - name: ganesha-config
           configMap: {name: {{ .Values.mounts.nfs.ganesha.configMap.name }}, defaultMode: 0444, items: [{key: {{ .Values.mounts.nfs.ganesha.configMap.key }}, path: ganesha.conf}]}
@@ -377,13 +374,95 @@ spec:
           secret: {secretName: {{ .Values.secrets.nfsBridgeVfsClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.nfsBridgeVfsClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.nfsBridgeVfsClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.nfsBridgeVfsClientTls.caKey }}, path: server-ca.crt}]}
         - name: recovery
           persistentVolumeClaim: {claimName: {{ .Values.mounts.nfs.recoveryClaim }}}
+        - {name: bridge-socket, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - {name: ganesha-tmp, emptyDir: {sizeLimit: 64Mi}}
+        - {name: bridge-tmp, emptyDir: {sizeLimit: 32Mi}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-relay
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-relay") | indent 4 }}
+spec:
+  serviceName: {{ include "filebelt.name" . }}-nfs-gateway
+  replicas: {{ ternary 0 1 .Values.deployment.quiesced }}
+  podManagementPolicy: OrderedReady
+  updateStrategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: nfs-relay}
+  template:
+    metadata:
+      labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-relay") | indent 8 }}
+        filebelt.dev/nfs-zone: relay
+        filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}
+      annotations:
+        checksum/tailnet-auth: {{ .Values.mounts.tailnet.authKeySecret.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ include "filebelt.name" . }}-nfs-relay
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      shareProcessNamespace: false
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      terminationGracePeriodSeconds: {{ .Values.mounts.nfs.terminationGracePeriodSeconds }}
+      securityContext:
+{{ include "filebelt.podSecurityContext" . | indent 8 }}
+      containers:
+        - name: relay
+          image: {{ $relayImage }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --listen-address
+            - 0.0.0.0:2049
+            - --backend-address
+            - {{ include "filebelt.nfsBackendAddress" . | quote }}
+            - --operations-address
+            - 0.0.0.0:9090
+            - --max-connections
+            - {{ .Values.mounts.nfs.relay.maxConnections | quote }}
+            - --max-connections-per-source
+            - {{ .Values.mounts.nfs.relay.maxConnectionsPerSource | quote }}
+            - --connect-timeout-seconds
+            - {{ .Values.mounts.nfs.relay.connectTimeoutSeconds | quote }}
+            - --inactivity-timeout-seconds
+            - {{ .Values.mounts.nfs.relay.inactivityTimeoutSeconds | quote }}
+            - --drain-timeout-seconds
+            - {{ .Values.mounts.nfs.relay.drainTimeoutSeconds | quote }}
+          ports:
+            - {name: nfs, containerPort: 2049, protocol: TCP}
+            - {name: operations, containerPort: 9090, protocol: TCP}
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "filebelt.containerSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.mounts.nfs.relay.resources | indent 12 }}
+        - name: tailscaled
+          image: {{ $tailscaledImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TS_AUTHKEY, valueFrom: {secretKeyRef: {name: {{ .Values.mounts.tailnet.authKeySecret.name }}, key: {{ .Values.mounts.tailnet.authKeySecret.key }}}}}
+            - {name: TS_HOSTNAME, value: {{ printf "%s-nfs-gateway-0" (include "filebelt.name" .) | quote }}}
+            - {name: TS_LOGIN_SERVER, value: {{ .Values.mounts.tailnet.address | quote }}}
+            - {name: TS_STATE_DIR, value: /var/lib/tailscale}
+          securityContext:
+{{ include "filebelt.tailscaledSecurityContext" . | indent 12 }}
+          resources:
+{{ toYaml .Values.mounts.nfs.tailscaled.resources | indent 12 }}
+          volumeMounts:
+            - {name: tailstate, mountPath: {{ $tailstateMount }}}
+            - {name: tun, mountPath: /dev/net/tun}
+            - {name: tailscale-tmp, mountPath: /tmp}
+      volumes:
         - name: tailstate
           persistentVolumeClaim: {claimName: {{ .Values.mounts.nfs.tailstateClaim }}}
         - name: tun
           hostPath: {path: /dev/net/tun, type: CharDevice}
-        - {name: bridge-socket, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
-        - {name: ganesha-tmp, emptyDir: {sizeLimit: 64Mi}}
-        - {name: bridge-tmp, emptyDir: {sizeLimit: 32Mi}}
         - {name: tailscale-tmp, emptyDir: {sizeLimit: 32Mi}}
 ---
 apiVersion: v1
@@ -394,7 +473,19 @@ metadata:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-gateway") | indent 4 }}
 spec:
   type: ClusterIP
-  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: nfs-gateway}
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: relay, filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}}
+  ports: [{name: nfs, port: 2049, targetPort: nfs, protocol: TCP}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-backend
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-gateway") | indent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: {{ .Values.mounts.nfs.backendClusterIP | quote }}
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: backend, filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}}
   ports: [{name: nfs, port: 2049, targetPort: nfs, protocol: TCP}]
 ---
 {{- end }}

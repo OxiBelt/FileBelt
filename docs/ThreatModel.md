@@ -99,6 +99,13 @@
   process identities, exact `0660` socket ownership, connection credentials,
   and packet credentials prevent any differently credentialed Pod process from
   using the bridge or export-control channels as a deputy.
+- NFS tailnet control is isolated from NFS/VFS authority material at the Pod
+  boundary. Only the relay Pod receives DNS, exact Headscale egress, tailnet
+  auth, tailstate, TUN, and `NET_ADMIN`; only the backend Pod receives the
+  keytab, bridge client key, recovery state, and Unix IPC. Backend egress is
+  restricted to VFS over a pinned Service address resolved through an exact
+  `/etc/hosts` alias. The byte relay cannot assert a client address: Ganesha's
+  observed relay peer is non-authoritative and PROXY protocol is rejected.
 - Hostile media cannot cause Internet/device access, parser widening, payload
   disclosure, unbounded resource consumption, or publication of partial
   output. The controller, job wrapper, FFmpeg process, I/O service, and
@@ -339,6 +346,12 @@ interval. The Kubernetes recovery procedure proves a coordinated quiesced
 restore into fresh targets, but it does not claim production availability,
 online backup, PITR, HA, or an RPO/RTO. Standard NetworkPolicy cannot identify
 an Internet FQDN, so OIDC and remote MCP depend on their operator gateways.
+A compromised NFS backend is contained from DNS and Headscale but is not an
+exfiltration-proof sandbox: Ganesha can still misuse an established cooperating
+NFS connection, and the shared adapter image controls both Ganesha and bridge
+code. The relay Pod also retains Tailscale device authority. End-to-end
+`krb5p`, exact Pod policies, image qualification, and current VFS authorization
+reduce but do not eliminate those risks.
 A compromised controller can replace eligible Pods and Secrets only in the
 exclusive runner namespace; exact RBAC, offline catalog verification, short Pod lifetime,
 and separate broker/gateway authentication limit but do not eliminate that

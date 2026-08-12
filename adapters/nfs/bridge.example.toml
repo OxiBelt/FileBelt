@@ -5,6 +5,8 @@ tenant_slug = "example-tenant"
 kerberos_realm = "EXAMPLE.COM"
 release_revision = "replace-with-filebelt-release-revision"
 vfs_url = "https://filebelt-vfs.filebelt.svc:8087/internal/v1/vfs/execute"
+# The deployment injects FILEBELT_NFS_EXPECTED_VFS_HOSTNAME with this exact
+# service name. The bridge rejects a missing value and non-literal URL hosts.
 ipc_socket = "/run/filebelt-nfs/bridge.sock"
 ganesha_control_socket = "/run/filebelt-nfs/ganesha-control.sock"
 state_file = "/run/filebelt-nfs/gateway.state"

@@ -3058,11 +3058,12 @@ components:
           $ref: "#/components/schemas/UuidV4"
         protocol:
           type: string
-          enum: [smb, ftps]
+          enum: [smb, ftps, nfs]
         gateway_id:
           type: string
         source_address:
           type: string
+          description: Immediate transport peer address. For relayed NFS this is the relay peer, not an authoritative client identity.
         state:
           type: string
           enum: [active, draining, closed, revoked]

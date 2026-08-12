@@ -509,6 +509,15 @@ Both `0660` sockets are assigned to dedicated group `10003` and require exact
 socket metadata, `SO_PEERCRED`, and matching `SCM_CREDENTIALS`; group membership
 alone never authenticates a caller.
 
+`NfsAuthenticateRequest.source_address` is the immediate TCP peer observed by
+Ganesha. In the supported split topology it is the relay Pod address, not the
+tailnet client's address. The field remains part of conservative session reuse
+fencing, so a relay reschedule creates a fresh FileBelt session. It is never an
+identity, authorization, rate-limit, or end-client audit claim; Kerberos
+principal mapping, the internal session principal, generations, and Virtual
+ACL remain authoritative. The relay is byte-transparent and PROXY protocol is
+prohibited.
+
 Create, mkdir, and symlink carry an optional mode containing only `0777`
 permission bits; omission selects `0644`, `0755`, and `0777` respectively,
 while Core always derives UID/GID from the authenticated NFS projection. Lock

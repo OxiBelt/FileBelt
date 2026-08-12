@@ -8,6 +8,11 @@ on:
       - ".github/workflows/nfs-qualification.yml"
       - "tests/nfs/qualification/**"
       - "tests/scripts/*nfs*"
+      - "source/apps/filebelt-nfs-relay/**"
+      - "adapters/nfs/**"
+      - "deploy/helm/filebelt/**"
+      - "tests/scripts/run-kubernetes-network-policy.sh"
+      - "tests/scripts/run-kubernetes-kind-compatibility.sh"
       - "docs/operations/nfs-qualification.md"
   workflow_dispatch:
     inputs:

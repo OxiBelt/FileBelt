@@ -49,7 +49,10 @@ for runner in \
 done
 for case_name in \
   authenticate_krb5p list read write commit rename xattr acl sparse \
-  restart_reclaim drain fence stale_handle reject_auth_sys \
+  relay_restart_active relay_restart_idle relay_restart_session_fence \
+  relay_restart_epoch_stable two_clients_shared_relay_peer \
+  backend_restart_reclaim backend_restart_epoch_advance split_claims_retained \
+  drain fence stale_handle reject_auth_sys \
   reject_root_principal reject_cross_realm_principal \
   replay_session_revocation replay_credential_revocation \
   replay_mapping_revocation replay_policy_revocation \
@@ -58,6 +61,13 @@ for case_name in \
   replay_changed_list_child_acl replay_open_close_idempotency \
   replay_end_session_narrow_ack; do
   assert_contains "${repo_root}/tests/nfs/qualification/required-cases.json" "\"${case_name}\""
+done
+
+for operation in relay-restart backend-restart; do
+  assert_contains "${client}" "\"${operation}\""
+done
+for cni in calico cilium; do
+  assert_contains "${validator}" "\"${cni}\""
 done
 
 assert_contains "${native}" 'filebelt.dev.nfs-ganesha'

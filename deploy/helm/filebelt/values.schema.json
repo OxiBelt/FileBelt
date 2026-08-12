@@ -27,7 +27,7 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "filebelt-nfs-gateway", "tailscaled"],
+      "required": ["filebelt-api", "filebelt-worker-io", "filebelt-worker-maintenance", "filebelt-tools", "filebelt-web", "filebelt-collaboration", "filebelt-mcp-broker", "filebelt-controller", "filebelt-mcp-runner", "filebelt-vfs", "filebelt-headscale-sync", "filebelt-document", "filebelt-smb-gateway", "filebelt-ftp-ftps-gateway", "filebelt-nfs-gateway", "filebelt-nfs-relay", "tailscaled"],
       "properties": {
         "filebelt-api": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-api"}}}]},
         "filebelt-worker-io": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-worker-io"}}}]},
@@ -44,6 +44,7 @@
         "filebelt-smb-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-smb-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
         "filebelt-ftp-ftps-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-ftp-ftps-gateway"}, "license": {"const": "GPL-3.0-or-later"}}}]},
         "filebelt-nfs-gateway": {"allOf": [{"$ref": "#/definitions/adapterImage"}, {"properties": {"repository": {"const": "oxibelt/filebelt-nfs-gateway"}, "license": {"const": "LGPL-3.0-or-later"}}}]},
+        "filebelt-nfs-relay": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "oxibelt/filebelt-nfs-relay"}}}]},
         "tailscaled": {"allOf": [{"$ref": "#/definitions/image"}, {"properties": {"repository": {"const": "tailscale/tailscale"}}}]}
       }
     },
@@ -227,13 +228,13 @@
       "properties": {
         "tailnet": {"type": "object", "additionalProperties": false, "required": ["kernelNetworking", "address", "authKeySecret"], "properties": {"kernelNetworking": {"const": true, "description": "Direct tailnet listeners require kernel networking; userspace mode needs a separately designed proxy."}, "address": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "authKeySecret": {"$ref": "#/definitions/singleKeySecret"}}},
         "headscale": {"type": "object", "additionalProperties": false, "required": ["apiUrl", "oidcIssuer", "syncSeconds"], "properties": {"apiUrl": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "oidcIssuer": {"type": "string", "pattern": "^https://", "minLength": 9, "maxLength": 253}, "syncSeconds": {"type": "integer", "minimum": 5, "maximum": 300}}},
-        "vfs": {"$ref": "#/definitions/mountDeployment"},
+        "vfs": {"$ref": "#/definitions/vfsMountDeployment"},
         "headscaleSync": {"$ref": "#/definitions/mountDeployment"},
         "smb": {"$ref": "#/definitions/tailnetStatefulSet"},
         "ftpFtps": {"type": "object", "additionalProperties": false, "required": ["enabled", "previousGatewayUriSan", "tailstateClaim", "resources", "passivePorts"], "properties": {"enabled": {"type": "boolean"}, "previousGatewayUriSan": {"$ref": "#/definitions/optionalSpiffeUri"}, "tailstateClaim": {"$ref": "#/definitions/dnsLabel"}, "resources": {"$ref": "#/definitions/resources"}, "passivePorts": {"type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": {"type": "integer", "minimum": 1024, "maximum": 65535}}}},
         "nfs": {
           "type": "object", "additionalProperties": false,
-          "required": ["enabled", "previousGatewayUriSan", "realm", "idmapDomain", "handleKeyGeneration", "graceSeconds", "tailstateClaim", "recoveryClaim", "terminationGracePeriodSeconds", "ganesha", "bridge", "tailscaled"],
+          "required": ["enabled", "previousGatewayUriSan", "realm", "idmapDomain", "handleKeyGeneration", "graceSeconds", "tailstateClaim", "recoveryClaim", "backendClusterIP", "terminationGracePeriodSeconds", "ganesha", "bridge", "tailscaled", "relay"],
           "properties": {
             "enabled": {"type": "boolean"},
             "previousGatewayUriSan": {"$ref": "#/definitions/optionalSpiffeUri"},
@@ -243,10 +244,23 @@
             "graceSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
             "tailstateClaim": {"$ref": "#/definitions/optionalDnsLabel"},
             "recoveryClaim": {"$ref": "#/definitions/optionalDnsLabel"},
-            "terminationGracePeriodSeconds": {"type": "integer", "minimum": 120, "maximum": 600},
+            "backendClusterIP": {"$ref": "#/definitions/optionalIpAddress"},
+            "terminationGracePeriodSeconds": {"type": "integer", "minimum": 60, "maximum": 600},
             "ganesha": {"$ref": "#/definitions/nfsProcess"},
             "bridge": {"$ref": "#/definitions/nfsProcess"},
-            "tailscaled": {"type": "object", "additionalProperties": false, "required": ["resources"], "properties": {"resources": {"$ref": "#/definitions/resources"}}}
+            "tailscaled": {"type": "object", "additionalProperties": false, "required": ["resources"], "properties": {"resources": {"$ref": "#/definitions/resources"}}},
+            "relay": {
+              "type": "object", "additionalProperties": false,
+              "required": ["maxConnections", "maxConnectionsPerSource", "connectTimeoutSeconds", "inactivityTimeoutSeconds", "drainTimeoutSeconds", "resources"],
+              "properties": {
+                "maxConnections": {"type": "integer", "minimum": 1, "maximum": 4096},
+                "maxConnectionsPerSource": {"type": "integer", "minimum": 1, "maximum": 256},
+                "connectTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 30},
+                "inactivityTimeoutSeconds": {"type": "integer", "minimum": 120, "maximum": 3600},
+                "drainTimeoutSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
+                "resources": {"$ref": "#/definitions/resources"}
+              }
+            }
           }
         }
       }
@@ -347,6 +361,7 @@
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "dnsLabel": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"},
     "optionalDnsLabel": {"type": "string", "maxLength": 63, "pattern": "^(?:|[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)$"},
+    "optionalIpAddress": {"type": "string", "maxLength": 45, "pattern": "^(?:|(?:[0-9]{1,3}\\.){3}[0-9]{1,3}|[0-9A-Fa-f:]+)$"},
     "optionalSpiffeUri": {"type": "string", "maxLength": 512, "pattern": "^(?:|spiffe://[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?/[^?#]+)$"},
     "image": {
       "type": "object", "additionalProperties": false, "required": ["repository", "registryMirror", "digest"],
@@ -380,6 +395,10 @@
     "mountDeployment": {
       "type": "object", "additionalProperties": false, "required": ["replicas", "resources"],
       "properties": {"replicas": {"type": "integer", "minimum": 1, "maximum": 10}, "resources": {"$ref": "#/definitions/resources"}}
+    },
+    "vfsMountDeployment": {
+      "type": "object", "additionalProperties": false, "required": ["clusterIP", "replicas", "resources"],
+      "properties": {"clusterIP": {"$ref": "#/definitions/optionalIpAddress"}, "replicas": {"type": "integer", "minimum": 1, "maximum": 10}, "resources": {"$ref": "#/definitions/resources"}}
     },
     "tailnetStatefulSet": {
       "type": "object", "additionalProperties": false, "required": ["enabled", "previousGatewayUriSan", "tailstateClaim", "resources"],

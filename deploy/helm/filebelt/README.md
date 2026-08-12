@@ -30,8 +30,10 @@ Mount protocols are independently disabled by default. Enabling any of
 VFS. SMB or FTP/FTPS additionally renders Headscale sync and the selected
 gateway StatefulSet; each selected gateway has tailscaled and a distinct
 operator-provided RWO tailstate claim. NFS does not render Headscale sync. It
-renders one single-active StatefulSet with Ganesha, its FileBelt bridge, and
-tailscaled, plus a NetworkPolicy-restricted ClusterIP Service on TCP 2049. VFS
+instead renders one single-active tailnet StatefulSet with `tailscaled` and the
+Apache byte relay, plus one single-active backend StatefulSet with Ganesha and
+its FileBelt bridge. NetworkPolicy admits TCP 2049 only across the exact
+tailnet-to-relay-to-backend path. VFS
 and Headscale sync never receive tailscaled, TUN, tailstate, or payload mounts.
 The bridge runs as fixed `10001:10001`, Ganesha as fixed `10002:10002`, and the
 Pod receives supplemental IPC group `10003`; only those two containers mount
@@ -39,13 +41,23 @@ the Unix socket volume. The group permits access to exact `0660` sockets;
 direction-specific process and packet credentials provide authentication.
 
 The NFS topology fails closed until the operator supplies published non-zero
-NFS and tailscaled image digests, exact realm and idmap values, distinct
-tailstate and recovery claims, separate Ganesha and bridge ConfigMaps, and
+NFS gateway, Apache relay, and tailscaled image digests, exact realm and idmap
+values, pinned VFS and backend ClusterIPs, distinct tailstate and recovery
+claims, separate Ganesha and bridge ConfigMaps, and
 shell-free command, health, and automatic preStop-drain argv matching the
 published adapter image ABI. The current repository does not publish that ABI
 image, so the chart does not invent executable paths or credentials. SMB and
 FTP/FTPS remain preview-only until their separately licensed adapter images and
 protocol acceptance evidence are qualified.
+
+NFS renders separate backend and relay StatefulSets. The backend retains the
+existing immutable `nfs-gateway` component selector but carries
+`filebelt.dev/nfs-zone: backend`; only it mounts recovery, keytab, VFS client
+TLS, and IPC. The `nfs-relay` Pod alone mounts tailstate and TUN and contains
+`tailscaled`. The Apache relay container receives none of those mounts or
+environment values. The backend resolves only
+`filebelt-vfs.<namespace>.svc` through the pinned `/etc/hosts` alias and has
+VFS-only egress; DNS and Headscale exist only on the relay policy.
 
 It never renders an HPA, Secret, PVC, dependency fixture, media
 controller, cluster-scoped RBAC, ClusterRole, or ClusterRoleBinding. The API,
@@ -168,7 +180,7 @@ contents change; the relevant Deployment then performs a controlled rollout.
 | `headscaleApiToken` and `headscaleServerCa` | `token` and `ca.crt` | Headscale synchronization only |
 | `nfsGaneshaKeytab` | `ganesha.keytab` | Ganesha only; static keytab, with no KDC NetworkPolicy path |
 | `nfsBridgeVfsClientTls` | `tls.crt`, `tls.key`, `server-ca.crt` | NFS bridge only; certificate URI SAN is exactly `spiffe://filebelt/nfs-gateway/vfs` |
-| `nfsHandleKeyring` | `keyring.json` | VFS only; never projected into the NFS gateway Pod |
+| `nfsHandleKeyring` | `keyring.json` | VFS only; never projected into either NFS Pod |
 
 Secret names are not rollouts by themselves. Generations make an in-place
 Secret rotation explicit and auditable. Rotate backend certificates by first
@@ -202,8 +214,10 @@ The chart permits only these application paths:
   to VFS, VFS to PostgreSQL and I/O, and I/O ingress from VFS; SMB/FTP also
   render Headscale sync to PostgreSQL; every tailscaled sidecar reaches only
   DNS and the exact HTTPS tailnet-control peer. Exact tailnet ingress reaches
-  only selected gateway ports. NFS has no KDC egress and exposes only a
-  ClusterIP Service on TCP 2049.
+  only selected gateway ports. NFS ingress terminates at the relay, which can
+  reach only DNS, Headscale, and the generation-matched private backend on TCP
+  2049. The backend can reach only VFS on TCP 8087; it has no DNS, Headscale,
+  KDC, or default egress.
 
 `networkPolicy` peers accept Kubernetes namespace/Pod selectors or bounded
 `ipBlock` CIDRs. The chart rejects `0.0.0.0/0` and `::/0`. Set every external
@@ -320,8 +334,9 @@ tests/scripts/check-helm-chart.sh
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
 negative schema/helper cases, proves core and MCP workload/RBAC/mount
-boundaries, renders independent SMB/FTP and NFS profiles, verifies NFS Secret
-separation and drain wiring, and rejects unsafe TUN/tailstate, image, ABI, KDC,
+boundaries, renders independent SMB/FTP and NFS profiles, verifies NFS Pod,
+Secret, PVC, pinned-address, policy, and drain separation, and rejects unsafe
+TUN/tailstate, image, ABI, KDC,
 or peer combinations, validates
 quiescing and administrative Jobs, and rejects unexpected resource kinds. A
 connected test cluster must additionally run server-side dry-run under the

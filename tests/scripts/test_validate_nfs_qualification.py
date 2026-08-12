@@ -98,6 +98,20 @@ class NfsQualificationEvidenceTests(unittest.TestCase):
                     "ganeshaImageDigest": image_digest,
                     "ganeshaRevision": revision,
                     "ipcCarriesSecrets": False,
+                    "relayHasAuthoritySecrets": False,
+                    "relayHasTailstate": False,
+                    "relayHasTun": False,
+                    "relayImageDigest": "sha256:" + "7" * 64,
+                    "relayRevision": revision,
+                    "tailscaledHasTailstate": True,
+                    "tailscaledImageDigest": "sha256:" + "8" * 64,
+                    "topologyGeneration": "1234567890abcdef",
+                    "vfsClusterIP": "10.96.20.10",
+                    "backendClusterIP": "10.96.20.11",
+                    "tailstateClaim": "filebelt-nfs-tailstate",
+                    "recoveryClaim": "filebelt-nfs-recovery",
+                    "backendHasDnsEgress": False,
+                    "backendHasHeadscaleEgress": False,
                     "samePinnedImage": True,
                 },
                 "cases": dict.fromkeys(cases, True),
@@ -143,6 +157,24 @@ class NfsQualificationEvidenceTests(unittest.TestCase):
                 "ganeshaHasKeytab": True,
                 "bridgeHasKeytab": False,
                 "ipcCarriesSecrets": False,
+                "relayImageDigest": "sha256:" + "7" * 64,
+                "relayRevision": revision,
+                "tailscaledImageDigest": "sha256:" + "8" * 64,
+                "topologyGeneration": "1234567890abcdef",
+                "vfsClusterIP": "10.96.20.10",
+                "backendClusterIP": "10.96.20.11",
+                "relayHasTailstate": False,
+                "relayHasTun": False,
+                "relayHasAuthoritySecrets": False,
+                "tailscaledHasTailstate": True,
+                "backendHasDnsEgress": False,
+                "backendHasHeadscaleEgress": False,
+                "tailstateClaim": "filebelt-nfs-tailstate",
+                "recoveryClaim": "filebelt-nfs-recovery",
+                "networkPolicyEvidence": [
+                    {"cni": cni, "passed": True, "log": self.artifact(f"{cni}-network-policy")}
+                    for cni in ("calico", "cilium")
+                ],
             },
             "licensing": {
                 "expression": "LGPL-3.0-or-later",
@@ -188,6 +220,25 @@ class NfsQualificationEvidenceTests(unittest.TestCase):
             result["failures"],
         )
         self.assertIn("notices.path resembles secret material", result["failures"])
+
+    def test_rejects_relay_secret_or_backend_dns_regression(self) -> None:
+        evidence = self.evidence()
+        evidence["runtimeImage"]["relayHasAuthoritySecrets"] = True
+        evidence["runtimeImage"]["backendHasDnsEgress"] = True
+        result = self.validate(evidence)
+        self.assertFalse(result["accepted"])
+        self.assertIn("runtimeImage.relayHasAuthoritySecrets must be false", result["failures"])
+        self.assertIn("runtimeImage.backendHasDnsEgress must be false", result["failures"])
+
+    def test_rejects_missing_live_cni_evidence(self) -> None:
+        evidence = self.evidence()
+        evidence["runtimeImage"]["networkPolicyEvidence"].pop()
+        result = self.validate(evidence)
+        self.assertFalse(result["accepted"])
+        self.assertIn(
+            "runtimeImage.networkPolicyEvidence must cover Calico and Cilium",
+            result["failures"],
+        )
 
     def test_rejects_checksum_mismatch_and_incomplete_cleanup(self) -> None:
         evidence = self.evidence()

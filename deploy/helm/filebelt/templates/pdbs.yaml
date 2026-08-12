@@ -58,7 +58,7 @@ spec:
 {{- $mountComponents := list "vfs" -}}
 {{- if .Values.mounts.smb.enabled }}{{- $mountComponents = append $mountComponents "smb-gateway" -}}{{- end }}
 {{- if .Values.mounts.ftpFtps.enabled }}{{- $mountComponents = append $mountComponents "ftp-ftps-gateway" -}}{{- end }}
-{{- if .Values.mounts.nfs.enabled }}{{- $mountComponents = append $mountComponents "nfs-gateway" -}}{{- end }}
+{{- if .Values.mounts.nfs.enabled }}{{- $mountComponents = concat $mountComponents (list "nfs-gateway" "nfs-relay") -}}{{- end }}
 {{- range $component := $mountComponents }}
 ---
 apiVersion: policy/v1
@@ -68,7 +68,7 @@ metadata:
   labels:
 {{ include "filebelt.componentLabels" (dict "root" $ "component" $component) | indent 4 }}
 spec:
-  {{- if eq $component "nfs-gateway" }}
+  {{- if has $component (list "nfs-gateway" "nfs-relay") }}
   maxUnavailable: 1
   {{- else }}
   minAvailable: 1

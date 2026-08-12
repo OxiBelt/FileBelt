@@ -89,6 +89,15 @@ run_curl() {
     >/dev/null 2>&1
 }
 
+run_dns_lookup() {
+  local namespace="$1"
+  local pod="$2"
+  local hostname="$3"
+
+  kubectl_cmd exec --namespace "${namespace}" "${pod}" --container client -- \
+    nslookup "${hostname}" >/dev/null 2>&1
+}
+
 expect_allowed() {
   local description="$1"
   shift
@@ -168,7 +177,7 @@ if ! [[ "${timeout_seconds}" =~ ^[0-9]+$ ]] \
   die "FILEBELT_KUBERNETES_TIMEOUT_SECONDS must be a decimal value from 120 through 900"
 fi
 
-for command in docker grep helm kubectl minikube mktemp; do
+for command in awk docker grep helm kubectl minikube mktemp; do
   require_command "${command}"
 done
 [[ -f "${chart_dir}/Chart.yaml" ]] || die "chart is unavailable: ${chart_dir}"
@@ -224,6 +233,41 @@ for namespace in \
     pod-security.kubernetes.io/audit=restricted \
     pod-security.kubernetes.io/warn=restricted >/dev/null
 done
+
+# The NFS chart path is intentionally tested with fixture images: Ganesha and
+# the relay image have separate qualification gates, while these Pods exercise
+# the exact labels, named ports, and policy selectors rendered by the chart.
+nfs_policy_values=(
+  --set mounts.nfs.enabled=true
+  --set-string images.filebelt-nfs-gateway.digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+  --set-string images.filebelt-nfs-relay.digest=sha256:3333333333333333333333333333333333333333333333333333333333333333
+  --set-string images.tailscaled.digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
+  --set-string mounts.vfs.clusterIP=10.96.20.10
+  --set-string mounts.nfs.backendClusterIP=10.96.20.11
+  --set-string mounts.nfs.realm=EXAMPLE.TEST
+  --set-string mounts.nfs.idmapDomain=example.test
+  --set-string mounts.nfs.tailstateClaim=filebelt-nfs-tailstate
+  --set-string mounts.nfs.recoveryClaim=filebelt-nfs-recovery
+  --set-json 'mounts.nfs.ganesha.command=["/contract/ganesha"]'
+  --set-json 'mounts.nfs.ganesha.healthCommand=["/contract/ganesha-health"]'
+  --set-json 'mounts.nfs.ganesha.preStopCommand=["/contract/ganesha-drain"]'
+  --set-string mounts.nfs.ganesha.configMap.name=filebelt-nfs-ganesha-config
+  --set-json 'mounts.nfs.bridge.command=["/contract/bridge"]'
+  --set-json 'mounts.nfs.bridge.healthCommand=["/contract/bridge-health"]'
+  --set-json 'mounts.nfs.bridge.preStopCommand=["/contract/bridge-drain"]'
+  --set-string mounts.nfs.bridge.configMap.name=filebelt-nfs-bridge-config
+  --set-json "networkPolicy.headscale.to=[{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"${DEPENDENCY_NAMESPACE}\"}},\"podSelector\":{\"matchLabels\":{\"app.kubernetes.io/name\":\"filebelt-ci-headscale\"}}}]"
+  --set-json "networkPolicy.mountIngress.from=[{\"namespaceSelector\":{\"matchLabels\":{\"kubernetes.io/metadata.name\":\"${CLIENT_NAMESPACE}\"}},\"podSelector\":{\"matchLabels\":{\"app.kubernetes.io/name\":\"filebelt-ci-mount-peer\"}}}]"
+)
+nfs_topology_generation="$(helm template "${RELEASE_NAME}" "${chart_dir}" \
+  --namespace "${FILEBELT_NAMESPACE}" \
+  --values "${ci_values}" \
+  --set deployment.quiesced=true \
+  "${nfs_policy_values[@]}" \
+  --show-only templates/mounts.yaml |
+  awk -F '"' '/filebelt.dev\/nfs-topology-generation:/ && generation == "" { generation = $2 } END { print generation }')"
+[[ "${nfs_topology_generation}" =~ ^[0-9a-f]{16}$ ]] \
+  || die "could not derive the NFS topology generation"
 
 # All fixtures satisfy restricted Pod Security and use immutable image
 # references. The FileBelt role labels and named ports intentionally match the
@@ -291,6 +335,27 @@ spec:
   ports: [{name: metrics, port: 9090, targetPort: operations, protocol: TCP}]
 ---
 apiVersion: v1
+kind: Service
+metadata: {name: fixture-vfs, namespace: ${FILEBELT_NAMESPACE}}
+spec:
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, app.kubernetes.io/component: vfs}
+  ports: [{name: vfs, port: 8087, targetPort: vfs, protocol: TCP}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fixture-nfs-relay, namespace: ${FILEBELT_NAMESPACE}}
+spec:
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, filebelt.dev/nfs-zone: relay, filebelt.dev/nfs-topology-generation: "${nfs_topology_generation}"}
+  ports: [{name: nfs, port: 2049, targetPort: nfs, protocol: TCP}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fixture-nfs-backend, namespace: ${FILEBELT_NAMESPACE}}
+spec:
+  selector: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, filebelt.dev/nfs-zone: backend, filebelt.dev/nfs-topology-generation: "${nfs_topology_generation}"}
+  ports: [{name: nfs, port: 2049, targetPort: nfs, protocol: TCP}]
+---
+apiVersion: v1
 kind: Pod
 metadata:
   name: api
@@ -310,6 +375,65 @@ spec:
       image: ${AGNHOST_IMAGE}
       command: [/agnhost, netexec, --http-port=9090, --udp-port=-1]
       ports: [{name: operations, containerPort: 9090, protocol: TCP}]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+    - name: client
+      image: ${CURL_IMAGE}
+      command: [/bin/sh, -c, sleep 3600]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vfs
+  namespace: ${FILEBELT_NAMESPACE}
+  labels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, app.kubernetes.io/component: vfs}
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: vfs
+      image: ${AGNHOST_IMAGE}
+      command: [/agnhost, netexec, --http-port=8087, --udp-port=-1]
+      ports: [{name: vfs, containerPort: 8087, protocol: TCP}]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-relay
+  namespace: ${FILEBELT_NAMESPACE}
+  labels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, app.kubernetes.io/component: nfs-relay, filebelt.dev/nfs-zone: relay, filebelt.dev/nfs-topology-generation: "${nfs_topology_generation}"}
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: nfs
+      image: ${AGNHOST_IMAGE}
+      command: [/agnhost, netexec, --http-port=2049, --udp-port=-1]
+      ports: [{name: nfs, containerPort: 2049, protocol: TCP}]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+    - name: client
+      image: ${CURL_IMAGE}
+      command: [/bin/sh, -c, sleep 3600]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-backend
+  namespace: ${FILEBELT_NAMESPACE}
+  labels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: ${RELEASE_NAME}, app.kubernetes.io/component: nfs-gateway, filebelt.dev/nfs-zone: backend, filebelt.dev/nfs-topology-generation: "${nfs_topology_generation}"}
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: nfs
+      image: ${AGNHOST_IMAGE}
+      command: [/agnhost, netexec, --http-port=2049, --udp-port=-1]
+      ports: [{name: nfs, containerPort: 2049, protocol: TCP}]
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
     - name: client
       image: ${CURL_IMAGE}
@@ -369,6 +493,21 @@ metadata:
   name: public
   namespace: ${CLIENT_NAMESPACE}
   labels: {app.kubernetes.io/name: filebelt-ci-client}
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: client
+      image: ${CURL_IMAGE}
+      command: [/bin/sh, -c, sleep 3600]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mount-peer
+  namespace: ${CLIENT_NAMESPACE}
+  labels: {app.kubernetes.io/name: filebelt-ci-mount-peer}
 spec:
   automountServiceAccountToken: false
   securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
@@ -457,6 +596,29 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
+  name: headscale
+  namespace: ${DEPENDENCY_NAMESPACE}
+  labels: {app.kubernetes.io/name: filebelt-ci-headscale}
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: server
+      image: ${AGNHOST_IMAGE}
+      command: [/agnhost, netexec, --http-port=443, --udp-port=-1]
+      ports: [{name: https, containerPort: 443, protocol: TCP}]
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL], add: [NET_BIND_SERVICE]}, readOnlyRootFilesystem: true}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: headscale, namespace: ${DEPENDENCY_NAMESPACE}}
+spec:
+  selector: {app.kubernetes.io/name: filebelt-ci-headscale}
+  ports: [{name: https, port: 443, targetPort: https, protocol: TCP}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
   name: iggy
   namespace: ${DEPENDENCY_NAMESPACE}
   labels: {app.kubernetes.io/name: filebelt-ci-iggy}
@@ -529,12 +691,17 @@ for namespace_pod in \
   "${FILEBELT_NAMESPACE}/api" \
   "${FILEBELT_NAMESPACE}/io" \
   "${FILEBELT_NAMESPACE}/maintenance" \
+  "${FILEBELT_NAMESPACE}/vfs" \
+  "${FILEBELT_NAMESPACE}/nfs-relay" \
+  "${FILEBELT_NAMESPACE}/nfs-backend" \
   "${CLIENT_NAMESPACE}/public" \
+  "${CLIENT_NAMESPACE}/mount-peer" \
   "${CLIENT_NAMESPACE}/untrusted" \
   "${MONITORING_NAMESPACE}/monitor" \
   "${MONITORING_NAMESPACE}/otel" \
   "${DEPENDENCY_NAMESPACE}/postgresql" \
   "${DEPENDENCY_NAMESPACE}/oidc" \
+  "${DEPENDENCY_NAMESPACE}/headscale" \
   "${DEPENDENCY_NAMESPACE}/iggy" \
   "${ARBITRARY_NAMESPACE}/arbitrary"; do
   namespace="${namespace_pod%%/*}"
@@ -547,6 +714,9 @@ web_ip="$(kubectl_cmd get pod web --namespace "${FILEBELT_NAMESPACE}" -o jsonpat
 api_ip="$(kubectl_cmd get pod api --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
 io_ip="$(kubectl_cmd get pod io --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
 maintenance_ip="$(kubectl_cmd get pod maintenance --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
+vfs_ip="$(kubectl_cmd get pod vfs --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
+nfs_relay_ip="$(kubectl_cmd get pod nfs-relay --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
+nfs_backend_ip="$(kubectl_cmd get pod nfs-backend --namespace "${FILEBELT_NAMESPACE}" -o jsonpath='{.status.podIP}')"
 
 # Positive controls precede policy application, so later drops cannot pass
 # merely because a target image, Pod, or listener failed to start.
@@ -554,6 +724,12 @@ expect_allowed "pre-policy web listener" run_curl "${CLIENT_NAMESPACE}" public "
 expect_allowed "pre-policy API listener" run_curl "${CLIENT_NAMESPACE}" public "http://${api_ip}:8080/"
 expect_allowed "pre-policy I/O listener" run_curl "${CLIENT_NAMESPACE}" public "http://${io_ip}:8081/"
 expect_allowed "pre-policy maintenance metrics" run_curl "${CLIENT_NAMESPACE}" public "http://${maintenance_ip}:9090/"
+expect_allowed "pre-policy mount peer reaching NFS relay" \
+  run_curl "${CLIENT_NAMESPACE}" mount-peer "http://${nfs_relay_ip}:2049/"
+expect_allowed "pre-policy NFS relay reaching backend" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-relay "http://${nfs_backend_ip}:2049/"
+expect_allowed "pre-policy NFS backend reaching VFS" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-backend "http://${vfs_ip}:8087/"
 expect_allowed "pre-policy arbitrary service" run_curl "${CLIENT_NAMESPACE}" public \
   "http://arbitrary.${ARBITRARY_NAMESPACE}.svc.cluster.local:8080/"
 
@@ -561,6 +737,7 @@ helm template "${RELEASE_NAME}" "${chart_dir}" \
   --namespace "${FILEBELT_NAMESPACE}" \
   --values "${ci_values}" \
   --set deployment.quiesced=true \
+  "${nfs_policy_values[@]}" \
   --show-only templates/networkpolicies.yaml |
   kubectl_cmd apply --namespace "${FILEBELT_NAMESPACE}" \
     --server-side --field-manager=filebelt-network-policy --filename -
@@ -568,8 +745,10 @@ helm template "${RELEASE_NAME}" "${chart_dir}" \
 web_host="fixture-web.${FILEBELT_NAMESPACE}.svc.cluster.local"
 api_host="fixture-api.${FILEBELT_NAMESPACE}.svc.cluster.local"
 io_host="fixture-io.${FILEBELT_NAMESPACE}.svc.cluster.local"
+nfs_relay_host="fixture-nfs-relay.${FILEBELT_NAMESPACE}.svc.cluster.local"
 postgres_host="postgresql.${DEPENDENCY_NAMESPACE}.svc.cluster.local"
 oidc_host="oidc.${DEPENDENCY_NAMESPACE}.svc.cluster.local"
+headscale_host="headscale.${DEPENDENCY_NAMESPACE}.svc.cluster.local"
 iggy_host="iggy.${DEPENDENCY_NAMESPACE}.svc.cluster.local"
 otel_host="otel.${MONITORING_NAMESPACE}.svc.cluster.local"
 arbitrary_host="arbitrary.${ARBITRARY_NAMESPACE}.svc.cluster.local"
@@ -589,6 +768,28 @@ expect_allowed "web reaching API" \
   run_curl "${FILEBELT_NAMESPACE}" web "http://${api_host}:8080/"
 expect_allowed "web reaching I/O" \
   run_curl "${FILEBELT_NAMESPACE}" web "http://${io_host}:8081/"
+
+# NFS is split at the relay/backend boundary. The tailnet peer may reach the
+# relay only; only the relay reaches the backend; and only the backend reaches
+# VFS. Pod IPs avoid granting the backend DNS solely for a fixture assertion.
+expect_allowed "mount peer reaching the NFS relay" \
+  run_curl "${CLIENT_NAMESPACE}" mount-peer "http://${nfs_relay_host}:2049/"
+expect_denied "untrusted client reaching the NFS relay" \
+  run_curl "${CLIENT_NAMESPACE}" untrusted "http://${nfs_relay_host}:2049/"
+expect_denied "mount peer bypassing the NFS relay" \
+  run_curl "${CLIENT_NAMESPACE}" mount-peer "http://${nfs_backend_ip}:2049/"
+expect_allowed "NFS relay reaching backend" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-relay "http://${nfs_backend_ip}:2049/"
+expect_denied "NFS backend reaching relay" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-backend "http://${nfs_relay_ip}:2049/"
+expect_allowed "NFS backend reaching VFS" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-backend "http://${vfs_ip}:8087/"
+expect_denied "NFS relay bypassing backend VFS access" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-relay "http://${vfs_ip}:8087/"
+expect_allowed "NFS relay DNS lookup" \
+  run_dns_lookup "${FILEBELT_NAMESPACE}" nfs-relay "${headscale_host}"
+expect_denied "NFS backend DNS lookup" \
+  run_dns_lookup "${FILEBELT_NAMESPACE}" nfs-backend "${headscale_host}"
 
 for component in web api io maintenance; do
   expect_allowed "monitor reaching ${component} metrics" \
@@ -616,6 +817,11 @@ expect_denied "I/O reaching the OIDC gateway" \
 expect_denied "maintenance reaching the OIDC gateway" \
   run_curl "${FILEBELT_NAMESPACE}" maintenance "http://${oidc_host}:8080/"
 
+expect_allowed "NFS relay reaching Headscale over HTTPS" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-relay "http://${headscale_host}:443/"
+expect_denied "NFS backend reaching Headscale" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-backend "http://${headscale_host}:443/"
+
 expect_allowed "maintenance reaching Iggy" \
   run_curl "${FILEBELT_NAMESPACE}" maintenance "http://${iggy_host}:8090/"
 expect_denied "API reaching Iggy" \
@@ -629,6 +835,10 @@ for component in web api io maintenance; do
   expect_denied "${component} general egress" \
     run_curl "${FILEBELT_NAMESPACE}" "${component}" "http://${arbitrary_host}:8080/"
 done
+expect_denied "NFS relay general egress" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-relay "http://${arbitrary_host}:8080/"
+expect_denied "NFS backend general egress" \
+  run_curl "${FILEBELT_NAMESPACE}" nfs-backend "http://${arbitrary_host}:8080/"
 
 expect_denied "API lateral access to I/O" \
   run_curl "${FILEBELT_NAMESPACE}" api "http://${io_host}:8081/"

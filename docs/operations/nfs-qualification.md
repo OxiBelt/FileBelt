@@ -85,7 +85,14 @@ fixture coordinates and absolute paths to separately projected keytabs:
   "rootfsDigestFile": "/etc/filebelt-nfs-rootfs-digest",
   "rootfsDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "imageIndexDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "relayImageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "tailscaledImageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "releaseRevision": "0000000000000000000000000000000000000000",
+  "topologyGeneration": "0000000000000000",
+  "vfsClusterIP": "10.96.20.10",
+  "backendClusterIP": "10.96.20.11",
+  "tailstateClaim": "filebelt-nfs-tailstate",
+  "recoveryClaim": "filebelt-nfs-recovery",
   "fenceTimeoutSeconds": 300
 }
 ```
@@ -106,13 +113,19 @@ successful rejection of swapped, wrong-GID, and same-group wrong-UID peers.
 The administrative driver receives exactly:
 
 ```text
-<driver> <prepare|attest|restart|drain|resume|fence|cleanup|assert-clean> \
+<driver> <prepare|attest|relay-restart|backend-restart|drain|resume|fence|cleanup|assert-clean> \
   <filebelt-nfs-qualification-run-id> <absolute-config-path>
 ```
 
 It and every parent path must be root-owned and not group/world writable or a
-symlink. `attest` prints only the exact observed client rootfs digest,
-server-image digest/revision equality, and Ganesha/bridge keytab-isolation JSON
+symlink. `attest` prints only the exact observed client rootfs digest, split
+image/revision/topology/address/claim equality, and keytab/mount/egress-isolation
+JSON.
+`relay-restart` prints the fixed boolean result contract for active and idle
+traffic, peer/session change, stable gateway epoch, and two-client GSS
+separation. `backend-restart` prints the fixed boolean result contract for
+epoch advancement and retention of both claims. All other successful operations
+are silent.
 checked by the client harness. `assert-clean` prints only
 `{"leftovers": []}` after verifying the exact run-owned cluster resources are
 gone. The driver must never echo configuration, ticket, keytab, Kubernetes
@@ -144,6 +157,25 @@ fixed empty applied `EndSession` acknowledgement. Cases not yet executable stay
 in the required-case manifest, so the current scaffold fails rather than
 omitting them. A negative result is counted only
 after the fixture's positive `krb5p` path succeeds.
+
+All client traffic crosses the admitted `filebelt-nfs-relay` digest before it
+reaches Ganesha. Two independent clients must remain distinguishable by their
+Kerberos/GSS bindings even though PostgreSQL records the same immediate relay
+peer address. PROXY protocol is prohibited. Qualification reschedules the
+relay during active and idle traffic and proves that a changed relay Pod
+address creates a fresh FileBelt session, old sessions remain fenced and
+expire, and relay-only restart does not advance the gateway epoch. Backend
+restart separately exercises drain, epoch advancement, grace, reclaim, replay,
+locks, and writes.
+
+Calico and Cilium evidence must demonstrate relay-to-backend and
+backend-to-VFS success while rejecting adjacent-to-backend, backend-to-DNS,
+backend-to-Headscale, backend-to-arbitrary-egress, and relay-to-VFS probes. The
+attestation binds the relay, gateway, and tailscaled image digests, the shared
+topology generation, the pinned VFS/backend Service addresses, and retained
+tailstate/recovery claims. The assembled runtime evidence must also include
+checksum-bound, secret-free successful logs from the exact Calico and Cilium
+policy harnesses; static Helm rendering is not live CNI evidence.
 
 Qualification must use the exact patched Ganesha 6.5 source and prove both
 MDCACHE delegation to FileBelt authorization and authoritative owner/group
@@ -177,7 +209,7 @@ python3 tests/scripts/validate-nfs-qualification.py \
 ```
 
 The validator rejects missing or duplicate platforms, emulation, mixed
-Ganesha/bridge digest or revision, an unauthorized release signer, the
+Ganesha/bridge/relay digest or revision, an unauthorized release signer, the
 `abi-probe-only` label, incomplete ABI/link/rebuild/SBOM/source evidence,
 missing cases, secret-shaped artifact paths, checksum drift, nondeterministic
 resource names, and cleanup leftovers.

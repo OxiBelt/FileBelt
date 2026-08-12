@@ -302,6 +302,8 @@ enum NfsGatewayFeature {
 message NfsAuthenticateRequest {
   string kerberos_principal = 1;
   bytes gss_binding_digest = 2;
+  // This is the immediate NFS transport peer. A relay peer address is
+  // non-authoritative observability and conservative session-reuse input only.
   string source_address = 3;
   RpcsecGssProtection protection = 4;
   int64 context_expires_at_unix_seconds = 5;

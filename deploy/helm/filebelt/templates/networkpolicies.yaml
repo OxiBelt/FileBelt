@@ -80,7 +80,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: [web, api, io, maintenance{{ if .Values.collaboration.enabled }}, collaboration{{ end }}{{ if .Values.documents.enabled }}, document{{ end }}{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}]
+        values: [web, api, io, maintenance{{ if .Values.collaboration.enabled }}, collaboration{{ end }}{{ if .Values.documents.enabled }}, document{{ end }}{{ if .Values.mcp.enabled }}, mcp-broker{{ end }}{{ if .Values.mcp.runners.enabled }}, controller{{ end }}{{ if .Values.mounts.nfs.enabled }}, nfs-relay{{ end }}]
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -422,9 +422,6 @@ spec:
 {{- if .Values.mounts.ftpFtps.enabled -}}
 {{- $components = append $components "ftp-ftps-gateway" -}}
 {{- end -}}
-{{- if .Values.mounts.nfs.enabled -}}
-{{- $components = append $components "nfs-gateway" -}}
-{{- end -}}
 {{- range $component := $components }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -457,7 +454,7 @@ spec:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: io}
       ports: [{port: io, protocol: TCP}]
 {{- end }}
-{{- if has $component (list "smb-gateway" "ftp-ftps-gateway" "nfs-gateway") }}
+{{- if has $component (list "smb-gateway" "ftp-ftps-gateway") }}
     - to:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: vfs}
@@ -487,7 +484,7 @@ spec:
         {{- end }}
         {{- if $root.Values.mounts.nfs.enabled }}
         - podSelector:
-            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, app.kubernetes.io/component: nfs-gateway}
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ $root.Release.Name }}, filebelt.dev/nfs-zone: backend, filebelt.dev/nfs-topology-generation: {{ include "filebelt.nfsTopologyGeneration" $root | quote }}}
         {{- end }}
       ports: [{port: vfs, protocol: TCP}]
     - from:
@@ -500,9 +497,6 @@ spec:
 {{- end -}}
 {{- if .Values.mounts.ftpFtps.enabled -}}
 {{- $gateways = append $gateways "ftp-ftps-gateway" -}}
-{{- end -}}
-{{- if .Values.mounts.nfs.enabled -}}
-{{- $gateways = append $gateways "nfs-gateway" -}}
 {{- end -}}
 {{- range $gateway := $gateways }}
 ---
@@ -531,4 +525,76 @@ spec:
         - {port: nfs, protocol: TCP}
         {{- end }}
 {{- end }}
+{{- end }}
+{{ if .Values.mounts.nfs.enabled }}
+{{- $topologyGeneration := include "filebelt.nfsTopologyGeneration" . -}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-relay-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-relay") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: relay}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+{{ toYaml .Values.networkPolicy.mountIngress.from | indent 8 }}
+      ports: [{port: nfs, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-relay-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-relay") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: relay}
+  policyTypes: [Egress]
+  egress:
+    - to:
+{{ toYaml .Values.networkPolicy.dns.to | indent 8 }}
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to:
+{{ toYaml .Values.networkPolicy.headscale.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.headscale.port }}, protocol: TCP}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: backend, filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}}
+      ports: [{port: nfs, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-gateway-ingress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-gateway") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: backend}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: relay, filebelt.dev/nfs-topology-generation: {{ $topologyGeneration | quote }}}
+      ports: [{port: nfs, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "filebelt.name" . }}-nfs-gateway-egress
+  labels:
+{{ include "filebelt.componentLabels" (dict "root" . "component" "nfs-gateway") | indent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, filebelt.dev/nfs-zone: backend}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: vfs}
+      ports: [{port: vfs, protocol: TCP}]
 {{- end }}

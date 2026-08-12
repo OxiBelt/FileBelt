@@ -37,7 +37,7 @@ test("opens an eligible Markdown file through its lazy editor route", async ({ p
   const Preview = Page.frameLocator('iframe[title="Markdown preview"]');
   await expect(Preview.getByText("<img src=x onerror=alert(1)>")).toBeVisible();
   await expect(Preview.locator("img")).toHaveCount(0);
-  const Editor = Page.locator('[data-filebelt-markdown-editor="source"] .cm-content');
+  const Editor = Page.getByRole("textbox", { name: "Markdown source" });
   await Editor.click();
   await Page.keyboard.press("End");
   await Page.keyboard.type(" local edit");
@@ -125,7 +125,7 @@ test("reconnects after an initial collaboration failure and closes a live sessio
   await expect(Page.getByRole("button", { name: "Reconnect" })).toBeVisible();
   await Page.getByRole("button", { name: "Reconnect" }).click();
   await expect(Page.getByText("Live collaboration connected.")).toBeVisible();
-  const Editor = Page.locator('[data-filebelt-markdown-editor="source"] .cm-content');
+  const Editor = Page.getByRole("textbox", { name: "Markdown source" });
   await Editor.click();
   await Page.keyboard.press("End");
   await Page.keyboard.type(" retained after reconnect");

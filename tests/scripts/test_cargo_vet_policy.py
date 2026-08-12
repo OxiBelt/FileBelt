@@ -23,6 +23,27 @@ def load_toml(relative_path: str) -> dict:
 
 
 class CargoVetPolicyTests(unittest.TestCase):
+    def test_opentelemetry_graph_is_coordinated_and_patched(self) -> None:
+        cargo_lock = load_toml("Cargo.lock")
+        expected_versions = {
+            "opentelemetry": {"0.32.0"},
+            "opentelemetry-http": {"0.32.0"},
+            "opentelemetry-otlp": {"0.32.0"},
+            "opentelemetry-proto": {"0.32.0"},
+            "opentelemetry_sdk": {"0.32.1"},
+            "tracing-opentelemetry": {"0.33.0"},
+        }
+        actual_versions = {
+            crate_name: {
+                package["version"]
+                for package in cargo_lock.get("package", [])
+                if package["name"] == crate_name
+            }
+            for crate_name in expected_versions
+        }
+
+        self.assertEqual(actual_versions, expected_versions)
+
     def test_exemptions_are_exact_locked_safe_to_deploy_records(self) -> None:
         config = load_toml("supply-chain/config.toml")
         cargo_lock = load_toml("Cargo.lock")

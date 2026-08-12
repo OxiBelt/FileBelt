@@ -99,11 +99,23 @@ criteria = "safe-to-deploy"
 version = "0.31.0"
 notes = "Reviewed complete checksum-matched source and selected features. It provides API, context, trace, and metric data structures with caller-proportional allocations and no build script or ambient I/O; the TypeId hasher invariant follows std TypeId hashing."
 
+[[audits.opentelemetry]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+notes = "Reviewed complete checksum-matched source with the resolved trace and metrics features. It provides caller-driven API, context, propagation, trace, and metric data structures with caller-proportional allocation; it has no build script, unsafe code, or ambient I/O."
+
 [[audits.opentelemetry-http]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.31.0"
 notes = "Reviewed complete checksum-matched source for the selected blocking reqwest path. Hyper-only unsafe code is unselected; network access uses the supplied client. Collector response bodies are buffered, while FileBelt bounds requests to three seconds and an operator-controlled endpoint."
+
+[[audits.opentelemetry-http]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+notes = "Reviewed complete checksum-matched source for the selected blocking reqwest path. The unselected Hyper module contains the crate's only unsafe code; network access uses FileBelt's supplied no-proxy, no-redirect client. Successful response bodies are buffered, while FileBelt limits the operator-controlled collector request to three seconds."
 
 [[audits.opentelemetry-otlp]]
 who = "OpenAI Codex"
@@ -111,17 +123,35 @@ criteria = "safe-to-deploy"
 version = "0.31.0"
 notes = "Reviewed complete checksum-matched source and selected HTTP protobuf, blocking reqwest, and trace features. It has no unsafe code or build script; FileBelt supplies a no-proxy, no-redirect, three-second client and bounded batching, while standard OTEL environment headers and compression remain operator inputs."
 
+[[audits.opentelemetry-otlp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+notes = "Reviewed complete checksum-matched source with HTTP protobuf, blocking reqwest, trace, and the implied metrics transforms selected. It has no build script or unsafe code; gRPC, JSON, compression, retry, and async-runtime paths are absent. FileBelt supplies the exact collector endpoint, bounded headers and batches, and a no-proxy, no-redirect, three-second client instead of the fallback client builder."
+
 [[audits.opentelemetry-proto]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.31.0"
 notes = "Reviewed complete checksum-matched generated prost messages and deterministic trace and metric transforms. It has no build script, unsafe code, or ambient I/O; allocations scale with supplied telemetry."
 
+[[audits.opentelemetry-proto]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.32.0"
+notes = "Reviewed complete checksum-matched generated Prost messages and deterministic trace and metric transforms. The selected generated-message path does not include Tonic transport; the crate has no build script, unsafe code, or ambient I/O, and allocations scale with FileBelt's bounded telemetry batches."
+
+[[audits.opentelemetry_sdk]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.31.0"
+notes = "Reviewed complete checksum-matched source. It uses OS-random identifiers and a dedicated bounded batch thread without unsafe code or a build script; FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
+
 [[audits.opentelemetry_sdk]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.32.1"
-notes = "Reviewed complete checksum-matched source. It uses OS-random identifiers and a dedicated bounded batch thread without unsafe code or a build script; FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
+notes = "Reviewed complete checksum-matched source with the resolved trace and metrics features. The W3C Baggage propagator rejects headers above 8192 bytes before parsing and caps extraction at 64 members, fixing GHSA-w9wp-h8wv-79jx; FileBelt installs no inbound propagator. The crate has no build script or unsafe code, uses OS-random trace identifiers and bounded synchronous batch channels, and FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
 
 [[audits.portable-atomic-util]]
 who = "OpenAI Codex"
@@ -145,7 +175,7 @@ notes = "Reviewed complete checksum-matched compiler-only proc-macro source. It 
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.13.4"
-notes = "Reviewed complete checksum-matched source with only form and json selected in the Sigstore graph. TLS, decompression, streaming, and system-proxy features are absent; native connector ReadBuf unsafe preserves initialization invariants, and FileBelt does not instantiate Sigstore's online clients."
+notes = "Reviewed complete checksum-matched source with blocking, form, json, and rustls-no-provider selected across the OTLP and Sigstore graph; default system-proxy, decompression, streaming, and cookie features are absent. Blocking buffer-initialization and connector ReadBuf unsafe preserve their initialized-byte invariants. Although the feature compiles the platform verifier, FileBelt's OTLP client injects an AWS-LC Rustls configuration containing only embedded WebPKI roots plus the optional operator CA, disables proxies and redirects, and applies a three-second timeout; FileBelt does not instantiate Sigstore's online clients."
 
 [[audits.rmcp]]
 who = "OpenAI Codex"
@@ -254,6 +284,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.32.0"
 notes = "Reviewed complete checksum-matched source with metrics and tracing-log defaults disabled. The TypeId-checked downcast_raw pointer preserves the subscriber lifetime, and the crate has no build script or ambient I/O."
+
+[[audits.tracing-opentelemetry]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.33.0"
+notes = "Reviewed complete checksum-matched source with default metrics and tracing-log features disabled. TypeId-checked downcast_raw implementations return only valid self/function pointers or delegate to the inner layer, preserving subscriber lifetimes. The crate has no build script or ambient filesystem, process, or network I/O."
 
 [[audits.tracing-serde]]
 who = "OpenAI Codex"

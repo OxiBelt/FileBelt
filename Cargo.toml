@@ -90,9 +90,10 @@ iggy = "=0.8.0"
 jiff = "=0.2.35"
 md4 = { version = "=0.11.0", default-features = false }
 openidconnect = { version = "=4.0.1", default-features = false, features = ["reqwest"] }
-opentelemetry = { version = "=0.31.0", default-features = false, features = ["trace"] }
-opentelemetry-otlp = { version = "=0.31.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry = { version = "=0.32.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
 opentelemetry_sdk = { version = "=0.32.1", default-features = false, features = ["trace"] }
+opentelemetry-reqwest = { package = "reqwest", version = "=0.13.4", default-features = false, features = ["blocking", "rustls-no-provider"] }
 prometheus-client = "=0.24.0"
 rcgen = "=0.14.8"
 prost = "=0.14.4"
@@ -116,10 +117,11 @@ tokio-rustls = "=0.26.4"
 toml = "=1.1.4"
 tower-http = { version = "=0.7.0", features = ["catch-panic", "cors", "limit", "request-id", "trace"] }
 tracing = "=0.1.44"
-tracing-opentelemetry = { version = "=0.32.0", default-features = false }
+tracing-opentelemetry = { version = "=0.33.0", default-features = false }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json", "std"] }
 url = { version = "=2.5.8", features = ["serde"] }
 uuid = { version = "=1.24.0", features = ["serde", "v4"] }
+webpki-roots = "=1.0.9"
 zeroize = "=1.9.0"
 x509-parser = "=0.18.1"
 yrs = "=0.27.3"

@@ -74,6 +74,19 @@ ELF dependency, license/notice, and RISC-V musl bindgen requirement. Embedded
 public WebPKI roots and an optional mounted custom CA bundle are the only trust
 root sources.
 
+The optional OTLP trace path uses one coordinated, exact family:
+`opentelemetry@0.32.0`, `opentelemetry-http@0.32.0`,
+`opentelemetry-otlp@0.32.0`, `opentelemetry-proto@0.32.0`,
+`opentelemetry_sdk@0.32.1`, and `tracing-opentelemetry@0.33.0`. The SDK floor
+includes the bounded W3C Baggage parser from GHSA-w9wp-h8wv-79jx. OTLP's HTTP
+client uses an isolated `reqwest@0.13.4` workspace alias with blocking Rustls
+and no default features; OIDC and the other application clients retain the
+reviewed `reqwest@0.12.28` API. FileBelt overrides the compiled platform
+verifier with an AWS-LC Rustls configuration containing only the embedded
+WebPKI roots plus the optional operator CA. FileBelt installs no inbound
+OpenTelemetry propagator, so public trace and baggage headers never become
+parent context.
+
 The resolved graph admits two non-baseline license families with narrow,
 recorded reasons. `webpki-roots` and `webpki-root-certs` carry
 `CDLA-Permissive-2.0` certificate data used by Rustls clients. The exact Iggy

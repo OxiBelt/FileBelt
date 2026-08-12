@@ -10,12 +10,13 @@ configured monitoring peers. OxiBelt remains the only public Service; never
 publish an operations port through the L4 frontend.
 
 Logs use JSON in Kubernetes. Traces use fresh local context and optional
-OTLP/HTTP to a configured in-cluster collector. Public `traceparent` and
-`tracestate` values are not trusted as parents and cannot select the trace ID
-or override the configured sampling ratio. Collector failure is bounded and
-does not change request correctness or readiness. The main chart installs no
-Prometheus, Grafana, or collector. `ServiceMonitor` and `PrometheusRule` are
-optional integrations and are disabled by default.
+OTLP/HTTP to a configured in-cluster collector. FileBelt installs no inbound
+W3C propagation extractor: public `traceparent`, `tracestate`, and `baggage`
+values are ignored and cannot select the trace ID or override the configured
+sampling ratio. Collector failure is bounded and does not change request
+correctness or readiness. The main chart installs no Prometheus, Grafana, or
+collector. `ServiceMonitor` and `PrometheusRule` are optional integrations and
+are disabled by default.
 
 ## Privacy and cardinality
 

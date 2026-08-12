@@ -696,22 +696,7 @@ fn build_tracer_provider(
     let Some(endpoint) = &settings.otlp_http_endpoint else {
         return Ok(None);
     };
-    let mut http = reqwest::blocking::ClientBuilder::new()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(3));
-    if let Some(path) = &settings.otlp_custom_ca_file {
-        let pem = std::fs::read(path)
-            .map_err(|error| format!("cannot read OTLP custom CA bundle: {error}"))?;
-        for certificate in reqwest::tls::Certificate::from_pem_bundle(&pem)
-            .map_err(|error| format!("OTLP custom CA bundle is invalid PEM: {error}"))?
-        {
-            http = http.add_root_certificate(certificate);
-        }
-    }
-    let http = http
-        .build()
-        .map_err(|error| format!("cannot build OTLP HTTP client: {error}"))?;
+    let http = otlp_http_client(settings.otlp_custom_ca_file.as_deref())?;
     let headers = settings
         .otlp_header_files
         .iter()
@@ -752,6 +737,43 @@ fn build_tracer_provider(
         .with_resource(Resource::builder_empty().with_service_name(role).build())
         .build();
     Ok(Some(provider))
+}
+
+fn otlp_http_client(
+    custom_ca_file: Option<&std::path::Path>,
+) -> Result<opentelemetry_reqwest::blocking::Client, String> {
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|error| format!("cannot select OTLP TLS protocol versions: {error}"))?
+    .with_root_certificates(otlp_root_store(custom_ca_file)?)
+    .with_no_client_auth();
+    opentelemetry_reqwest::blocking::ClientBuilder::new()
+        .use_preconfigured_tls(tls)
+        .no_proxy()
+        .redirect(opentelemetry_reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(|error| format!("cannot build OTLP HTTP client: {error}"))
+}
+
+fn otlp_root_store(custom_ca_file: Option<&std::path::Path>) -> Result<RootCertStore, String> {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(path) = custom_ca_file {
+        let pem = std::fs::read(path)
+            .map_err(|error| format!("cannot read OTLP custom CA bundle: {error}"))?;
+        let certificates = CertificateDer::pem_slice_iter(&pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("OTLP custom CA bundle is invalid PEM: {error}"))?;
+        for certificate in certificates {
+            roots
+                .add(certificate)
+                .map_err(|error| format!("OTLP custom CA bundle is invalid: {error}"))?;
+        }
+    }
+    Ok(roots)
 }
 
 pub async fn trace_request(request: Request, next: Next) -> Response {
@@ -799,7 +821,7 @@ impl fmt::Debug for OperationsState {
 mod tests {
     use super::{
         MtlsListener, OperationsState, PolicyUriClientVerifier, VerifiedMtlsPeer,
-        certificate_has_allowed_uri,
+        certificate_has_allowed_uri, otlp_http_client, otlp_root_store,
     };
     use axum::Router;
     use axum::extract::ConnectInfo;
@@ -961,6 +983,33 @@ mod tests {
         assert!(output.contains("filebelt_storage_capacity_bytes{kind=\"free\"} 4"));
         assert!(output.contains("filebelt_build_info{role=\"test-role\"} 1"));
         assert!(!output.contains("filebelt_build_info_info"));
+    }
+
+    #[test]
+    fn otlp_uses_embedded_roots_and_adds_the_custom_ca() {
+        let embedded = otlp_root_store(None).unwrap();
+        assert_eq!(embedded.len(), webpki_roots::TLS_SERVER_ROOTS.len());
+        otlp_http_client(None).unwrap();
+
+        let certificate = CertificateParams::new(Vec::<String>::new())
+            .unwrap()
+            .self_signed(&KeyPair::generate().unwrap())
+            .unwrap();
+        let suffix = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "filebelt-runtime-otlp-roots-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let custom_ca = directory.join("custom-ca.pem");
+        fs::write(&custom_ca, certificate.pem()).unwrap();
+
+        let with_custom = otlp_root_store(Some(&custom_ca)).unwrap();
+        assert_eq!(with_custom.len(), embedded.len() + 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

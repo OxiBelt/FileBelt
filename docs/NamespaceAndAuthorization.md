@@ -351,6 +351,18 @@ by `READ_CONTENT`. Phase 8 activation creates only managed traversal
 projections needed to preserve previously reachable objects. It does not
 weaken an existing deny or disclose an otherwise hidden sibling.
 
+An NFS replay receipt proves protocol idempotency, not continuing authority.
+Every ordinary exact retransmission re-enters current credential, principal,
+policy, mapping, feature/export, gateway, session, handle, namespace, resource,
+and Virtual ACL admission before stored fields may be returned. One repeatable
+PostgreSQL snapshot validates those generation, handle, and replay-slot fences
+at receipt selection; a changed or denied projection returns no cached fields. Read replay validates its exact
+open handle, immutable version, and `READ_CONTENT` without fetching the payload
+again.
+The only post-close exception is the exact fixed no-data acknowledgement for
+the `EndSession` operation that atomically closed its own session, and even that
+exception requires all external authority fences to remain current.
+
 NFS authenticates with RPCSEC_GSS `krb5p` against an operator-managed external
 KDC. A tenant administrator may propose that one exact Kerberos principal map
 to one FileBelt user, but cannot activate the binding. Every target user,

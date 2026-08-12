@@ -50,7 +50,13 @@ done
 for case_name in \
   authenticate_krb5p list read write commit rename xattr acl sparse \
   restart_reclaim drain fence stale_handle reject_auth_sys \
-  reject_root_principal reject_cross_realm_principal; do
+  reject_root_principal reject_cross_realm_principal \
+  replay_session_revocation replay_credential_revocation \
+  replay_mapping_revocation replay_policy_revocation \
+  replay_resource_acl_revocation replay_feature_export_revocation \
+  replay_gateway_revocation replay_closed_handle_read \
+  replay_changed_list_child_acl replay_open_close_idempotency \
+  replay_end_session_narrow_ack; do
   assert_contains "${repo_root}/tests/nfs/qualification/required-cases.json" "\"${case_name}\""
 done
 

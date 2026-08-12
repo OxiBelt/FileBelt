@@ -4,12 +4,13 @@
 
 use filebelt_database::mount::{
     ApplyNfsWriteExtentInput, BeginMountIoOperationInput, CommitNfsWriteInput,
-    CreateNfsMappingProposalInput, CreateNfsMountSessionInput, ExtendNfsWriteChunksInput,
-    FinalizeNfsInternalIoReplayInput, MountIoAdmission, MountIoCompletion, MountIoLookup,
-    MountIoOperation, MountWriteCapabilityFence, MountWriteChunkPlan, MountWriteRangeOperation,
-    NfsAdminIdempotency, NfsAdminIdempotentWrite, NfsExportState, NfsFeatureState,
-    NfsMountSessionProjection, NfsPrincipalMapping, NfsReplayContext, OpenNfsHandleInput,
-    PendingMountIoWorkerState, PreauthorizeMountIoOperationInput, ReconcileNfsExportManifestInput,
+    CreateNfsMappingProposalInput, CreateNfsMountSessionInput, EndNfsSessionInput,
+    ExtendNfsWriteChunksInput, FinalizeNfsInternalIoReplayInput, MountIoAdmission,
+    MountIoCompletion, MountIoLookup, MountIoOperation, MountWriteCapabilityFence,
+    MountWriteChunkPlan, MountWriteRangeOperation, NfsAdminIdempotency, NfsAdminIdempotentWrite,
+    NfsExportState, NfsFeatureState, NfsMountSessionProjection, NfsMutationAuthorization,
+    NfsPrincipalMapping, NfsReplayContext, OpenNfsHandleInput, PendingMountIoWorkerState,
+    PreauthorizeMountIoOperationInput, ReconcileNfsExportManifestInput,
     RecordNfsReplayReceiptInput, ReissueMountIoOperationInput, SeekNfsWriteExtentInput,
     UpsertNfsPrincipalMappingInput,
 };
@@ -1927,6 +1928,76 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         first_session.absolute_expires_at_unix_seconds,
         effective_expiry
     );
+    let end_binding_digest = [30_u8; 32];
+    let ending_session = database
+        .create_nfs_mount_session(&CreateNfsMountSessionInput {
+            tenant_id,
+            kerberos_principal: "Nfs_User@EXAMPLE.TEST",
+            gss_binding_digest: &end_binding_digest,
+            gateway_id: "nfs-gateway-0",
+            gateway_epoch,
+            source_address: "192.0.2.43",
+            gss_expires_at_unix_seconds: 2_000_000_000,
+        })
+        .await
+        .expect("create dedicated EndSession replay fixture");
+    let end_request_digest = [29_u8; 32];
+    let end_response_bytes = [0x08_u8, 0x01];
+    let end_response_digest = [28_u8; 32];
+    let end_context = NfsReplayContext {
+        tenant_id,
+        mount_session_id: ending_session.session.session_id,
+        client_id: "nfs-client-end",
+        nfs_session_id: "nfs-session-end",
+        slot_id: 2,
+        sequence_id: 1,
+        operation_index: 0,
+        operation: "end_session",
+        request_digest: &end_request_digest,
+        gateway_epoch,
+    };
+    let ended = database
+        .end_nfs_mount_session(&EndNfsSessionInput {
+            session: &ending_session.session,
+            gss_binding_digest: &end_binding_digest,
+            replay: RecordNfsReplayReceiptInput {
+                context: end_context.clone(),
+                response_bytes: &end_response_bytes,
+                response_digest: &end_response_digest,
+            },
+            reason_code: "client_end",
+        })
+        .await
+        .expect("close dedicated NFS session with its replay receipt");
+    assert_eq!(ended.outcome, "applied");
+    assert_eq!(
+        database
+            .lookup_applied_nfs_end_session_replay(
+                &end_context,
+                "nfs-gateway-0",
+                ending_session.session.credential_generation,
+                ending_session.session.authorization_generation,
+                Some(&end_binding_digest),
+                "client_end",
+            )
+            .await
+            .expect("look up externally admitted EndSession replay"),
+        Some(ended.replay.clone())
+    );
+    assert_eq!(
+        database
+            .lookup_applied_nfs_end_session_replay(
+                &end_context,
+                "nfs-gateway-0",
+                ending_session.session.credential_generation,
+                ending_session.session.authorization_generation,
+                Some(&end_binding_digest),
+                "different_reason",
+            )
+            .await
+            .expect("reject EndSession replay under a different close reason"),
+        None
+    );
     let replay_request_digest = [31_u8; 32];
     let replay_response_digest = [32_u8; 32];
     let replay_context = NfsReplayContext {
@@ -1950,9 +2021,40 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         .await
         .expect("persist exact NFS operation replay response");
     assert_eq!(replay.response_bytes, vec![0x08, 0x01]);
+    let (drive_acl_generation, drive_namespace_generation): (i64, i64) = sqlx::query_as(
+        "SELECT acl_generation,namespace_generation FROM drives \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read replay authorization drive generations");
+    let replay_authorization = NfsMutationAuthorization {
+        drive_id,
+        resource_id: root_node_id,
+        membership_generation: first_session.session.membership_generation,
+        drive_acl_generation,
+        drive_namespace_generation,
+        resource_acl_generation: alias_owner_resolution.target.acl_generation,
+        resource_namespace_generation: alias_owner_resolution.target.namespace_generation,
+    };
     assert_eq!(
         database
-            .lookup_nfs_replay_receipt(&replay_context)
+            .select_authorized_nfs_replay_receipt(
+                &first_session.session,
+                &binding_digest,
+                &replay_context,
+                std::slice::from_ref(&replay_authorization),
+                None,
+            )
+            .await
+            .expect("select replay under one locked live authority projection"),
+        Some(replay.clone())
+    );
+    assert_eq!(
+        database
+            .lookup_nfs_replay_candidate(&replay_context)
             .await
             .expect("look up NFS replay response")
             .expect("stored NFS replay response"),
@@ -1987,14 +2089,14 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         .expect("a later forwarded compound operation may skip local operation indexes");
     assert_eq!(
         database
-            .lookup_nfs_replay_receipt(&replay_context)
+            .lookup_nfs_replay_candidate(&replay_context)
             .await
             .expect("retransmit the first forwarded operation"),
         Some(replay.clone())
     );
     assert_eq!(
         database
-            .lookup_nfs_replay_receipt(&later_context)
+            .lookup_nfs_replay_candidate(&later_context)
             .await
             .expect("retransmit the later forwarded operation"),
         Some(later)
@@ -2033,7 +2135,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         .await
         .expect("a higher observed sequence may skip locally handled compounds");
     assert!(matches!(
-        database.lookup_nfs_replay_receipt(&replay_context).await,
+        database.lookup_nfs_replay_candidate(&replay_context).await,
         Err(DatabaseError::StaleGeneration)
     ));
     let concurrent_request_digest = [45_u8; 32];
@@ -2051,7 +2153,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         response_digest: &concurrent_response_digest,
     };
     let second_input = RecordNfsReplayReceiptInput {
-        context: concurrent_context,
+        context: concurrent_context.clone(),
         response_bytes: &[0x08, 0x06],
         response_digest: &concurrent_response_digest,
     };
@@ -2059,8 +2161,9 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         database.record_nfs_replay_receipt(&first_input),
         database.record_nfs_replay_receipt(&second_input)
     );
+    let concurrent_replay = first.expect("first concurrent next sequence");
     assert_eq!(
-        first.expect("first concurrent next sequence"),
+        concurrent_replay,
         second.expect("second concurrent next sequence")
     );
     let replay_slot: (i64, i32, i64, bool, bool) = sqlx::query_as(
@@ -2234,6 +2337,19 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     let inherited_vfs_database = Database::connect(&inherited_vfs_url, 2)
         .await
         .expect("connect database client as deployment-like inherited VFS login");
+    assert_eq!(
+        inherited_vfs_database
+            .select_authorized_nfs_replay_receipt(
+                &first_session.session,
+                &binding_digest,
+                &concurrent_context,
+                std::slice::from_ref(&replay_authorization),
+                None,
+            )
+            .await
+            .expect("select admitted replay through deployment-like VFS role"),
+        Some(concurrent_replay)
+    );
     let inherited_io_pool = PgPoolOptions::new()
         .max_connections(1)
         .connect_with(
@@ -4062,6 +4178,156 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
             .is_err(),
         "an export cannot drain before the gateway drain is durable"
     );
+    let replay_mapping = database
+        .list_nfs_principal_mappings(tenant_id)
+        .await
+        .expect("list mappings for replay revocation race")
+        .into_iter()
+        .find(|record| record.kerberos_principal == "second_alias@EXAMPLE.TEST")
+        .expect("active secondary mapping for replay revocation race");
+    let replay_binding_digest = [53_u8; 32];
+    let replay_session = database
+        .create_nfs_mount_session(&CreateNfsMountSessionInput {
+            tenant_id,
+            kerberos_principal: "second_alias@EXAMPLE.TEST",
+            gss_binding_digest: &replay_binding_digest,
+            gateway_id: "nfs-gateway-0",
+            gateway_epoch,
+            source_address: "192.0.2.44",
+            gss_expires_at_unix_seconds: 2_000_000_000,
+        })
+        .await
+        .expect("create mapping-revocation replay session");
+    let revocation_request_digest = [54_u8; 32];
+    let revocation_context = NfsReplayContext {
+        tenant_id,
+        mount_session_id: replay_session.session.session_id,
+        client_id: "nfs-client-revocation-race",
+        nfs_session_id: "nfs-session-revocation-race",
+        slot_id: 1,
+        sequence_id: 1,
+        operation_index: 0,
+        operation: "stat",
+        request_digest: &revocation_request_digest,
+        gateway_epoch,
+    };
+    let revocation_replay = database
+        .record_nfs_replay_receipt(&RecordNfsReplayReceiptInput {
+            context: revocation_context.clone(),
+            response_bytes: &[0x08, 0x07],
+            response_digest: &[55_u8; 32],
+        })
+        .await
+        .expect("persist mapping-revocation replay receipt");
+    let revocation_resolution = database
+        .resolve_nfs_handle(
+            &replay_session.session,
+            &replay_binding_digest,
+            7,
+            root_node_id,
+            Some(1),
+        )
+        .await
+        .expect("resolve current replay revocation resource");
+    let (revocation_drive_acl, revocation_drive_namespace): (i64, i64) = sqlx::query_as(
+        "SELECT acl_generation,namespace_generation FROM drives \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read current replay revocation drive generations");
+    let revocation_authorization = NfsMutationAuthorization {
+        drive_id,
+        resource_id: root_node_id,
+        membership_generation: replay_session.session.membership_generation,
+        drive_acl_generation: revocation_drive_acl,
+        drive_namespace_generation: revocation_drive_namespace,
+        resource_acl_generation: revocation_resolution.target.acl_generation,
+        resource_namespace_generation: revocation_resolution.target.namespace_generation,
+    };
+    let mut revocation_barrier = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin mapping-revocation replay barrier");
+    sqlx::query(
+        "SELECT 1 FROM filebelt_mount.nfs_principal_mappings \
+         WHERE tenant_id=$1 AND credential_id=$2 FOR UPDATE",
+    )
+    .bind(tenant_id)
+    .bind(replay_mapping.credential_id)
+    .execute(&mut *revocation_barrier)
+    .await
+    .expect("lock replay mapping before revocation");
+    let revoker = Database::connect(
+        &postgres_url_with_application_name(&database_url, "nfs_replay_mapping_revoker"),
+        1,
+    )
+    .await
+    .expect("connect replay mapping revoker");
+    let revoker_task = tokio::spawn(async move {
+        revoker
+            .revoke_nfs_principal_mapping(
+                tenant_id,
+                principal_id,
+                replay_mapping.credential_id,
+                replay_mapping.generation,
+            )
+            .await
+    });
+    wait_for_postgres_lock(
+        database.pool(),
+        "nfs_replay_mapping_revoker",
+        "update filebelt_mount.nfs_principal_mappings",
+    )
+    .await;
+    assert_eq!(
+        database
+            .select_authorized_nfs_replay_receipt(
+                &replay_session.session,
+                &replay_binding_digest,
+                &revocation_context,
+                std::slice::from_ref(&revocation_authorization),
+                None,
+            )
+            .await
+            .expect("selection linearizes before blocked mapping revocation"),
+        Some(revocation_replay)
+    );
+    revocation_barrier
+        .commit()
+        .await
+        .expect("release replay mapping revocation barrier");
+    revoker_task
+        .await
+        .expect("join replay mapping revoker")
+        .expect("commit replay mapping revocation");
+    assert!(matches!(
+        database
+            .select_authorized_nfs_replay_receipt(
+                &replay_session.session,
+                &replay_binding_digest,
+                &revocation_context,
+                std::slice::from_ref(&revocation_authorization),
+                None,
+            )
+            .await,
+        Err(DatabaseError::StaleGeneration)
+    ));
+    let first_session = database
+        .create_nfs_mount_session(&CreateNfsMountSessionInput {
+            tenant_id,
+            kerberos_principal: "Nfs_User@EXAMPLE.TEST",
+            gss_binding_digest: &binding_digest,
+            gateway_id: "nfs-gateway-0",
+            gateway_epoch,
+            source_address: "192.0.2.42",
+            gss_expires_at_unix_seconds: 2_000_000_000,
+        })
+        .await
+        .expect("refresh primary NFS session after alias policy generation change");
     database
         .drain_mount_gateway_epoch(
             tenant_id,

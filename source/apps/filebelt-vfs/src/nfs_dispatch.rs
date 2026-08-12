@@ -14,7 +14,7 @@ use filebelt_database::mount::{
     MountIoCompletion, MountIoOperation, MountSessionFence, MountWriteCapabilityFence,
     MountWriteChunkPlan, MountWriteRangeOperation, MountWriteStorageOperation,
     MountWriteStorageRecord, NfsHandleResolution, NfsMutationAuthorization, NfsReplayContext,
-    OpenNfsHandleInput, PendingMountIoOperation, PendingMountIoWorkerState,
+    NfsReplayHandleFence, OpenNfsHandleInput, PendingMountIoOperation, PendingMountIoWorkerState,
     PreauthorizeMountIoOperationInput, RecordNfsReplayReceiptInput, ReissueMountIoOperationInput,
     SeekNfsWriteExtentInput,
 };
@@ -47,11 +47,246 @@ pub enum DispatchResult {
     Atomic(VfsResponse),
 }
 
+pub struct ReplayAdmission {
+    pub authorizations: Vec<NfsMutationAuthorization>,
+    pub handle: Option<NfsReplayHandleFence<'static>>,
+}
+
 struct ResolvedTarget {
     export_id: i64,
     resolution: NfsHandleResolution,
     node: NodeRecord,
     traversal_fence: Option<super::policy::AuthorizationCommonFence>,
+    traversal_authorizations: Vec<NfsMutationAuthorization>,
+}
+
+pub async fn authorize_replay(
+    state: &VfsState,
+    fence: &RequestFence,
+    session: &MountSessionFence,
+    operation: &filebelt_vfs_protocol::vfs_request::Operation,
+    replay: &VfsResponse,
+) -> Result<ReplayAdmission, VfsResponse> {
+    use filebelt_vfs_protocol::vfs_request::Operation;
+    let mut authorizations = Vec::new();
+    let mut handle = None;
+    match operation {
+        Operation::Read(request) => {
+            let handle_id = parse_non_nil_uuid(&request.handle_id).map_err(|()| invalid(fence))?;
+            let admitted = admit_current_handle(
+                state,
+                fence,
+                session,
+                handle_id,
+                "READ_CONTENT",
+                Action::ReadContent,
+                false,
+            )
+            .await?;
+            let version_id = admitted
+                .version_id
+                .filter(|version_id| !version_id.is_nil())
+                .ok_or_else(|| stale(fence, "vfs.handle_version_missing"))?;
+            let target = resolve_mount_handle_target(state, fence, session, &admitted).await?;
+            let grant = authorize(state, fence, session, &target, Action::ReadContent).await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+            handle = Some(NfsReplayHandleFence {
+                handle_id,
+                version_id,
+                required_action: "READ_CONTENT",
+                authorization: mutation_authorization(&target, grant),
+            });
+        }
+        Operation::List(request) => {
+            let parent =
+                resolve_persistent_handle(state, fence, session, &request.directory_handle).await?;
+            if request.drive_id != parent.node.drive_id.to_string()
+                || request.directory_id != parent.node.id.to_string()
+                || parent.node.kind != "directory"
+            {
+                return Err(denied(fence, "vfs.resource_not_found"));
+            }
+            for action in [Action::Traverse, Action::ListChildren] {
+                let grant = authorize(state, fence, session, &parent, action).await?;
+                append_target_authorizations(&mut authorizations, &parent, grant);
+            }
+            for entry in &replay.entries {
+                let target =
+                    resolve_persistent_handle(state, fence, session, &entry.persistent_handle)
+                        .await?;
+                if entry.resource_id != target.node.id.to_string()
+                    || target.node.parent_id != Some(parent.node.id)
+                {
+                    return Err(stale(fence, "vfs.nfs_replay_authority_changed"));
+                }
+                let grant = authorize(state, fence, session, &target, Action::ReadMetadata).await?;
+                append_target_authorizations(&mut authorizations, &target, grant);
+            }
+        }
+        Operation::Stat(request) => {
+            let target =
+                resolve_persistent_handle(state, fence, session, &request.persistent_handle)
+                    .await?;
+            if request.drive_id != target.node.drive_id.to_string()
+                || request.resource_id != target.node.id.to_string()
+            {
+                return Err(denied(fence, "vfs.resource_not_found"));
+            }
+            let grant = authorize(state, fence, session, &target, Action::ReadMetadata).await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::ResolveHandle(request) => {
+            let target =
+                resolve_persistent_handle(state, fence, session, &request.persistent_handle)
+                    .await?;
+            let grant = authorize(state, fence, session, &target, Action::ReadMetadata).await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::ExportRoot(request) => {
+            let target =
+                resolve_persistent_handle(state, fence, session, &replay.persistent_handle).await?;
+            if u64::try_from(target.export_id).ok() != Some(request.export_id)
+                || target.resolution.target.node_id != target.resolution.root_node_id
+            {
+                return Err(stale(fence, "vfs.nfs_export_stale"));
+            }
+            let grant = authorize(state, fence, session, &target, Action::Traverse).await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::Lookup(request) => {
+            let parent =
+                resolve_persistent_handle(state, fence, session, &request.parent_handle).await?;
+            let parent_grant = authorize(state, fence, session, &parent, Action::Traverse).await?;
+            append_target_authorizations(&mut authorizations, &parent, parent_grant);
+            let target =
+                resolve_persistent_handle(state, fence, session, &replay.persistent_handle).await?;
+            let name = NormalizedName::new(&request.display_name).map_err(|_| invalid(fence))?;
+            if target.node.parent_id != Some(parent.node.id)
+                || target.node.name_key != name.comparison_key()
+                || replay.resource_id != target.node.id.to_string()
+            {
+                return Err(denied(fence, "vfs.resource_not_found"));
+            }
+            let grant = authorize(state, fence, session, &target, Action::ReadMetadata).await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::GetXattr(request) => {
+            let (target, grant) = resolve_request_target(
+                state,
+                fence,
+                session,
+                &request.drive_id,
+                &request.resource_id,
+                &request.persistent_handle,
+                Action::ReadMetadata,
+            )
+            .await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::ListXattr(request) => {
+            let (target, grant) = resolve_request_target(
+                state,
+                fence,
+                session,
+                &request.drive_id,
+                &request.resource_id,
+                &request.persistent_handle,
+                Action::ReadMetadata,
+            )
+            .await?;
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::Readlink(request) => {
+            let (target, grant) = resolve_request_target(
+                state,
+                fence,
+                session,
+                &request.drive_id,
+                &request.resource_id,
+                &request.persistent_handle,
+                Action::ReadMetadata,
+            )
+            .await?;
+            if target.node.kind != "symlink" {
+                return Err(invalid(fence));
+            }
+            append_target_authorizations(&mut authorizations, &target, grant);
+        }
+        Operation::Access(request) => {
+            let current = access(state, fence, session, request).await;
+            if current.error != replay.error || current.allowed_actions != replay.allowed_actions {
+                return Err(stale(fence, "vfs.nfs_replay_authority_changed"));
+            }
+            let target =
+                resolve_persistent_handle(state, fence, session, &request.persistent_handle)
+                    .await?;
+            for action in &replay.allowed_actions {
+                let action = VfsAction::try_from(*action).map_err(|_| invalid(fence))?;
+                let common = common_action(action).ok_or_else(|| invalid(fence))?;
+                let grant = authorize(state, fence, session, &target, common).await?;
+                append_target_authorizations(&mut authorizations, &target, grant);
+            }
+        }
+        Operation::Open(request) => {
+            let target =
+                resolve_persistent_handle(state, fence, session, &request.persistent_handle)
+                    .await?;
+            if request.drive_id != target.node.drive_id.to_string()
+                || request.resource_id != target.node.id.to_string()
+                || target.node.kind != "file"
+            {
+                return Err(denied(fence, "vfs.resource_not_found"));
+            }
+            for requested in &request.requested_actions {
+                let action = match VfsAction::try_from(*requested) {
+                    Ok(VfsAction::ReadMetadata) => Action::ReadMetadata,
+                    Ok(VfsAction::ReadContent) => Action::ReadContent,
+                    _ => return Err(super::nfs_not_qualified(fence, "open")),
+                };
+                let grant = authorize(state, fence, session, &target, action).await?;
+                append_target_authorizations(&mut authorizations, &target, grant);
+            }
+            let resolved =
+                bind_read_open_head(target.node.head_version_id, &request.expected_version_id)
+                    .map_err(|_| stale(fence, "vfs.handle_version_stale"))?;
+            if !open_replay_matches_current_head(replay, resolved) {
+                return Err(stale(fence, "vfs.nfs_replay_authority_changed"));
+            }
+        }
+        Operation::EndSession(_) => return Err(denied(fence, "vfs.session_fence_stale")),
+        _ => {}
+    }
+    deduplicate_authorizations(&mut authorizations);
+    Ok(ReplayAdmission {
+        authorizations,
+        handle,
+    })
+}
+
+fn append_target_authorizations(
+    output: &mut Vec<NfsMutationAuthorization>,
+    target: &ResolvedTarget,
+    grant: super::policy::AuthorizationGrant,
+) {
+    for authorization in target
+        .traversal_authorizations
+        .iter()
+        .cloned()
+        .chain(std::iter::once(mutation_authorization(target, grant)))
+    {
+        output.push(authorization);
+    }
+}
+
+fn open_replay_matches_current_head(replay: &VfsResponse, version_id: Uuid) -> bool {
+    (replay.error == VfsError::Ok as i32 && replay.version_id == version_id.to_string())
+        || (replay.error == VfsError::Conflict as i32
+            && replay.reason_code == "vfs.share_mode_conflict")
+}
+
+fn deduplicate_authorizations(authorizations: &mut Vec<NfsMutationAuthorization>) {
+    let mut seen = HashSet::with_capacity(authorizations.len());
+    authorizations.retain(|authorization| seen.insert(authorization.clone()));
 }
 
 #[derive(Debug)]
@@ -386,6 +621,7 @@ async fn finish_resolution(
         return Err(stale(fence, "vfs.authorization_changed"));
     }
     let mut traversal_fence = None;
+    let mut traversal_authorizations = Vec::with_capacity(traversal_grants.len());
     for (entry, grant) in resolution.path.iter().zip(&traversal_grants) {
         if grant.resource_acl_generation != entry.metadata.acl_generation
             || grant.resource_namespace_generation != entry.metadata.namespace_generation
@@ -393,6 +629,15 @@ async fn finish_resolution(
         {
             return Err(stale(fence, "vfs.authorization_changed"));
         }
+        traversal_authorizations.push(NfsMutationAuthorization {
+            drive_id: resolution.target.drive_id,
+            resource_id: entry.metadata.node_id,
+            membership_generation: grant.membership_generation,
+            drive_acl_generation: grant.drive_acl_generation,
+            drive_namespace_generation: grant.namespace_generation,
+            resource_acl_generation: grant.resource_acl_generation,
+            resource_namespace_generation: grant.resource_namespace_generation,
+        });
     }
     let node = match state
         .database
@@ -422,6 +667,7 @@ async fn finish_resolution(
         resolution,
         node,
         traversal_fence,
+        traversal_authorizations,
     })
 }
 
@@ -1904,6 +2150,25 @@ async fn close(
         })
         .await
     {
+        Ok(result) if result.replayed => {
+            let replay = state
+                .database
+                .select_authorized_nfs_replay_receipt(
+                    session,
+                    match gss_binding(fence) {
+                        Ok(value) => value,
+                        Err(()) => return DispatchResult::ReadOnly(invalid(fence)),
+                    },
+                    context,
+                    &[],
+                    None,
+                )
+                .await;
+            match replay {
+                Ok(Some(replay)) => DispatchResult::Atomic(decode_nfs_replay(fence, &replay)),
+                _ => DispatchResult::Atomic(denied(fence, "vfs.session_fence_stale")),
+            }
+        }
         Ok(result) => DispatchResult::Atomic(decode_nfs_replay(fence, &result.replay)),
         Err(error) => {
             DispatchResult::ReadOnly(mutation_error(fence, error, "vfs.handle_close_failed"))
@@ -1938,7 +2203,28 @@ async fn end_session(
         })
         .await
     {
-        Ok(result) => DispatchResult::Atomic(decode_nfs_replay(fence, &result.replay)),
+        Ok(result) if result.replayed => {
+            let replay = state
+                .database
+                .lookup_applied_nfs_end_session_replay(
+                    context,
+                    &fence.gateway_id,
+                    session.credential_generation,
+                    session.authorization_generation,
+                    Some(gss),
+                    &request.reason_code,
+                )
+                .await;
+            match replay {
+                Ok(Some(replay)) => {
+                    DispatchResult::Atomic(super::decode_nfs_end_session_replay(fence, &replay))
+                }
+                _ => DispatchResult::Atomic(denied(fence, "vfs.session_fence_stale")),
+            }
+        }
+        Ok(result) => {
+            DispatchResult::Atomic(super::decode_nfs_end_session_replay(fence, &result.replay))
+        }
         Err(error) => {
             DispatchResult::ReadOnly(mutation_error(fence, error, "vfs.session_close_failed"))
         }
@@ -3301,8 +3587,9 @@ mod tests {
     use super::{
         MOUNT_CAPABILITY_AUDIENCE, MOUNT_CAPABILITY_LIFETIME_SECONDS, NodeCursor, RangeSpec,
         ReadOpenHeadError, access_action_has_qualified_handler, bind_read_open_head,
-        build_mount_chunk_plan, compare_cursor, decode_cursor, decode_hex_digest, encode_cursor,
-        merge_coherent_grant, merge_common_fence, pending_flush_matches, pending_range_matches,
+        build_mount_chunk_plan, compare_cursor, decode_cursor, decode_hex_digest,
+        deduplicate_authorizations, encode_cursor, merge_coherent_grant, merge_common_fence,
+        open_replay_matches_current_head, pending_flush_matches, pending_range_matches,
         prepare_mount_capability, range_endpoint, read_ends_at_eof, required_reservation,
         validate_base_parts,
     };
@@ -3310,12 +3597,12 @@ mod tests {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use filebelt_database::mount::{
         MountIoOperation, MountPayloadPartRecord, MountWriteCapabilityFence, MountWriteChunkPlan,
-        MountWriteRangeOperation, MountWriteStorageRecord, PendingMountIoOperation,
-        PendingMountIoWorkerState,
+        MountWriteRangeOperation, MountWriteStorageRecord, NfsMutationAuthorization,
+        PendingMountIoOperation, PendingMountIoWorkerState,
     };
     use filebelt_database::{NodeRecord, PayloadRecord};
     use filebelt_storage_protocol::MountStorageCapabilityUse;
-    use filebelt_vfs_protocol::VfsAction;
+    use filebelt_vfs_protocol::{MAX_DIRECTORY_ENTRIES, VfsAction, VfsError, VfsResponse};
     use reqwest::Method;
     use uuid::Uuid;
 
@@ -3439,6 +3726,54 @@ mod tests {
             range_end,
             content_blake3,
         }
+    }
+
+    #[test]
+    fn open_replay_accepts_only_current_success_or_canonical_share_conflict() {
+        let version_id = Uuid::new_v4();
+        let mut response = VfsResponse {
+            protocol_version: filebelt_vfs_protocol::PROTOCOL_VERSION,
+            request_id: Uuid::new_v4().to_string(),
+            error: VfsError::Ok as i32,
+            ..VfsResponse::default()
+        };
+        response.version_id = version_id.to_string();
+        assert!(open_replay_matches_current_head(&response, version_id));
+        response.version_id = Uuid::new_v4().to_string();
+        assert!(!open_replay_matches_current_head(&response, version_id));
+
+        let conflict = VfsResponse::failure(
+            Uuid::new_v4(),
+            VfsError::Conflict,
+            "vfs.share_mode_conflict",
+        );
+        assert!(open_replay_matches_current_head(&conflict, version_id));
+        let other = VfsResponse::failure(Uuid::new_v4(), VfsError::Conflict, "vfs.other");
+        assert!(!open_replay_matches_current_head(&other, version_id));
+    }
+
+    #[test]
+    fn maximum_shallow_list_deduplicates_shared_ancestor_proofs() {
+        let drive_id = Uuid::new_v4();
+        let ancestor = NfsMutationAuthorization {
+            drive_id,
+            resource_id: Uuid::new_v4(),
+            membership_generation: 1,
+            drive_acl_generation: 2,
+            drive_namespace_generation: 3,
+            resource_acl_generation: 4,
+            resource_namespace_generation: 5,
+        };
+        let mut authorizations = Vec::with_capacity(MAX_DIRECTORY_ENTRIES * 2);
+        for _ in 0..MAX_DIRECTORY_ENTRIES {
+            authorizations.push(ancestor.clone());
+            authorizations.push(NfsMutationAuthorization {
+                resource_id: Uuid::new_v4(),
+                ..ancestor.clone()
+            });
+        }
+        deduplicate_authorizations(&mut authorizations);
+        assert_eq!(authorizations.len(), MAX_DIRECTORY_ENTRIES + 1);
     }
 
     #[test]

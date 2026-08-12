@@ -464,12 +464,10 @@ async fn dispatch(state: &VfsState, request: &VfsRequest, fence: &RequestFence) 
     if let Operation::Authenticate(authentication) = operation {
         return authenticate(state, fence, authentication).await;
     }
-    // NFS exact replay is resolved before live-session admission so a stored
-    // terminal outcome (notably EndSession) remains recoverable after the
-    // original mutation has deliberately closed or otherwise advanced the
-    // live authority that produced it. The canonical request digest binds the
-    // original GSS/session/gateway context; a non-replay still performs the
-    // complete current admission below.
+    // NFS replay is part of dispatch because every ordinary retransmission
+    // must re-enter current session and operation authorization. EndSession is
+    // the sole exception: its fixed applied acknowledgement has a dedicated,
+    // closed-session admission path in dispatch_nfs.
     if fence.protocol == MountProtocol::Nfs {
         return dispatch_nfs(state, request, fence, operation).await;
     }
@@ -533,26 +531,6 @@ async fn dispatch_nfs(
     let Some(context) = nfs_replay_context(fence, &canonical_digest) else {
         return invalid(fence);
     };
-    match state.database.lookup_nfs_replay_receipt(&context).await {
-        Ok(Some(receipt)) => return decode_nfs_replay(fence, &receipt),
-        Ok(None) => {}
-        Err(DatabaseError::Conflict) => {
-            return VfsResponse::failure(
-                fence.request_id,
-                VfsError::Conflict,
-                "vfs.nfs_replay_mismatch",
-            );
-        }
-        Err(DatabaseError::StaleGeneration) => {
-            return VfsResponse::failure(
-                fence.request_id,
-                VfsError::StaleGeneration,
-                "vfs.nfs_replay_stale",
-            );
-        }
-        Err(_) => return unavailable(fence, "vfs.nfs_replay_unavailable"),
-    }
-
     let Some(session_fence) = session_admission_fence(fence) else {
         return invalid(fence);
     };
@@ -574,14 +552,100 @@ async fn dispatch_nfs(
         .await
     {
         Ok(session) => session,
-        Err(_) => return denied(fence, "vfs.session_fence_stale"),
+        Err(_) => {
+            if let Operation::EndSession(end) = operation {
+                return match state
+                    .database
+                    .lookup_applied_nfs_end_session_replay(
+                        &context,
+                        &fence.gateway_id,
+                        session_fence.credential_generation,
+                        session_fence.authorization_generation,
+                        fence
+                            .nfs_context
+                            .as_ref()
+                            .map(|context| &context.gss_binding_digest),
+                        &end.reason_code,
+                    )
+                    .await
+                {
+                    Ok(Some(receipt)) => decode_nfs_end_session_replay(fence, &receipt),
+                    Ok(None) | Err(DatabaseError::StaleGeneration) => {
+                        denied(fence, "vfs.session_fence_stale")
+                    }
+                    Err(DatabaseError::Conflict) => VfsResponse::failure(
+                        fence.request_id,
+                        VfsError::Conflict,
+                        "vfs.nfs_replay_mismatch",
+                    ),
+                    Err(_) => unavailable(fence, "vfs.nfs_replay_unavailable"),
+                };
+            }
+            return denied(fence, "vfs.session_fence_stale");
+        }
     };
+
+    let replay_candidate = match state.database.lookup_nfs_replay_candidate(&context).await {
+        Ok(candidate) => candidate,
+        Err(DatabaseError::Conflict) => {
+            return VfsResponse::failure(
+                fence.request_id,
+                VfsError::Conflict,
+                "vfs.nfs_replay_mismatch",
+            );
+        }
+        Err(DatabaseError::StaleGeneration) => {
+            return VfsResponse::failure(
+                fence.request_id,
+                VfsError::StaleGeneration,
+                "vfs.nfs_replay_stale",
+            );
+        }
+        Err(_) => return unavailable(fence, "vfs.nfs_replay_unavailable"),
+    };
+    if let Some(candidate) = replay_candidate {
+        let replay = decode_nfs_replay(fence, &candidate);
+        let admission = match nfs_dispatch::authorize_replay(
+            state, fence, &session, operation, &replay,
+        )
+        .await
+        {
+            Ok(admission) => admission,
+            Err(response) => return response,
+        };
+        return match state
+            .database
+            .select_authorized_nfs_replay_receipt(
+                &session,
+                match fence.nfs_context.as_ref() {
+                    Some(context) => &context.gss_binding_digest,
+                    None => return invalid(fence),
+                },
+                &context,
+                &admission.authorizations,
+                admission.handle.as_ref(),
+            )
+            .await
+        {
+            Ok(Some(receipt)) => decode_nfs_replay(fence, &receipt),
+            Ok(None) | Err(DatabaseError::StaleGeneration) => {
+                denied(fence, "vfs.session_fence_stale")
+            }
+            Err(DatabaseError::Conflict) => VfsResponse::failure(
+                fence.request_id,
+                VfsError::Conflict,
+                "vfs.nfs_replay_mismatch",
+            ),
+            Err(_) => unavailable(fence, "vfs.nfs_replay_unavailable"),
+        };
+    }
 
     match nfs_dispatch::dispatch(state, fence, &session, &context, operation).await {
         nfs_dispatch::DispatchResult::Atomic(response) => response,
         nfs_dispatch::DispatchResult::Retryable(response) => response,
         nfs_dispatch::DispatchResult::ReadOnly(response) => {
-            persist_nfs_read_only_receipt(state, fence, context, response).await
+            persist_nfs_read_only_receipt(state, fence, &session, context, operation, response)
+                .await
         }
     }
 }
@@ -727,26 +791,95 @@ fn decode_nfs_replay(
     }
 }
 
+fn decode_nfs_end_session_replay(
+    fence: &RequestFence,
+    receipt: &filebelt_database::mount::NfsReplayReceipt,
+) -> VfsResponse {
+    let expected = ok(fence);
+    let mut template = expected.clone();
+    template.request_id.clear();
+    if receipt.mutation_outcome.as_deref() != Some("applied")
+        || receipt.response_bytes != template.encode_to_vec()
+    {
+        return denied(fence, "vfs.session_fence_stale");
+    }
+    decode_nfs_replay(fence, receipt)
+}
+
+fn select_authorized_nfs_replay(
+    fence: &RequestFence,
+    receipt: &filebelt_database::mount::NfsReplayReceipt,
+    current_response: VfsResponse,
+) -> VfsResponse {
+    let mut current_template = current_response.clone();
+    current_template.request_id.clear();
+    if receipt.response_bytes == current_template.encode_to_vec() {
+        return decode_nfs_replay(fence, receipt);
+    }
+    if current_response.error != VfsError::Ok as i32 {
+        return current_response;
+    }
+    VfsResponse::failure(
+        fence.request_id,
+        VfsError::StaleGeneration,
+        "vfs.nfs_replay_authority_changed",
+    )
+}
+
 async fn persist_nfs_read_only_receipt(
     state: &VfsState,
     fence: &RequestFence,
+    session: &filebelt_database::mount::MountSessionFence,
     context: NfsReplayContext<'_>,
+    operation: &Operation,
     response: VfsResponse,
 ) -> VfsResponse {
-    let mut response_template = response;
+    let current_response = response;
+    let mut response_template = current_response.clone();
     response_template.request_id.clear();
     let response_bytes = response_template.encode_to_vec();
     let response_digest = *blake3::hash(&response_bytes).as_bytes();
     match state
         .database
         .record_nfs_replay_receipt(&RecordNfsReplayReceiptInput {
-            context,
+            context: context.clone(),
             response_bytes: &response_bytes,
             response_digest: &response_digest,
         })
         .await
     {
-        Ok(receipt) => decode_nfs_replay(fence, &receipt),
+        Ok(receipt) => {
+            let replay = decode_nfs_replay(fence, &receipt);
+            let admission =
+                match nfs_dispatch::authorize_replay(state, fence, session, operation, &replay)
+                    .await
+                {
+                    Ok(admission) => admission,
+                    Err(response) => return response,
+                };
+            match state
+                .database
+                .select_authorized_nfs_replay_receipt(
+                    session,
+                    match fence.nfs_context.as_ref() {
+                        Some(context) => &context.gss_binding_digest,
+                        None => return invalid(fence),
+                    },
+                    &context,
+                    &admission.authorizations,
+                    admission.handle.as_ref(),
+                )
+                .await
+            {
+                Ok(Some(receipt)) => {
+                    select_authorized_nfs_replay(fence, &receipt, current_response)
+                }
+                Ok(None) | Err(DatabaseError::StaleGeneration) => {
+                    denied(fence, "vfs.session_fence_stale")
+                }
+                Err(_) => unavailable(fence, "vfs.nfs_replay_unavailable"),
+            }
+        }
         Err(DatabaseError::Conflict) => VfsResponse::failure(
             fence.request_id,
             VfsError::Conflict,
@@ -2348,7 +2481,78 @@ mod tests {
     }
 
     #[test]
-    fn nfs_terminal_replay_precedes_live_session_readmission() {
+    fn nfs_replay_never_returns_cached_fields_after_live_result_changes() {
+        let fence = nfs_fence(filebelt_vfs_protocol::OperationKind::Read);
+        let cached = VfsResponse {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: fence.request_id.to_string(),
+            error: VfsError::Ok as i32,
+            data: b"cached-secret".to_vec(),
+            ..VfsResponse::default()
+        };
+        let mut cached_template = cached.clone();
+        cached_template.request_id.clear();
+        let response_bytes = cached_template.encode_to_vec();
+        let receipt = filebelt_database::mount::NfsReplayReceipt {
+            response_digest: *blake3::hash(&response_bytes).as_bytes(),
+            response_bytes,
+            gateway_epoch: fence.gateway_epoch,
+            expires_at_unix_seconds: 100,
+            mutation_outcome: None,
+        };
+
+        let denied = denied(&fence, "vfs.resource_not_found");
+        let replay = select_authorized_nfs_replay(&fence, &receipt, denied.clone());
+        assert_eq!(replay, denied);
+        assert!(replay.data.is_empty());
+
+        let changed = VfsResponse {
+            data: b"changed-data".to_vec(),
+            ..cached.clone()
+        };
+        let replay = select_authorized_nfs_replay(&fence, &receipt, changed);
+        assert_eq!(replay.error, VfsError::StaleGeneration as i32);
+        assert_eq!(replay.reason_code, "vfs.nfs_replay_authority_changed");
+        assert!(replay.data.is_empty());
+
+        assert_eq!(
+            select_authorized_nfs_replay(&fence, &receipt, cached.clone()),
+            cached
+        );
+    }
+
+    #[test]
+    fn nfs_end_session_replay_is_only_the_fixed_applied_acknowledgement() {
+        let fence = nfs_fence(filebelt_vfs_protocol::OperationKind::EndSession);
+        let mut response = ok(&fence);
+        response.request_id.clear();
+        let response_bytes = response.encode_to_vec();
+        let mut receipt = filebelt_database::mount::NfsReplayReceipt {
+            response_digest: *blake3::hash(&response_bytes).as_bytes(),
+            response_bytes,
+            gateway_epoch: fence.gateway_epoch,
+            expires_at_unix_seconds: 100,
+            mutation_outcome: Some("applied".into()),
+        };
+        assert_eq!(decode_nfs_end_session_replay(&fence, &receipt), ok(&fence));
+
+        receipt.mutation_outcome = Some("conflict".into());
+        assert_eq!(
+            decode_nfs_end_session_replay(&fence, &receipt).error,
+            VfsError::NotFound as i32
+        );
+
+        response.data = b"not-an-ack".to_vec();
+        receipt.response_bytes = response.encode_to_vec();
+        receipt.response_digest = *blake3::hash(&receipt.response_bytes).as_bytes();
+        receipt.mutation_outcome = Some("applied".into());
+        let replay = decode_nfs_end_session_replay(&fence, &receipt);
+        assert_eq!(replay.error, VfsError::NotFound as i32);
+        assert!(replay.data.is_empty());
+    }
+
+    #[test]
+    fn nfs_replay_reenters_live_session_and_operation_admission() {
         let dispatch = include_str!("main.rs")
             .split_once("async fn dispatch_nfs(")
             .unwrap()
@@ -2356,9 +2560,16 @@ mod tests {
             .split_once("fn nfs_not_qualified(")
             .unwrap()
             .0;
-        let replay = dispatch.find("lookup_nfs_replay_receipt").unwrap();
-        let live_session = dispatch.find("admit_mount_session").unwrap();
-        assert!(replay < live_session);
+        let session = dispatch.find("admit_mount_session").unwrap();
+        let candidate = dispatch.find("lookup_nfs_replay_candidate").unwrap();
+        let authorization = dispatch.find("authorize_replay").unwrap();
+        let selection = dispatch
+            .find("select_authorized_nfs_replay_receipt")
+            .unwrap();
+        assert!(session < candidate);
+        assert!(candidate < authorization);
+        assert!(authorization < selection);
+        assert!(dispatch.contains("lookup_applied_nfs_end_session_replay"));
     }
 
     #[test]

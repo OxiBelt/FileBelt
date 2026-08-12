@@ -453,6 +453,18 @@ digest requirement. Reclaim records, replay receipts, cleanup jobs, and gateway
 fencing are PostgreSQL authority; Ganesha `fs_ng` recovery data on its RWO claim
 supplies protocol recovery only and cannot authorize a FileBelt commit.
 
+Persisted NFS replay bytes remain durable only as idempotency evidence. The VFS
+does not return an ordinary receipt ahead of current session and operation
+admission: an operation-specific preflight derives exact generation and handle
+proofs, and one repeatable PostgreSQL transaction validates those proofs and
+the slot high-water in the snapshot that selects the receipt. Read replay does
+not fetch payload bytes again. Atomic open retains its authorization preflight
+before its database replay point. `EndSession`
+records `mutation_outcome=applied` in the same transaction that closes the
+session; a dedicated lookup may recover only its canonical empty success while
+the closed row and every external NFS authority fence remain current. No new
+table, grant, retention rule, or migration is introduced by this replay rule.
+
 Retained-conflict copy publishes the already-finalized payload, converts its
 reservation exactly once, and records the new node/version, audit, outbox, and
 HTTP idempotency response in one transaction. Discard retains the inventory row

@@ -170,6 +170,9 @@ pub struct MountPolicyRecord {
 const NFS_MAX_PROJECTED_ID: i64 = 4_294_967_294;
 const NFS_NOBODY_PROJECTED_ID: i64 = 65_534;
 const NFS_MAX_REPLAY_RESPONSE_BYTES: usize = 1_114_112;
+// A directory replay can fence 1,000 direct children plus the protocol's
+// 129-node maximum path. Duplicate ancestors are removed by VFS.
+const NFS_MAX_REPLAY_AUTHORIZATIONS: usize = 1_129;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NfsFeatureState {
@@ -356,6 +359,14 @@ pub struct NfsReplayReceipt {
     pub mutation_outcome: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct NfsReplayHandleFence<'a> {
+    pub handle_id: Uuid,
+    pub version_id: Uuid,
+    pub required_action: &'a str,
+    pub authorization: NfsMutationAuthorization,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NfsNodeMetadata {
     pub node_id: Uuid,
@@ -442,7 +453,7 @@ pub struct NfsAuthorizationSnapshot {
     pub feature_generation: i64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct NfsMutationAuthorization {
     pub drive_id: Uuid,
     pub resource_id: Uuid,
@@ -3314,10 +3325,12 @@ impl Database {
         Ok(projection)
     }
 
-    /// Looks up the exact persisted protobuf for one NFS compound operation.
-    /// A reused slot identity with different context is rejected rather than
-    /// treated as a cache miss.
-    pub async fn lookup_nfs_replay_receipt(
+    /// Reads an untrusted replay candidate so VFS can derive an
+    /// operation-specific authorization proof. This is not an admission
+    /// result and its bytes must never be returned until
+    /// `select_authorized_nfs_replay_receipt` succeeds. A reused slot identity
+    /// with different context is rejected rather than treated as a cache miss.
+    pub async fn lookup_nfs_replay_candidate(
         &self,
         context: &NfsReplayContext<'_>,
     ) -> Result<Option<NfsReplayReceipt>, DatabaseError> {
@@ -3400,6 +3413,422 @@ impl Database {
         };
         transaction.commit().await?;
         Ok(Some(receipt))
+    }
+
+    /// Selects an ordinary NFS replay only when the repeatable transaction
+    /// snapshot validates the current external session, resource generation,
+    /// replay slot, and optional open-handle fences.
+    /// The caller must derive every authorization proof from the current
+    /// operation-specific Virtual ACL evaluation; receipt bytes are never an
+    /// authorization input.
+    pub async fn select_authorized_nfs_replay_receipt(
+        &self,
+        session: &MountSessionFence,
+        gss_binding_digest: &[u8; 32],
+        context: &NfsReplayContext<'_>,
+        authorizations: &[NfsMutationAuthorization],
+        handle: Option<&NfsReplayHandleFence<'_>>,
+    ) -> Result<Option<NfsReplayReceipt>, DatabaseError> {
+        if !valid_nfs_replay_context(context)
+            || session.protocol != "nfs"
+            || session.tenant_id != context.tenant_id
+            || session.session_id != context.mount_session_id
+            || session.gateway_epoch != context.gateway_epoch
+            || authorizations.len() > NFS_MAX_REPLAY_AUTHORIZATIONS
+            || authorizations
+                .iter()
+                .any(|authorization| !valid_nfs_mutation_authorization(authorization))
+            || handle.is_some_and(|handle| {
+                handle.handle_id.is_nil()
+                    || handle.version_id.is_nil()
+                    || !matches!(handle.required_action, "READ_METADATA" | "READ_CONTENT")
+                    || !valid_nfs_mutation_authorization(&handle.authorization)
+            })
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let (
+            Some(mapping_generation),
+            Some(feature_generation),
+            Some(manifest_generation),
+            Some(restore_generation),
+        ) = (
+            session.nfs_mapping_generation,
+            session.nfs_feature_generation,
+            session.nfs_manifest_generation,
+            session.nfs_restore_generation,
+        )
+        else {
+            return Err(DatabaseError::InvalidPersistedValue);
+        };
+        let mut transaction = self.pool().begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *transaction)
+            .await?;
+        let admitted = sqlx::query_scalar::<_, i32>(
+            "SELECT 1 FROM filebelt_mount.sessions AS mount_session \
+             JOIN filebelt_mount.credentials AS credential \
+               ON credential.tenant_id=mount_session.tenant_id \
+              AND credential.id=mount_session.credential_id \
+             JOIN principals AS principal ON principal.tenant_id=mount_session.tenant_id \
+              AND principal.id=mount_session.user_principal_id \
+             JOIN users AS user_record ON user_record.tenant_id=principal.tenant_id \
+              AND user_record.principal_id=principal.id \
+             JOIN filebelt_mount.policies AS policy ON policy.tenant_id=mount_session.tenant_id \
+              AND policy.principal_id=mount_session.user_principal_id AND policy.protocol='nfs' \
+             JOIN filebelt_mount.gateway_epochs AS gateway \
+               ON gateway.tenant_id=mount_session.tenant_id AND gateway.protocol='nfs' \
+              AND gateway.gateway_id=mount_session.gateway_id \
+              AND gateway.epoch=mount_session.gateway_epoch \
+             JOIN filebelt_mount.nfs_feature_state AS feature \
+               ON feature.tenant_id=mount_session.tenant_id \
+             JOIN filebelt_mount.nfs_principal_mappings AS mapping \
+               ON mapping.tenant_id=mount_session.tenant_id \
+              AND mapping.credential_id=mount_session.credential_id \
+              AND mapping.principal_id=mount_session.user_principal_id \
+             JOIN filebelt_mount.nfs_posix_groups AS posix_group \
+               ON posix_group.tenant_id=mapping.tenant_id \
+              AND posix_group.group_id=mapping.posix_group_id \
+              AND posix_group.projected_gid=mapping.projected_gid \
+             JOIN group_memberships AS membership ON membership.tenant_id=mapping.tenant_id \
+              AND membership.group_id=posix_group.group_id \
+              AND membership.user_principal_id=mapping.principal_id \
+             WHERE mount_session.tenant_id=$1 AND mount_session.id=$2 \
+               AND mount_session.user_principal_id=$3 AND mount_session.credential_id=$4 \
+               AND mount_session.protocol='nfs' AND mount_session.state IN ('active','draining') \
+               AND mount_session.credential_generation=$5 \
+               AND mount_session.authorization_generation=$6 \
+               AND mount_session.membership_generation=$7 \
+               AND mount_session.gateway_epoch=$8 \
+               AND mount_session.nfs_gss_binding_digest=$9 \
+               AND mount_session.nfs_mapping_generation=$10 \
+               AND mount_session.nfs_feature_generation=$11 \
+               AND mount_session.nfs_manifest_generation=$12 \
+               AND mount_session.nfs_restore_generation=$13 \
+               AND mount_session.nfs_allowed_export_ids=$14 \
+               AND mount_session.idle_expires_at>clock_timestamp() \
+               AND mount_session.absolute_expires_at>clock_timestamp() \
+               AND credential.revoked_at IS NULL AND credential.expires_at>clock_timestamp() \
+               AND credential.credential_generation=$5 \
+               AND credential.authorization_generation=$6 \
+               AND (credential.bound_device_id IS NULL OR EXISTS (SELECT 1 \
+                 FROM filebelt_mount.headscale_devices AS device \
+                 WHERE device.tenant_id=credential.tenant_id \
+                   AND device.id=credential.bound_device_id \
+                   AND device.principal_id=mount_session.user_principal_id \
+                   AND device.revoked_at IS NULL \
+                   AND device.observed_at>clock_timestamp()-interval '5 minutes')) \
+               AND principal.disabled_at IS NULL AND principal.generation=$7 \
+               AND user_record.status='active' AND policy.enabled \
+               AND policy.authorization_generation=$6 \
+               AND mapping.generation=$10 AND mapping.revoked_at IS NULL \
+               AND feature.generation=$11 AND feature.restore_generation=$13 \
+               AND feature.applied_manifest_digest IS NOT NULL \
+               AND feature.applied_gateway_id=mount_session.gateway_id \
+               AND feature.applied_gateway_epoch=mount_session.gateway_epoch \
+               AND ((mount_session.state='active' AND feature.state='active' \
+                     AND feature.manifest_generation=$12 \
+                     AND feature.applied_manifest_generation=feature.manifest_generation \
+                     AND NOT gateway.draining AND gateway.lease_expires_at>clock_timestamp()) \
+                 OR (mount_session.state='draining' \
+                     AND feature.state IN ('active','draining') AND gateway.draining \
+                     AND gateway.drain_deadline>clock_timestamp())) \
+               AND NOT EXISTS (SELECT 1 \
+                 FROM unnest(mount_session.nfs_allowed_export_ids) AS allowed(export_id) \
+                 WHERE NOT EXISTS (SELECT 1 FROM filebelt_mount.nfs_exports AS export \
+                   JOIN nodes AS root ON root.tenant_id=export.tenant_id \
+                     AND root.drive_id=export.drive_id AND root.parent_id IS NULL \
+                     AND root.trash_root_id IS NULL AND root.kind='directory' \
+                   WHERE export.tenant_id=mount_session.tenant_id \
+                     AND export.export_id=allowed.export_id \
+                     AND export.drive_id=ANY(credential.allowed_drive_ids) \
+                     AND export.drive_id=ANY(policy.allowed_drive_ids) \
+                     AND ((mount_session.state='active' \
+                           AND export.desired_state='active' AND export.applied_state='active' \
+                           AND export.desired_generation=export.applied_generation) \
+                       OR (mount_session.state='draining' \
+                           AND export.applied_state IN ('active','draining'))))) \
+             FOR SHARE OF mount_session,credential,policy,gateway",
+        )
+        .bind(session.tenant_id)
+        .bind(session.session_id)
+        .bind(session.user_principal_id)
+        .bind(session.credential_id)
+        .bind(session.credential_generation)
+        .bind(session.authorization_generation)
+        .bind(session.membership_generation)
+        .bind(session.gateway_epoch)
+        .bind(gss_binding_digest.as_slice())
+        .bind(mapping_generation)
+        .bind(feature_generation)
+        .bind(manifest_generation)
+        .bind(restore_generation)
+        .bind(&session.allowed_export_ids)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if admitted.is_none() {
+            return Err(DatabaseError::StaleGeneration);
+        }
+        for authorization in authorizations {
+            let current = sqlx::query_scalar::<_, i32>(
+                "SELECT 1 FROM drives AS drive JOIN nodes AS node \
+                   ON node.tenant_id=drive.tenant_id AND node.drive_id=drive.id \
+                 WHERE drive.tenant_id=$1 AND drive.id=$2 AND node.id=$3 \
+                   AND node.trash_root_id IS NULL AND drive.acl_generation=$4 \
+                   AND drive.namespace_generation=$5 AND node.acl_generation=$6 \
+                   AND node.namespace_generation=$7 \
+                ",
+            )
+            .bind(session.tenant_id)
+            .bind(authorization.drive_id)
+            .bind(authorization.resource_id)
+            .bind(authorization.drive_acl_generation)
+            .bind(authorization.drive_namespace_generation)
+            .bind(authorization.resource_acl_generation)
+            .bind(authorization.resource_namespace_generation)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if current.is_none()
+                || authorization.membership_generation != session.membership_generation
+            {
+                return Err(DatabaseError::StaleGeneration);
+            }
+        }
+        if let Some(handle) = handle {
+            let current = sqlx::query_scalar::<_, i32>(
+                "SELECT 1 FROM filebelt_mount.handles AS handle \
+                 JOIN nodes AS node ON node.tenant_id=handle.tenant_id \
+                   AND node.drive_id=handle.drive_id AND node.id=handle.node_id \
+                 WHERE handle.tenant_id=$1 AND handle.id=$2 AND handle.session_id=$3 \
+                   AND handle.closed_at IS NULL AND handle.expires_at>clock_timestamp() \
+                   AND handle.version_id=$4 AND $5=ANY(handle.access_actions) \
+                   AND handle.drive_id=$6 AND handle.node_id=$7 \
+                   AND handle.credential_generation=$8 \
+                   AND handle.authorization_generation=$9 \
+                   AND handle.membership_generation=$10 AND handle.gateway_epoch=$11 \
+                   AND handle.drive_acl_generation=$12 \
+                   AND handle.namespace_generation=$13 \
+                   AND handle.resource_acl_generation=$14 \
+                   AND node.namespace_generation=$13 AND node.acl_generation=$14 \
+                 FOR SHARE OF handle",
+            )
+            .bind(session.tenant_id)
+            .bind(handle.handle_id)
+            .bind(session.session_id)
+            .bind(handle.version_id)
+            .bind(handle.required_action)
+            .bind(handle.authorization.drive_id)
+            .bind(handle.authorization.resource_id)
+            .bind(session.credential_generation)
+            .bind(session.authorization_generation)
+            .bind(session.membership_generation)
+            .bind(session.gateway_epoch)
+            .bind(handle.authorization.drive_acl_generation)
+            .bind(handle.authorization.resource_namespace_generation)
+            .bind(handle.authorization.resource_acl_generation)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if current.is_none() {
+                return Err(DatabaseError::StaleGeneration);
+            }
+        }
+        let row = sqlx::query(
+            "SELECT receipt.response_bytes,receipt.response_digest,receipt.mutation_outcome,\
+                    receipt.gateway_epoch,\
+                    floor(extract(epoch FROM receipt.expires_at))::bigint \
+                      AS expires_at_unix_seconds \
+             FROM filebelt_mount.nfs_replay_slots AS slot \
+             JOIN filebelt_mount.nfs_replay_receipts AS receipt \
+               ON receipt.tenant_id=slot.tenant_id \
+              AND receipt.mount_session_id=slot.mount_session_id \
+              AND receipt.nfs_session_id=slot.nfs_session_id \
+              AND receipt.slot_id=slot.slot_id \
+              AND receipt.sequence_id=slot.current_sequence_id \
+             WHERE slot.tenant_id=$1 AND slot.mount_session_id=$2 \
+               AND slot.client_id=$3 AND slot.nfs_session_id=$4 AND slot.slot_id=$5 \
+               AND slot.current_sequence_id=$6 AND slot.max_operation_index>=$7 \
+               AND slot.gateway_epoch=$10 AND receipt.operation_index=$7 \
+               AND receipt.operation=$8 AND receipt.request_digest=$9 \
+               AND receipt.client_id=$3 AND receipt.gateway_epoch=$10 \
+               AND receipt.expires_at>statement_timestamp()",
+        )
+        .bind(context.tenant_id)
+        .bind(context.mount_session_id)
+        .bind(context.client_id)
+        .bind(context.nfs_session_id)
+        .bind(context.slot_id)
+        .bind(context.sequence_id)
+        .bind(context.operation_index)
+        .bind(context.operation)
+        .bind(context.request_digest.as_slice())
+        .bind(context.gateway_epoch)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let receipt = if let Some(row) = row {
+            Some(NfsReplayReceipt {
+                response_bytes: row.get("response_bytes"),
+                response_digest: row
+                    .get::<Vec<u8>, _>("response_digest")
+                    .try_into()
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                gateway_epoch: row.get("gateway_epoch"),
+                expires_at_unix_seconds: row.get("expires_at_unix_seconds"),
+                mutation_outcome: row.get("mutation_outcome"),
+            })
+        } else {
+            None
+        };
+        transaction.commit().await?;
+        Ok(receipt)
+    }
+
+    /// Returns the fixed acknowledgement for the exact EndSession operation
+    /// that closed its own session. Unlike the general replay primitive, this
+    /// exceptional path admits a closed session while continuing to require
+    /// every external NFS authority fence to be current.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn lookup_applied_nfs_end_session_replay(
+        &self,
+        context: &NfsReplayContext<'_>,
+        gateway_id: &str,
+        credential_generation: i64,
+        authorization_generation: i64,
+        nfs_gss_binding_digest: Option<&[u8; 32]>,
+        reason_code: &str,
+    ) -> Result<Option<NfsReplayReceipt>, DatabaseError> {
+        if !valid_nfs_replay_context(context)
+            || context.operation != "end_session"
+            || gateway_id.is_empty()
+            || reason_code.is_empty()
+            || reason_code.len() > 64
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let Some(nfs_gss_binding_digest) = nfs_gss_binding_digest else {
+            return Err(DatabaseError::InvalidPersistedValue);
+        };
+        let row = sqlx::query(
+            "SELECT receipt.response_bytes,receipt.response_digest,receipt.gateway_epoch,\
+                    receipt.mutation_outcome,\
+                    floor(extract(epoch FROM receipt.expires_at))::bigint \
+                      AS expires_at_unix_seconds \
+             FROM filebelt_mount.nfs_replay_receipts AS receipt \
+             JOIN filebelt_mount.sessions AS mount_session \
+               ON mount_session.tenant_id=receipt.tenant_id \
+              AND mount_session.id=receipt.mount_session_id \
+             JOIN filebelt_mount.credentials AS credential \
+               ON credential.tenant_id=mount_session.tenant_id \
+              AND credential.id=mount_session.credential_id \
+             JOIN principals AS principal \
+               ON principal.tenant_id=mount_session.tenant_id \
+              AND principal.id=mount_session.user_principal_id \
+             JOIN users AS user_record ON user_record.tenant_id=principal.tenant_id \
+              AND user_record.principal_id=principal.id \
+             JOIN filebelt_mount.policies AS policy \
+               ON policy.tenant_id=mount_session.tenant_id \
+              AND policy.principal_id=mount_session.user_principal_id \
+              AND policy.protocol='nfs' \
+             JOIN filebelt_mount.gateway_epochs AS gateway \
+               ON gateway.tenant_id=mount_session.tenant_id \
+              AND gateway.protocol='nfs' AND gateway.gateway_id=mount_session.gateway_id \
+              AND gateway.epoch=mount_session.gateway_epoch \
+             JOIN filebelt_mount.nfs_feature_state AS feature \
+               ON feature.tenant_id=mount_session.tenant_id \
+             JOIN filebelt_mount.nfs_principal_mappings AS mapping \
+               ON mapping.tenant_id=mount_session.tenant_id \
+              AND mapping.credential_id=mount_session.credential_id \
+              AND mapping.principal_id=mount_session.user_principal_id \
+             JOIN filebelt_mount.nfs_posix_groups AS posix_group \
+               ON posix_group.tenant_id=mapping.tenant_id \
+              AND posix_group.group_id=mapping.posix_group_id \
+              AND posix_group.projected_gid=mapping.projected_gid \
+             JOIN group_memberships AS membership \
+               ON membership.tenant_id=mapping.tenant_id \
+              AND membership.group_id=posix_group.group_id \
+              AND membership.user_principal_id=mapping.principal_id \
+             WHERE receipt.tenant_id=$1 AND receipt.mount_session_id=$2 \
+               AND receipt.client_id=$3 AND receipt.nfs_session_id=$4 \
+               AND receipt.slot_id=$5 AND receipt.sequence_id=$6 \
+               AND receipt.operation_index=$7 AND receipt.operation='end_session' \
+               AND receipt.request_digest=$8 AND receipt.gateway_epoch=$9 \
+               AND receipt.mutation_outcome='applied' \
+               AND receipt.expires_at>statement_timestamp() \
+               AND mount_session.protocol='nfs' AND mount_session.state='closed' \
+               AND mount_session.close_reason=$10 \
+               AND mount_session.gateway_id=$11 AND mount_session.gateway_epoch=$9 \
+               AND mount_session.credential_generation=$12 \
+               AND mount_session.authorization_generation=$13 \
+               AND mount_session.nfs_gss_binding_digest=$14 \
+               AND mount_session.absolute_expires_at>statement_timestamp() \
+               AND credential.revoked_at IS NULL \
+               AND credential.expires_at>statement_timestamp() \
+               AND credential.credential_generation=$12 \
+               AND credential.authorization_generation=$13 \
+               AND (credential.bound_device_id IS NULL OR EXISTS (SELECT 1 \
+                 FROM filebelt_mount.headscale_devices AS device \
+                 WHERE device.tenant_id=credential.tenant_id \
+                   AND device.id=credential.bound_device_id \
+                   AND device.principal_id=mount_session.user_principal_id \
+                   AND device.revoked_at IS NULL \
+                   AND device.observed_at>statement_timestamp()-interval '5 minutes')) \
+               AND principal.disabled_at IS NULL \
+               AND principal.generation=mount_session.membership_generation \
+               AND user_record.status='active' AND policy.enabled \
+               AND policy.authorization_generation=$13 \
+               AND NOT gateway.draining \
+               AND gateway.lease_expires_at>statement_timestamp() \
+               AND feature.state='active' \
+               AND feature.generation=mount_session.nfs_feature_generation \
+               AND feature.manifest_generation=mount_session.nfs_manifest_generation \
+               AND feature.applied_manifest_generation=feature.manifest_generation \
+               AND feature.applied_manifest_digest IS NOT NULL \
+               AND feature.applied_gateway_id=mount_session.gateway_id \
+               AND feature.applied_gateway_epoch=mount_session.gateway_epoch \
+               AND feature.restore_generation=mount_session.nfs_restore_generation \
+               AND mapping.generation=mount_session.nfs_mapping_generation \
+               AND mapping.revoked_at IS NULL \
+               AND NOT EXISTS (SELECT 1 \
+                 FROM unnest(mount_session.nfs_allowed_export_ids) AS allowed(export_id) \
+                 WHERE NOT EXISTS (SELECT 1 FROM filebelt_mount.nfs_exports AS export \
+                   JOIN nodes AS root ON root.tenant_id=export.tenant_id \
+                     AND root.drive_id=export.drive_id AND root.parent_id IS NULL \
+                     AND root.trash_root_id IS NULL AND root.kind='directory' \
+                   WHERE export.tenant_id=mount_session.tenant_id \
+                     AND export.export_id=allowed.export_id \
+                     AND export.drive_id=ANY(credential.allowed_drive_ids) \
+                     AND export.drive_id=ANY(policy.allowed_drive_ids) \
+                     AND export.desired_state='active' AND export.applied_state='active' \
+                     AND export.desired_generation=export.applied_generation))",
+        )
+        .bind(context.tenant_id)
+        .bind(context.mount_session_id)
+        .bind(context.client_id)
+        .bind(context.nfs_session_id)
+        .bind(context.slot_id)
+        .bind(context.sequence_id)
+        .bind(context.operation_index)
+        .bind(context.request_digest.as_slice())
+        .bind(context.gateway_epoch)
+        .bind(reason_code)
+        .bind(gateway_id)
+        .bind(credential_generation)
+        .bind(authorization_generation)
+        .bind(nfs_gss_binding_digest.as_slice())
+        .fetch_optional(self.pool())
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(NfsReplayReceipt {
+            response_bytes: row.get("response_bytes"),
+            response_digest: row
+                .get::<Vec<u8>, _>("response_digest")
+                .try_into()
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+            gateway_epoch: row.get("gateway_epoch"),
+            expires_at_unix_seconds: row.get("expires_at_unix_seconds"),
+            mutation_outcome: row.get("mutation_outcome"),
+        }))
     }
 
     /// Persists one replay response in its own database operation. This is a
@@ -7046,11 +7475,6 @@ impl Database {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool().begin().await?;
-        if let Some(replay) = begin_nfs_atomic_replay_tx(&mut transaction, &input.replay).await? {
-            let result = nfs_open_result_from_replay(input, replay)?;
-            transaction.commit().await?;
-            return Ok(result);
-        }
         let authorized = if read_only_open {
             sqlx::query(
                 "SELECT user_principal_id FROM filebelt_mount.authorize_nfs_handle_open(\
@@ -7123,6 +7547,11 @@ impl Database {
             || node.get::<i64, _>("acl_generation") != input.authorization.resource_acl_generation
         {
             return Err(DatabaseError::StaleGeneration);
+        }
+        if let Some(replay) = begin_nfs_atomic_replay_tx(&mut transaction, &input.replay).await? {
+            let result = nfs_open_result_from_replay(input, replay)?;
+            transaction.commit().await?;
+            return Ok(result);
         }
         let wants_read = input
             .access_actions

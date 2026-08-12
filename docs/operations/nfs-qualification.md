@@ -131,9 +131,15 @@ prohibited-bit/chown checks,
 xattr list/remove and namespace rejection, conflicting/unlock/to-EOF/LOCKT
 locks, open-unlinked completion, truncate/allocate/punch/SEEK_DATA/SEEK_HOLE,
 readdir-cookie resume, ACL deny/attenuation, Web-versus-NFS conflict-copy, and
-induced replay/retransmit evidence. Cases not yet executable stay in the
-required-case manifest, so the current scaffold fails rather than omitting
-them. A negative result is counted only
+induced replay/retransmit evidence. Replay cases must lose a read response and
+then retransmit its exact slot after session, credential, mapping, policy,
+resource ACL, feature/export, and gateway revocation; no cached bytes or
+metadata may return. They also close a handle before exact read replay, change
+one listed child's ACL without revoking the parent listing, prove unchanged
+open/close replay has no second side effect, and admit after self-close only the
+fixed empty applied `EndSession` acknowledgement. Cases not yet executable stay
+in the required-case manifest, so the current scaffold fails rather than
+omitting them. A negative result is counted only
 after the fixture's positive `krb5p` path succeeds.
 
 Qualification must use the exact patched Ganesha 6.5 source and prove both

@@ -517,6 +517,19 @@ stable pre-authority qualification sentinel. Their additive messages and
 database authority are contracts for later qualification, not an enabled
 write surface.
 
+NFS slot replay never bypasses live VFS admission. Ordinary retransmissions
+execute an operation-specific side-effect-free authorization preflight, then
+validate its session, generation, resource, handle, and replay-slot fences in
+the repeatable PostgreSQL snapshot that selects the canonical receipt. Read replay proves the current handle, immutable version,
+and `READ_CONTENT` without repeating payload I/O; atomic open re-enters its
+target/action preflight before its database-owned replay point. A changed
+read/list/metadata projection yields a stale or existence-hiding response with
+no cached payload or metadata. `EndSession` alone may replay after its session
+is closed, and only as the exact applied, empty success acknowledgement while
+credential, principal, policy, mapping, feature/export, gateway, GSS, and
+expiry authority remain current. This tightens internal behavior without a VFS
+protobuf or public route change.
+
 Collaboration additionally advertises `/collaboration/v1/wt` when enabled.
 One WebTransport session and one client-created reliable bidirectional stream
 carry the unchanged length-delimited Protobuf frames for one room participant;

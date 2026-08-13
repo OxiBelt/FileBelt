@@ -176,13 +176,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     }
     assert!(release.contains("tests/scripts/promote-release-artifacts.sh"));
     assert!(release.contains("tests/scripts/run-kubernetes-release-gate.sh"));
-    for job in [
-        "docker-core-acceptance:",
-        "docker-collaboration-acceptance:",
-        "docker-mcp-acceptance:",
-    ] {
-        assert!(release.contains(job), "release workflow is missing {job}");
-    }
+    assert!(release.contains("docker-integration-acceptance:"));
     assert!(release.contains("tests/scripts/run-kubernetes-kind-compatibility.sh"));
     assert!(release.contains("helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc"));
     for node_image in [
@@ -300,10 +294,8 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             &[
                 ("image-platforms", "normalized-rebuild"),
                 ("normalized-rebuild", "package-assets"),
-                ("package-assets", "docker-core-acceptance"),
-                ("docker-core-acceptance", "docker-collaboration-acceptance"),
-                ("docker-collaboration-acceptance", "docker-mcp-acceptance"),
-                ("docker-mcp-acceptance", "kubernetes-compatibility"),
+                ("package-assets", "docker-integration-acceptance"),
+                ("docker-integration-acceptance", "kubernetes-compatibility"),
                 ("kubernetes-compatibility", "release-gate"),
             ][..],
         ),
@@ -498,28 +490,48 @@ fn docker_units_consume_exact_amd64_archives_in_matrices() {
 
     let release =
         fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");
-    for (job, next, unit) in [
-        (
-            "docker-core-acceptance",
-            "docker-collaboration-acceptance",
-            "core",
-        ),
-        (
-            "docker-collaboration-acceptance",
-            "docker-mcp-acceptance",
-            "collaboration",
-        ),
-        ("docker-mcp-acceptance", "kubernetes-compatibility", "mcp"),
-    ] {
-        let body = workflow_job(&release, job, next);
-        assert!(body.contains("!cancelled() && needs.image-platforms.result == 'success'"));
-        assert!(body.contains("name: filebelt-release-amd64"));
-        assert!(body.contains(&format!("--unit {unit}")));
-    }
-    assert!(release.contains("DOCKER_CORE: ${{ needs.docker-core-acceptance.result }}"));
-    assert!(
-        release
-            .contains("DOCKER_COLLABORATION: ${{ needs.docker-collaboration-acceptance.result }}")
+    let acceptance = workflow_job(
+        &release,
+        "docker-integration-acceptance",
+        "kubernetes-compatibility",
     );
-    assert!(release.contains("DOCKER_MCP: ${{ needs.docker-mcp-acceptance.result }}"));
+    for required in [
+        "if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}",
+        "timeout-minutes: ${{ matrix.timeout_minutes }}",
+        "strategy:\n      fail-fast: false",
+        "- unit: core\n            timeout_minutes: 45\n            requires_playwright: false",
+        "- unit: collaboration\n            timeout_minutes: 60\n            requires_playwright: true",
+        "- unit: mcp\n            timeout_minutes: 45\n            requires_playwright: false",
+        "fetch-depth: 0",
+        "name: filebelt-release-amd64",
+        "path: artifacts/docker/${{ matrix.unit }}-images",
+        "tests/scripts/run-kubernetes-release-gate.sh",
+        "--unit ${{ matrix.unit }}",
+        "--diagnostics-dir artifacts/docker/${{ matrix.unit }}",
+        "name: filebelt-release-docker-${{ matrix.unit }}-diagnostics",
+        "retention-days: 30",
+    ] {
+        assert!(
+            acceptance.contains(required),
+            "release Docker matrix is missing {required}"
+        );
+    }
+    assert_eq!(
+        acceptance.matches("if: matrix.requires_playwright").count(),
+        4
+    );
+    for removed in [
+        "\n  docker-core-acceptance:\n",
+        "\n  docker-collaboration-acceptance:\n",
+        "\n  docker-mcp-acceptance:\n",
+    ] {
+        assert!(!release.contains(removed));
+    }
+    let release_gate = workflow_job(&release, "release-gate", "promote");
+    assert!(release_gate.contains("docker-integration-acceptance"));
+    assert!(
+        release_gate
+            .contains("DOCKER_INTEGRATION: ${{ needs.docker-integration-acceptance.result }}")
+    );
+    assert!(release_gate.contains("test \"$DOCKER_INTEGRATION\" = success"));
 }

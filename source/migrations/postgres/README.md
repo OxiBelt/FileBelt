@@ -14,6 +14,29 @@ an explicit allowlist instead of default table privileges. Finish by running
 checks the compiled migration checksums, required privileges, prohibited excess
 privileges, and the non-login properties of every group role.
 
+`roles.sql` temporarily grants the migrator database `CREATE` for immutable
+idempotent schema statements and assigns ownership of `filebelt_revision` to
+the migrator. `grants.sql` revokes database `CREATE` immediately after the
+migrations, and verification treats a retained grant as a failure. Neither
+script grants database ownership, `CREATEDB`, or role-administration rights.
+
+`000017_nfs_worker_trigger_dispatch.sql` repairs the immutable migration 14
+worker-authority trigger by dispatching on the trigger relation before reading
+relation-specific `OLD` fields. It preserves fail-closed NFS staging denial
+while allowing ordinary upload and collaboration payload transitions.
+
+`000018_collaboration_backend_reservation.sql` preserves the backend row lock
+used by collaboration object allocation without granting the collaboration
+runtime role table write privileges. Its fixed-search-path security-definer
+functions return only the selected backend UUID or the four authorization
+generations plus the session expiry required for grant publication.
+`grants.sql` permits the API and collaboration roles to execute the fence and
+only `filebelt_collaboration` to reserve a backend. The I/O role receives
+execute-only access to the one-shot object finalizer: the definer locks and
+consumes the matching staging object and active reservation before it converts
+reserved drive bytes to used bytes. I/O can read, but cannot directly update,
+those authoritative accounting rows.
+
 Use the read-only, column-scoped `filebelt_audit_exporter` group for
 `filebeltctl audit export` and `filebelt_recovery` for `filebeltctl recovery`.
 Scrub orchestration writes durable maintenance jobs and therefore uses a login

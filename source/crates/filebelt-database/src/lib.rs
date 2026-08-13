@@ -1772,8 +1772,17 @@ impl Database {
         session_id: Uuid,
     ) -> Result<(), DatabaseError> {
         let mut transaction = self.pool.begin().await?;
-        let current=sqlx::query("SELECT p.generation AS membership_generation,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.acl_generation AS resource_acl_generation,LEAST(s.idle_expires_at,s.absolute_expires_at)::text AS session_expires_at FROM api_sessions s JOIN users u ON u.tenant_id=s.tenant_id AND u.id=s.user_id JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.principal_id JOIN drives d ON d.tenant_id=s.tenant_id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id WHERE s.tenant_id=$1 AND s.id=$2 AND s.principal_id=$3 AND s.revoked_at IS NULL AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() AND u.status='active' AND p.disabled_at IS NULL AND d.id=$4 AND n.id=$5 FOR SHARE OF s,u,p,d,n")
-            .bind(snapshot.tenant_id).bind(session_id).bind(snapshot.actor_principal_id).bind(snapshot.drive_id).bind(snapshot.resource_id).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::StaleGeneration)?;
+        let current = sqlx::query(
+            "SELECT * FROM filebelt_collaboration.lock_authorization_fence($1,$2,$3,$4,$5)",
+        )
+        .bind(snapshot.tenant_id)
+        .bind(snapshot.actor_principal_id)
+        .bind(session_id)
+        .bind(snapshot.drive_id)
+        .bind(snapshot.resource_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::StaleGeneration)?;
         if current.get::<i64, _>("membership_generation") != snapshot.membership_generation
             || current.get::<i64, _>("drive_acl_generation") != snapshot.drive_acl_generation
             || current.get::<i64, _>("namespace_generation") != snapshot.namespace_generation
@@ -3005,8 +3014,8 @@ async fn lock_authorization_fence(
 
 /// Fence a collaboration manifest against the exact session and Virtual ACL
 /// projection without giving the collaboration role mutation rights on policy
-/// rows. `FOR SHARE` conflicts with the authorization-changing updates that
-/// advance the corresponding generation.
+/// rows. The narrowly executable database function holds `FOR SHARE` locks
+/// that conflict with authorization-changing generation updates.
 async fn lock_collaboration_authorization_fence(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: Uuid,
@@ -3016,15 +3025,17 @@ async fn lock_collaboration_authorization_fence(
     resource_id: Uuid,
     expected: [i64; 4],
 ) -> Result<(), DatabaseError> {
-    let current = sqlx::query("SELECT p.generation AS membership_generation,d.acl_generation AS drive_acl_generation,d.namespace_generation,n.acl_generation AS resource_acl_generation FROM api_sessions s JOIN users u ON u.tenant_id=s.tenant_id AND u.id=s.user_id JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.principal_id JOIN drives d ON d.tenant_id=s.tenant_id JOIN nodes n ON n.tenant_id=d.tenant_id AND n.drive_id=d.id WHERE s.tenant_id=$1 AND s.id=$2 AND s.principal_id=$3 AND s.revoked_at IS NULL AND s.idle_expires_at>clock_timestamp() AND s.absolute_expires_at>clock_timestamp() AND u.status='active' AND p.disabled_at IS NULL AND d.id=$4 AND n.id=$5 FOR SHARE OF s,u,p,d,n")
-        .bind(tenant_id)
-        .bind(session_id)
-        .bind(actor_principal_id)
-        .bind(drive_id)
-        .bind(resource_id)
-        .fetch_optional(&mut **transaction)
-        .await?
-        .ok_or(DatabaseError::StaleGeneration)?;
+    let current = sqlx::query(
+        "SELECT * FROM filebelt_collaboration.lock_authorization_fence($1,$2,$3,$4,$5)",
+    )
+    .bind(tenant_id)
+    .bind(actor_principal_id)
+    .bind(session_id)
+    .bind(drive_id)
+    .bind(resource_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(DatabaseError::StaleGeneration)?;
     let actual: [i64; 4] = [
         current.get("membership_generation"),
         current.get("drive_acl_generation"),
@@ -3368,9 +3379,15 @@ mod tests {
             .split_once("fn share_preset_actions")
             .expect("share presets follow fences")
             .0;
-        assert!(fence.contains("FOR SHARE OF s,u,p,d,n"));
-        assert!(fence.contains("u.status='active'"));
+        assert!(fence.contains("filebelt_collaboration.lock_authorization_fence"));
         assert!(!fence.contains("FOR UPDATE"));
+        let migration = include_str!(
+            "../../../migrations/postgres/000018_collaboration_backend_reservation.sql"
+        );
+        assert!(migration.contains("SECURITY DEFINER"));
+        assert!(migration.contains("FOR SHARE OF session, user_account, principal, drive, node"));
+        assert!(migration.contains("user_account.status = 'active'"));
+        assert!(migration.contains("SET search_path = pg_catalog, pg_temp"));
     }
 
     #[test]
@@ -3549,7 +3566,13 @@ mod tests {
             .split_once("pub async fn create_directory")
             .expect("create_directory follows publish_authorization_generations")
             .0;
-        assert!(publish.contains("u.status='active' AND p.disabled_at IS NULL"));
+        assert!(publish.contains("filebelt_collaboration.lock_authorization_fence"));
+
+        let collaboration_migration = include_str!(
+            "../../../migrations/postgres/000018_collaboration_backend_reservation.sql"
+        );
+        assert!(collaboration_migration.contains("user_account.status = 'active'"));
+        assert!(collaboration_migration.contains("principal.disabled_at IS NULL"));
 
         let migration = include_str!("../../../migrations/postgres/000001_phase2_core.sql");
         assert!(migration.contains("invalidate_principal_capability_projection"));

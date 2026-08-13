@@ -19,6 +19,7 @@ const ROLES: &[&str] = &[
     "filebelt_recovery",
     "filebelt_mcp_broker",
     "filebelt_collaboration",
+    "filebelt_collaboration_definer",
     "filebelt_vfs",
     "filebelt_headscale_sync",
     "filebelt_document",
@@ -56,6 +57,7 @@ pub async fn verify(database: &Database) -> Result<String, String> {
     if !failures.is_empty() {
         return Err(verification_failure(failures));
     }
+    verify_database_privileges(database, &mut failures).await?;
     verify_schema_privileges(database, &mut failures).await?;
     let tables = reviewed_tables(database).await?;
     verify_table_privileges(database, &tables, &mut failures).await?;
@@ -74,6 +76,26 @@ pub async fn verify(database: &Database) -> Result<String, String> {
         "reviewed_tables": tables.len(),
     }))
     .map_err(|error| error.to_string())
+}
+
+async fn verify_database_privileges(
+    database: &Database,
+    failures: &mut Vec<String>,
+) -> Result<(), String> {
+    for role in ROLES {
+        let create: bool =
+            sqlx::query_scalar("SELECT has_database_privilege($1,current_database(),'CREATE')")
+                .bind(role)
+                .fetch_one(database.pool())
+                .await
+                .map_err(|error| error.to_string())?;
+        if create {
+            failures.push(format!(
+                "role {role} has prohibited database CREATE privilege"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn verification_failure(mut failures: Vec<String>) -> String {
@@ -211,6 +233,7 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
                 | "filebelt_maintenance"
                 | "filebelt_recovery"
                 | "filebelt_collaboration"
+                | "filebelt_collaboration_definer"
         ),
         "filebelt_mount" => matches!(
             role,
@@ -442,7 +465,16 @@ fn expected_table_privilege(role: &str, schema: &str, table: &str, privilege: &s
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE" | "DELETE")
         }
         "filebelt_audit_exporter" | "filebelt_recovery" | "filebelt_mcp_broker" => false,
-        "filebelt_collaboration" => table == "authorization_generations" && privilege == "SELECT",
+        "filebelt_collaboration" => {
+            table == "authorization_generations" && privilege == "SELECT"
+                || table == "jobs" && privilege == "INSERT"
+        }
+        "filebelt_collaboration_definer" => {
+            matches!(
+                table,
+                "storage_backends" | "api_sessions" | "users" | "principals" | "drives" | "nodes"
+            ) && matches!(privilege, "SELECT" | "UPDATE")
+        }
         "filebelt_vfs" => {
             matches!(
                 table,
@@ -846,10 +878,11 @@ fn expected_collaboration_table_privilege(role: &str, table: &str, privilege: &s
                     | "participants"
                     | "payload_objects"
             ) && matches!(privilege, "SELECT" | "INSERT" | "UPDATE")
+                || table == "participants" && privilege == "DELETE"
         }
         "filebelt_io" => {
-            matches!(table, "objects" | "object_reservations" | "payload_objects")
-                && matches!(privilege, "SELECT" | "UPDATE")
+            matches!(table, "objects" | "object_reservations") && privilege == "SELECT"
+                || table == "payload_objects" && matches!(privilege, "SELECT" | "UPDATE")
                 || table == "epochs" && privilege == "SELECT"
         }
         "filebelt_maintenance" => {
@@ -874,6 +907,11 @@ fn expected_collaboration_table_privilege(role: &str, table: &str, privilege: &s
                 table,
                 "rooms" | "epochs" | "objects" | "update_groups" | "snapshots" | "checkpoints"
             ) && privilege == "SELECT"
+        }
+        "filebelt_collaboration_definer" => {
+            table == "epochs" && matches!(privilege, "SELECT" | "UPDATE")
+                || matches!(table, "objects" | "object_reservations")
+                    && matches!(privilege, "SELECT" | "UPDATE")
         }
         _ => false,
     }
@@ -935,6 +973,7 @@ fn expected_mcp_table_privilege(role: &str, table: &str, privilege: &str) -> boo
                 || table == "deletion_tombstones" && privilege == "INSERT"
                 || table == "registrations" && matches!(privilege, "SELECT" | "INSERT")
                 || table == "invocations" && privilege == "INSERT"
+                || matches!(table, "capability_snapshots" | "capabilities") && privilege == "INSERT"
         }
         "filebelt_mcp_broker" => {
             BROKER_READ_TABLES.contains(&table) && privilege == "SELECT"
@@ -1478,11 +1517,31 @@ async fn verify_function_privileges(
 }
 
 fn expected_function_privilege(role: &str, function: &str) -> bool {
-    (function == "filebelt_revision.attach_legacy_content()"
+    (function == "filebelt_collaboration.reserve_posix_storage_backend(uuid)"
         && matches!(
             role,
-            "filebelt_api" | "filebelt_document" | "filebelt_collaboration" | "filebelt_revision"
+            "filebelt_collaboration" | "filebelt_collaboration_definer"
         ))
+        || (function == "filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)"
+            && matches!(
+                role,
+                "filebelt_api"
+                    | "filebelt_io"
+                    | "filebelt_collaboration"
+                    | "filebelt_collaboration_definer"
+            ))
+        || (function == "filebelt_collaboration.lock_epoch(uuid,uuid,bigint)"
+            && matches!(role, "filebelt_io" | "filebelt_collaboration_definer"))
+        || (function == "filebelt_collaboration.finalize_object(uuid,uuid,bigint,bytea)"
+            && matches!(role, "filebelt_io" | "filebelt_collaboration_definer"))
+        || (function == "filebelt_revision.attach_legacy_content()"
+            && matches!(
+                role,
+                "filebelt_api"
+                    | "filebelt_document"
+                    | "filebelt_collaboration"
+                    | "filebelt_revision"
+            ))
         || (function == "filebelt_revision.create_tenant_activation_state()"
             && role == "filebelt_api")
         || (function
@@ -1939,6 +1998,15 @@ mod tests {
     }
 
     #[test]
+    fn migrator_database_create_is_bounded_to_the_migration_window() {
+        let roles = include_str!("../../../migrations/postgres/roles.sql");
+        let grants = include_str!("../../../migrations/postgres/grants.sql");
+        assert!(roles.contains("GRANT CREATE ON DATABASE %I TO filebelt_migrator"));
+        assert!(grants.contains("REVOKE CREATE ON DATABASE %I FROM filebelt_migrator"));
+        assert!(roles.contains("ALTER SCHEMA filebelt_revision OWNER TO filebelt_migrator"));
+    }
+
+    #[test]
     fn database_owner_bootstraps_non_public_schemas() {
         let roles = include_str!("../../../migrations/postgres/roles.sql");
         let phase4 = include_str!("../../../migrations/postgres/000002_phase4_mcp.sql");
@@ -2023,6 +2091,117 @@ mod tests {
             "api_sessions",
             "access_token_digest",
             "SELECT"
+        ));
+    }
+
+    #[test]
+    fn collaboration_role_can_only_delete_ephemeral_participants() {
+        assert!(expected_table_privilege(
+            "filebelt_collaboration",
+            "filebelt_collaboration",
+            "participants",
+            "DELETE"
+        ));
+        for table in ["rooms", "epochs", "join_grants", "payload_objects"] {
+            assert!(!expected_table_privilege(
+                "filebelt_collaboration",
+                "filebelt_collaboration",
+                table,
+                "DELETE"
+            ));
+        }
+        assert!(expected_function_privilege(
+            "filebelt_collaboration",
+            "filebelt_collaboration.reserve_posix_storage_backend(uuid)"
+        ));
+        assert!(!expected_function_privilege(
+            "filebelt_api",
+            "filebelt_collaboration.reserve_posix_storage_backend(uuid)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_collaboration",
+            "filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)"
+        ));
+        assert!(!expected_function_privilege(
+            "filebelt_maintenance",
+            "filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_api",
+            "filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_io",
+            "filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_io",
+            "filebelt_collaboration.lock_epoch(uuid,uuid,bigint)"
+        ));
+        assert!(!expected_function_privilege(
+            "filebelt_collaboration",
+            "filebelt_collaboration.lock_epoch(uuid,uuid,bigint)"
+        ));
+        assert!(expected_function_privilege(
+            "filebelt_io",
+            "filebelt_collaboration.finalize_object(uuid,uuid,bigint,bytea)"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_collaboration_definer",
+            "filebelt_collaboration",
+            "object_reservations",
+            "SELECT"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_collaboration_definer",
+            "filebelt_collaboration",
+            "object_reservations",
+            "UPDATE"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_io",
+            "filebelt_collaboration",
+            "object_reservations",
+            "UPDATE"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_collaboration",
+            "public",
+            "jobs",
+            "INSERT"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_collaboration",
+            "public",
+            "jobs",
+            "UPDATE"
+        ));
+        for table in [
+            "storage_backends",
+            "api_sessions",
+            "users",
+            "principals",
+            "drives",
+            "nodes",
+        ] {
+            assert!(expected_table_privilege(
+                "filebelt_collaboration_definer",
+                "public",
+                table,
+                "SELECT"
+            ));
+            assert!(expected_table_privilege(
+                "filebelt_collaboration_definer",
+                "public",
+                table,
+                "UPDATE"
+            ));
+        }
+        assert!(!expected_table_privilege(
+            "filebelt_collaboration",
+            "public",
+            "api_sessions",
+            "UPDATE"
         ));
     }
 

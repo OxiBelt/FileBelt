@@ -116,6 +116,14 @@ release-matched `grants.sql`, and the migrator runs
 `filebeltctl database verify-grants`. The chart never receives a database-owner
 credential.
 
+The database owner opens the migration window with the release-matched
+`roles.sql`. That script grants `filebelt_migrator` database `CREATE` only so
+immutable migrations can execute their already-released idempotent schema
+statements, and makes the migrator the owner of `filebelt_revision` without
+granting database or role ownership. The release-matched `grants.sql` closes
+the window by revoking database `CREATE`; `verify-grants` fails if any reviewed
+group role retains that privilege.
+
 Schema evolution uses expand, migrate, and contract:
 
 1. add structures that are compatible with the running binary;

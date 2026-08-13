@@ -296,8 +296,8 @@ impl Database {
         let connection_id = Uuid::new_v4();
         let inserted = sqlx::query(
             "INSERT INTO filebelt_collaboration.participants \
-             (tenant_id,room_id,epoch,client_id,connection_id,principal_id,session_id,expires_at) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval '90 seconds') \
+             (tenant_id,room_id,epoch,client_id,connection_id,principal_id,session_id,joined_at,last_seen_at,expires_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,statement_timestamp(),statement_timestamp(),statement_timestamp()+interval '90 seconds') \
              ON CONFLICT (tenant_id,room_id,epoch,client_id) DO NOTHING",
         )
         .bind(tenant_id)
@@ -324,7 +324,7 @@ impl Database {
     ) -> Result<(), DatabaseError> {
         let affected = sqlx::query(
             "UPDATE filebelt_collaboration.participants SET \
-               last_seen_at=clock_timestamp(),expires_at=clock_timestamp()+interval '90 seconds' \
+             last_seen_at=statement_timestamp(),expires_at=statement_timestamp()+interval '90 seconds' \
              WHERE tenant_id=$1 AND connection_id=$2 AND expires_at>clock_timestamp()",
         )
         .bind(tenant_id)
@@ -495,8 +495,13 @@ impl Database {
         }
         if sqlx::query("UPDATE public.drives SET reserved_bytes=reserved_bytes+$3 WHERE tenant_id=$1 AND id=$2 AND used_physical_bytes+reserved_bytes+$3<=quota_bytes RETURNING id")
             .bind(tenant_id).bind(drive_id).bind(reserved_bytes).fetch_optional(&mut *transaction).await?.is_none() { return Err(DatabaseError::QuotaExceeded); }
-        let backend_id: Uuid = sqlx::query("SELECT id FROM public.storage_backends WHERE tenant_id=$1 AND kind='posix' AND storage_ready AND capacity_checked_at>clock_timestamp()-interval '2 minutes' AND capacity_free_bytes-(SELECT COALESCE(sum(reserved_bytes),0) FROM public.drives WHERE tenant_id=$1)>=10737418240 AND (capacity_free_bytes-(SELECT COALESCE(sum(reserved_bytes),0) FROM public.drives WHERE tenant_id=$1))::numeric>=capacity_total_bytes::numeric*0.05 FOR SHARE")
-            .bind(tenant_id).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::StorageUnavailable)?.get(0);
+        let backend_id: Uuid = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT filebelt_collaboration.reserve_posix_storage_backend($1)",
+        )
+        .bind(tenant_id)
+        .fetch_one(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::StorageUnavailable)?;
         let object_id = Uuid::new_v4();
         let payload_id = Uuid::new_v4();
         let locator = Uuid::new_v4();
@@ -560,18 +565,33 @@ impl Database {
             authorization.expected_generations(),
         )
         .await?;
+        let object_epoch = sqlx::query(
+            "SELECT room_id,epoch FROM filebelt_collaboration.objects \
+             WHERE tenant_id=$1 AND id=$2",
+        )
+        .bind(tenant_id)
+        .bind(object_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+        let object_room_id: Uuid = object_epoch.get("room_id");
+        let object_epoch_number: i64 = object_epoch.get("epoch");
+        let epoch = sqlx::query("SELECT * FROM filebelt_collaboration.lock_epoch($1,$2,$3)")
+            .bind(tenant_id)
+            .bind(object_room_id)
+            .bind(object_epoch_number)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(DatabaseError::StaleGeneration)?;
         let current = sqlx::query(
-            "SELECT o.state,o.reserved_bytes,o.size_bytes,o.blake3, \
-                    e.node_id,e.drive_id,e.state AS epoch_state,e.fencing_token, \
+            "SELECT o.state,o.reserved_bytes,o.size_bytes,o.blake3,o.room_id,o.epoch,o.drive_id, \
                     r.state AS reservation_state \
              FROM filebelt_collaboration.objects o \
-             JOIN filebelt_collaboration.epochs e \
-               ON e.tenant_id=o.tenant_id AND e.room_id=o.room_id AND e.epoch=o.epoch \
              JOIN filebelt_collaboration.object_reservations r \
                ON r.tenant_id=o.tenant_id AND r.object_id=o.id \
              JOIN filebelt_collaboration.payload_objects p \
                ON p.tenant_id=o.tenant_id AND p.id=o.payload_id \
-             WHERE o.tenant_id=$1 AND o.id=$2 FOR UPDATE OF o,e,r,p",
+             WHERE o.tenant_id=$1 AND o.id=$2 FOR UPDATE OF p",
         )
         .bind(tenant_id)
         .bind(object_id)
@@ -590,11 +610,13 @@ impl Database {
             };
         }
         let reserved_bytes: i64 = current.get("reserved_bytes");
-        if current.get::<Uuid, _>("node_id") != authorization.node_id
+        if epoch.get::<Uuid, _>("node_id") != authorization.node_id
             || current.get::<Uuid, _>("drive_id") != authorization.drive_id
+            || current.get::<Uuid, _>("room_id") != object_room_id
+            || current.get::<i64, _>("epoch") != object_epoch_number
             || object_state != "staging"
-            || current.get::<String, _>("epoch_state") != "active"
-            || current.get::<i64, _>("fencing_token") != expected_fencing_token
+            || epoch.get::<String, _>("state") != "active"
+            || epoch.get::<i64, _>("fencing_token") != expected_fencing_token
             || current.get::<String, _>("reservation_state") != "active"
             || size_bytes > reserved_bytes
         {
@@ -616,39 +638,16 @@ impl Database {
         if payload_update.rows_affected() != 1 {
             return Err(DatabaseError::Conflict);
         }
-        sqlx::query(
-            "UPDATE filebelt_collaboration.objects \
-             SET state='durable',size_bytes=$3,blake3=$4,durable_at=clock_timestamp() \
-             WHERE tenant_id=$1 AND id=$2 AND state='staging'",
+        let drive_update = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT filebelt_collaboration.finalize_object($1,$2,$3,$4)",
         )
         .bind(tenant_id)
         .bind(object_id)
         .bind(size_bytes)
         .bind(blake3)
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
-        sqlx::query(
-            "UPDATE filebelt_collaboration.object_reservations SET state='committed' \
-             WHERE tenant_id=$1 AND object_id=$2 AND state='active'",
-        )
-        .bind(tenant_id)
-        .bind(object_id)
-        .execute(&mut *transaction)
-        .await?;
-        let drive_update = sqlx::query(
-            "UPDATE public.drives d \
-             SET reserved_bytes=reserved_bytes-$3,used_physical_bytes=used_physical_bytes+$4 \
-             FROM filebelt_collaboration.objects o \
-             WHERE o.tenant_id=$1 AND o.id=$2 AND d.tenant_id=o.tenant_id \
-               AND d.id=o.drive_id AND d.reserved_bytes >= $3",
-        )
-        .bind(tenant_id)
-        .bind(object_id)
-        .bind(reserved_bytes)
-        .bind(size_bytes)
-        .execute(&mut *transaction)
-        .await?;
-        if drive_update.rows_affected() != 1 {
+        if drive_update.is_none() {
             return Err(DatabaseError::Conflict);
         }
         transaction.commit().await?;
@@ -1679,6 +1678,25 @@ mod tests {
                 .1;
             assert!(implementation.contains("lock_collaboration_authorization_fence("));
         }
+        let finalize = source
+            .split_once("pub async fn collaboration_finalize_object")
+            .expect("finalize exists")
+            .1
+            .split_once("pub async fn collaboration_persist_update_group")
+            .expect("update-group recording follows finalize")
+            .0;
+        assert!(finalize.contains("filebelt_collaboration.lock_epoch"));
+        assert!(finalize.contains("FOR UPDATE OF p"));
+        assert!(!finalize.contains("FOR UPDATE OF o,e,r,p"));
+        assert!(finalize.contains("filebelt_collaboration.finalize_object($1,$2,$3,$4)"));
+        let migration = include_str!(
+            "../../../migrations/postgres/000018_collaboration_backend_reservation.sql"
+        );
+        assert!(migration.contains("finalize_object(uuid, uuid, bigint, bytea)"));
+        assert!(migration.contains("object.state = 'staging'"));
+        assert!(migration.contains("reservation.state = 'active'"));
+        assert!(migration.contains("reservation.bytes = object.reserved_bytes"));
+        assert!(migration.contains("FOR UPDATE OF object, reservation, drive"));
     }
 
     #[test]
@@ -1791,5 +1809,18 @@ mod tests {
         assert!(join.contains("ON CONFLICT (tenant_id,room_id,epoch,client_id) DO NOTHING"));
         assert!(!join.contains("DO UPDATE SET"));
         assert!(join.contains("inserted != 1"));
+        assert!(join.contains(
+            "statement_timestamp(),statement_timestamp(),statement_timestamp()+interval '90 seconds'"
+        ));
+        let heartbeat = source
+            .split_once("pub async fn collaboration_heartbeat_participant")
+            .expect("participant heartbeat exists")
+            .1
+            .split_once("pub async fn collaboration_leave_participant")
+            .expect("participant leave follows heartbeat")
+            .0;
+        assert!(heartbeat.contains(
+            "last_seen_at=statement_timestamp(),expires_at=statement_timestamp()+interval '90 seconds'"
+        ));
     }
 }

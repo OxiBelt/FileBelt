@@ -3,6 +3,17 @@
 -- default privileges: newly added objects remain inaccessible until this
 -- reviewed allowlist and the verifier are updated.
 
+-- End the database-scoped migration window opened by roles.sql. Keep this
+-- dynamic so deployments are not required to name their database `filebelt`.
+DO $$
+BEGIN
+  EXECUTE format(
+    'REVOKE CREATE ON DATABASE %I FROM filebelt_migrator',
+    current_database()
+  );
+END
+$$;
+
 REVOKE ALL ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault, filebelt_collaboration,
   filebelt_mount, filebelt_mount_vault, filebelt_document, filebelt_media,
   filebelt_phase8, filebelt_security, filebelt_revision FROM PUBLIC;
@@ -13,6 +24,13 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
        filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
        filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
        filebelt_document, filebelt_media, filebelt_revision;
+
+-- The no-login definer can take the row locks required by the fixed-shape
+-- collaboration functions without extending either runtime role's DML.
+REVOKE ALL ON ALL TABLES IN SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
+  filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
+  filebelt_media, filebelt_phase8, filebelt_security, filebelt_revision
+  FROM filebelt_collaboration_definer;
 REVOKE CREATE ON SCHEMA public, filebelt_mcp, filebelt_mcp_vault,
   filebelt_collaboration, filebelt_mount, filebelt_mount_vault, filebelt_document,
   filebelt_media, filebelt_phase8, filebelt_security, filebelt_revision
@@ -30,6 +48,8 @@ GRANT USAGE ON SCHEMA public
      filebelt_audit_exporter, filebelt_recovery, filebelt_mcp_broker,
      filebelt_collaboration, filebelt_vfs, filebelt_headscale_sync,
      filebelt_document, filebelt_media, filebelt_revision;
+GRANT USAGE ON SCHEMA public, filebelt_collaboration
+  TO filebelt_collaboration_definer;
 GRANT USAGE ON SCHEMA filebelt_mcp
   TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
@@ -179,6 +199,8 @@ GRANT SELECT ON filebelt_mcp.capability_snapshots, filebelt_mcp.capabilities,
   TO filebelt_api;
 GRANT INSERT ON filebelt_mcp.deletion_tombstones TO filebelt_api;
 GRANT INSERT ON filebelt_mcp.invocations TO filebelt_api;
+GRANT INSERT ON filebelt_mcp.capability_snapshots, filebelt_mcp.capabilities
+  TO filebelt_api;
 GRANT UPDATE (superseded_at) ON filebelt_mcp.capability_snapshots TO filebelt_api;
 GRANT UPDATE (state, response_bytes, reason_code, semantic_output_digest, finished_at)
   ON filebelt_mcp.invocations TO filebelt_api;
@@ -268,9 +290,38 @@ GRANT SELECT, INSERT, UPDATE ON
   filebelt_collaboration.checkpoints, filebelt_collaboration.leases,
   filebelt_collaboration.participants
   TO filebelt_collaboration;
+GRANT DELETE ON filebelt_collaboration.participants
+  TO filebelt_collaboration;
+ALTER FUNCTION filebelt_collaboration.reserve_posix_storage_backend(uuid)
+  OWNER TO filebelt_collaboration_definer;
+ALTER FUNCTION filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)
+  OWNER TO filebelt_collaboration_definer;
+ALTER FUNCTION filebelt_collaboration.lock_epoch(uuid,uuid,bigint)
+  OWNER TO filebelt_collaboration_definer;
+ALTER FUNCTION filebelt_collaboration.finalize_object(uuid,uuid,bigint,bytea)
+  OWNER TO filebelt_collaboration_definer;
+GRANT EXECUTE ON FUNCTION
+  filebelt_collaboration.reserve_posix_storage_backend(uuid)
+  TO filebelt_collaboration;
+GRANT EXECUTE ON FUNCTION
+  filebelt_collaboration.lock_authorization_fence(uuid,uuid,uuid,uuid,uuid)
+  TO filebelt_api, filebelt_io, filebelt_collaboration;
+GRANT EXECUTE ON FUNCTION filebelt_collaboration.lock_epoch(uuid,uuid,bigint)
+  TO filebelt_io;
+GRANT EXECUTE ON FUNCTION
+  filebelt_collaboration.finalize_object(uuid,uuid,bigint,bytea)
+  TO filebelt_io;
+GRANT SELECT, UPDATE ON storage_backends, api_sessions, users, principals, drives, nodes
+  TO filebelt_collaboration_definer;
+GRANT SELECT, UPDATE ON filebelt_collaboration.epochs
+  TO filebelt_collaboration_definer;
+GRANT SELECT, UPDATE ON filebelt_collaboration.objects,
+  filebelt_collaboration.object_reservations
+  TO filebelt_collaboration_definer;
+GRANT INSERT ON jobs TO filebelt_collaboration;
 
 GRANT SELECT, UPDATE ON payload_objects TO filebelt_io;
-GRANT SELECT, UPDATE ON filebelt_collaboration.objects,
+GRANT SELECT ON filebelt_collaboration.objects,
   filebelt_collaboration.object_reservations TO filebelt_io;
 GRANT SELECT ON filebelt_collaboration.epochs TO filebelt_io;
 

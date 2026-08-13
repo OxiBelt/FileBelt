@@ -80,6 +80,20 @@ export default tseslint.config(
     },
   },
   {
+    files: ["ui/web/browser/docker-integration.spec.mjs"],
+    languageOptions: {
+      globals: {
+        clearTimeout: "readonly",
+        crypto: "readonly",
+        fetch: "readonly",
+        location: "readonly",
+        setTimeout: "readonly",
+        TextEncoder: "readonly",
+        WebSocket: "readonly",
+      },
+    },
+  },
+  {
     files: ["adapters/onlyoffice/ui/launcher.ts"],
     rules: {
       "@typescript-eslint/naming-convention": [

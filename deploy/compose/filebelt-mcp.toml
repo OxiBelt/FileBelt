@@ -129,6 +129,11 @@ io_url = "http://filebelt-worker-io:8081/"
 public_webpki = true
 ports = [443]
 
+[mcp.trust_profiles.integration]
+public_webpki = true
+hosts = ["filebelt-mcp-integration.example.test"]
+ports = [443]
+
 [mcp.runners]
 enabled = false
 

@@ -4,6 +4,7 @@ import { BlockList, isIP } from "node:net";
 import { URL } from "node:url";
 
 export const AllowedPorts = new Set([443, 8443]);
+export const AllowedTrustProfiles = new Set(["integration", "public"]);
 
 const DeniedIpv4 = new BlockList();
 const DeniedIpv6 = new BlockList();
@@ -58,11 +59,11 @@ export function ParseAuthority(Authority) {
   return { Host, Port };
 }
 
-export function ValidateForwardTarget(TargetValue, MethodValue, TrustProfile) {
+export function ValidateForwardTarget(TargetValue, MethodValue, TrustProfile, IntegrationHost = "") {
   if (
     typeof TargetValue !== "string"
     || !["GET", "POST"].includes(MethodValue ?? "")
-    || TrustProfile !== "public"
+    || !AllowedTrustProfiles.has(TrustProfile ?? "")
   ) {
     throw new Error("forwarding contract is invalid");
   }
@@ -77,6 +78,9 @@ export function ValidateForwardTarget(TargetValue, MethodValue, TrustProfile) {
     || isIP(Target.hostname)
   ) {
     throw new Error("target is outside the egress policy");
+  }
+  if (TrustProfile === "integration" && (IntegrationHost.length === 0 || Target.hostname !== IntegrationHost || Port !== 443)) {
+    throw new Error("integration target is outside the exact synthetic allowlist");
   }
   return { Port, Target };
 }

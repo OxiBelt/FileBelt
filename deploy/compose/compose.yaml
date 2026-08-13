@@ -60,7 +60,7 @@ services:
     build:
       context: ../../tests/docker/oidc
       dockerfile: Dockerfile
-    image: filebelt-oidc-fixture:phase2
+    image: ${FILEBELT_OIDC_FIXTURE_IMAGE:-filebelt-oidc-fixture:phase2}
     profiles: *filebelt-profiles
     user: "10001:10001"
     read_only: true
@@ -162,7 +162,7 @@ services:
     build:
       context: ../../tests/docker/oidc
       dockerfile: Dockerfile
-    image: filebelt-oidc-fixture:phase2
+    image: ${FILEBELT_OIDC_FIXTURE_IMAGE:-filebelt-oidc-fixture:phase2}
     profiles: [core, fault]
     entrypoint:
       - node
@@ -291,8 +291,10 @@ services:
     build:
       context: ../../tests/docker/mcp-egress
       dockerfile: Dockerfile
-    image: filebelt-mcp-egress-fixture:phase4
+    image: ${FILEBELT_MCP_EGRESS_FIXTURE_IMAGE:-filebelt-mcp-egress-fixture:phase4}
     profiles: [mcp]
+    environment:
+      FILEBELT_MCP_INTEGRATION_HOST: ${FILEBELT_MCP_INTEGRATION_HOST:-}
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]
@@ -329,7 +331,9 @@ services:
     command: [serve, --config, /etc/filebelt/filebelt.toml]
     secrets:
       - mcp-database-url
-      - mcp-vault-keyring
+      - source: mcp-vault-keyring
+        target: /run/secrets/mcp-vault-keyring.json
+        mode: 0400
       - api-mcp-delegation-capability-public-keyset
       - source: mcp-egress-client-certificate
         target: /run/secrets/mcp-egress-client.crt

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+
+schema_version = 1
+
+[units.core]
+description = "Two-user core storage, ACL, versioning, restart, and reconciliation acceptance"
+compose_files = ["deploy/compose/compose.yaml"]
+profiles = ["core"]
+driver = ["python3", "tests/docker/phase2/acceptance.py"]
+roles = [
+  "filebelt-api",
+  "filebelt-collaboration",
+  "filebelt-tools",
+  "filebelt-web",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+]
+event_tiers = ["pull_request", "main", "scheduled", "manual", "release"]
+browser_projects = []
+exact_artifacts = true
+status = "ready"
+
+[units.collaboration]
+description = "Chromium and Firefox collaboration convergence, durability, restart, and revocation acceptance"
+compose_files = ["deploy/compose/compose.yaml"]
+profiles = ["core"]
+driver = ["python3", "tests/docker/units/run-collaboration.py"]
+roles = [
+  "filebelt-api",
+  "filebelt-collaboration",
+  "filebelt-tools",
+  "filebelt-web",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+]
+event_tiers = ["main", "scheduled", "manual", "release"]
+browser_projects = ["chromium", "firefox"]
+exact_artifacts = true
+status = "ready"
+
+[units.mcp]
+description = "MCP registration, review, invocation, revocation, isolation, and hostile-upstream acceptance"
+compose_files = ["deploy/compose/compose.yaml", "deploy/compose/compose.mcp.yaml"]
+profiles = ["core", "mcp"]
+driver = ["python3", "tests/docker/units/run-mcp.py"]
+roles = [
+  "filebelt-api",
+  "filebelt-collaboration",
+  "filebelt-mcp-broker",
+  "filebelt-tools",
+  "filebelt-web",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+]
+event_tiers = ["main", "scheduled", "manual", "release"]
+browser_projects = []
+exact_artifacts = true
+status = "ready"

@@ -17,13 +17,23 @@ test("private, loopback, metadata, and documentation addresses fail closed", () 
   assert.equal(PrivateAddress("1.1.1.1"), false);
 });
 
-test("forwarding requires an exact public profile and credential-free HTTPS DNS target", () => {
+test("forwarding requires an admitted profile and credential-free HTTPS DNS target", () => {
   assert.throws(() => ValidateForwardTarget("http://example.com/", "GET", "public"));
   assert.throws(() => ValidateForwardTarget("https://127.0.0.1/", "GET", "public"));
   assert.throws(() => ValidateForwardTarget("https://example.com/", "GET", "unknown"));
   const { Port, Target } = ValidateForwardTarget("https://example.com/mcp", "POST", "public");
   assert.equal(Port, 443);
   assert.equal(Target.pathname, "/mcp");
+});
+
+test("the integration profile retains the same HTTPS DNS boundary", () => {
+  const Host = "filebelt-mcp-integration.example.test";
+  const { Port, Target } = ValidateForwardTarget(`https://${Host}/mcp`, "POST", "integration", Host);
+  assert.equal(Port, 443);
+  assert.equal(Target.hostname, "filebelt-mcp-integration.example.test");
+  assert.throws(() => ValidateForwardTarget("https://127.0.0.1/mcp", "POST", "integration"));
+  assert.throws(() => ValidateForwardTarget("https://example.test:8444/mcp", "POST", "integration"));
+  assert.throws(() => ValidateForwardTarget("https://other.example.test/mcp", "POST", "integration", Host));
 });
 
 test("forwarding pins virtual-host routing and only approved credential headers", () => {

@@ -3,7 +3,10 @@
 
 FROM node:24-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
 
+RUN install -d -o 10001 -g 10001 -m 0555 /opt/filebelt-mcp-egress
+
 COPY --chmod=0444 policy.mjs /opt/filebelt-mcp-egress/policy.mjs
+COPY --chmod=0444 integration.mjs /opt/filebelt-mcp-egress/integration.mjs
 COPY --chmod=0555 server.mjs /opt/filebelt-mcp-egress/server.mjs
 
 USER 10001:10001

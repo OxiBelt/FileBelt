@@ -70,6 +70,12 @@ def main() -> int:
             "collaboration-storage-capability-public-keyset"
         ), name
         assert collaboration_settings["io_url"] == "http://filebelt-worker-io:8081/", name
+    integration_profile = configurations["filebelt-mcp.toml"]["mcp"]["trust_profiles"]["integration"]
+    assert integration_profile == {
+        "public_webpki": True,
+        "hosts": ["filebelt-mcp-integration.example.test"],
+        "ports": [443],
+    }
     with tempfile.TemporaryDirectory(prefix="filebelt-phase2-compose-") as directory:
         state = Path(directory) / "state"
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
@@ -199,6 +205,7 @@ def main() -> int:
     assert not broker.get("volumes"), "the MCP broker must not mount payload storage"
     assert not collaboration.get("volumes"), "collaboration must not mount payload storage"
     assert not gateway.get("volumes"), "the egress gateway must not mount payload storage"
+    assert gateway["environment"] == {"FILEBELT_MCP_INTEGRATION_HOST": ""}
     assert not web.get("volumes")
     assert secret_sources(web) == {
         "filebelt-tls-certificate",
@@ -233,6 +240,13 @@ def main() -> int:
         "mcp-egress-client-private-key",
         "mcp-egress-ca-certificate",
     }
+    broker_vault_secret = next(
+        secret
+        for secret in broker["secrets"]
+        if isinstance(secret, dict) and secret["source"] == "mcp-vault-keyring"
+    )
+    assert broker_vault_secret["target"] == "/run/secrets/mcp-vault-keyring.json"
+    assert broker_vault_secret["mode"] == "0400"
     assert secret_sources(collaboration) == {
         "collaboration-database-url",
         "collaboration-storage-capability-private-key",

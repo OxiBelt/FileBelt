@@ -5,6 +5,8 @@ import { promises as dns } from "node:dns";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { createServer, request as httpsRequest } from "node:https";
+import process from "node:process";
+import { setTimeout as Delay } from "node:timers/promises";
 
 import {
   BuildForwardHeaders,
@@ -12,11 +14,73 @@ import {
   PrivateAddress,
   ValidateForwardTarget,
 } from "./policy.mjs";
+import {
+  IntegrationResponse,
+  IntegrationSessionDenial,
+  IsIntegrationTarget,
+} from "./integration.mjs";
 
 const ListenPort = 8443;
 const MaximumHeaderBytes = 16 * 1024;
 const MaximumRequestBytes = 16 * 1024 * 1024;
 const MaximumResponseBytes = 25_165_824;
+const IntegrationHost = process.env.FILEBELT_MCP_INTEGRATION_HOST ?? "";
+async function ServeIntegration(Request, Response, Chunks, Pathname) {
+  const ExpectedAuthorization = "Bearer filebelt-mcp-integration";
+  if ((Pathname === "/credential" && Request.headers.authorization !== undefined)
+      || Request.headers["x-api-key"] !== undefined
+      || (Pathname !== "/credential" && Request.headers.authorization !== ExpectedAuthorization)) {
+    Response.writeHead(403, {"Cache-Control": "no-store", "Content-Type": "text/plain"});
+    Response.end("fixture credentials refused\n");
+    return;
+  }
+  let RequestValue;
+  try {
+    RequestValue = JSON.parse(Buffer.concat(Chunks).toString("utf8"));
+  } catch {
+    Response.writeHead(400, {"Cache-Control": "no-store", "Content-Type": "text/plain"});
+    Response.end("invalid fixture request\n");
+    return;
+  }
+  const SessionDenial = IntegrationSessionDenial(
+    Pathname,
+    RequestValue?.method,
+    Request.headers["mcp-session-id"],
+  );
+  if (SessionDenial !== undefined) {
+    Response.writeHead(409, {"Cache-Control": "no-store", "Content-Type": "text/plain"});
+    Response.end(SessionDenial);
+    return;
+  }
+  const Result = IntegrationResponse(RequestValue, Pathname, MaximumResponseBytes, Request.url);
+  if (Result.DelayMs !== undefined) await Delay(Result.DelayMs);
+  if (Result.Redirect !== undefined) {
+    Response.writeHead(307, {
+      "Cache-Control": "no-store",
+      "Content-Length": "0",
+      "Location": Result.Redirect,
+    });
+    Response.end();
+    return;
+  }
+  if (Result.Denied !== undefined) {
+    Response.writeHead(403, {"Cache-Control": "no-store", "Content-Type": "text/plain"});
+    Response.end(Result.Denied);
+    return;
+  }
+  if (Result.Notification === true) {
+    const Headers = {"Cache-Control": "no-store"};
+    if (Result.Session !== undefined) Headers["Mcp-Session-Id"] = Result.Session;
+    Response.writeHead(202, Headers);
+    Response.end();
+    return;
+  }
+  const Body = Result.Raw ?? Buffer.from(JSON.stringify(Result.Body));
+  const Headers = {"Cache-Control": "no-store", "Content-Type": "application/json"};
+  if (Result.Session !== undefined) Headers["Mcp-Session-Id"] = Result.Session;
+  Response.writeHead(200, Headers);
+  Response.end(Body);
+}
 
 async function ResolvePublic(Host) {
   const Answers = await dns.lookup(Host, { all: true, verbatim: true });
@@ -41,8 +105,7 @@ const Server = createServer({
     const TargetValue = Request.headers["x-filebelt-mcp-target"];
     const MethodValue = Request.headers["x-filebelt-mcp-upstream-method"];
     const TrustProfile = Request.headers["x-filebelt-mcp-trust-profile"];
-    const { Port, Target } = ValidateForwardTarget(TargetValue, MethodValue, TrustProfile);
-    const Address = await ResolvePublic(Target.hostname);
+    const { Port, Target } = ValidateForwardTarget(TargetValue, MethodValue, TrustProfile, IntegrationHost);
     const Chunks = [];
     let Size = 0;
     for await (const Chunk of Request) {
@@ -52,6 +115,12 @@ const Server = createServer({
       }
       Chunks.push(Chunk);
     }
+    if (IsIntegrationTarget(Target, Port, TrustProfile, IntegrationHost)) {
+      await ServeIntegration(Request, Response, Chunks, Target.pathname);
+      return;
+    }
+    if (TrustProfile === "integration") throw new Error("integration target path is not synthetic");
+    const Address = await ResolvePublic(Target.hostname);
     const Headers = BuildForwardHeaders(Request.headers, Target, Port);
     const Upstream = httpsRequest({
       host: Address,

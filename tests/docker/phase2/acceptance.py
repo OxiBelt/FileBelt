@@ -26,7 +26,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.yaml"
-ORIGIN = "https://filebelt.localhost:8443"
+ORIGIN = os.environ.get("FILEBELT_ACCEPTANCE_ORIGIN", "https://filebelt.localhost:8443")
 CONNECT_HOST = os.environ.get("FILEBELT_ACCEPTANCE_CONNECT_HOST")
 UUID_V4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -165,16 +165,18 @@ def expect(result: HttpResult, status: int, operation: str) -> None:
 
 
 def compose(*arguments: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    files = os.environ.get("FILEBELT_ACCEPTANCE_COMPOSE_FILES", str(COMPOSE)).split(os.pathsep)
+    profiles = os.environ.get("FILEBELT_ACCEPTANCE_PROFILES", "core").split(os.pathsep)
+    command = ["docker", "compose"]
+    project = os.environ.get("FILEBELT_ACCEPTANCE_PROJECT")
+    if project:
+        command.extend(("--project-name", project))
+    for path in files:
+        command.extend(("--file", path))
+    for profile in profiles:
+        command.extend(("--profile", profile))
     return subprocess.run(
-        [
-            "docker",
-            "compose",
-            "--file",
-            str(COMPOSE),
-            "--profile",
-            "core",
-            *arguments,
-        ],
+        [*command, *arguments],
         cwd=ROOT,
         check=True,
         text=True,
@@ -231,6 +233,7 @@ def upload(
     name: str,
     content: bytes,
     *,
+    declared_media_type: str | None = None,
     node_id: str | None = None,
     expected_head: str | None = None,
     restart_io: bool = False,
@@ -248,6 +251,7 @@ def upload(
         f"/drives/{drive['id']}/uploads",
         {
             "declared_size_bytes": len(content),
+            "declared_media_type": declared_media_type,
             "expected_head_version_id": expected_head,
             "expected_parent_generation": expected_parent_generation,
             "name": name,

@@ -180,6 +180,16 @@ coordinator, and returns a typed Git histogram line diff with three context
 lines. A comparison fails atomically after 5 seconds, 50,000 lines, or 8 MiB;
 partial output is never returned.
 
+After authentication, a comparison must acquire both the coordinator-wide and
+authenticated-`user_id` admission permits before any database or adapter work.
+The defaults are two comparisons globally and one per user; neither scope
+queues. Saturation returns HTTP `429` with problem code
+`revision.admission_limited` and `Retry-After: 5`. The private revision protocol
+reports `ADMISSION_LIMITED` with a 5,000-millisecond retry hint. This overload
+result is distinct from the existing HTTP `413` and private
+`RESOURCE_EXHAUSTED` result for input or output size bounds. Cancellation,
+timeout, success, and every error release both permits.
+
 `filebelt-gfm-v1` accepts GitHub-Flavored Markdown with alerts, footnotes,
 Mermaid, and KaTeX. Raw HTML is rendered as literal text, not executed or
 sanitized HTML. Markdown uses the same configured text limits; invalid UTF-8

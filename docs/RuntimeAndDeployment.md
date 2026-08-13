@@ -51,7 +51,7 @@ The current build matrix contains fifteen Apache-region images on
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
 | `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
 | `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs `document-storage` exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
-| `filebelt-revision` | Compatibility-gated and disabled by default. Coordinates PostgreSQL-authoritative text Git revisions, shared-chunk backfill, comparison, activation, and repair holds through purpose-scoped I/O and adapter calls. It has a narrow PostgreSQL role and no payload/Git mount, browser session credential, or Internet egress. |
+| `filebelt-revision` | Compatibility-gated and disabled by default. Coordinates PostgreSQL-authoritative text Git revisions, shared-chunk backfill, bounded comparison, activation, and repair holds through purpose-scoped I/O and adapter calls. Comparison admission defaults to two globally and one per authenticated user, with immediate overload rejection. It has a narrow PostgreSQL role and no payload/Git mount, browser session credential, or Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
@@ -102,7 +102,12 @@ identity. The Apache coordinator listens privately on 8091 without either
 byte-plane mount. Adapter images remain non-publishable until their exact Git
 source, build inputs, license notices, SBOM/provenance, amd64/arm64 behavior,
 SHA-256 repository behavior, and restore/fsck matrix are admitted. The chart
-does not create its Namespace, Secrets, or database.
+does not create its Namespace, Secrets, database, or operator-owned adapter
+ConfigMap. It bounds admitted private tasks at eight and concurrent system-Git
+processes at two. A raw connection above the private-task limit closes without
+dispatch; an admitted comparison that cannot immediately acquire a Git-process
+permit returns the typed admission result. Non-comparison maintenance may wait
+for a Git-process permit only within its existing bounded request timeout.
 
 Other reserved adapter roles are future `filebelt-nfs-gateway` and
 `filebelt-transcoder`. Each has an independently truthful platform and license contract. Transcode implementation remains
@@ -631,6 +636,26 @@ referenced by a `filebelt.recovery.checkpoint.v4` document.
 
 When compatibility cannot be proved, remain quiesced and restore the last
 coordinated checkpoint into fresh targets before migrating forward.
+
+Revision comparison limits are part of the format-9 deployment contract.
+`revisions.limits.globalComparisons` defaults to `2` and accepts `1` through
+`32`; `revisions.limits.perUserComparisons` defaults to `1`, accepts `1`
+through `8`, and must not exceed the global value. The Git chart values
+`limits.maxConcurrentPrivateRequests` and
+`limits.maxConcurrentGitProcesses` default to `8` and `2`, accept `1` through
+`64` and `1` through `16` respectively, and the Git-process limit must not
+exceed the private-request limit. The Git chart projects those values as the
+adapter `serve` flags `--max-concurrent-private-requests` and
+`--max-concurrent-git-processes`; the Apache chart projects the coordinator
+values under `[revisions.limits]` as `global_comparisons` and
+`per_user_comparisons`.
+
+Roll out the Apache core and private protocol support before deploying an
+adapter that can emit the new admission result. Rollback reverses that order:
+restore the compatible adapter before removing core support. A limit-only
+rollback restores the preceding validated limits and drains normally; it does
+not require a migration or alter PostgreSQL, payload, Git, or event state.
+Revision activation remains disabled by default throughout this rollout.
 
 Each native role emits structured redacted JSON logs and bounded-label
 Prometheus metrics, with optional OTLP/HTTP traces. Portable alert and

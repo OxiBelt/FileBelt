@@ -89,11 +89,24 @@
       ],
       "title": "MCP runner controller",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "id": 8,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "sum(filebelt_revision_comparisons_active)", "refId": "A"},
+        {"expr": "sum(increase(filebelt_revision_comparison_admission_rejections_total[10m]))", "refId": "B"}
+      ],
+      "title": "Revision comparison admission",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 41,
-  "tags": ["filebelt", "phase4", "mcp"],
+  "tags": ["filebelt", "phase4", "mcp", "revisions"],
   "templating": {
     "list": [
       {

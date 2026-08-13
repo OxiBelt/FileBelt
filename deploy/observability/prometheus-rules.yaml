@@ -33,6 +33,16 @@ groups:
         annotations:
           summary: FileBelt HTTP failures exceed five percent
           runbook_url: docs/operations/observability.md#initial-questions-and-signals
+      - alert: FileBeltRevisionComparisonAdmissionSustained
+        expr: >-
+          sum(increase(filebelt_revision_comparison_admission_rejections_total[10m]))
+          >= 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Revision comparison admission pressure is sustained
+          runbook_url: docs/operations/observability.md#alerts
   - name: filebelt-identity-storage
     rules:
       - alert: FileBeltOidcMetadataStale

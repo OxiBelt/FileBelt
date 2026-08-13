@@ -25,6 +25,13 @@ bounded outcome/reason category, and job kind. They must not contain a tenant,
 principal, resource, filename/path, request/job UUID, physical locator,
 capability, token, credential, raw error, or payload content.
 
+Revision comparison admission exports the zero-label gauge
+`filebelt_revision_comparisons_active` and zero-label counter
+`filebelt_revision_comparison_admission_rejections_total`. Neither metric may
+gain tenant, user, resource, repository, or request labels. Admission logs may
+record only a fixed bounded scope such as `global`, `per_user`, or
+`git_process`; even the per-user scope contains no user identifier.
+
 Structured logs may use request/operation/job and trace IDs for correlation but
 must not emit raw cookies, OIDC codes/tokens, CSRF values, share tokens,
 capabilities, keys, database URLs, private certificate material, payload
@@ -49,6 +56,8 @@ stream, not a logging mode.
   controller the reconciliation leader when runners are enabled?
 - Are one-shot runner creation and cleanup progressing without reconciliation
   failures or orphan resources?
+- Are revision comparisons reaching their admitted concurrency, and are
+  admission rejections sustained rather than transient?
 
 The shipped dashboard answers these questions without a user-content or
 tenant selector.
@@ -71,6 +80,19 @@ tenant selector.
   seconds: critical when runners are enabled.
 - Runner reconciliation failure in ten minutes sustained for five minutes, or
   a registration entering quarantine in 15 minutes: warning.
+- At least ten revision comparison admission rejections over ten minutes,
+  sustained for five minutes: warning.
+
+The shipped dashboard plots active revision comparisons and the increase in
+admission rejections without identity selectors. On the warning, first confirm
+that active comparisons drain and the coordinator and adapter are healthy.
+Classify the pressure as transient, abusive, or sustained legitimate demand
+using bounded route/outcome telemetry and protected correlation logs; do not
+identify a user through metrics or add identity labels. Investigate stuck work
+and request timeouts before raising a limit. Change limits only within their
+validated ranges, keep the per-user limit no greater than the global limit and
+the Git-process limit no greater than the private-task limit, then verify that
+rejections fall and active work continues to drain.
 
 There is no backup-freshness alert because FileBelt has no persisted backup
 schedule or numeric recovery objective. External backup automation must alert

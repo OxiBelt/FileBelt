@@ -43,12 +43,40 @@ the additive schema. After activation, do not run a binary that cannot read
 Git/shared-chunk content: restore the matched PostgreSQL, payload, Git PVC, and
 shared-chunk snapshot under quiescence, verify the v4 checkpoint, then resume.
 
+## Comparison admission
+
+The core chart projects `[revisions.limits]` with
+`global_comparisons = 2` and `per_user_comparisons = 1` by default. Operators
+may set `revisions.limits.globalComparisons` from `1` through `32` and
+`revisions.limits.perUserComparisons` from `1` through `8`; the per-user value
+must not exceed the global value. Core admits a comparison only when both
+permits are immediately available. An HTTP `429` with
+`revision.admission_limited` and `Retry-After: 5` is capacity pressure, not a
+size failure; HTTP `413` continues to mean that an input or result exceeded a
+declared bound.
+
+The Git chart defaults `limits.maxConcurrentPrivateRequests` to `8` and
+`limits.maxConcurrentGitProcesses` to `2`, and projects them to the adapter
+`serve` flags. Their allowed ranges are `1` through `64` and `1` through `16`,
+with Git processes no greater than private requests. Keep the operator-created
+adapter ConfigMap. A raw connection above the private-task ceiling closes;
+comparison process saturation returns the typed retryable result, while
+non-comparison maintenance waits only within its existing request deadline.
+
+Deploy compatible core and protocol handling before the bounded adapter. To
+roll back, restore the compatible adapter before removing core support. A
+limits-only rollback restores the last validated values and allows active work
+to drain; it changes no persisted state and needs no migration. Revisions
+remain disabled by default.
+
 ## Qualification gate
 
 Production admission requires current `main` evidence for concurrent legacy
 writes during migration, restart/retry at every publish boundary, corrupt input
 holds, UTF-8/NUL/100 MiB classification, ODF and OOXML preservation, per-drive
 dedup/quota races, Range integrity, Git ref CAS/fsck/restore, diff timeout and
-atomic bounds, ACL/session revocation, cross-tenant/OID/chunk denial, amd64 and
-arm64 adapter behavior, and a fresh-target v4 restore. Static Helm rendering,
-unit tests, and a local system Git version are not substitutes for that matrix.
+atomic bounds, dual-scope comparison saturation and permit recovery, a
+controlled maximum of two concurrent Git processes under excess comparison
+load, ACL/session revocation, cross-tenant/OID/chunk denial, amd64 and arm64
+adapter behavior, and a fresh-target v4 restore. Static Helm rendering, unit
+tests, and a local system Git version are not substitutes for that matrix.

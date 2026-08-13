@@ -89,9 +89,11 @@ artifact_prefix=${artifact_directory}/
 toolchain=${stable_toolchain}
 sanitizer=none
 detect_leaks=0
+sanitizer_environment=()
 if [[ ${profile} == asan ]]; then
   toolchain=${asan_toolchain}
   sanitizer=address
+  sanitizer_environment+=(ASAN_OPTIONS=allocator_may_return_null=1)
   [[ ${mode} == smoke ]] || detect_leaks=1
 fi
 
@@ -121,6 +123,7 @@ set +e
 log=$(mktemp "${repo_root}/fuzz/artifacts/${target}.${profile}.log.XXXXXX")
 trap 'rm -rf -- "${corpus}" "${artifact_directory}"; rm -f -- "${log}"' EXIT
 env -u CUSTOM_LIBFUZZER_PATH -u CUSTOM_LIBFUZZER_STD_CXX -u RUST_LIBFUZZER_DEBUG_PATH \
+  "${sanitizer_environment[@]}" \
   cargo "${cargo_args[@]}" >"${log}" 2>&1
 status=$?
 set -e

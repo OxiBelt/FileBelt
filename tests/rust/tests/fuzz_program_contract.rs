@@ -230,7 +230,30 @@ fn runner_enforces_the_cataloged_resource_controls() {
         assert!(runner.contains(required), "runner is missing {required}");
     }
     assert!(runner.contains("sanitizer=none"));
-    assert!(runner.contains("sanitizer=address"));
+    assert!(runner.contains("sanitizer_environment=()"));
+    let asan_branch = runner
+        .split_once("if [[ ${profile} == asan ]]; then")
+        .expect("ASan profile branch")
+        .1
+        .split_once("fi\n\nengine=(")
+        .expect("end of ASan profile branch")
+        .0;
+    assert!(asan_branch.contains("sanitizer=address"));
+    assert_eq!(
+        asan_branch
+            .matches("ASAN_OPTIONS=allocator_may_return_null=1")
+            .count(),
+        1
+    );
+    assert_eq!(
+        runner
+            .matches("ASAN_OPTIONS=allocator_may_return_null=1")
+            .count(),
+        1
+    );
+    assert!(runner.contains(
+        "env -u CUSTOM_LIBFUZZER_PATH -u CUSTOM_LIBFUZZER_STD_CXX -u RUST_LIBFUZZER_DEBUG_PATH \\\n  \"${sanitizer_environment[@]}\" \\\n  cargo"
+    ));
     assert!(runner.contains("rm -rf -- \"${corpus}\" \"${artifact_directory}\""));
     assert!(runner.contains("rm -f -- \"${log}\""));
 }

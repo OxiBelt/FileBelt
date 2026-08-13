@@ -23,7 +23,12 @@ network requests.
 10-second per-input timeout, 3 GiB RSS ceiling, 512 MiB allocation ceiling, and
 the target input maximum. Stable smoke uses Rust `1.97.1` without a sanitizer.
 ASan uses `nightly-2026-08-04`; sustained campaigns enable leak detection.
-The exact runner dependency is `cargo-fuzz 0.13.2` with
+ASan runs set runner-owned `ASAN_OPTIONS=allocator_may_return_null=1` so
+explicitly fallible allocation attempts return an error to the decoder instead
+of making the sanitizer abort before that error path is exercised. Stable runs
+and every cataloged input, timeout, RSS, and allocation limit remain unchanged.
+This runner-only behavior does not apply to production or mitigate an accepted
+dependency risk. The exact runner dependency is `cargo-fuzz 0.13.2` with
 `libfuzzer-sys 0.4.13`.
 
 ## Accepted collaboration decoder quarantine

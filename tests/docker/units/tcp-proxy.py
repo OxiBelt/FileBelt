@@ -21,8 +21,10 @@ def forward(client: socket.socket, target: tuple[str, int], admission: threading
         except OSError:
             return
         try:
-            client.setblocking(False)
-            upstream.setblocking(False)
+            # `selectors` gates reads; keep writes blocking so `sendall` cannot
+            # turn ordinary backpressure on a large TLS body into a reset.
+            client.setblocking(True)
+            upstream.setblocking(True)
             selector = selectors.DefaultSelector()
             selector.register(client, selectors.EVENT_READ, upstream)
             selector.register(upstream, selectors.EVENT_READ, client)

@@ -31,6 +31,7 @@ CONNECT_HOST = os.environ.get("FILEBELT_ACCEPTANCE_CONNECT_HOST")
 UUID_V4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+MAXIMUM_READY_ERROR_DETAIL = 240
 
 if CONNECT_HOST:
     _system_getaddrinfo = socket.getaddrinfo
@@ -186,16 +187,24 @@ def compose(*arguments: str, capture: bool = False) -> subprocess.CompletedProce
 
 def wait_api(browser: Browser) -> None:
     deadline = time.monotonic() + 60
+    last_error = None
     while time.monotonic() < deadline:
         try:
             result = browser.request("GET", "/api/v1/session")
-        except urllib.error.URLError:
+        except urllib.error.URLError as error:
+            last_error = error
             time.sleep(0.5)
             continue
         if result.status in {200, 401}:
             return
         time.sleep(0.5)
-    raise AssertionError("FileBelt API did not become ready")
+    if last_error is None:
+        raise AssertionError("FileBelt API did not become ready")
+    detail = "".join(
+        character if character.isprintable() else "?"
+        for character in str(last_error.reason)
+    )[:MAXIMUM_READY_ERROR_DETAIL]
+    raise AssertionError(f"FileBelt API did not become ready: last transport error: {detail}")
 
 
 def retry_request(

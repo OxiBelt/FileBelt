@@ -29,6 +29,8 @@ COMPOSE_SUFFIX = {
     "filebelt-collaboration": "phase5",
     "filebelt-mcp-broker": "phase4",
 }
+LOOPBACK_EDGE_HOST = "127.0.0.1"
+EDGE_NO_PROXY_HOSTS = ("filebelt.localhost", "localhost", "127.0.0.1", "::1")
 
 
 def docker_host_root(root: Path) -> Path:
@@ -73,6 +75,33 @@ def wait_proxy(address: str, process: subprocess.Popen[bytes]) -> None:
         except OSError:
             time.sleep(0.1)
     raise RuntimeError("browser TCP proxy did not become ready")
+
+
+def append_no_proxy(value: str) -> str:
+    """Preserve an inherited bypass list while adding the local edge route."""
+    entries = [entry.strip() for entry in value.split(",") if entry.strip()]
+    known = {entry.casefold() for entry in entries}
+    for host in EDGE_NO_PROXY_HOSTS:
+        if host.casefold() not in known:
+            entries.append(host)
+            known.add(host.casefold())
+    return ",".join(entries)
+
+
+def configure_outside_edge(environment: dict[str, str]) -> None:
+    """Route the fixed-origin browser client through the local DoD TCP bridge."""
+    environment["FILEBELT_ACCEPTANCE_CONNECT_HOST"] = LOOPBACK_EDGE_HOST
+    for name in ("NO_PROXY", "no_proxy"):
+        environment[name] = append_no_proxy(environment.get(name, ""))
+
+
+def proxy_command(address: str) -> list[str]:
+    return [
+        "python3",
+        str(ROOT / "tests/docker/units/tcp-proxy.py"),
+        "--target",
+        f"{address}:8443",
+    ]
 
 
 def main() -> int:
@@ -178,15 +207,14 @@ def main() -> int:
             ).stdout.strip()
             if not address:
                 raise RuntimeError("Docker edge address is empty")
-            environment["FILEBELT_ACCEPTANCE_CONNECT_HOST"] = address
-            if unit.browser_projects:
-                proxy = subprocess.Popen(
-                    ["python3", str(ROOT / "tests/docker/units/tcp-proxy.py"), "--target", f"{address}:8443"],
-                    cwd=ROOT,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                wait_proxy("127.0.0.1", proxy)
+            configure_outside_edge(environment)
+            proxy = subprocess.Popen(
+                proxy_command(address),
+                cwd=ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            wait_proxy(LOOPBACK_EDGE_HOST, proxy)
         subprocess.run(unit.driver, cwd=ROOT, env=environment, check=True)
         status = 0
     except (OSError, subprocess.CalledProcessError, ValueError, RuntimeError) as error:

@@ -350,7 +350,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.Awareness.off("update", this.#AwarenessUpdate);
     this.#PendingCheckpoint?.Reject(Reason);
     this.#PendingCheckpoint = undefined;
-    if (this.#Socket.readyState === 0 || this.#Socket.readyState === OpenWebSocketState) this.#Socket.close(1008, "collaboration failed");
+    if (this.#Socket.readyState === 0 || this.#Socket.readyState === OpenWebSocketState) this.#Socket.close(4008, "collaboration failed");
     this.#OnStateChange?.("disconnected");
   }
 }

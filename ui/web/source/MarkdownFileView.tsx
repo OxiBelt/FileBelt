@@ -94,6 +94,8 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   const Reconnect = async (): Promise<void> => {
     if (Source === null || ExpectedHeadVersionId === null) return;
     const LocalText = Collaboration?.CurrentText() ?? Source.Text;
+    let FallbackRemote = { ...Source, Text: SavedText };
+    let FallbackVersionId = ExpectedHeadVersionId;
     Collaboration?.Destroy();
     SetCollaboration(null);
     SetCollaborationState("connecting");
@@ -101,6 +103,8 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     try {
       const Latest = await Client.readMarkdownHead(Entry.Id);
       const Remote = DecodeEditableText(new Uint8Array(await Latest.Contents.arrayBuffer()));
+      FallbackRemote = Remote;
+      FallbackVersionId = Latest.VersionId;
       const ClientId = crypto.randomUUID();
       const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId);
       if (Grant === null) {
@@ -122,7 +126,7 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
       SetDirty(Merged.Text !== LiveText);
       SetCollaboration(Session);
     } catch (Cause) {
-      ApplyFallbackMerge(LocalText, { ...Source, Text: SavedText }, ExpectedHeadVersionId);
+      ApplyFallbackMerge(LocalText, FallbackRemote, FallbackVersionId);
       SetError(Cause instanceof Error ? Cause.message : En.markdownUnavailable);
     }
   };

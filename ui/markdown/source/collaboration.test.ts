@@ -31,6 +31,24 @@ describe("Markdown collaboration transport", () => {
     Session.Destroy();
     ServerDocument.destroy();
   });
+
+  it("uses an application close code after a server protocol rejection", async () => {
+    const Socket = new FakeWebSocket(() => undefined);
+    const Connected = MarkdownRealtimeSession.Connect({
+      Grant: {
+        Authorization: "fbcollab1.test",
+        ClientId: "00000000-0000-4000-8000-000000000010",
+        EndpointUrl: "wss://files.example.test/collaboration/v1/ws",
+        PresenceLabel: "Editor 1",
+        RoomId: "00000000-0000-4000-8000-000000000020",
+      },
+      WebSocketFactory: () => Socket as unknown as WebSocket,
+    });
+    Socket.Open();
+    Socket.Receive(Frame(9, Message([Unsigned(1, 8), Text(2, "rejected")])));
+    await expect(Connected).rejects.toThrow("The collaboration transport closed.");
+    expect(Socket.CloseCodes[0]).toBe(4008);
+  });
 });
 
 class FakeWebSocket extends EventTarget {
@@ -39,6 +57,7 @@ class FakeWebSocket extends EventTarget {
   binaryType = "arraybuffer";
   // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket exposes this platform-defined member spelling.
   readyState = 0;
+  readonly CloseCodes: (number | undefined)[] = [];
 
   constructor(OnSend: (Payload: Uint8Array) => void) {
     super();
@@ -58,7 +77,8 @@ class FakeWebSocket extends EventTarget {
     this.#OnSend(new Uint8Array(Payload));
   }
 
-  close(): void {
+  close(Code?: number): void {
+    this.CloseCodes.push(Code);
     this.readyState = 3;
     this.dispatchEvent(new Event("close"));
   }

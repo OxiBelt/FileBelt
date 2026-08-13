@@ -60,6 +60,16 @@ audits as that evidence becomes available. `cargo audit`, `cargo deny check`,
 the exact Cargo lockfile, and the locked import set remain independent required
 controls; an exemption weakens none of those gates.
 
+The fuzz-only graph pins `cargo-fuzz 0.13.2`, `libfuzzer-sys 0.4.13`, and the
+transitive `arbitrary 1.4.2`. Complete checksum-matched local audits admit the
+two crates only for `safe-to-run`; `filebelt-fuzz` policy does not promote that
+criterion to deployment. The bundled native libFuzzer runtime therefore never
+enters a FileBelt image or deployed package. `libfuzzer-sys@0.4.13` has one
+exact Cargo Deny exception for its NCSA portion; NCSA is not globally admitted.
+Changing either version, feature set, build script, bundled C++ source, runner
+environment, or deployed-graph reachability invalidates this review. The full
+program and private crash-input handling are documented in [Fuzzing](Fuzzing.md).
+
 ## Phase 2 dependency admission
 
 Phase 2 retains exact Cargo and pnpm resolution and adds runtime dependencies
@@ -325,6 +335,15 @@ cookies, CSRF tokens, capabilities, and signing/hash keysets never enter build
 contexts or retained evidence. Docker and browser logs redact these values.
 Fault and restore artifacts are sensitive local test output and use
 deterministic cleanup.
+
+Docker integration consumers verify the current-revision AMD64 archive and its
+checksum, build/evidence metadata, validation, smoke result, vulnerability
+decision, and nonempty build/runtime SBOMs before `docker load`. They may build
+only the digest-pinned OIDC and MCP test fixtures; FileBelt subjects are never
+rebuilt. Collaboration installs frozen pnpm dependencies without lifecycle
+scripts and uses the lockfile-pinned Playwright package with Chromium and
+Firefox. Retained failure artifacts contain only bounded scrubbed logs and
+synthetic screenshots for 7 days on pull requests and 30 days otherwise.
 
 ## Phase 5 Kubernetes and publication evidence
 

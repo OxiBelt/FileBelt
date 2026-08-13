@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
+protocol="filebelt.mcp.runner.v1"
+code="invalid_request"
+uuid="550e8400-e29b-41d4-a716-446655440000"

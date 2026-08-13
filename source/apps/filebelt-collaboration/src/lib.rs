@@ -28,6 +28,46 @@ pub use rate_limit::{AdmissionKind, RateAdmission, RateLimiter};
 pub use source::{LineEnding, MarkdownSource, MarkdownSourceError};
 pub use wire::{FrameError, decode_frame, encode_frame, validate_awareness};
 
+/// Side-effect-free exercises for repository-owned fuzz targets.
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing {
+    use filebelt_collaboration_protocol::collaboration_frame::Frame;
+    use filebelt_control_protocol::CollaborationLimitConfig;
+
+    use crate::{RoomDocument, decode_frame, encode_frame, validate_awareness};
+
+    /// Exercises collaboration Protobuf, awareness, and bounded Yjs decoding.
+    pub fn exercise_collaboration_wire(input: &[u8]) {
+        if let Ok(decoded) = decode_frame(input) {
+            let frame = decoded
+                .frame
+                .expect("the collaboration decoder rejects empty frames");
+            let encoded = encode_frame(frame.clone())
+                .expect("a decoded bounded collaboration frame re-encodes");
+            assert_eq!(
+                decode_frame(&encoded).ok().and_then(|value| value.frame),
+                Some(frame.clone())
+            );
+            if let Frame::Awareness(awareness) = frame {
+                let _ = validate_awareness(&awareness, 8_192);
+            }
+        }
+
+        let limits = CollaborationLimitConfig {
+            max_update_bytes: 256 * 1024,
+            max_operation_group_bytes: 256 * 1024,
+            max_state_bytes: 512 * 1024,
+            ..CollaborationLimitConfig::default()
+        };
+        if let Ok(restored) = RoomDocument::from_snapshot(input, 1, limits.clone()) {
+            let snapshot = restored.snapshot();
+            let round_trip = RoomDocument::from_snapshot(&snapshot, 1, limits)
+                .expect("an accepted collaboration snapshot remains valid");
+            assert_eq!(round_trip.snapshot(), snapshot);
+        }
+    }
+}
+
 pub const MARKDOWN_ROOT: &str = "source";
 /// Initial Markdown collaboration source follows the shared per-user editor
 /// ceiling. Encoded Yjs state and retained-room limits remain independently

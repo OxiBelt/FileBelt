@@ -1,0 +1,6 @@
+version = 9
+
+[deployment]
+mode = "development"
+
+public_origin = "https://filebelt.example"

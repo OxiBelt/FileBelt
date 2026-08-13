@@ -1029,7 +1029,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-collaboration"
 crate_root = "source/apps/filebelt-collaboration/src/lib.rs"
-public_modules = ["io_client", "server", "webtransport"]
+public_modules = ["fuzzing", "io_client", "server", "webtransport"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -1174,6 +1174,12 @@ wildcard_reexports = []
 package = "filebelt-vfs"
 crate_root = "source/apps/filebelt-vfs/src/main.rs"
 public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-vfs"
+crate_root = "source/apps/filebelt-vfs/src/lib.rs"
+public_modules = ["fuzzing"]
 wildcard_reexports = []
 
 [[public_surfaces]]

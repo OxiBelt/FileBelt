@@ -143,6 +143,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+
+[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1978,6 +1984,17 @@ dependencies = [
 [[package]]
 name = "filebelt-fuzz"
 version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "filebelt-collaboration",
+ "filebelt-control-protocol",
+ "filebelt-mcp-protocol",
+ "filebelt-revision-protocol",
+ "filebelt-vfs",
+ "libfuzzer-sys",
+ "prost",
+ "toml 1.1.4+spec-1.1.0",
+]
 
 [[package]]
 name = "filebelt-headscale-sync"
@@ -2105,6 +2122,7 @@ dependencies = [
 name = "filebelt-repository-tests"
 version = "0.1.0"
 dependencies = [
+ "filebelt-fuzz",
  "serde_json",
  "syn 3.0.3",
  "toml 1.1.4+spec-1.1.0",
@@ -3409,6 +3427,16 @@ checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "libfuzzer-sys"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9fd2f41a1cba099f79a0b6b6c35656cf7c03351a7bae8ff0f28f25270f929d2"
+dependencies = [
+ "arbitrary",
+ "cc",
 ]
 
 [[package]]

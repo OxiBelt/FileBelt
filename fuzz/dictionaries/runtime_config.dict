@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version="version = 9"
+development="mode = \"development\""
+kubernetes="mode = \"kubernetes\""
+origin="public_origin = \"https://filebelt.example\""
+section="[deployment]"

@@ -9,5 +9,63 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[package.metadata]
+cargo-fuzz = true
+
+[features]
+default = ["fuzz-target"]
+fuzz-target = ["dep:libfuzzer-sys"]
+
+[dependencies]
+aws-lc-rs.workspace = true
+filebelt-collaboration = { version = "=0.1.0", path = "../source/apps/filebelt-collaboration", features = ["fuzzing"] }
+filebelt-control-protocol = { version = "=0.1.0", path = "../source/crates/filebelt-control-protocol" }
+filebelt-mcp-protocol.workspace = true
+filebelt-revision-protocol.workspace = true
+filebelt-vfs = { version = "=0.1.0", path = "../source/apps/filebelt-vfs", features = ["fuzzing"] }
+libfuzzer-sys = { workspace = true, optional = true }
+prost.workspace = true
+toml.workspace = true
+
+[[bin]]
+name = "nfs_vfs_boundary"
+path = "fuzz_targets/nfs_vfs_boundary.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzz-target"]
+
+[[bin]]
+name = "mcp_runner_relay"
+path = "fuzz_targets/mcp_runner_relay.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzz-target"]
+
+[[bin]]
+name = "collaboration_wire"
+path = "fuzz_targets/collaboration_wire.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzz-target"]
+
+[[bin]]
+name = "revision_protocol"
+path = "fuzz_targets/revision_protocol.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzz-target"]
+
+[[bin]]
+name = "runtime_config"
+path = "fuzz_targets/runtime_config.rs"
+test = false
+doc = false
+bench = false
+required-features = ["fuzz-target"]
+
 [lints]
 workspace = true

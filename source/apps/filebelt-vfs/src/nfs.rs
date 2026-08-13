@@ -322,6 +322,67 @@ fn tag(key: &[u8; 32], body: &[u8]) -> [u8; TAG_BYTES] {
     *hasher.finalize().as_bytes()
 }
 
+#[cfg(feature = "fuzzing")]
+pub(crate) fn fuzz_exercise(input: &[u8]) {
+    use filebelt_vfs_protocol::{VfsRequest, canonical_nfs_request_digest};
+    use prost::Message as _;
+
+    let mut padded = [0_u8; 112];
+    let copied = input.len().min(padded.len());
+    padded[..copied].copy_from_slice(&input[..copied]);
+
+    let mut tenant_bytes = [0_u8; 16];
+    tenant_bytes.copy_from_slice(&padded[..16]);
+    tenant_bytes[15] |= 1;
+    let mut node_bytes = [0_u8; 16];
+    node_bytes.copy_from_slice(&padded[16..32]);
+    node_bytes[15] |= 1;
+    let key_material: [u8; 32] = padded[32..64]
+        .try_into()
+        .expect("the fuzz key slice has a fixed length");
+    let nonzero = |offset: usize| {
+        u64::from_be_bytes(
+            padded[offset..offset + 8]
+                .try_into()
+                .expect("the fuzz integer slice has a fixed length"),
+        ) | 1
+    };
+    let scope = NfsHandleScope {
+        tenant_id: Uuid::from_bytes(tenant_bytes),
+        export_id: nonzero(64),
+        node_id: Uuid::from_bytes(node_bytes),
+        export_generation: nonzero(72),
+        node_generation: nonzero(80),
+        restore_generation: nonzero(88),
+    };
+    let keyring = NfsHandleKeyring {
+        current: NfsHandleKeyMaterial {
+            generation: 1,
+            material: Zeroizing::new(key_material),
+        },
+        previous: None,
+    };
+    let issued = issue_handle(scope, keyring.current());
+    assert_eq!(validate_handle(&issued, &keyring), Ok(scope));
+    let mut tampered = issued;
+    tampered[HANDLE_BYTES - 1] ^= 1;
+    assert_eq!(
+        validate_handle(&tampered, &keyring),
+        Err(NfsHandleError::Malformed)
+    );
+
+    let realm = std::str::from_utf8(&padded[96..104]).unwrap_or_default();
+    let principal = std::str::from_utf8(input).unwrap_or_default();
+    let _ = validate_authenticated_principal(principal, realm);
+    let _ = root_handle_digest(input);
+
+    if let Ok(request) = VfsRequest::decode(input) {
+        let first = canonical_nfs_request_digest(&request);
+        assert_eq!(first, canonical_nfs_request_digest(&request));
+        let _ = request.validate();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

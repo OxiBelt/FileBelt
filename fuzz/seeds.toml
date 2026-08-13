@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+schema_version = 1
+
+[[seed]]
+target = "nfs_vfs_boundary"
+path = "fuzz/seeds/nfs_vfs_boundary/minimal.seed"
+sha256 = "882c4114e3f8557d88cd787e67a1c13aa9f9d894ffd85023742630ce8bb5a172"
+
+[[seed]]
+target = "mcp_runner_relay"
+path = "fuzz/seeds/mcp_runner_relay/minimal.seed"
+sha256 = "86809fb91beae61128239fe2e76e55a2bff6f1e098367f55d291f5e799f81241"
+
+[[seed]]
+target = "collaboration_wire"
+path = "fuzz/seeds/collaboration_wire/minimal.seed"
+sha256 = "b8bb034f9b63bd0254fbc7c157cae746c75853f4643d6cea844dc48ddb57f522"
+
+[[seed]]
+target = "revision_protocol"
+path = "fuzz/seeds/revision_protocol/minimal.seed"
+sha256 = "1658f4e419b698170a08dd5c832053d91d95df9952a7b0e5f6a1b4a5c19f1882"
+
+[[seed]]
+target = "runtime_config"
+path = "fuzz/seeds/runtime_config/minimal.seed"
+sha256 = "a673e0ee3561f5889271c8c8af5e99b8e63e5e4ea7da477133038ae7195db600"

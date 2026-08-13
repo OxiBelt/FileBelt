@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+
+schema_version = 1
+cargo_fuzz_version = "0.13.2"
+libfuzzer_sys_version = "0.4.13"
+stable_toolchain = "1.97.1"
+asan_toolchain = "nightly-2026-08-04"
+timeout_seconds = 10
+rss_limit_mib = 3072
+malloc_limit_mib = 512
+smoke_runs = 256
+
+[[target]]
+name = "nfs_vfs_boundary"
+max_input_bytes = 4096
+seed_directory = "fuzz/seeds/nfs_vfs_boundary"
+
+[[target]]
+name = "mcp_runner_relay"
+max_input_bytes = 131072
+seed_directory = "fuzz/seeds/mcp_runner_relay"
+dictionary = "fuzz/dictionaries/mcp_runner_relay.dict"
+
+[[target]]
+name = "collaboration_wire"
+max_input_bytes = 262144
+seed_directory = "fuzz/seeds/collaboration_wire"
+
+[[target]]
+name = "revision_protocol"
+max_input_bytes = 1048576
+seed_directory = "fuzz/seeds/revision_protocol"
+
+[[target]]
+name = "runtime_config"
+max_input_bytes = 65536
+seed_directory = "fuzz/seeds/runtime_config"
+dictionary = "fuzz/dictionaries/runtime_config.dict"

@@ -9,6 +9,12 @@ criterion does not certify generic safe-to-deploy use.
 """
 implies = "safe-to-run"
 
+[[audits.arbitrary]]
+who = "OpenAI Codex"
+criteria = "safe-to-run"
+version = "1.4.2"
+notes = "Reviewed complete checksum-matched source with the default feature set; the derive feature and its proc macro are unselected. It has no build script or ambient filesystem, network, environment, or process access. Input consumption is bounded by the supplied slice. Array initialization tracks and drops exactly the initialized prefix on error, UTF-8 unchecked construction follows a successful validation prefix, and CString unchecked construction follows removal of every NUL byte. Caller-invalid empty ranges and ratios can panic as documented, but libfuzzer-sys uses only the byte-slice target form in FileBelt. This dependency is test-only and never enters a deployed graph."
+
 [[audits.arc-swap]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -86,6 +92,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.1.3"
 notes = "Reviewed complete checksum-matched source. It is a minimal no_std platform re-export with no build script, unsafe code, or ambient I/O and is absent from FileBelt's Linux deployment targets."
+
+[[audits.libfuzzer-sys]]
+who = "OpenAI Codex"
+criteria = "safe-to-run"
+version = "0.4.13"
+notes = "Reviewed complete checksum-matched Rust shim, build script, and bundled LLVM libFuzzer C++ source with the default link_libfuzzer feature. The FFI wrapper constructs the target slice from libFuzzer's valid pointer/length callback and aborts on panic; the bundled mutators keep copies and moves within caller-provided sizes. The build script compiles packaged C++17 sources to OUT_DIR, while FileBelt's runner clears the custom-library and debug-path environment inputs and does not enable fork, jobs, merge, or data-flow subprocess modes. Runtime filesystem access is limited to operator-selected ephemeral corpus and artifact paths. This native test-only dependency is admitted for bounded fuzz jobs and never enters a deployed FileBelt graph."
 
 [[audits.md4]]
 who = "OpenAI Codex"

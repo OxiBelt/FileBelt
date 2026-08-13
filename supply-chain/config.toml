@@ -42,6 +42,10 @@ x509-cert = "safe-to-deploy"
 dependency-criteria = { sigstore-verify = "filebelt-constrained-deployment" }
 notes = "The controller is the sole sigstore-verify caller and enforces FileBelt's bounded offline trust profile before accepting a runner catalog entry."
 
+[policy.filebelt-fuzz]
+dependency-criteria = { libfuzzer-sys = "safe-to-run" }
+notes = "The native libFuzzer runtime is test-only and never enters a deployed FileBelt dependency graph."
+
 [policy."sigstore-verify:0.11.0"]
 notes = "The constrained verifier criterion applies only to sigstore-verify itself; its direct dependencies retain the standard deployment requirement."
 

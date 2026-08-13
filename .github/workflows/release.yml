@@ -147,11 +147,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  phase3-acceptance:
-    name: Exercise exact AMD64 release archives
+  docker-core-acceptance:
+    name: Exercise exact AMD64 core archives
+    if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
     needs: image-platforms
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: 45
     steps:
       - name: Check out the signed tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -161,9 +162,93 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: filebelt-release-amd64
-          path: artifacts/phase3/amd64-download
-      - name: Run exact-artifact Docker acceptance without rebuilding FileBelt
-        run: tests/scripts/run-kubernetes-release-gate.sh --image-dir artifacts/phase3/amd64-download
+          path: artifacts/docker/core-images
+      - name: Run exact-artifact core acceptance without rebuilding FileBelt
+        run: >-
+          tests/scripts/run-kubernetes-release-gate.sh
+          --image-dir artifacts/docker/core-images
+          --unit core
+          --diagnostics-dir artifacts/docker/core
+      - name: Upload scrubbed failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-docker-core-diagnostics
+          path: artifacts/docker/core
+          if-no-files-found: warn
+          retention-days: 30
+
+  docker-collaboration-acceptance:
+    name: Exercise exact AMD64 collaboration archives
+    if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
+    needs: image-platforms
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+      - name: Activate pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+      - name: Install browser workspace without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install pinned Playwright browsers
+        run: pnpm --filter @filebelt/web exec playwright install --with-deps chromium firefox
+      - name: Download AMD64 image evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-amd64
+          path: artifacts/docker/collaboration-images
+      - name: Run exact-artifact collaboration acceptance without rebuilding FileBelt
+        run: >-
+          tests/scripts/run-kubernetes-release-gate.sh
+          --image-dir artifacts/docker/collaboration-images
+          --unit collaboration
+          --diagnostics-dir artifacts/docker/collaboration
+      - name: Upload synthetic screenshots and scrubbed failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-docker-collaboration-diagnostics
+          path: artifacts/docker/collaboration
+          if-no-files-found: warn
+          retention-days: 30
+
+  docker-mcp-acceptance:
+    name: Exercise exact AMD64 MCP archives
+    if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
+    needs: image-platforms
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the signed tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Download AMD64 image evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-release-amd64
+          path: artifacts/docker/mcp-images
+      - name: Run exact-artifact MCP acceptance without rebuilding FileBelt
+        run: >-
+          tests/scripts/run-kubernetes-release-gate.sh
+          --image-dir artifacts/docker/mcp-images
+          --unit mcp
+          --diagnostics-dir artifacts/docker/mcp
+      - name: Upload scrubbed failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-release-docker-mcp-diagnostics
+          path: artifacts/docker/mcp
+          if-no-files-found: warn
+          retention-days: 30
 
   kubernetes-compatibility:
     name: Kubernetes ${{ matrix.kubernetes }} compatibility
@@ -205,7 +290,7 @@ jobs:
   release-gate:
     name: Require every release check
     if: always()
-    needs: [image-platforms, normalized-rebuild, package-assets, phase3-acceptance, kubernetes-compatibility]
+    needs: [image-platforms, normalized-rebuild, package-assets, docker-core-acceptance, docker-collaboration-acceptance, docker-mcp-acceptance, kubernetes-compatibility]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
@@ -214,13 +299,17 @@ jobs:
           IMAGES: ${{ needs.image-platforms.result }}
           REBUILD: ${{ needs.normalized-rebuild.result }}
           ASSETS: ${{ needs.package-assets.result }}
-          ACCEPTANCE: ${{ needs.phase3-acceptance.result }}
+          DOCKER_CORE: ${{ needs.docker-core-acceptance.result }}
+          DOCKER_COLLABORATION: ${{ needs.docker-collaboration-acceptance.result }}
+          DOCKER_MCP: ${{ needs.docker-mcp-acceptance.result }}
           KUBERNETES: ${{ needs.kubernetes-compatibility.result }}
         run: |
           test "$IMAGES" = success
           test "$REBUILD" = success
           test "$ASSETS" = success
-          test "$ACCEPTANCE" = success
+          test "$DOCKER_CORE" = success
+          test "$DOCKER_COLLABORATION" = success
+          test "$DOCKER_MCP" = success
           test "$KUBERNETES" = success
 
   promote:

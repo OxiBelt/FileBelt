@@ -26,6 +26,7 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
     for job in [
         "source-structure:",
         "rust:",
+        "fuzz-smoke:",
         "rust-boundaries:",
         "supply-chain:",
         "node:",
@@ -35,6 +36,11 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
         "phase1-images-native:",
         "phase1-images-riscv64:",
         "phase1-gate:",
+        "fuzz-sustained:",
+        "docker-core:",
+        "docker-collaboration:",
+        "docker-mcp:",
+        "docker-integration-gate:",
     ] {
         assert!(workflow.contains(job), "workflow is missing {job}");
     }
@@ -72,7 +78,7 @@ fn rust_boundary_job_is_advisory_for_size_and_blocks_the_bootstrap_gate() {
     assert!(advisory < cargo_graph);
     assert!(cargo_graph < source_contract);
     assert!(workflow.contains(
-        "needs: [source-structure, rust, rust-boundaries, supply-chain, node, protocol, dco]"
+        "needs: [source-structure, rust, fuzz-smoke, rust-boundaries, supply-chain, node, protocol, dco]"
     ));
     assert!(workflow.contains("RUST_BOUNDARIES: ${{ needs.rust-boundaries.result }}"));
     assert!(workflow.contains("test \"$RUST_BOUNDARIES\" = success"));
@@ -142,6 +148,13 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     }
     assert!(release.contains("tests/scripts/promote-release-artifacts.sh"));
     assert!(release.contains("tests/scripts/run-kubernetes-release-gate.sh"));
+    for job in [
+        "docker-core-acceptance:",
+        "docker-collaboration-acceptance:",
+        "docker-mcp-acceptance:",
+    ] {
+        assert!(release.contains(job), "release workflow is missing {job}");
+    }
     assert!(release.contains("tests/scripts/run-kubernetes-kind-compatibility.sh"));
     assert!(release.contains("helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc"));
     for node_image in [
@@ -183,37 +196,10 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     let exact_artifact =
         fs::read_to_string(root.join("tests/scripts/run-kubernetes-release-gate.sh"))
             .expect("release acceptance script");
-    assert!(exact_artifact.contains("docker load --input"));
-    assert!(exact_artifact.contains("FILEBELT_ACCEPTANCE_SKIP_BUILD=1"));
-    assert!(exact_artifact.contains("tests/docker/phase2/run-acceptance.sh"));
+    assert!(exact_artifact.contains("tests/docker/units/run-unit.py"));
+    assert!(exact_artifact.contains("--image-channel release"));
+    assert!(exact_artifact.contains("core|collaboration|mcp"));
     assert!(!exact_artifact.contains("run-image-matrix.sh"));
-    let active_start = exact_artifact
-        .find("active_roles=(")
-        .expect("release active-role allowlist");
-    let active_end = exact_artifact[active_start..]
-        .find("\n)")
-        .map(|offset| active_start + offset)
-        .expect("release active-role allowlist end");
-    let active_roles = &exact_artifact[active_start..active_end];
-    for active in [
-        "filebelt-api",
-        "filebelt-worker-io",
-        "filebelt-worker-maintenance",
-        "filebelt-collaboration",
-        "filebelt-mcp-broker",
-        "filebelt-controller",
-        "filebelt-mcp-runner",
-        "filebelt-tools",
-        "filebelt-vfs",
-        "filebelt-headscale-sync",
-        "filebelt-nfs-relay",
-        "filebelt-document",
-        "filebelt-revision",
-        "filebelt-web",
-    ] {
-        assert!(active_roles.contains(active));
-    }
-    assert!(!active_roles.contains("filebelt-media-controller"));
     for required in [
         "permissions:\n  contents: read",
         "cargo check --locked --manifest-path adapters/onlyoffice/Cargo.toml --target riscv64gc-unknown-linux-musl",
@@ -298,4 +284,112 @@ fn phase3_workloads_bypass_transitive_skips_and_require_successful_bootstrap() {
         assert!(job.contains("needs: bootstrap-gate"));
         assert!(!job.contains("always()"));
     }
+}
+
+#[test]
+fn fuzz_matrices_are_bounded_pinned_and_blocking() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("check workflow");
+    let smoke = workflow_job(&workflow, "fuzz-smoke", "rust-boundaries");
+    let sustained = workflow_job(&workflow, "fuzz-sustained", "phase1-images-native");
+    let targets = [
+        "nfs_vfs_boundary",
+        "mcp_runner_relay",
+        "collaboration_wire",
+        "revision_protocol",
+        "runtime_config",
+    ];
+    for target in targets {
+        assert!(smoke.contains(target));
+        assert!(sustained.contains(target));
+    }
+    for required in [
+        "if: github.event_name == 'pull_request'",
+        "profile: [stable, asan]",
+        "max-parallel: 5",
+        "cargo install --locked cargo-fuzz --version 0.13.2",
+        "rustup toolchain install nightly-2026-08-04 --profile minimal",
+        "--mode smoke",
+        "--runs 256",
+    ] {
+        assert!(
+            smoke.contains(required),
+            "smoke matrix is missing {required}"
+        );
+    }
+    for required in [
+        "needs.bootstrap-gate.result == 'success'",
+        "github.event_name != 'pull_request'",
+        "max-parallel: 3",
+        "--profile asan",
+        "--mode campaign",
+        "github.event_name == 'push' && '900' || '3600'",
+    ] {
+        assert!(
+            sustained.contains(required),
+            "sustained matrix is missing {required}"
+        );
+    }
+    assert!(!workflow.contains("actions/cache"));
+    assert!(workflow.contains("FUZZ_SMOKE: ${{ needs.fuzz-smoke.result }}"));
+    assert!(workflow.contains("FUZZ_SUSTAINED: ${{ needs.fuzz-sustained.result }}"));
+}
+
+#[test]
+fn docker_units_consume_exact_amd64_archives_in_event_tiers() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("check workflow");
+    for (job, next, unit, non_pr_only) in [
+        ("docker-core", "docker-collaboration", "core", false),
+        ("docker-collaboration", "docker-mcp", "collaboration", true),
+        ("docker-mcp", "docker-integration-gate", "mcp", true),
+    ] {
+        let body = workflow_job(&workflow, job, next);
+        assert!(body.contains("needs: [bootstrap-gate, phase1-images-native]"));
+        assert!(body.contains("!cancelled()"));
+        assert!(body.contains("needs.bootstrap-gate.result == 'success'"));
+        assert!(body.contains("needs.phase1-images-native.result == 'success'"));
+        assert!(body.contains("name: filebelt-phase1-amd64"));
+        assert!(body.contains(&format!("--unit {unit}")));
+        assert!(body.contains("--image-channel build"));
+        assert!(!body.contains("--build"));
+        assert_eq!(
+            body.contains("github.event_name != 'pull_request'"),
+            non_pr_only
+        );
+    }
+    let gate = workflow_job(&workflow, "docker-integration-gate", "phase3-kind-current");
+    assert!(gate.contains("needs: [docker-core, docker-collaboration, docker-mcp]"));
+    assert!(gate.contains("test \"$CORE\" = success"));
+    assert!(gate.contains("test \"$COLLABORATION\" = skipped"));
+    assert!(gate.contains("test \"$MCP\" = success"));
+
+    let release =
+        fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");
+    for (job, next, unit) in [
+        (
+            "docker-core-acceptance",
+            "docker-collaboration-acceptance",
+            "core",
+        ),
+        (
+            "docker-collaboration-acceptance",
+            "docker-mcp-acceptance",
+            "collaboration",
+        ),
+        ("docker-mcp-acceptance", "kubernetes-compatibility", "mcp"),
+    ] {
+        let body = workflow_job(&release, job, next);
+        assert!(body.contains("!cancelled() && needs.image-platforms.result == 'success'"));
+        assert!(body.contains("name: filebelt-release-amd64"));
+        assert!(body.contains(&format!("--unit {unit}")));
+    }
+    assert!(release.contains("DOCKER_CORE: ${{ needs.docker-core-acceptance.result }}"));
+    assert!(
+        release
+            .contains("DOCKER_COLLABORATION: ${{ needs.docker-collaboration-acceptance.result }}")
+    );
+    assert!(release.contains("DOCKER_MCP: ${{ needs.docker-mcp-acceptance.result }}"));
 }

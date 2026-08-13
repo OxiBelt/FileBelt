@@ -232,6 +232,24 @@ be replaced with independently admitted adapter-image evidence before use.
 Publication permission exists only in the promotion job. Published versions
 are never moved or automatically deleted for rollback.
 
+The versioned Docker integration catalog contains isolated `core`,
+`collaboration`, and `mcp` units. Pull requests run the core unit; main,
+scheduled, and manual validation run all three. Signed-tag release validation
+replays all three independently. Every job downloads only the validated AMD64
+artifact, verifies that it binds the current revision and event channel, and
+loads it without rebuilding FileBelt. Unique Compose projects, disposable
+state, owned fixture tags, volumes, and networks make cleanup deterministic.
+Failure evidence is limited to bounded scrubbed logs and synthetic screenshots
+for 7 days on pull requests and 30 days otherwise; browser traces are disabled.
+The catalog and exact operator commands are documented in
+[Docker integration units](operations/docker-integration.md).
+
+Docker evidence proves the cataloged development topology only. It is not live
+Kubernetes, Helm rollout, CNI, NFS/Kerberos/Ganesha, public DNS, provider, or
+external MCP TLS qualification. Kubernetes compatibility and Calico/Cilium
+jobs remain separate blocking gates and their definitions are unchanged by the
+Docker matrix.
+
 ## Kubernetes production contract
 
 FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.3. The chart

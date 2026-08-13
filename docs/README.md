@@ -34,11 +34,14 @@ their respective details:
 - [Supply Chain](SupplyChain.md) defines dependency and release evidence.
 - [Threat Model](ThreatModel.md) defines assets, trust boundaries, required
   controls, and residual risk.
+- [Fuzzing](Fuzzing.md) defines the bounded target catalog, reviewed inputs,
+  runner profiles, CI tiers, and private crash-triage contract.
 - [Protocol documentation](../protocol/README.md) defines schema layout and
   deterministic generation.
 - [UI documentation](../ui/README.md) defines browser security, accessibility,
   design, dependency, and test requirements.
 - [Kubernetes operations](operations/kubernetes.md),
+  [Docker integration units](operations/docker-integration.md),
   [ONLYOFFICE integration operations](operations/onlyoffice.md),
   [revision storage operations](operations/revisions.md),
   [NFS release qualification](operations/nfs-qualification.md), and the

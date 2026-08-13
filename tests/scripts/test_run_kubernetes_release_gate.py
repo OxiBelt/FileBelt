@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
@@ -11,104 +10,75 @@ import unittest
 from pathlib import Path
 
 
-ROLES = (
-    "filebelt-api",
-    "filebelt-worker-io",
-    "filebelt-worker-maintenance",
-    "filebelt-collaboration",
-    "filebelt-media-controller",
-    "filebelt-mcp-broker",
-    "filebelt-controller",
-    "filebelt-mcp-runner",
-    "filebelt-tools",
-    "filebelt-vfs",
-    "filebelt-headscale-sync",
-    "filebelt-nfs-relay",
-    "filebelt-document",
-    "filebelt-revision",
-    "filebelt-web",
-)
-
-
 class KubernetesReleaseGateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.artifacts = self.root / "artifacts"
+        self.diagnostics = self.root / "diagnostics"
         self.bin = self.root / "bin"
         self.artifacts.mkdir()
         self.bin.mkdir()
-        self.docker_log = self.root / "docker.log"
-        self.docker_log.write_text("", encoding="utf-8")
-        docker = self.bin / "docker"
-        docker.write_text(
+        self.python_log = self.root / "python.log"
+        python = self.bin / "python3"
+        python.write_text(
             """#!/usr/bin/env bash
-printf '%s\n' "$*" >>"$DOCKER_LOG"
-exit 99
+printf '%s\n' "$*" >"$PYTHON_LOG"
 """,
             encoding="utf-8",
         )
-        docker.chmod(0o755)
+        python.chmod(0o755)
         self.script = Path(__file__).with_name("run-kubernetes-release-gate.sh")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_plan(self, *, repository_owner: str = "oxibelt") -> None:
-        plan = {
-            "schemaVersion": 1,
-            "channel": "release",
-            "version": "1.2.3",
-            "tag": "1.2.3",
-            "source": {
-                "kind": "release",
-                "dirty": False,
-                "url": "https://github.com/OxiBelt/FileBelt",
-                "ref": "refs/tags/1.2.3",
-                "revision": "a" * 40,
-            },
-            "runtime": {"uid": 10001, "gid": 10001},
-            "images": [
-                {
-                    "role": role,
-                    "repository": f"ghcr.io/{repository_owner}/{role}",
-                    "platforms": ["linux/amd64", "linux/arm64", "linux/riscv64"],
-                }
-                for role in ROLES
-            ],
-        }
-        (self.artifacts / "image-plan.json").write_text(
-            json.dumps(plan), encoding="utf-8"
-        )
-
-    def run_script(self) -> subprocess.CompletedProcess[str]:
+    def run_script(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(
             {
                 "PATH": f"{self.bin}:{environment['PATH']}",
-                "DOCKER_LOG": str(self.docker_log),
+                "PYTHON_LOG": str(self.python_log),
             }
         )
         return subprocess.run(
-            [self.script, "--image-dir", self.artifacts],
+            [self.script, *arguments],
             env=environment,
             text=True,
             capture_output=True,
             check=False,
         )
 
-    def test_requires_each_validated_active_archive_before_docker_runs(self) -> None:
-        self.write_plan()
-        result = self.run_script()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("expected exactly one filebelt-api-amd64.docker.tar", result.stderr)
-        self.assertEqual(self.docker_log.read_text(encoding="utf-8"), "")
+    def test_delegates_one_release_unit_to_the_shared_exact_artifact_runner(self) -> None:
+        result = self.run_script(
+            "--image-dir",
+            str(self.artifacts),
+            "--unit",
+            "collaboration",
+            "--diagnostics-dir",
+            str(self.diagnostics),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        invocation = self.python_log.read_text(encoding="utf-8")
+        self.assertIn("tests/docker/units/run-unit.py", invocation)
+        self.assertIn("--unit collaboration", invocation)
+        self.assertIn(f"--image-dir {self.artifacts}", invocation)
+        self.assertIn("--image-channel release", invocation)
+        self.assertIn(f"--diagnostics-dir {self.diagnostics}", invocation)
 
-    def test_rejects_a_release_plan_outside_the_ghcr_allowlist(self) -> None:
-        self.write_plan(repository_owner="attacker")
-        result = self.run_script()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.docker_log.read_text(encoding="utf-8"), "")
+    def test_rejects_unknown_unit_before_invoking_python(self) -> None:
+        result = self.run_script(
+            "--image-dir", str(self.artifacts), "--unit", "media"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.python_log.exists())
+
+    def test_requires_an_existing_image_directory(self) -> None:
+        result = self.run_script(
+            "--image-dir", str(self.root / "missing"), "--unit", "core"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.python_log.exists())
 
 
 if __name__ == "__main__":

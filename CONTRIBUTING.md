@@ -123,6 +123,23 @@ when the affected artifact exists. Do not substitute a placeholder check. A
 pull request may omit an inapplicable or unavailable check only when it records
 the reason.
 
+The bounded fuzz runner and cataloged Docker units use these forms:
+
+```sh
+cargo install --locked cargo-fuzz --version 0.13.2
+tests/scripts/run-fuzz-target.sh --target nfs_vfs_boundary --profile stable --mode smoke --runs 256
+python3 tests/docker/units/run-unit.py --unit core --build
+python3 tests/docker/units/run-unit.py --unit core --image-dir artifacts/phase1 --image-channel build --diagnostics-dir artifacts/docker/core
+```
+
+`--build` is local source-build integration. `--image-dir` is exact-artifact
+integration and must use `--image-channel build` for CI archives or
+`--image-channel release` for signed-tag archives. Collaboration additionally
+requires the frozen pnpm workspace and installed pinned Playwright Chromium and
+Firefox binaries. Fuzz crash inputs and Docker diagnostics can contain security
+evidence; keep unreviewed inputs private and retain only the runner's scrubbed,
+bounded synthetic diagnostics.
+
 ## Commit messages
 
 Use Conventional Commits for commit messages:

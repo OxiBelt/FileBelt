@@ -15,12 +15,40 @@ fn workflow_job<'a>(workflow: &'a str, job: &str, next_job: &str) -> &'a str {
     &workflow[start..end]
 }
 
+fn final_workflow_job<'a>(workflow: &'a str, job: &str) -> &'a str {
+    let job_marker = format!("\n  {job}:\n");
+    let start = workflow.find(&job_marker).expect("workflow job");
+    &workflow[start..]
+}
+
+fn assert_no_workflow_permissions(workflow: &str) {
+    let header = workflow
+        .split_once("\njobs:\n")
+        .map(|(header, _)| header)
+        .expect("workflow jobs");
+    assert!(
+        !header.contains("\npermissions:"),
+        "workflow permissions must be scoped to jobs"
+    );
+}
+
+fn assert_contents_read(job: &str) {
+    assert!(
+        job.contains("\n    permissions:\n      contents: read\n")
+            || job.contains("\n    permissions: { contents: read }\n")
+    );
+}
+
+fn assert_tokenless(job: &str) {
+    assert!(job.contains("\n    permissions: {}\n"));
+}
+
 #[test]
 fn bootstrap_workflow_is_least_privileged_and_complete() {
     let root = repository_root();
     let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
         .expect("bootstrap workflow");
-    assert!(workflow.contains("permissions:\n  contents: read"));
+    assert_no_workflow_permissions(&workflow);
     assert!(!workflow.contains("pull_request_target:"));
     assert!(!workflow.contains("packages: write"));
     for job in [
@@ -94,7 +122,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     let onlyoffice = fs::read_to_string(root.join(".github/workflows/onlyoffice-release.yml"))
         .expect("ONLYOFFICE release scaffold workflow");
     for workflow in [&checks, &dry_run] {
-        assert!(workflow.contains("permissions:\n  contents: read"));
+        assert_no_workflow_permissions(workflow);
         for forbidden in [
             "packages: write",
             "contents: write",
@@ -126,6 +154,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
 
     let release =
         fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");
+    assert_no_workflow_permissions(&release);
     assert!(release.contains("tags:\n      - \"[0-9]*.[0-9]*.[0-9]*\""));
     assert!(!release.contains("workflow_dispatch:"));
     assert!(!release.contains("pull_request:"));
@@ -201,7 +230,6 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(exact_artifact.contains("core|collaboration|mcp"));
     assert!(!exact_artifact.contains("run-image-matrix.sh"));
     for required in [
-        "permissions:\n  contents: read",
         "cargo check --locked --manifest-path adapters/onlyoffice/Cargo.toml --target riscv64gc-unknown-linux-musl",
         "pnpm --filter @filebelt/devops test",
         "check-onlyoffice-helm-chart.sh",
@@ -218,6 +246,97 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             "ONLYOFFICE workflow contains {forbidden}"
         );
     }
+
+    let nfs = fs::read_to_string(root.join(".github/workflows/nfs-qualification.yml"))
+        .expect("NFS qualification workflow");
+    let performance = fs::read_to_string(root.join(".github/workflows/phase8-performance.yml"))
+        .expect("Phase 8 performance workflow");
+    for workflow in [&onlyoffice, &nfs, &performance] {
+        assert_no_workflow_permissions(workflow);
+    }
+
+    for (workflow, jobs) in [
+        (
+            checks.as_str(),
+            &[
+                ("source-structure", "rust"),
+                ("rust", "fuzz-smoke"),
+                ("fuzz-smoke", "rust-boundaries"),
+                ("rust-boundaries", "supply-chain"),
+                ("supply-chain", "node"),
+                ("node", "protocol"),
+                ("protocol", "dco"),
+                ("dco", "bootstrap-gate"),
+                ("fuzz-sustained", "phase1-images-native"),
+                ("phase1-images-native", "phase1-images-riscv64"),
+                ("phase1-images-riscv64", "phase1-gate"),
+                ("docker-core", "docker-collaboration"),
+                ("docker-collaboration", "docker-mcp"),
+                ("docker-mcp", "docker-integration-gate"),
+                ("phase3-kind-current", "phase3-kind-supported"),
+                ("phase3-kind-supported", "phase3-network-calico"),
+                ("phase3-network-calico", "phase3-network-cilium"),
+                ("phase3-network-cilium", "phase3-gate"),
+            ][..],
+        ),
+        (
+            dry_run.as_str(),
+            &[
+                ("image-platforms", "normalized-rebuild"),
+                ("normalized-rebuild", "dry-run-gate"),
+            ][..],
+        ),
+        (
+            onlyoffice.as_str(),
+            &[("adapter-contract", "chart-contract")][..],
+        ),
+        (
+            nfs.as_str(),
+            &[
+                ("contract", "native-builds"),
+                ("native-builds", "clients"),
+                ("clients", "qualification-boundary"),
+            ][..],
+        ),
+        (
+            release.as_str(),
+            &[
+                ("image-platforms", "normalized-rebuild"),
+                ("normalized-rebuild", "package-assets"),
+                ("package-assets", "docker-core-acceptance"),
+                ("docker-core-acceptance", "docker-collaboration-acceptance"),
+                ("docker-collaboration-acceptance", "docker-mcp-acceptance"),
+                ("docker-mcp-acceptance", "kubernetes-compatibility"),
+                ("kubernetes-compatibility", "release-gate"),
+            ][..],
+        ),
+    ] {
+        for (job, next_job) in jobs {
+            assert_contents_read(workflow_job(workflow, job, next_job));
+        }
+    }
+    assert_contents_read(final_workflow_job(&onlyoffice, "chart-contract"));
+    assert_contents_read(final_workflow_job(&performance, "evidence-contract"));
+    for (workflow, job, next_job) in [
+        (checks.as_str(), "bootstrap-gate", "fuzz-sustained"),
+        (checks.as_str(), "phase1-gate", "docker-core"),
+        (
+            checks.as_str(),
+            "docker-integration-gate",
+            "phase3-kind-current",
+        ),
+        (dry_run.as_str(), "dry-run-gate", ""),
+        (nfs.as_str(), "qualification-boundary", ""),
+        (release.as_str(), "release-gate", "promote"),
+    ] {
+        let body = if next_job.is_empty() {
+            final_workflow_job(workflow, job)
+        } else {
+            workflow_job(workflow, job, next_job)
+        };
+        assert_tokenless(body);
+    }
+    assert_tokenless(final_workflow_job(&checks, "phase3-gate"));
 }
 
 #[test]

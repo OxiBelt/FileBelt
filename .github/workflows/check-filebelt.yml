@@ -10,14 +10,12 @@ on:
     - cron: "23 4 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-
 jobs:
   source-structure:
     name: Source structure
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -54,6 +52,8 @@ jobs:
   rust:
     name: Rust workspace
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -71,6 +71,8 @@ jobs:
     name: Fuzz smoke (${{ matrix.target }}, ${{ matrix.profile }})
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -106,6 +108,8 @@ jobs:
   rust-boundaries:
     name: Rust boundaries
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -133,6 +137,8 @@ jobs:
   supply-chain:
     name: Rust supply chain
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -152,6 +158,8 @@ jobs:
   node:
     name: Node workspace
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -183,6 +191,8 @@ jobs:
   protocol:
     name: Protocol policy
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -208,6 +218,8 @@ jobs:
     name: DCO
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 5
     steps:
       - name: Check out full history
@@ -225,6 +237,7 @@ jobs:
     if: always()
     needs: [source-structure, rust, fuzz-smoke, rust-boundaries, supply-chain, node, protocol, dco]
     runs-on: ubuntu-26.04
+    permissions: {}
     timeout-minutes: 5
     steps:
       - name: Require every bootstrap job
@@ -257,6 +270,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -301,6 +316,8 @@ jobs:
             platform: linux/arm64
             artifact-arch: arm64
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     timeout-minutes: 90
     steps:
       - name: Check out source
@@ -345,6 +362,8 @@ jobs:
     name: Phase 1 images (linux/riscv64)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 120
     steps:
       - name: Check out source
@@ -391,6 +410,7 @@ jobs:
     if: always()
     needs: [bootstrap-gate, phase1-images-native, phase1-images-riscv64]
     runs-on: ubuntu-26.04
+    permissions: {}
     timeout-minutes: 5
     steps:
       - name: Require the complete Phase 1 matrix
@@ -413,6 +433,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && needs.phase1-images-native.result == 'success' }}
     needs: [bootstrap-gate, phase1-images-native]
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -443,6 +465,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && needs.phase1-images-native.result == 'success' && github.event_name != 'pull_request' }}
     needs: [bootstrap-gate, phase1-images-native]
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 60
     steps:
       - name: Check out source
@@ -483,6 +507,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && needs.phase1-images-native.result == 'success' && github.event_name != 'pull_request' }}
     needs: [bootstrap-gate, phase1-images-native]
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -513,6 +539,7 @@ jobs:
     if: always()
     needs: [docker-core, docker-collaboration, docker-mcp]
     runs-on: ubuntu-26.04
+    permissions: {}
     timeout-minutes: 5
     steps:
       - name: Require the event-appropriate Docker units
@@ -536,6 +563,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name == 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -570,6 +599,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -617,6 +648,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' }}
     needs: bootstrap-gate
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -654,6 +687,8 @@ jobs:
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && github.event_name != 'pull_request' }}
     needs: bootstrap-gate
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -698,6 +733,7 @@ jobs:
       - phase3-network-calico
       - phase3-network-cilium
     runs-on: ubuntu-26.04
+    permissions: {}
     timeout-minutes: 5
     steps:
       - name: Require the event-appropriate Kubernetes matrix

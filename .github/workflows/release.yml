@@ -7,9 +7,6 @@ on:
     tags:
       - "[0-9]*.[0-9]*.[0-9]*"
 
-permissions:
-  contents: read
-
 jobs:
   image-platforms:
     name: Validate release images (${{ matrix.platform }})
@@ -30,6 +27,8 @@ jobs:
             artifact-arch: riscv64
             qemu-arguments: "--qemu-mode rootless"
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     timeout-minutes: 150
     steps:
       - name: Check out the signed tag
@@ -76,6 +75,8 @@ jobs:
   normalized-rebuild:
     name: Verify normalized AMD64 rebuild
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 150
     steps:
       - name: Check out the signed tag
@@ -121,6 +122,8 @@ jobs:
   package-assets:
     name: Validate and package Helm/admin assets
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Check out the signed tag
@@ -152,6 +155,8 @@ jobs:
     if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
     needs: image-platforms
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out the signed tag
@@ -183,6 +188,8 @@ jobs:
     if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
     needs: image-platforms
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 60
     steps:
       - name: Check out the signed tag
@@ -224,6 +231,8 @@ jobs:
     if: ${{ !cancelled() && needs.image-platforms.result == 'success' }}
     needs: image-platforms
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 45
     steps:
       - name: Check out the signed tag
@@ -253,6 +262,8 @@ jobs:
   kubernetes-compatibility:
     name: Kubernetes ${{ matrix.kubernetes }} compatibility
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -292,6 +303,7 @@ jobs:
     if: always()
     needs: [image-platforms, normalized-rebuild, package-assets, docker-core-acceptance, docker-collaboration-acceptance, docker-mcp-acceptance, kubernetes-compatibility]
     runs-on: ubuntu-26.04
+    permissions: {}
     timeout-minutes: 5
     steps:
       - name: Require successful immutable inputs

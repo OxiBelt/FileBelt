@@ -25,8 +25,13 @@ done
 bash -n "${native}"
 python3 -m py_compile "${client}" "${validator}"
 
-assert_contains "${workflow}" "permissions:"
-assert_contains "${workflow}" "contents: read"
+if grep -Eq '^permissions:' "${workflow}"; then
+  die "qualification workflow must scope permissions at the job level"
+fi
+[[ "$(grep -Fc 'permissions: { contents: read }' "${workflow}")" -eq 3 ]] || \
+  die "qualification workflow must grant checkout jobs only contents: read"
+[[ "$(grep -Fc 'permissions: {}' "${workflow}")" -eq 1 ]] || \
+  die "qualification workflow must deny permissions to the fan-in gate"
 if grep -Eq 'packages: write|contents: write|id-token: write|attestations: write' "${workflow}"; then
   die "read-only qualification workflow requests publication authority"
 fi

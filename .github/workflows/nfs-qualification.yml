@@ -49,15 +49,12 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-
-
 jobs:
   contract:
     name: Validate fail-closed qualification contract
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    permissions: { contents: read }
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,6 +81,7 @@ jobs:
             artifact-arch: riscv64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+    permissions: { contents: read }
     steps:
       - name: Check out the exact signed release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,6 +134,7 @@ jobs:
             architecture: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions: { contents: read }
     steps:
       - name: Check out the exact signed release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -188,6 +187,7 @@ jobs:
     needs: [contract, native-builds, clients]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    permissions: {}
     steps:
       - name: Require every executable qualification tier
         env:

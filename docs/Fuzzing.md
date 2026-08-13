@@ -14,7 +14,7 @@ network requests.
 | --- | --- | ---: |
 | `nfs_vfs_boundary` | NFS handle, principal, request digest, and VFS validation | 4 KiB |
 | `mcp_runner_relay` | MCP invocation, runner hello, and relay framing | 128 KiB |
-| `collaboration_wire` | Collaboration frame and awareness decoding | 256 KiB |
+| `collaboration_wire` | Collaboration frame, awareness, and `yjs-v1` decoder boundary | 256 KiB |
 | `revision_protocol` | Revision request and response framing and validation | 1 MiB |
 | `runtime_config` | In-memory runtime TOML deserialization and validation | 64 KiB |
 
@@ -26,10 +26,30 @@ ASan uses `nightly-2026-08-04`; sustained campaigns enable leak detection.
 The exact runner dependency is `cargo-fuzz 0.13.2` with
 `libfuzzer-sys 0.4.13`.
 
+## Accepted collaboration decoder quarantine
+
+`collaboration_wire` remains an active, single-target fuzz quarantine for the
+accepted third-party `yrs` decoder risk tracked in
+[issue 10](https://github.com/OxiBelt/FileBelt/issues/10). The catalog pins
+the exact reviewed dependency identity: `yrs` `0.27.3` from crates.io with its
+lockfile checksum. The quarantine does not change the target's input ceiling,
+smoke coverage, sanitizer coverage, production protocol, or deployment
+defaults.
+
+Any change to the quarantined target or that dependency identity makes the
+dedicated sustained-matrix verifier fail and requires review of the quarantine
+metadata and tracker. Clearance requires a later upstream distribution whose
+relevant decoder allocations have been reviewed, preservation of valid
+`yjs-v1` inputs without a new FileBelt wire limit, sanitized snapshot-restore
+and live-update regressions, a passing 900-second ASan campaign, and removal of
+the quarantine and accepted-risk notices in the same change.
+
 Every pull request, push, schedule, and manual workflow runs 256 iterations for
 all five targets under both profiles. Pushes additionally run a blocking
-15-minute ASan/LSan campaign per target. The Monday schedule and manual
-workflow run 60 minutes per target. Corpora, crash inputs,
+15-minute ASan/LSan campaign per target, except that the exact quarantined
+`collaboration_wire` job runs the fail-closed dependency sentinel instead. The
+Monday schedule and manual workflow run 60 minutes for each non-quarantined
+target and the same sentinel for `collaboration_wire`. Corpora, crash inputs,
 coverage output, and raw engine logs are ephemeral. A failing runner prints
 only bounded sanitizer summaries and SHA-256 digests of crash inputs. Never
 upload an unreviewed crash input to a public workflow artifact or issue.

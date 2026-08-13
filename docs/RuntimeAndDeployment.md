@@ -571,6 +571,15 @@ migration and reviewed narrow grants while collaboration admission is disabled,
 then take a coordinated checkpoint. Enable WebSocket collaboration only after
 the I/O finalize/fsync-to-manifest ACK path, 60-second authorization checks,
 external-head freeze, reconnect, diff3, and dirty-retention tests pass.
+Collaboration remains disabled by default. Its `yjs-v1` decoder dependency is
+a risk-accepted operator opt-in under the single-target, exact-version fuzz
+quarantine tracked by [issue 10](https://github.com/OxiBelt/FileBelt/issues/10).
+The quarantine preserves the existing resource ceilings and stable/ASan smoke
+coverage while substituting an exact dependency sentinel for this target's
+sustained campaign; it is not a protocol change or a claim of remediation. A
+dependency identity or quarantined-target change requires review. Clearance
+requires the tracker gates, private snapshot/live-update regressions, and the
+full sustained campaign against a reviewed later distribution.
 WebTransport is not part of the Phase 5 baseline. Its reviewed Phase 8 route is
 separately opt-in and falls back to WebSocket. On a fault, stop new grants,
 drain connections, fence rooms, and preserve dirty manifests

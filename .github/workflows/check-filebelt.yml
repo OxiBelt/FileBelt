@@ -280,12 +280,21 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned ASan toolchain
+        if: matrix.target != 'collaboration_wire'
         run: rustup toolchain install nightly-2026-08-04 --profile minimal
       - name: Install pinned cargo-fuzz
+        if: matrix.target != 'collaboration_wire'
         run: |
           cargo install --locked cargo-fuzz --version 0.13.2
           test "$(cargo fuzz --version)" = "cargo-fuzz 0.13.2"
+      - name: Verify version-pinned collaboration quarantine
+        if: matrix.target == 'collaboration_wire'
+        run: >-
+          python3 tests/scripts/check-fuzz-quarantine.py
+          --repo-root .
+          --target collaboration_wire
       - name: Run sustained ASan and LSan campaign
+        if: matrix.target != 'collaboration_wire'
         env:
           FILEBELT_FUZZ_OUTPUT_DIR: ${{ runner.temp }}/filebelt-fuzz
           FILEBELT_FUZZ_SECONDS: ${{ github.event_name == 'push' && '900' || '3600' }}

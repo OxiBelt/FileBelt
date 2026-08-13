@@ -22,7 +22,7 @@ fn document(path: &str) -> Value {
 fn fuzz_catalog_matches_explicit_bins_and_limits() {
     let root = repository_root();
     let catalog = document("fuzz/targets.toml");
-    assert_eq!(catalog["schema_version"].as_integer(), Some(1));
+    assert_eq!(catalog["schema_version"].as_integer(), Some(2));
     assert_eq!(catalog["cargo_fuzz_version"].as_str(), Some("0.13.2"));
     assert_eq!(catalog["libfuzzer_sys_version"].as_str(), Some("0.4.13"));
     assert_eq!(catalog["stable_toolchain"].as_str(), Some("1.97.1"));
@@ -81,6 +81,105 @@ fn fuzz_catalog_matches_explicit_bins_and_limits() {
     for (name, _) in expected {
         assert!(root.join(format!("fuzz/fuzz_targets/{name}.rs")).is_file());
     }
+}
+
+#[test]
+fn collaboration_wire_quarantine_is_single_target_and_lockfile_pinned() {
+    let catalog = document("fuzz/targets.toml");
+    let quarantines = catalog["quarantine"].as_array().expect("quarantine array");
+    assert_eq!(quarantines.len(), 1);
+    let quarantine = &quarantines[0];
+    assert_eq!(quarantine["target"].as_str(), Some("collaboration_wire"));
+    assert_eq!(
+        quarantine["target_source"].as_str(),
+        Some("fuzz/fuzz_targets/collaboration_wire.rs")
+    );
+    assert_eq!(
+        quarantine["target_sha256"].as_str(),
+        Some("ade6705cb0a691a9c9e6d7779932ede34a7b127e50d95fc2eac0a081d2c26d8b")
+    );
+    assert_eq!(quarantine["status"].as_str(), Some("risk_accepted"));
+    assert_eq!(quarantine["dependency_name"].as_str(), Some("yrs"));
+    assert_eq!(quarantine["dependency_version"].as_str(), Some("0.27.3"));
+    assert_eq!(
+        quarantine["dependency_source"].as_str(),
+        Some("registry+https://github.com/rust-lang/crates.io-index")
+    );
+    assert_eq!(
+        quarantine["dependency_checksum"].as_str(),
+        Some("9d3a728b1abffeca5b9e5319c5b81e04b73790cbdc1e342da8d91b440b3026cb")
+    );
+    assert_eq!(
+        quarantine["tracker"].as_str(),
+        Some("https://github.com/OxiBelt/FileBelt/issues/10")
+    );
+    assert_eq!(
+        quarantine["review_required_on_change"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        quarantine["clearance_requires"]
+            .as_array()
+            .expect("clearance requirements")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "tracked_resolution",
+            "dependency_identity_change",
+            "private_validation"
+        ]
+    );
+
+    let target_names = catalog["target"]
+        .as_array()
+        .expect("target array")
+        .iter()
+        .filter_map(|target| target["name"].as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        target_names,
+        BTreeSet::from([
+            "collaboration_wire",
+            "mcp_runner_relay",
+            "nfs_vfs_boundary",
+            "revision_protocol",
+            "runtime_config"
+        ])
+    );
+    assert!(target_names.contains(quarantine["target"].as_str().expect("quarantined target")));
+    let target_source = quarantine["target_source"]
+        .as_str()
+        .expect("quarantined target source");
+    let target_bytes = fs::read(repository_root().join(target_source))
+        .expect("quarantined target source must exist");
+    assert_eq!(
+        sha256_hex(&target_bytes),
+        quarantine["target_sha256"]
+            .as_str()
+            .expect("quarantined target digest")
+    );
+
+    let lockfile = document("Cargo.lock");
+    let matching = lockfile["package"]
+        .as_array()
+        .expect("lockfile packages")
+        .iter()
+        .filter(|package| {
+            package["name"].as_str() == quarantine["dependency_name"].as_str()
+                && package["version"].as_str() == quarantine["dependency_version"].as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1, "quarantined dependency identity");
+    let package = matching[0];
+    assert_eq!(
+        package["source"].as_str(),
+        quarantine["dependency_source"].as_str()
+    );
+    assert_eq!(
+        package["checksum"].as_str(),
+        quarantine["dependency_checksum"].as_str()
+    );
 }
 
 #[test]

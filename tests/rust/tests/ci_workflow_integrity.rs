@@ -112,6 +112,32 @@ fn rust_boundary_job_is_advisory_for_size_and_blocks_the_bootstrap_gate() {
 }
 
 #[test]
+fn sustained_fuzz_quarantines_only_the_reviewed_collaboration_target() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("check workflow");
+    let sustained = workflow_job(&workflow, "fuzz-sustained", "phase1-images-native");
+
+    assert_eq!(
+        sustained
+            .matches("if: matrix.target != 'collaboration_wire'")
+            .count(),
+        3
+    );
+    assert_eq!(
+        sustained
+            .matches("if: matrix.target == 'collaboration_wire'")
+            .count(),
+        1
+    );
+    assert!(sustained.contains("Verify version-pinned collaboration quarantine"));
+    assert!(sustained.contains("tests/scripts/check-fuzz-quarantine.py"));
+    assert!(sustained.contains("--target collaboration_wire"));
+    assert!(sustained.contains("Run sustained ASan and LSan campaign"));
+    assert!(!sustained.contains("continue-on-error"));
+}
+
+#[test]
 fn validation_is_read_only_and_release_promotion_is_tag_only() {
     let root = repository_root();
     let checks = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))

@@ -16,4 +16,5 @@ filebelt.dev/adapter-source: {{ .Values.image.correspondingSource | quote }}
 {{- if ne .Release.Namespace .Values.gitNamespace -}}{{- fail "install this chart into gitNamespace; it never creates a namespace" -}}{{- end -}}
 {{- if eq .Values.gitNamespace .Values.coreNamespace -}}{{- fail "gitNamespace must be distinct from coreNamespace" -}}{{- end -}}
 {{- if eq (len .Values.networkPolicy.coordinatorIngress.from) 0 -}}{{- fail "coordinator ingress peers must be explicit" -}}{{- end -}}
+{{- if gt (int .Values.limits.maxConcurrentGitProcesses) (int .Values.limits.maxConcurrentPrivateRequests) -}}{{- fail "maxConcurrentGitProcesses must not exceed maxConcurrentPrivateRequests" -}}{{- end -}}
 {{- end -}}

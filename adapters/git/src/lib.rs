@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use filebelt_revision_protocol::{
@@ -21,11 +22,17 @@ use prost::Message as _;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::process::Command;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
 use uuid::Uuid;
 
 pub const REQUIRED_GIT_VERSION: &str = "2.55.0";
 pub const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_MAX_CONCURRENT_GIT_PROCESSES: usize = 2;
+pub const MIN_MAX_CONCURRENT_GIT_PROCESSES: usize = 1;
+pub const MAX_MAX_CONCURRENT_GIT_PROCESSES: usize = 16;
 const MAX_GIT_OUTPUT_BYTES: usize = MAX_LINE_DIFF_OUTPUT_BYTES;
 const ZERO_SHA256_OID: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -41,6 +48,8 @@ pub enum GitError {
     TimedOut,
     #[error("Git process output exceeds the limit")]
     OutputTooLarge,
+    #[error("Git process comparison admission is saturated")]
+    AdmissionLimited,
     #[error("Git process failed")]
     Failed,
     #[error("system Git is not the required version")]
@@ -55,15 +64,30 @@ pub enum GitError {
 pub struct GitRepository {
     root: PathBuf,
     git: PathBuf,
+    process_limiter: GitProcessLimiter,
 }
 
 impl GitRepository {
     #[must_use]
     pub fn new(root: impl Into<PathBuf>, git: impl Into<PathBuf>) -> Self {
-        Self {
+        Self::with_max_concurrent_processes(root, git, DEFAULT_MAX_CONCURRENT_GIT_PROCESSES)
+            .expect("the default Git process limit is valid")
+    }
+
+    pub fn with_max_concurrent_processes(
+        root: impl Into<PathBuf>,
+        git: impl Into<PathBuf>,
+        maximum: usize,
+    ) -> Result<Self, GitError> {
+        if !(MIN_MAX_CONCURRENT_GIT_PROCESSES..=MAX_MAX_CONCURRENT_GIT_PROCESSES).contains(&maximum)
+        {
+            return Err(GitError::Invalid);
+        }
+        Ok(Self {
             root: root.into(),
             git: git.into(),
-        }
+            process_limiter: GitProcessLimiter::new(maximum),
+        })
     }
 
     pub async fn verify_system_git(&self) -> Result<(), GitError> {
@@ -153,7 +177,12 @@ impl GitRepository {
         }
         validate_oid(blob_oid).map_err(|_| GitError::Integrity)?;
         let content = self
-            .git_bytes_limited(&repository, &["cat-file", "blob", blob_oid], MAX_TEXT_BYTES)
+            .git_bytes_limited(
+                &repository,
+                &["cat-file", "blob", blob_oid],
+                MAX_TEXT_BYTES,
+                GitProcessAdmission::Wait,
+            )
             .await?;
         validate_read_text(&content).map_err(|_| GitError::Integrity)?;
         Ok(RevisionBlob {
@@ -171,7 +200,7 @@ impl GitRepository {
     ) -> Result<RevisionComparison, GitError> {
         let repository = self.existing_repository(repository_id)?;
         let output = self
-            .git(
+            .git_comparison(
                 &repository,
                 &[
                     "diff",
@@ -206,7 +235,7 @@ impl GitRepository {
     ) -> Result<RevisionComparison, GitError> {
         let repository = self.existing_repository(repository_id)?;
         let output = self
-            .git(
+            .git_comparison(
                 &repository,
                 &[
                     "diff",
@@ -399,8 +428,23 @@ impl GitRepository {
     }
 
     async fn git(&self, repository: &Path, args: &[&str]) -> Result<String, GitError> {
+        self.git_with_admission(repository, args, GitProcessAdmission::Wait)
+            .await
+    }
+
+    async fn git_comparison(&self, repository: &Path, args: &[&str]) -> Result<String, GitError> {
+        self.git_with_admission(repository, args, GitProcessAdmission::Reject)
+            .await
+    }
+
+    async fn git_with_admission(
+        &self,
+        repository: &Path,
+        args: &[&str],
+        admission: GitProcessAdmission,
+    ) -> Result<String, GitError> {
         String::from_utf8(
-            self.git_bytes_limited(repository, args, MAX_GIT_OUTPUT_BYTES)
+            self.git_bytes_limited(repository, args, MAX_GIT_OUTPUT_BYTES, admission)
                 .await?,
         )
         .map(|value| value.trim_end_matches('\n').into())
@@ -412,8 +456,9 @@ impl GitRepository {
         repository: &Path,
         args: &[&str],
         maximum_output: usize,
+        admission: GitProcessAdmission,
     ) -> Result<Vec<u8>, GitError> {
-        self.git_bytes_with_env(repository, args, &[], &[], maximum_output)
+        self.git_bytes_with_env(repository, args, &[], &[], maximum_output, admission)
             .await
     }
 
@@ -424,8 +469,15 @@ impl GitRepository {
         input: &[u8],
     ) -> Result<String, GitError> {
         String::from_utf8(
-            self.git_bytes_with_env(repository, args, input, &[], MAX_GIT_OUTPUT_BYTES)
-                .await?,
+            self.git_bytes_with_env(
+                repository,
+                args,
+                input,
+                &[],
+                MAX_GIT_OUTPUT_BYTES,
+                GitProcessAdmission::Wait,
+            )
+            .await?,
         )
         .map(|value| value.trim_end_matches('\n').into())
         .map_err(|_| GitError::Integrity)
@@ -439,8 +491,15 @@ impl GitRepository {
         extra_env: &[(&str, &str)],
     ) -> Result<String, GitError> {
         String::from_utf8(
-            self.git_bytes_with_env(repository, args, input, extra_env, MAX_GIT_OUTPUT_BYTES)
-                .await?,
+            self.git_bytes_with_env(
+                repository,
+                args,
+                input,
+                extra_env,
+                MAX_GIT_OUTPUT_BYTES,
+                GitProcessAdmission::Wait,
+            )
+            .await?,
         )
         .map(|value| value.trim_end_matches('\n').into())
         .map_err(|_| GitError::Integrity)
@@ -453,7 +512,9 @@ impl GitRepository {
         input: &[u8],
         extra_env: &[(&str, &str)],
         maximum_output: usize,
+        admission: GitProcessAdmission,
     ) -> Result<Vec<u8>, GitError> {
+        let _permit = self.process_limiter.acquire(admission).await?;
         let mut command = self.command(repository, args, extra_env);
         command.kill_on_drop(true);
         let mut child = command
@@ -489,20 +550,23 @@ impl GitRepository {
         args: &[&str],
         extra_env: &[(&str, &str)],
     ) -> Result<Vec<u8>, GitError> {
-        let result = timeout(
-            GIT_COMMAND_TIMEOUT,
-            Command::new(&self.git)
-                .args(args)
-                .envs(git_environment())
-                .envs(extra_env.iter().copied())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output(),
-        )
-        .await
-        .map_err(|_| GitError::TimedOut)?
-        .map_err(|_| GitError::Io)?;
+        let _permit = self
+            .process_limiter
+            .acquire(GitProcessAdmission::Wait)
+            .await?;
+        let mut command = Command::new(&self.git);
+        command
+            .args(args)
+            .envs(git_environment())
+            .envs(extra_env.iter().copied())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let result = timeout(GIT_COMMAND_TIMEOUT, command.output())
+            .await
+            .map_err(|_| GitError::TimedOut)?
+            .map_err(|_| GitError::Io)?;
         checked_output(
             result.stdout,
             result.stderr,
@@ -531,6 +595,130 @@ impl GitRepository {
             .envs(git_environment())
             .envs(extra_env.iter().copied());
         command
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum GitProcessAdmission {
+    Wait,
+    Reject,
+}
+
+#[derive(Clone, Debug)]
+struct GitProcessLimiter {
+    permits: Arc<Semaphore>,
+    #[cfg(test)]
+    probe: Option<Arc<GitProcessProbe>>,
+}
+
+impl GitProcessLimiter {
+    fn new(maximum: usize) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(maximum)),
+            #[cfg(test)]
+            probe: None,
+        }
+    }
+
+    async fn acquire(&self, admission: GitProcessAdmission) -> Result<GitProcessPermit, GitError> {
+        let permit = match admission {
+            GitProcessAdmission::Wait => Arc::clone(&self.permits)
+                .acquire_owned()
+                .await
+                .map_err(|_| GitError::Io),
+            GitProcessAdmission::Reject => Arc::clone(&self.permits)
+                .try_acquire_owned()
+                .map_err(|_| GitError::AdmissionLimited),
+        }?;
+        #[cfg(test)]
+        let probe = match &self.probe {
+            Some(probe) => Some(Arc::clone(probe).enter().await),
+            None => None,
+        };
+        Ok(GitProcessPermit {
+            _permit: permit,
+            #[cfg(test)]
+            _probe: probe,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct GitProcessPermit {
+    _permit: OwnedSemaphorePermit,
+    #[cfg(test)]
+    _probe: Option<GitProcessProbeGuard>,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct GitProcessProbe {
+    entered: std::sync::atomic::AtomicUsize,
+    active: std::sync::atomic::AtomicUsize,
+    maximum_active: std::sync::atomic::AtomicUsize,
+    entered_notification: Notify,
+    release: Semaphore,
+}
+
+#[cfg(test)]
+impl GitProcessProbe {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            entered: std::sync::atomic::AtomicUsize::new(0),
+            active: std::sync::atomic::AtomicUsize::new(0),
+            maximum_active: std::sync::atomic::AtomicUsize::new(0),
+            entered_notification: Notify::new(),
+            release: Semaphore::new(0),
+        })
+    }
+
+    async fn enter(self: Arc<Self>) -> GitProcessProbeGuard {
+        use std::sync::atomic::Ordering;
+
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.maximum_active.fetch_max(active, Ordering::SeqCst);
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        self.entered_notification.notify_waiters();
+        let guard = GitProcessProbeGuard {
+            probe: Arc::clone(&self),
+        };
+        self.release
+            .acquire()
+            .await
+            .expect("the test process probe remains open")
+            .forget();
+        guard
+    }
+
+    async fn wait_for_entered(&self, target: usize) {
+        use std::sync::atomic::Ordering;
+
+        loop {
+            let notified = self.entered_notification.notified();
+            if self.entered.load(Ordering::SeqCst) >= target {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    fn release_one(&self) {
+        self.release.add_permits(1);
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct GitProcessProbeGuard {
+    probe: Arc<GitProcessProbe>,
+}
+
+#[cfg(test)]
+impl Drop for GitProcessProbeGuard {
+    fn drop(&mut self) {
+        self.probe
+            .active
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -760,19 +948,20 @@ pub async fn dispatch(
 }
 
 fn error_response(error: GitError) -> RevisionError {
-    let code = match error {
-        GitError::Invalid | GitError::WrongVersion => RevisionErrorCode::InvalidRequest,
-        GitError::NotFound => RevisionErrorCode::NotFound,
-        GitError::Conflict => RevisionErrorCode::Conflict,
-        GitError::OutputTooLarge => RevisionErrorCode::ResourceExhausted,
-        GitError::TimedOut | GitError::Io => RevisionErrorCode::Unavailable,
-        GitError::Integrity => RevisionErrorCode::IntegrityFailure,
-        GitError::Failed => RevisionErrorCode::Internal,
+    let (code, retry_after_millis) = match error {
+        GitError::Invalid | GitError::WrongVersion => (RevisionErrorCode::InvalidRequest, 0),
+        GitError::NotFound => (RevisionErrorCode::NotFound, 0),
+        GitError::Conflict => (RevisionErrorCode::Conflict, 0),
+        GitError::OutputTooLarge => (RevisionErrorCode::ResourceExhausted, 0),
+        GitError::AdmissionLimited => (RevisionErrorCode::AdmissionLimited, 5_000),
+        GitError::TimedOut | GitError::Io => (RevisionErrorCode::Unavailable, 0),
+        GitError::Integrity => (RevisionErrorCode::IntegrityFailure, 0),
+        GitError::Failed => (RevisionErrorCode::Internal, 0),
     };
     RevisionError {
         code: code as i32,
         message: code.as_str_name().into(),
-        retry_after_millis: 0,
+        retry_after_millis,
     }
 }
 
@@ -929,5 +1118,115 @@ mod tests {
             Some(revision_execute_response::Result::Error(_))
         ));
         let _ = PrepareRevisionCommit::default();
+    }
+
+    #[test]
+    fn repository_rejects_out_of_range_process_limits() {
+        assert!(matches!(
+            GitRepository::with_max_concurrent_processes("/nonexistent", "git", 0),
+            Err(GitError::Invalid)
+        ));
+        assert!(matches!(
+            GitRepository::with_max_concurrent_processes("/nonexistent", "git", 17),
+            Err(GitError::Invalid)
+        ));
+    }
+
+    #[tokio::test]
+    async fn twelve_comparisons_admit_two_reject_excess_and_reuse_capacity() {
+        use std::sync::atomic::Ordering;
+
+        let temporary =
+            std::env::temp_dir().join(format!("filebelt-git-admission-{}", Uuid::new_v4()));
+        let repository_id = "550e8400-e29b-41d4-a716-446655440000";
+        std::fs::create_dir_all(temporary.join(format!("{repository_id}.git"))).unwrap();
+        let probe = GitProcessProbe::new();
+        let mut repository =
+            GitRepository::with_max_concurrent_processes(&temporary, "/bin/false", 2).unwrap();
+        repository.process_limiter.probe = Some(Arc::clone(&probe));
+
+        let first_repository = repository.clone();
+        let first = tokio::spawn(async move {
+            first_repository
+                .compare_histogram(repository_id, "base", "target")
+                .await
+        });
+        let second_repository = repository.clone();
+        let second = tokio::spawn(async move {
+            second_repository
+                .compare_line_diff(repository_id, "base", "target")
+                .await
+        });
+        probe.wait_for_entered(2).await;
+
+        for index in 0..10 {
+            let result = if index % 2 == 0 {
+                repository
+                    .compare_histogram(repository_id, "base", "target")
+                    .await
+            } else {
+                repository
+                    .compare_line_diff(repository_id, "base", "target")
+                    .await
+            };
+            assert!(matches!(result, Err(GitError::AdmissionLimited)));
+        }
+        assert_eq!(probe.maximum_active.load(Ordering::SeqCst), 2);
+
+        first.abort();
+        second.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert!(second.await.unwrap_err().is_cancelled());
+
+        let replacement_repository = repository.clone();
+        let replacement = tokio::spawn(async move {
+            replacement_repository
+                .compare_histogram(repository_id, "base", "target")
+                .await
+        });
+        probe.wait_for_entered(3).await;
+        probe.release_one();
+        assert!(matches!(replacement.await.unwrap(), Err(GitError::Failed)));
+        assert_eq!(repository.process_limiter.permits.available_permits(), 2);
+        std::fs::remove_dir_all(temporary).unwrap();
+    }
+
+    #[tokio::test]
+    async fn non_comparison_work_waits_and_cancellation_releases_permits() {
+        use std::sync::atomic::Ordering;
+
+        let mut repository =
+            GitRepository::with_max_concurrent_processes("/nonexistent", "/bin/false", 1).unwrap();
+        let held = repository
+            .process_limiter
+            .acquire(GitProcessAdmission::Reject)
+            .await
+            .unwrap();
+        let probe = GitProcessProbe::new();
+        repository.process_limiter.probe = Some(Arc::clone(&probe));
+        let waiting_repository = repository.clone();
+        let waiting = tokio::spawn(async move { waiting_repository.verify_system_git().await });
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        assert_eq!(probe.entered.load(Ordering::SeqCst), 0);
+        drop(held);
+        probe.wait_for_entered(1).await;
+        probe.release_one();
+        assert!(matches!(waiting.await.unwrap(), Err(GitError::Failed)));
+        assert_eq!(repository.process_limiter.permits.available_permits(), 1);
+
+        let cancelled_repository = repository.clone();
+        let cancelled = tokio::spawn(async move { cancelled_repository.verify_system_git().await });
+        probe.wait_for_entered(2).await;
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        assert_eq!(repository.process_limiter.permits.available_permits(), 1);
+    }
+
+    #[test]
+    fn admission_error_is_typed_and_retryable() {
+        let response = error_response(GitError::AdmissionLimited);
+        assert_eq!(response.code, RevisionErrorCode::AdmissionLimited as i32);
+        assert_eq!(response.retry_after_millis, 5_000);
     }
 }

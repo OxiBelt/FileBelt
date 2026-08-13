@@ -20,6 +20,17 @@ private `8092` listener requires TLS 1.3 mTLS and exactly
 frame and closes. The unauthenticated `9090` listener serves only low-
 information kubelet health routes and is never a Service port.
 
+The `serve` process accepts `--max-concurrent-private-requests` (default `8`,
+range `1..=64`) and `--max-concurrent-git-processes` (default `2`, range
+`1..=16`). The Git-process limit must not exceed the private-request limit.
+These operator limits are command-line deployment inputs so the strict,
+operator-owned TOML contract remains unchanged. A private socket beyond the
+request-task limit is closed before TLS work is spawned. Every system-Git
+process independently holds one process permit; comparisons reject immediately
+with typed admission exhaustion and a five-second retry hint, while other
+authenticated operations wait within their existing bounded request lifetime.
+Permits are released on success, failure, timeout, and cancellation.
+
 The source-first Dockerfile and Helm chart are non-publishable sentinels. The
 operator supplies the Git-only RWX claim and every mTLS Secret. There is no
 database credential, payload mount, browser route, general egress, or Git
@@ -28,4 +39,5 @@ transport in this adapter.
 ```sh
 cargo fmt --check --manifest-path adapters/git/Cargo.toml
 cargo test --manifest-path adapters/git/Cargo.toml --locked
+tests/scripts/check-git-helm-chart.sh
 ```

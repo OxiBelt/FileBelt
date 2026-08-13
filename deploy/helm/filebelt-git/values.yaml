@@ -21,6 +21,10 @@ config:
   key: adapter.toml
   generation: initial
 
+limits:
+  maxConcurrentPrivateRequests: 8
+  maxConcurrentGitProcesses: 2
+
 secrets:
   serverTls:
     name: filebelt-git-server-tls

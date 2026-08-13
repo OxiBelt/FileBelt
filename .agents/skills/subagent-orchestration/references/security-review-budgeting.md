@@ -33,32 +33,18 @@ For a monorepo, scope the scan to one meaningful product, service, adapter, or s
 
 Prefer persistent `SECURITY.md` guidance over repeatedly pasting a threat model into prompts. Keep additional context focused on facts that materially change the review: attacker-controlled inputs, trust boundaries, sensitive actions, exclusions, or a specific area to prioritize.
 
-### C. Release preparation is not a full-repository trigger
+### C. High-assurance repository review
 
-Do **not** recommend a full-repository security review merely because a release is being prepared, including a major release. Release readiness should normally be established from the actual release delta and the security boundaries that delta can affect.
+Use Deep Security Scan when broader and lower-variance discovery is worth the extra resources. Typical triggers include:
 
-Prefer this release-oriented scope:
-
-- the release diff or bounded range since the last trusted security baseline;
-- authentication, authorization, tenancy, secret, persistence, parser, filesystem, network, and privilege boundaries touched by that diff;
-- shared security-critical dependencies and callers needed to reason about those changes;
-- high-risk surfaces selected from the threat model even if they were not directly edited, when the release can change their behavior through configuration, dependency, schema, or integration changes;
-- targeted regression and contract tests for the affected controls.
-
-A release milestone by itself does **not** justify rereading every source-like file. Prefer risk-based, change-aware, scoped review even during release preparation.
-
-### D. High-assurance repository review
-
-Use a full-repository or Deep Security Scan only when repository-wide, lower-variance discovery has a concrete assurance reason independent of the release date. Examples include:
-
-- an explicit whole-repository audit, compliance, or assurance requirement;
-- establishing or re-establishing a trusted repository-wide security baseline;
-- a major authentication/authorization or multi-tenant redesign whose affected scope cannot be bounded safely;
-- cross-cutting persistence, secrets, build, dependency, or deployment changes with genuinely repository-wide reach;
-- a scoped or standard scan that exposed suspicious gaps indicating the true affected surface is broader than expected;
+- release or audit milestones;
+- a major authentication/authorization redesign;
+- multi-tenant boundary changes;
+- sensitive persistence or secrets changes;
+- a standard scan that exposed suspicious or incomplete coverage;
 - an explicit requirement for repeated discovery to reduce run-to-run variance.
 
-Deep scan is not the default loop for ordinary implementation iterations **or for ordinary release preparation**.
+Deep scan is not the default loop for ordinary implementation iterations.
 
 ## Do not double-orchestrate Deep Security Scan
 
@@ -94,10 +80,10 @@ A common loop is:
 2. run targeted tests;
 3. run a security diff scan;
 4. repeat as needed;
-5. at a component or release boundary, run a **scoped** standard scan over the affected security boundary when useful;
-6. run a full-repository or deep scan only when a separate assurance reason requires repository-wide coverage.
+5. run one standard scan at the component/release boundary;
+6. run one deep scan only when the assurance goal requires it.
 
-This avoids turning release milestones into automatic full-repository rescans while preserving broad review where the actual change or assurance requirement warrants it.
+This removes repeated full-repository discovery without weakening the broad scan that still occurs at the milestone.
 
 ### 2. Use a legitimate narrower boundary
 
@@ -191,16 +177,34 @@ Use high reasoning where it changes security judgment, not everywhere around the
 A practical split is:
 
 - repository/file discovery supporting security: Terra medium;
-- bounded permission/data-flow tracing: Terra high;
-- adversarial review of a high-risk path: Terra high or stronger when justified;
+- bounded permission/data-flow tracing: Terra high, or `gpt-daybreak-blue-latest` when available and useful;
+- adversarial review of a high-risk path: Terra high or `gpt-daybreak-blue-latest`, escalating within the allowed effort ceiling when justified;
+- vulnerability discovery, secure code review, incident-response analysis, malware analysis for defensive purposes, patch validation, or finding verification: `gpt-daybreak-blue-latest` is permitted for an authorized bounded subtask when available;
 - deterministic validation/test execution: Terra medium or Luna;
 - final unresolved security-boundary decision: primary agent with the strongest configuration appropriate to the risk.
 
-Do not lower the final security judgment model solely because a cheaper worker produced a confident summary.
+### Daybreak Blue subagent constraints
+
+Treat `gpt-daybreak-blue-latest` as an optional alias supplied by the active Daybreak/Codex environment. The public Daybreak documentation describes Daybreak Blue as the recommended starting point for most approved defenders and lists vulnerability discovery, secure code review, malware analysis, incident response, patch validation, and security assessments among its intended defensive uses. Do not assume the alias exists in every environment merely because Daybreak Blue exists as an access tier.
+
+For every `gpt-daybreak-blue-latest` subagent launched under this skill:
+
+- set reasoning to **`xhigh` or lower**; never request an effort level above `xhigh`;
+- choose the lowest sufficient reasoning level for the bounded task rather than defaulting every security worker to `xhigh`;
+- give it an explicit authorized target, objective, scope, and stop condition;
+- keep production, third-party, destructive, or externally consequential actions out of scope unless the surrounding workflow separately establishes authorization and the required review controls;
+- prefer sandboxed/isolated execution and reviewed elevated actions;
+- require concise evidence and validation output rather than an unbounded security narrative;
+- do not use it to duplicate an active Codex Security Deep Scan over the same target;
+- do not let its confidence override the primary agent's final security-boundary judgment.
+
+Daybreak Blue availability is a model/access choice, not a reason to widen the review from a diff or scoped boundary to the whole repository. The same change-aware and release-review scoping rules still apply.
+
+Do not lower the final security judgment model solely because a cheaper or specialized worker produced a confident summary.
 
 ## When a deep scan should remain expensive
 
-Do not optimize away repeated discovery merely to conserve usage when the user explicitly requires exhaustive review, variance reduction, or comparable repository-wide security coverage. A release milestone alone does not create that requirement; repository-wide review should be justified separately.
+Do not optimize away repeated discovery merely to conserve usage when the user explicitly requires exhaustive review, variance reduction, high-assurance release evidence, or comparable repository-wide security coverage.
 
 In those cases, the correct optimization target is the surrounding workflow:
 
@@ -217,8 +221,7 @@ For a long-running project, a reasonable default policy is:
 
 - **per meaningful change:** targeted tests + security diff scan when the change is security-relevant;
 - **per component milestone:** standard scoped security scan;
-- **before a release:** diff/change review plus scoped review of affected and threat-model-selected high-risk surfaces; do not default to a full-repository scan;
-- **after a repository-wide trust-boundary redesign or when an explicit whole-repository assurance requirement exists:** deep security scan if that broader scope is actually justified;
+- **before major release / after major trust-boundary redesign:** deep security scan if the assurance requirement justifies it;
 - **after fixing an accepted finding:** bounded fix verification + diff scan, with broad rescan only when warranted.
 
 Adjust cadence upward for high-risk systems and downward only when the security policy explicitly allows it.

@@ -4,7 +4,7 @@ description: Orchestrate bounded Codex subagents for complex software-engineerin
 compatibility: Designed for OpenAI Codex clients with subagent support. Model names and reasoning levels are policy defaults and may be replaced by equivalent available configurations.
 metadata:
   title: Subagent Orchestration
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Subagent Orchestration
@@ -84,6 +84,24 @@ Use for narrow, explicit, high-volume tasks with objective success criteria, suc
 - summarizing bounded command output.
 
 Use high effort, including `max` where available, only when the task remains narrow enough that extra reasoning is useful without turning the worker into a second primary agent.
+
+### `gpt-daybreak-blue-latest` for authorized defensive security work
+
+When this model alias is available in the active Codex/Daybreak environment, it may be used as a security-focused subagent for **authorized defensive work**, including:
+
+- vulnerability discovery and triage;
+- secure code review and adversarial patch review;
+- bounded authorization, trust-boundary, and data-flow analysis;
+- malware analysis performed for defensive purposes;
+- incident-response investigation;
+- patch validation and regression review;
+- scoped security assessments and finding verification.
+
+For subagent orchestration under this skill, cap its reasoning level at **`xhigh` or lower**. Do not request a reasoning level above `xhigh`, even if the host later exposes one. Prefer the lowest level that is sufficient for the bounded security task; use `xhigh` for difficult exploitability, cross-boundary, or adversarial reasoning rather than as a universal default.
+
+Treat `gpt-daybreak-blue-latest` as an optional security worker, not as a replacement for the primary agent's final security judgment or for Codex Security workflows that already own their worker orchestration. Do not create a parallel Daybreak swarm around an active Deep Security Scan over the same target.
+
+Because Daybreak access is intended for approved defensive use with reduced safeguards, keep its task scope explicit and authorized. Prefer sandboxed or isolated environments, bounded permissions, and reviewed elevated actions. Do not infer authorization to test production systems, third-party systems, or unrelated targets merely because the model is available.
 
 ### Escalate instead of grinding
 
@@ -296,6 +314,8 @@ Do **not** wrap a Codex Security Deep Security Scan in a generic swarm of securi
 If equal security coverage is required, do not reduce deep-scan discovery caps merely to save tokens. Reduce repeated scans, legitimate scope, duplicated outer agents, prompt/context size, and log volume first.
 
 For accepted findings, prefer the bounded fix-and-verify workflow and a targeted change review over rerunning a full or deep repository scan after every edit. Run the broader scan again only when the change or assurance goal justifies it.
+
+For bounded authorized security-review subagents, `gpt-daybreak-blue-latest` may be selected when available, with reasoning **no higher than `xhigh`**. Use it for security judgment that benefits from Daybreak Blue access, while keeping deterministic validation on Terra/Luna where appropriate. It does not justify broadening scope, repeating an existing scan, or bypassing the normal primary-agent and Codex Security review boundaries.
 
 When security review or token pressure is central to the task, read [references/security-review-budgeting.md](references/security-review-budgeting.md).
 

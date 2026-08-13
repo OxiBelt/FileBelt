@@ -42,6 +42,15 @@ impl ApiError {
         }
     }
 
+    pub(crate) const fn admission_limited(code: &'static str, title: &'static str) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code,
+            title,
+            retry_after_seconds: Some(5),
+        }
+    }
+
     pub(crate) const fn bad_request(code: &'static str, title: &'static str) -> Self {
         Self::new(StatusCode::BAD_REQUEST, code, title)
     }
@@ -164,6 +173,20 @@ mod tests {
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE),
             Some(&HeaderValue::from_static("application/problem+json"))
+        );
+    }
+
+    #[test]
+    fn admission_errors_use_the_fixed_retry_hint() {
+        let response = ApiError::admission_limited(
+            "revision.admission_limited",
+            "comparison admission limited",
+        )
+        .into_response();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response.headers().get(header::RETRY_AFTER),
+            Some(&HeaderValue::from_static("5"))
         );
     }
 }

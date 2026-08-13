@@ -2916,6 +2916,8 @@ export interface components {
     headers: {
         /** @description Opaque generation validator for this representation. */
         readonly GenerationEtag: string;
+        /** @description Comparison admission may be retried after five seconds; clients must not retry earlier. */
+        readonly RetryAfter5: "5";
         /** @description The tenant-wide security admission gate is rechecked after 60 seconds; clients must not retry earlier. */
         readonly RetryAfter60: "60";
     };
@@ -4883,6 +4885,16 @@ export interface operations {
             /** @description Either input exceeds the caller's inline limit or the atomic diff bounds. */
             readonly 413: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Global, per-user, or Git-adapter comparison admission is at capacity. The Problem code is `revision.admission_limited`. */
+            readonly 429: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter5"];
                     readonly [name: string]: unknown;
                 };
                 content: {

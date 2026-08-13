@@ -272,8 +272,14 @@ fn validate_error(error: &RevisionError) -> Result<(), ValidationError> {
         | Some(RevisionErrorCode::ResourceExhausted)
         | Some(RevisionErrorCode::Unavailable)
         | Some(RevisionErrorCode::IntegrityFailure)
-        | Some(RevisionErrorCode::Internal) => Ok(()),
+        | Some(RevisionErrorCode::Internal)
+            if error.retry_after_millis == 0 =>
+        {
+            Ok(())
+        }
+        Some(RevisionErrorCode::AdmissionLimited) if error.retry_after_millis == 5_000 => Ok(()),
         Some(RevisionErrorCode::Unspecified) | None => Err(ValidationError::Error),
+        _ => Err(ValidationError::Error),
     }
 }
 
@@ -765,5 +771,25 @@ mod tests {
                 Err(ValidationError::Error)
             );
         }
+    }
+
+    #[test]
+    fn admission_errors_require_the_fixed_retry_hint() {
+        let (request, _) = valid_pairs().into_iter().next().expect("valid pair");
+        let valid = response_with(revision_execute_response::Result::Error(RevisionError {
+            code: RevisionErrorCode::AdmissionLimited as i32,
+            message: "admission limited".into(),
+            retry_after_millis: 5_000,
+        }));
+        assert_eq!(validate_response(&request, &valid), Ok(()));
+        let invalid = response_with(revision_execute_response::Result::Error(RevisionError {
+            code: RevisionErrorCode::AdmissionLimited as i32,
+            message: "admission limited".into(),
+            retry_after_millis: 0,
+        }));
+        assert_eq!(
+            validate_response(&request, &invalid),
+            Err(ValidationError::Error)
+        );
     }
 }

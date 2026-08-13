@@ -88,6 +88,15 @@ spec:
           annotations:
             summary: A FileBelt TLS certificate expires within 14 days
             runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/kubernetes.md
+        {{- if .Values.revisions.enabled }}
+        - alert: FileBeltRevisionComparisonAdmissionSustained
+          expr: sum(increase(filebelt_revision_comparison_admission_rejections_total[10m])) >= 10
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: Revision comparison admission pressure is sustained
+            runbook_url: https://github.com/OxiBelt/FileBelt/blob/main/docs/operations/observability.md#alerts
+        {{- end }}
         {{- if .Values.mcp.enabled }}
         - alert: FileBeltMcpRevocationLag
           expr: filebelt_mcp_revocation_lag_seconds > 5

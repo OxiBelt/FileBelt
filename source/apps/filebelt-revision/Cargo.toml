@@ -24,6 +24,7 @@ filebelt-runtime.workspace = true
 filebelt-storage-protocol.workspace = true
 getrandom.workspace = true
 prost.workspace = true
+prometheus-client.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true

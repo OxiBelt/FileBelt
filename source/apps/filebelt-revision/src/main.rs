@@ -8,9 +8,10 @@
 
 #![deny(unsafe_code)]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -24,7 +25,7 @@ use filebelt_capability_keyset::RevisionStorageKeyset;
 use filebelt_control_protocol::{Config, DeploymentMode, read_secret_string};
 use filebelt_database::Database;
 use filebelt_revision_protocol::{
-    CompareRevisionCommits, RevisionComparisonKind, RevisionExecuteRequest,
+    CompareRevisionCommits, RevisionComparisonKind, RevisionErrorCode, RevisionExecuteRequest,
     RevisionExecuteResponse, RevisionLineKind, revision_execute_request, revision_execute_response,
     validate_request, validate_response,
 };
@@ -37,6 +38,8 @@ use filebelt_storage_protocol::{
     sign_revision_storage_capability, unix_time_now,
 };
 use getrandom::fill as random_fill;
+use prometheus_client::metrics::counter::Counter;
+use prometheus_client::metrics::gauge::Gauge;
 use prost::Message as _;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
@@ -45,6 +48,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 use url::Url;
@@ -83,6 +87,21 @@ struct AppState {
     signer: Arc<Ed25519KeyPair>,
     signing_generation: u32,
     worker_id: Uuid,
+    comparison_admission: Arc<ComparisonAdmission>,
+}
+
+struct ComparisonAdmission {
+    global: Arc<Semaphore>,
+    users: Mutex<HashMap<Uuid, Weak<Semaphore>>>,
+    per_user: usize,
+    active: Gauge,
+    rejections: Counter,
+}
+
+struct ComparisonPermits {
+    _global: OwnedSemaphorePermit,
+    _user: OwnedSemaphorePermit,
+    active: Gauge,
 }
 
 #[derive(Clone)]
@@ -154,13 +173,14 @@ struct ErrorResponse {
     code: &'static str,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ServiceError {
     Forbidden,
     NotFound,
     TooLarge,
     Unavailable,
     Integrity,
+    AdmissionLimited,
 }
 
 #[tokio::main]
@@ -231,6 +251,25 @@ async fn serve(config: Config) -> Result<()> {
             probe.as_ref(),
         )
         .map_err(|_| anyhow!("revision capability private key does not match the keyset"))?;
+    let operations = OperationsState::new(ROLE, config.telemetry.prometheus_enabled, {
+        let database = database.clone();
+        move || {
+            let database = database.clone();
+            async move { database.health().await.is_ok() }
+        }
+    });
+    let comparison_admission = Arc::new(ComparisonAdmission::new(
+        config.revisions.limits.global_comparisons,
+        config.revisions.limits.per_user_comparisons,
+        operations.register_gauge(
+            "revision_comparisons_active",
+            "Revision comparisons currently holding global and per-user admission slots.",
+        ),
+        operations.register_counter(
+            "revision_comparison_admission_rejections",
+            "Revision comparisons rejected by coordinator or adapter capacity admission.",
+        ),
+    ));
     let state = AppState {
         database: database.clone(),
         tenant_id,
@@ -239,6 +278,7 @@ async fn serve(config: Config) -> Result<()> {
         signer,
         signing_generation: signing.current_generation,
         worker_id: Uuid::new_v4(),
+        comparison_admission,
     };
     let backfill_state = state.clone();
     tokio::spawn(async move {
@@ -249,10 +289,6 @@ async fn serve(config: Config) -> Result<()> {
         .layer(axum::extract::DefaultBodyLimit::max(16 * 1024))
         .layer(axum::middleware::from_fn(trace_request))
         .with_state(state);
-    let operations = OperationsState::new(ROLE, config.telemetry.prometheus_enabled, move || {
-        let database = database.clone();
-        async move { database.health().await.is_ok() }
-    });
     let operations_listener = tokio::net::TcpListener::bind(config.listeners.operations).await?;
     let (operations_stop, operations_stopped) = tokio::sync::oneshot::channel();
     let operations_server = tokio::spawn(async move {
@@ -327,6 +363,65 @@ async fn compare(State(state): State<AppState>, Json(command): Json<CompareComma
     }
 }
 
+impl ComparisonAdmission {
+    fn new(global: u32, per_user: u32, active: Gauge, rejections: Counter) -> Self {
+        Self {
+            global: Arc::new(Semaphore::new(global as usize)),
+            users: Mutex::new(HashMap::new()),
+            per_user: per_user as usize,
+            active,
+            rejections,
+        }
+    }
+
+    fn try_acquire(&self, user_id: Uuid) -> Result<ComparisonPermits, ServiceError> {
+        let global = self
+            .global
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| self.rejected("global"))?;
+        let user = {
+            let mut users = self
+                .users
+                .lock()
+                .expect("revision comparison admission lock poisoned");
+            users.retain(|_, semaphore| semaphore.strong_count() != 0);
+            if let Some(semaphore) = users.get(&user_id).and_then(Weak::upgrade) {
+                semaphore
+            } else {
+                let semaphore = Arc::new(Semaphore::new(self.per_user));
+                users.insert(user_id, Arc::downgrade(&semaphore));
+                semaphore
+            }
+        };
+        let user = user
+            .try_acquire_owned()
+            .map_err(|_| self.rejected("per_user"))?;
+        self.active.inc();
+        Ok(ComparisonPermits {
+            _global: global,
+            _user: user,
+            active: self.active.clone(),
+        })
+    }
+
+    fn record_adapter_rejection(&self) {
+        let _ = self.rejected("git_process");
+    }
+
+    fn rejected(&self, scope: &'static str) -> ServiceError {
+        self.rejections.inc();
+        tracing::warn!(scope, "revision comparison admission limited");
+        ServiceError::AdmissionLimited
+    }
+}
+
+impl Drop for ComparisonPermits {
+    fn drop(&mut self) {
+        self.active.dec();
+    }
+}
+
 async fn compare_inner(
     state: &AppState,
     command: CompareCommand,
@@ -334,6 +429,7 @@ async fn compare_inner(
     if command.tenant_id != state.tenant_id {
         return Err(ServiceError::Forbidden);
     }
+    let _permits = state.comparison_admission.try_acquire(command.user_id)?;
     let permitted = state
         .database
         .revision_authorization_fence_matches(
@@ -391,7 +487,11 @@ async fn compare_inner(
     };
     // The deadline covers every adapter round trip; no partial comparison can escape it.
     timeout(ADAPTER_TIMEOUT, async {
-        let comparison = state.adapter.execute(request).await?;
+        let comparison = state.adapter.execute(request).await.inspect_err(|error| {
+            if *error == ServiceError::AdmissionLimited {
+                state.comparison_admission.record_adapter_rejection();
+            }
+        })?;
         comparison_response(command, comparison, &record)
     })
     .await
@@ -781,15 +881,24 @@ impl AdapterClient {
         let response = RevisionExecuteResponse::decode(body.as_slice())
             .map_err(|_| ServiceError::Integrity)?;
         validate_response(&request, &response).map_err(|_| ServiceError::Integrity)?;
-        match response.result.ok_or(ServiceError::Integrity)? {
-            revision_execute_response::Result::Error(error) => match error.code {
-                2 => Err(ServiceError::NotFound),
-                4 => Err(ServiceError::TooLarge),
-                6 => Err(ServiceError::Integrity),
+        adapter_result(response.result)
+    }
+}
+
+fn adapter_result(
+    result: Option<revision_execute_response::Result>,
+) -> Result<revision_execute_response::Result, ServiceError> {
+    match result.ok_or(ServiceError::Integrity)? {
+        revision_execute_response::Result::Error(error) => {
+            match RevisionErrorCode::try_from(error.code).ok() {
+                Some(RevisionErrorCode::NotFound) => Err(ServiceError::NotFound),
+                Some(RevisionErrorCode::ResourceExhausted) => Err(ServiceError::TooLarge),
+                Some(RevisionErrorCode::IntegrityFailure) => Err(ServiceError::Integrity),
+                Some(RevisionErrorCode::AdmissionLimited) => Err(ServiceError::AdmissionLimited),
                 _ => Err(ServiceError::Unavailable),
-            },
-            result => Ok(result),
+            }
         }
+        result => Ok(result),
     }
 }
 
@@ -1054,28 +1163,112 @@ fn host_port(url: &Url) -> Result<(String, u16)> {
 }
 
 fn service_error(error: ServiceError) -> Response {
-    let (status, code) = match error {
-        ServiceError::Forbidden => (StatusCode::FORBIDDEN, "revision.authorization_stale"),
-        ServiceError::NotFound => (StatusCode::NOT_FOUND, "revision.not_found"),
-        ServiceError::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "revision.limit_exceeded"),
-        ServiceError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "revision.unavailable"),
+    let (status, code, retry_after) = match error {
+        ServiceError::Forbidden => (StatusCode::FORBIDDEN, "revision.authorization_stale", false),
+        ServiceError::NotFound => (StatusCode::NOT_FOUND, "revision.not_found", false),
+        ServiceError::TooLarge => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "revision.limit_exceeded",
+            false,
+        ),
+        ServiceError::Unavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "revision.unavailable",
+            false,
+        ),
         ServiceError::Integrity => (
             StatusCode::SERVICE_UNAVAILABLE,
             "revision.integrity_failure",
+            false,
+        ),
+        ServiceError::AdmissionLimited => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "revision.admission_limited",
+            true,
         ),
     };
-    (
+    let mut response = (
         status,
         [(header::CONTENT_TYPE, CONTENT_TYPE)],
         Json(ErrorResponse { code }),
     )
-        .into_response()
+        .into_response();
+    if retry_after {
+        response.headers_mut().insert(
+            header::RETRY_AFTER,
+            axum::http::HeaderValue::from_static("5"),
+        );
+    }
+    response
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use filebelt_revision_protocol::{RevisionLine, RevisionLineDiffHunk};
+    use filebelt_revision_protocol::{RevisionError, RevisionLine, RevisionLineDiffHunk};
+
+    #[test]
+    fn comparison_admission_bounds_both_scopes_and_recovers() {
+        let active = Gauge::default();
+        let rejections = Counter::default();
+        let admission = ComparisonAdmission::new(2, 1, active.clone(), rejections.clone());
+        let first_user = Uuid::new_v4();
+        let second_user = Uuid::new_v4();
+        let third_user = Uuid::new_v4();
+
+        let first = admission.try_acquire(first_user).unwrap();
+        assert_eq!(active.get(), 1);
+        assert!(matches!(
+            admission.try_acquire(first_user),
+            Err(ServiceError::AdmissionLimited)
+        ));
+        let second = admission.try_acquire(second_user).unwrap();
+        assert_eq!(active.get(), 2);
+        assert!(matches!(
+            admission.try_acquire(third_user),
+            Err(ServiceError::AdmissionLimited)
+        ));
+        assert_eq!(rejections.get(), 2);
+
+        drop(first);
+        drop(second);
+        assert_eq!(active.get(), 0);
+        assert!(admission.try_acquire(first_user).is_ok());
+    }
+
+    #[test]
+    fn adapter_admission_and_size_errors_remain_distinct() {
+        let error = |code| {
+            Some(revision_execute_response::Result::Error(RevisionError {
+                code: code as i32,
+                message: "bounded adapter error".into(),
+                retry_after_millis: if code == RevisionErrorCode::AdmissionLimited {
+                    5_000
+                } else {
+                    0
+                },
+            }))
+        };
+        assert_eq!(
+            adapter_result(error(RevisionErrorCode::AdmissionLimited)),
+            Err(ServiceError::AdmissionLimited)
+        );
+        assert_eq!(
+            adapter_result(error(RevisionErrorCode::ResourceExhausted)),
+            Err(ServiceError::TooLarge)
+        );
+
+        let response = service_error(ServiceError::AdmissionLimited);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response.headers().get(header::RETRY_AFTER),
+            Some(&axum::http::HeaderValue::from_static("5"))
+        );
+        assert_eq!(
+            service_error(ServiceError::TooLarge).status(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
 
     #[test]
     fn typed_lines_preserve_per_side_coordinates() {

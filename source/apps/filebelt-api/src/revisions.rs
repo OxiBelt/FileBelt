@@ -247,6 +247,10 @@ async fn compare_versions(
             "revision.limit_exceeded",
             "The comparison exceeds its atomic size limit",
         )),
+        StatusCode::TOO_MANY_REQUESTS => Err(ApiError::admission_limited(
+            "revision.admission_limited",
+            "Text revision comparison is temporarily at capacity",
+        )),
         StatusCode::NOT_FOUND | StatusCode::FORBIDDEN => Err(ApiError::not_found()),
         _ => Err(unavailable()),
     }

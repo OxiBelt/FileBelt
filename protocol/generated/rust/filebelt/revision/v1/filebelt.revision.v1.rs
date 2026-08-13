@@ -308,6 +308,7 @@ pub enum RevisionErrorCode {
     Unavailable = 5,
     IntegrityFailure = 6,
     Internal = 7,
+    AdmissionLimited = 8,
 }
 impl RevisionErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -324,6 +325,7 @@ impl RevisionErrorCode {
             Self::Unavailable => "REVISION_ERROR_CODE_UNAVAILABLE",
             Self::IntegrityFailure => "REVISION_ERROR_CODE_INTEGRITY_FAILURE",
             Self::Internal => "REVISION_ERROR_CODE_INTERNAL",
+            Self::AdmissionLimited => "REVISION_ERROR_CODE_ADMISSION_LIMITED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -337,6 +339,7 @@ impl RevisionErrorCode {
             "REVISION_ERROR_CODE_UNAVAILABLE" => Some(Self::Unavailable),
             "REVISION_ERROR_CODE_INTEGRITY_FAILURE" => Some(Self::IntegrityFailure),
             "REVISION_ERROR_CODE_INTERNAL" => Some(Self::Internal),
+            "REVISION_ERROR_CODE_ADMISSION_LIMITED" => Some(Self::AdmissionLimited),
             _ => None,
         }
     }

@@ -1308,6 +1308,15 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "429":
+          description: Global, per-user, or Git-adapter comparison admission is at capacity. The Problem code is `revision.admission_limited`.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter5"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore:
@@ -2748,6 +2757,11 @@ components:
       schema:
         type: string
         const: "60"
+    RetryAfter5:
+      description: Comparison admission may be retried after five seconds; clients must not retry earlier.
+      schema:
+        type: string
+        const: "5"
   responses:
     Problem:
       description: Stable FileBelt problem response.

@@ -193,6 +193,11 @@ helm template phase9 "${chart}" --kube-version 1.36.0 \
   --set-string revisions.activation.compatibilityGate=release-a-v9 \
   >"${temporary}/render-revisions.yaml"
 expect_failure revisions-without-compatibility-gate --set revisions.enabled=true
+expect_failure revisions-user-limit-above-global \
+  --set revisions.enabled=true \
+  --set-string revisions.activation.compatibilityGate=release-a-v9 \
+  --set revisions.limits.globalComparisons=2 \
+  --set revisions.limits.perUserComparisons=3
 assert_rendered_toml "${default_manifest}" filebelt.toml
 assert_rendered_toml "${default_manifest}" oxibelt.toml
 assert_rendered_toml "${temporary}/render-ci-values.yaml" filebelt.toml
@@ -290,6 +295,9 @@ assert_document_contains "${temporary}/render-revisions.yaml" NetworkPolicy file
 assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-api 'mountPath: /run/secrets/revision-client-tls'
 assert_document_contains "${temporary}/render-revisions.yaml" Deployment filebelt-io 'mountPath: /run/secrets/revision-storage-capability-public-keyset'
 assert_contains "${temporary}/render-revisions.yaml" 'adapter_url = "https://filebelt-git.filebelt-git.svc:8092"'
+assert_contains "${temporary}/render-revisions.yaml" '[revisions.limits]'
+assert_contains "${temporary}/render-revisions.yaml" 'global_comparisons = 2'
+assert_contains "${temporary}/render-revisions.yaml" 'per_user_comparisons = 1'
 assert_contains "${temporary}/render-revisions.yaml" 'allowed_client_uri_sans = ["spiffe://filebelt/api/revision"]'
 assert_contains "${temporary}/render-revisions.yaml" 'spiffe://filebelt/revision-coordinator/io'
 python3 - "${temporary}/render-documents.yaml" <<'PY'
@@ -542,6 +550,15 @@ helm template phase4 "${chart}" --kube-version 1.36.0 \
   >"${temporary}/monitoring.yaml"
 assert_count "${temporary}/monitoring.yaml" '^kind: ServiceMonitor$' 1
 assert_count "${temporary}/monitoring.yaml" '^kind: PrometheusRule$' 1
+assert_not_contains "${temporary}/monitoring.yaml" 'FileBeltRevisionComparisonAdmissionSustained'
+helm template phase9 "${chart}" --kube-version 1.36.0 \
+  --api-versions monitoring.coreos.com/v1/PrometheusRule \
+  --set monitoring.prometheusRule.enabled=true \
+  --set revisions.enabled=true \
+  --set-string revisions.activation.compatibilityGate=release-a-v9 \
+  >"${temporary}/monitoring-revisions.yaml"
+assert_contains "${temporary}/monitoring-revisions.yaml" 'FileBeltRevisionComparisonAdmissionSustained'
+assert_contains "${temporary}/monitoring-revisions.yaml" 'filebelt_revision_comparison_admission_rejections_total[10m]'
 
 awk '
   /^  filebelt: \|$/ { in_filebelt=1; next }

@@ -369,6 +369,26 @@ pub struct RevisionConfig {
     pub max_text_bytes: u64,
     #[serde(default = "default_revision_object_format")]
     pub git_object_format: String,
+    #[serde(default)]
+    pub limits: RevisionLimitConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevisionLimitConfig {
+    #[serde(default = "default_revision_global_comparisons")]
+    pub global_comparisons: u32,
+    #[serde(default = "default_revision_user_comparisons")]
+    pub per_user_comparisons: u32,
+}
+
+impl Default for RevisionLimitConfig {
+    fn default() -> Self {
+        Self {
+            global_comparisons: default_revision_global_comparisons(),
+            per_user_comparisons: default_revision_user_comparisons(),
+        }
+    }
 }
 
 impl Default for RevisionConfig {
@@ -392,6 +412,7 @@ impl Default for RevisionConfig {
             chunk_size_bytes: default_revision_chunk_bytes(),
             max_text_bytes: default_revision_text_bytes(),
             git_object_format: default_revision_object_format(),
+            limits: RevisionLimitConfig::default(),
         }
     }
 }
@@ -1504,6 +1525,14 @@ impl Config {
         {
             return Err(invalid(
                 "revision storage requires 16 MiB fixed chunks, a 100 MiB text cap, and SHA-256 Git objects",
+            ));
+        }
+        if !(1..=32).contains(&revisions.limits.global_comparisons)
+            || !(1..=8).contains(&revisions.limits.per_user_comparisons)
+            || revisions.limits.per_user_comparisons > revisions.limits.global_comparisons
+        {
+            return Err(invalid(
+                "revision comparison concurrency is outside the accepted envelope",
             ));
         }
         let authority_paths = [
@@ -2709,6 +2738,12 @@ const fn default_revision_text_bytes() -> u64 {
 fn default_revision_object_format() -> String {
     "sha256".to_owned()
 }
+const fn default_revision_global_comparisons() -> u32 {
+    2
+}
+const fn default_revision_user_comparisons() -> u32 {
+    1
+}
 const fn default_headscale_sync_seconds() -> u64 {
     15
 }
@@ -3036,6 +3071,23 @@ mod tests {
     #[test]
     fn defaults_validate() {
         config().validate().unwrap();
+    }
+    #[test]
+    fn revision_comparison_limits_are_finite_and_ordered() {
+        let mut candidate = config();
+        candidate.revisions.limits.global_comparisons = 0;
+        assert!(candidate.validate().is_err());
+        candidate.revisions.limits.global_comparisons = 33;
+        assert!(candidate.validate().is_err());
+        candidate.revisions.limits.global_comparisons = 2;
+        candidate.revisions.limits.per_user_comparisons = 0;
+        assert!(candidate.validate().is_err());
+        candidate.revisions.limits.per_user_comparisons = 9;
+        assert!(candidate.validate().is_err());
+        candidate.revisions.limits.per_user_comparisons = 3;
+        assert!(candidate.validate().is_err());
+        candidate.revisions.limits.per_user_comparisons = 1;
+        candidate.validate().unwrap();
     }
     #[test]
     fn unsafe_listener_fails() {

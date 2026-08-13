@@ -901,6 +901,9 @@ revisions:
   adapterOrigin: https://filebelt-git.filebelt-git.svc:8092
   adapterServerName: filebelt-git.filebelt-git.svc
   adapterPort: 8092
+  limits:
+    globalComparisons: 2
+    perUserComparisons: 1
   activation:
     compatibilityGate: ""
 

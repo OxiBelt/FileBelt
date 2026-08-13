@@ -233,13 +233,14 @@
     },
     "revisions": {
       "type": "object", "additionalProperties": false,
-      "required": ["enabled", "gitNamespace", "adapterOrigin", "adapterServerName", "adapterPort", "activation"],
+      "required": ["enabled", "gitNamespace", "adapterOrigin", "adapterServerName", "adapterPort", "limits", "activation"],
       "properties": {
         "enabled": {"type": "boolean"},
         "gitNamespace": {"$ref": "#/definitions/dnsLabel"},
         "adapterOrigin": {"type": "string", "pattern": "^https://[a-z0-9.-]+:[1-9][0-9]{0,4}$", "maxLength": 512},
         "adapterServerName": {"type": "string", "pattern": "^[a-z0-9.-]+$", "minLength": 1, "maxLength": 253},
         "adapterPort": {"const": 8092},
+        "limits": {"type": "object", "additionalProperties": false, "required": ["globalComparisons", "perUserComparisons"], "properties": {"globalComparisons": {"type": "integer", "minimum": 1, "maximum": 32}, "perUserComparisons": {"type": "integer", "minimum": 1, "maximum": 8}}},
         "activation": {"type": "object", "additionalProperties": false, "required": ["compatibilityGate"], "properties": {"compatibilityGate": {"type": "string", "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$|^$"}}}
       }
     },

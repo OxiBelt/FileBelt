@@ -305,6 +305,26 @@ describe("HttpFileBeltClient", () => {
     expect(await PolicyPatch.clone().json()).toEqual({ policy: "binary" });
   });
 
+  it("preserves the revision admission problem for retry guidance", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
+      if (new URL(RequestValue.url).pathname.endsWith(`/versions/${FirstVersionId}/compare/${SecondVersionId}`)) {
+        return Json({
+          code: "revision.admission_limited",
+          status: 429,
+          title: "Text revision comparison is temporarily at capacity",
+          type: "https://filebelt.dev/problems/revision.admission_limited",
+        }, 429, { "Retry-After": "5" });
+      }
+      return Server.fetch(RequestValue);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+    await expect(Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId))
+      .rejects.toThrow("Text revision comparison is temporarily at capacity");
+  });
+
   it("projects symlinks without traversing them or requesting file versions and content", async () => {
     const Server = new ContractServer([SymlinkNode()]);
     const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");

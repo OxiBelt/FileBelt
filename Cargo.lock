@@ -2127,6 +2127,7 @@ dependencies = [
  "filebelt-runtime",
  "filebelt-storage-protocol",
  "getrandom 0.4.3",
+ "prometheus-client",
  "prost",
  "reqwest 0.12.28",
  "rustls",

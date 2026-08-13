@@ -121,7 +121,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.revisions.enabled -}}
-{{- $revisionConfig := printf "[revisions]\nenabled = true\ndatabase_url_file = \"/run/secrets/revision-database-url\"\nurl = \"https://filebelt-revision:8091/\"\nadapter_url = %q\nio_url = \"https://filebelt-worker-io:8081/\"\nclient_certificate_chain_file = \"/run/secrets/revision-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/revision-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/revision-client-tls/server-ca.crt\"\nadapter_client_certificate_chain_file = \"/run/secrets/revision-adapter-client-tls/tls.crt\"\nadapter_client_private_key_file = \"/run/secrets/revision-adapter-client-tls/tls.key\"\nadapter_server_ca_file = \"/run/secrets/revision-adapter-client-tls/server-ca.crt\"\nio_client_certificate_chain_file = \"/run/secrets/revision-io-client-tls/tls.crt\"\nio_client_private_key_file = \"/run/secrets/revision-io-client-tls/tls.key\"\nio_server_ca_file = \"/run/secrets/revision-io-client-tls/server-ca.crt\"\nchunk_size_bytes = 16777216\nmax_text_bytes = 104857600\ngit_object_format = \"sha256\"\n\n[revisions.capability_signing]\nprivate_key_file = \"/run/secrets/revision-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/revision-storage-capability-public-keyset\"\ncurrent_generation = 1" .Values.revisions.adapterOrigin -}}
+{{- $revisionConfig := printf "[revisions]\nenabled = true\ndatabase_url_file = \"/run/secrets/revision-database-url\"\nurl = \"https://filebelt-revision:8091/\"\nadapter_url = %q\nio_url = \"https://filebelt-worker-io:8081/\"\nclient_certificate_chain_file = \"/run/secrets/revision-client-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/revision-client-tls/tls.key\"\nserver_ca_file = \"/run/secrets/revision-client-tls/server-ca.crt\"\nadapter_client_certificate_chain_file = \"/run/secrets/revision-adapter-client-tls/tls.crt\"\nadapter_client_private_key_file = \"/run/secrets/revision-adapter-client-tls/tls.key\"\nadapter_server_ca_file = \"/run/secrets/revision-adapter-client-tls/server-ca.crt\"\nio_client_certificate_chain_file = \"/run/secrets/revision-io-client-tls/tls.crt\"\nio_client_private_key_file = \"/run/secrets/revision-io-client-tls/tls.key\"\nio_server_ca_file = \"/run/secrets/revision-io-client-tls/server-ca.crt\"\nchunk_size_bytes = 16777216\nmax_text_bytes = 104857600\ngit_object_format = \"sha256\"\n\n[revisions.limits]\nglobal_comparisons = %v\nper_user_comparisons = %v\n\n[revisions.capability_signing]\nprivate_key_file = \"/run/secrets/revision-storage-capability-private-key\"\npublic_keyset_file = \"/run/secrets/revision-storage-capability-public-keyset\"\ncurrent_generation = 1" .Values.revisions.adapterOrigin .Values.revisions.limits.globalComparisons .Values.revisions.limits.perUserComparisons -}}
 {{- $configuration = replace "[revisions]\nenabled = false" $revisionConfig $configuration -}}
 {{- $configuration = printf "%s\n\n[backend_tls.revision]\ncertificate_chain_file = \"/run/secrets/revision-server-tls/tls.crt\"\nprivate_key_file = \"/run/secrets/revision-server-tls/tls.key\"\nclient_ca_file = \"/run/secrets/revision-server-tls/client-ca.crt\"\nallowed_client_uri_sans = [\"spiffe://filebelt/api/revision\"]" $configuration -}}
 {{- range $current := list
@@ -294,6 +294,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- if eq .Values.revisions.activation.compatibilityGate "" -}}
 {{- fail "revisions.enabled requires a nonempty completed compatibility-gate identifier" -}}
 {{- end -}}
+{{- if gt (int .Values.revisions.limits.perUserComparisons) (int .Values.revisions.limits.globalComparisons) -}}
+{{- fail "revisions per-user comparison concurrency must not exceed global comparison concurrency" -}}
+{{- end -}}
 {{- if eq .Values.revisions.gitNamespace .Release.Namespace -}}
 {{- fail "revisions.gitNamespace must be a dedicated Git-adapter namespace separate from the FileBelt release namespace" -}}
 {{- end -}}
@@ -332,7 +335,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (not (contains $revisionIoClientUris $revisionIoTls)) (contains "allowed_client_trust_domains" $revisionIoTls) -}}
 {{- fail "I/O backend TLS must permit only the exact enabled revision and other FileBelt client SPIFFE identities" -}}
 {{- end -}}
-{{- range $required := list "revision = \"0.0.0.0:8091\"" "url = \"https://filebelt-revision:8091/\"" (printf "adapter_url = %q" .Values.revisions.adapterOrigin) "io_url = \"https://filebelt-worker-io:8081/\"" "[revisions.capability_signing]" "chunk_size_bytes = 16777216" "max_text_bytes = 104857600" "git_object_format = \"sha256\"" -}}
+{{- range $required := list "revision = \"0.0.0.0:8091\"" "url = \"https://filebelt-revision:8091/\"" (printf "adapter_url = %q" .Values.revisions.adapterOrigin) "io_url = \"https://filebelt-worker-io:8081/\"" "[revisions.limits]" (printf "global_comparisons = %v" .Values.revisions.limits.globalComparisons) (printf "per_user_comparisons = %v" .Values.revisions.limits.perUserComparisons) "[revisions.capability_signing]" "chunk_size_bytes = 16777216" "max_text_bytes = 104857600" "git_object_format = \"sha256\"" -}}
 {{- if not (contains $required $renderedFilebeltConfig) -}}
 {{- fail (printf "revisions.enabled requires configuration.filebelt setting %s" $required) -}}
 {{- end -}}

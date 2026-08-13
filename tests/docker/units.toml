@@ -15,7 +15,7 @@ roles = [
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
 ]
-event_tiers = ["pull_request", "main", "scheduled", "manual", "release"]
+event_tiers = ["pull_request", "push", "scheduled", "manual", "release"]
 browser_projects = []
 exact_artifacts = true
 status = "ready"
@@ -33,7 +33,7 @@ roles = [
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
 ]
-event_tiers = ["main", "scheduled", "manual", "release"]
+event_tiers = ["pull_request", "push", "scheduled", "manual", "release"]
 browser_projects = ["chromium", "firefox"]
 exact_artifacts = true
 status = "ready"
@@ -52,7 +52,7 @@ roles = [
   "filebelt-worker-io",
   "filebelt-worker-maintenance",
 ]
-event_tiers = ["main", "scheduled", "manual", "release"]
+event_tiers = ["pull_request", "push", "scheduled", "manual", "release"]
 browser_projects = []
 exact_artifacts = true
 status = "ready"

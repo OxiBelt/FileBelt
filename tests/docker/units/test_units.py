@@ -26,6 +26,8 @@ class CatalogTest(unittest.TestCase):
         units = load_catalog(ROOT, ROOT / "tests/docker/units.toml")
         self.assertEqual(set(units), {"core", "collaboration", "mcp"})
         self.assertTrue(all(unit.exact_artifacts for unit in units.values()))
+        expected_tiers = ("pull_request", "push", "scheduled", "manual", "release")
+        self.assertTrue(all(unit.event_tiers == expected_tiers for unit in units.values()))
         self.assertEqual(units["collaboration"].browser_projects, ("chromium", "firefox"))
         self.assertIn("filebelt-mcp-broker", units["mcp"].roles)
         collaboration = (ROOT / "ui/web/browser/docker-integration.spec.mjs").read_text(

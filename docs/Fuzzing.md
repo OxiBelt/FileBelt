@@ -26,9 +26,10 @@ ASan uses `nightly-2026-08-04`; sustained campaigns enable leak detection.
 The exact runner dependency is `cargo-fuzz 0.13.2` with
 `libfuzzer-sys 0.4.13`.
 
-Pull requests run 256 iterations for all five targets under both profiles.
-Main pushes run a blocking 15-minute ASan/LSan campaign per target. The Monday
-schedule and manual workflow run 60 minutes per target. Corpora, crash inputs,
+Every pull request, push, schedule, and manual workflow runs 256 iterations for
+all five targets under both profiles. Pushes additionally run a blocking
+15-minute ASan/LSan campaign per target. The Monday schedule and manual
+workflow run 60 minutes per target. Corpora, crash inputs,
 coverage output, and raw engine logs are ephemeral. A failing runner prints
 only bounded sanitizer summaries and SHA-256 digests of crash inputs. Never
 upload an unreviewed crash input to a public workflow artifact or issue.

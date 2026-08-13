@@ -40,8 +40,8 @@ fail closed. This fixture does not qualify public DNS or a second TLS hop.
 
 On failure, the runner retains at most bounded scrubbed logs and synthetic
 browser screenshots. Playwright traces are disabled because they can contain
-session cookies. Pull-request core diagnostics expire after 7 days; other
-workflow diagnostics expire after 30 days. Disposable tenant state and secrets
+session cookies. Pull-request diagnostics expire after 7 days; other workflow
+diagnostics expire after 30 days. Disposable tenant state and secrets
 are destroyed before artifact upload. Rollback removes the new CI consumers
 first and then the catalog/runner; it does not require a migration or a
 production deployment change.

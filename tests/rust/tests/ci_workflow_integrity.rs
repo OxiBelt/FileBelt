@@ -51,6 +51,7 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
     assert_no_workflow_permissions(&workflow);
     assert!(!workflow.contains("pull_request_target:"));
     assert!(!workflow.contains("packages: write"));
+    assert!(workflow.contains("push:\n    branches: [\"**\"]"));
     for job in [
         "source-structure:",
         "rust:",
@@ -65,9 +66,7 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
         "phase1-images-riscv64:",
         "phase1-gate:",
         "fuzz-sustained:",
-        "docker-core:",
-        "docker-collaboration:",
-        "docker-mcp:",
+        "docker-integration:",
         "docker-integration-gate:",
     ] {
         assert!(workflow.contains(job), "workflow is missing {job}");
@@ -270,9 +269,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
                 ("fuzz-sustained", "phase1-images-native"),
                 ("phase1-images-native", "phase1-images-riscv64"),
                 ("phase1-images-riscv64", "phase1-gate"),
-                ("docker-core", "docker-collaboration"),
-                ("docker-collaboration", "docker-mcp"),
-                ("docker-mcp", "docker-integration-gate"),
+                ("docker-integration", "docker-integration-gate"),
                 ("phase3-kind-current", "phase3-kind-supported"),
                 ("phase3-kind-supported", "phase3-network-calico"),
                 ("phase3-network-calico", "phase3-network-cilium"),
@@ -319,7 +316,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert_contents_read(final_workflow_job(&performance, "evidence-contract"));
     for (workflow, job, next_job) in [
         (checks.as_str(), "bootstrap-gate", "fuzz-sustained"),
-        (checks.as_str(), "phase1-gate", "docker-core"),
+        (checks.as_str(), "phase1-gate", "docker-integration"),
         (
             checks.as_str(),
             "docker-integration-gate",
@@ -424,9 +421,7 @@ fn fuzz_matrices_are_bounded_pinned_and_blocking() {
         assert!(sustained.contains(target));
     }
     for required in [
-        "if: github.event_name == 'pull_request'",
         "profile: [stable, asan]",
-        "max-parallel: 5",
         "cargo install --locked cargo-fuzz --version 0.13.2",
         "rustup toolchain install nightly-2026-08-04 --profile minimal",
         "--mode smoke",
@@ -437,6 +432,8 @@ fn fuzz_matrices_are_bounded_pinned_and_blocking() {
             "smoke matrix is missing {required}"
         );
     }
+    assert!(!smoke.contains("\n    if:"));
+    assert!(!smoke.contains("max-parallel:"));
     for required in [
         "needs.bootstrap-gate.result == 'success'",
         "github.event_name != 'pull_request'",
@@ -453,37 +450,51 @@ fn fuzz_matrices_are_bounded_pinned_and_blocking() {
     assert!(!workflow.contains("actions/cache"));
     assert!(workflow.contains("FUZZ_SMOKE: ${{ needs.fuzz-smoke.result }}"));
     assert!(workflow.contains("FUZZ_SUSTAINED: ${{ needs.fuzz-sustained.result }}"));
+    let bootstrap = workflow_job(&workflow, "bootstrap-gate", "fuzz-sustained");
+    assert!(bootstrap.contains("test \"$FUZZ_SMOKE\" = success"));
+    assert!(!bootstrap.contains("test \"$FUZZ_SMOKE\" = skipped"));
 }
 
 #[test]
-fn docker_units_consume_exact_amd64_archives_in_event_tiers() {
+fn docker_units_consume_exact_amd64_archives_in_matrices() {
     let root = repository_root();
     let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
         .expect("check workflow");
-    for (job, next, unit, non_pr_only) in [
-        ("docker-core", "docker-collaboration", "core", false),
-        ("docker-collaboration", "docker-mcp", "collaboration", true),
-        ("docker-mcp", "docker-integration-gate", "mcp", true),
+    let body = workflow_job(&workflow, "docker-integration", "docker-integration-gate");
+    for required in [
+        "if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && needs.phase1-images-native.result == 'success' }}",
+        "needs: [bootstrap-gate, phase1-images-native]",
+        "timeout-minutes: ${{ matrix.timeout_minutes }}",
+        "- unit: core\n            timeout_minutes: 45\n            requires_playwright: false",
+        "- unit: collaboration\n            timeout_minutes: 60\n            requires_playwright: true",
+        "- unit: mcp\n            timeout_minutes: 45\n            requires_playwright: false",
+        "name: filebelt-phase1-amd64",
+        "path: artifacts/docker/${{ matrix.unit }}-images",
+        "--unit ${{ matrix.unit }}",
+        "--image-channel build",
+        "--diagnostics-dir artifacts/docker/${{ matrix.unit }}",
+        "name: filebelt-docker-${{ matrix.unit }}-diagnostics",
+        "retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}",
     ] {
-        let body = workflow_job(&workflow, job, next);
-        assert!(body.contains("needs: [bootstrap-gate, phase1-images-native]"));
-        assert!(body.contains("!cancelled()"));
-        assert!(body.contains("needs.bootstrap-gate.result == 'success'"));
-        assert!(body.contains("needs.phase1-images-native.result == 'success'"));
-        assert!(body.contains("name: filebelt-phase1-amd64"));
-        assert!(body.contains(&format!("--unit {unit}")));
-        assert!(body.contains("--image-channel build"));
-        assert!(!body.contains("--build"));
-        assert_eq!(
-            body.contains("github.event_name != 'pull_request'"),
-            non_pr_only
+        assert!(
+            body.contains(required),
+            "Docker matrix is missing {required}"
         );
     }
+    assert_eq!(body.matches("if: matrix.requires_playwright").count(), 4);
+    assert!(!body.contains("--build"));
+    assert!(!body.contains("github.event_name != 'pull_request'"));
+    for removed in [
+        "\n  docker-core:\n",
+        "\n  docker-collaboration:\n",
+        "\n  docker-mcp:\n",
+    ] {
+        assert!(!workflow.contains(removed));
+    }
     let gate = workflow_job(&workflow, "docker-integration-gate", "phase3-kind-current");
-    assert!(gate.contains("needs: [docker-core, docker-collaboration, docker-mcp]"));
-    assert!(gate.contains("test \"$CORE\" = success"));
-    assert!(gate.contains("test \"$COLLABORATION\" = skipped"));
-    assert!(gate.contains("test \"$MCP\" = success"));
+    assert!(gate.contains("needs: [docker-integration]"));
+    assert!(gate.contains("DOCKER_INTEGRATION: ${{ needs.docker-integration.result }}"));
+    assert!(gate.contains("test \"$DOCKER_INTEGRATION\" = success"));
 
     let release =
         fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");

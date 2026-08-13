@@ -233,9 +233,9 @@ Publication permission exists only in the promotion job. Published versions
 are never moved or automatically deleted for rollback.
 
 The versioned Docker integration catalog contains isolated `core`,
-`collaboration`, and `mcp` units. Pull requests run the core unit; main,
-scheduled, and manual validation run all three. Signed-tag release validation
-replays all three independently. Every job downloads only the validated AMD64
+`collaboration`, and `mcp` units. Pull requests, pushes, scheduled validation,
+and manual validation run all three. Signed-tag release validation replays all
+three independently. Every job downloads only the validated AMD64
 artifact, verifies that it binds the current revision and event channel, and
 loads it without rebuilding FileBelt. Unique Compose projects, disposable
 state, owned fixture tags, volumes, and networks make cleanup deterministic.

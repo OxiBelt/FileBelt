@@ -13,7 +13,7 @@ from pathlib import Path
 
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 ROLE = re.compile(r"^filebelt-[a-z0-9-]+$")
-KNOWN_TIERS = {"pull_request", "main", "scheduled", "manual", "release"}
+KNOWN_TIERS = {"pull_request", "push", "scheduled", "manual", "release"}
 KNOWN_BROWSERS = {"chromium", "firefox"}
 KNOWN_STATUS = {"ready", "blocked"}
 

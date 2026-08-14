@@ -433,6 +433,15 @@ compile-and-probe-only and is not included in the adapter manifest. The image
 contains no operator secret, provider database, DocumentServer binary,
 provider connector, `api.js`, or other provider asset.
 
+The adapter pins `hmac@0.13.0`, `sha2@0.11.0`, and `zip@8.6.0`. Their resolved
+cryptographic and archive-support graph is limited to the exact permissively
+licensed crates in `adapters/onlyoffice/Cargo.lock`; it adds no lifecycle
+script, native linkage, provider code, or network fetch. The adapter's AGPL
+corresponding-source bundle and SBOM include that exact lockfile and every
+resolved crate and notice. Changing the digest implementation, archive
+features, or extraction behavior repeats the callback-authentication,
+malformed-document, license, and source-offer review.
+
 ONLYOFFICE Docs Community `9.4.0` is an operator-supplied external process, not
 a FileBelt build input or release subject. An operator records its exact image
 digest, upstream source, notices, branding, and vulnerability review outside
@@ -467,6 +476,10 @@ Ubuntu 26.04 snapshot and NFS-Ganesha `6.5-8`. Evidence includes the exact
 package snapshot, dynamic FSAL ABI probe, LGPL source/replacement instructions,
 bridge lockfile, Kerberos composition, runtime functional probe, normalized
 SBOM, vulnerability result, source archive, provenance, and rebuild comparison.
+The bridge pins `nix@0.31.3` with only `fs`, `socket`, `uio`, and `user`
+features. This MIT-licensed Rust wrapper changes neither the Ganesha ABI nor
+the dynamic LGPL relinking boundary; its exact source, lockfile, notice, and
+SBOM entry remain part of the NFS corresponding-source evidence.
 
 The transcoder image publishes native AMD64 and ARM64 artifacts. RISC-V is
 compile/probe-only and cannot enter the manifest. Evidence locks FFmpeg

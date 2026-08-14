@@ -23,7 +23,7 @@ use filebelt_document_protocol::{
     ReceiveDocumentCallbackCommand, RedeemDocumentLaunchCommand, RefreshDocumentSourceCommand,
     document_execute_request, document_execute_response,
 };
-use hmac::{Hmac, Mac as _};
+use hmac::{Hmac, KeyInit as _, Mac as _};
 use prost::Message as _;
 use reqwest::blocking::Client;
 use reqwest::{Certificate, Identity, StatusCode};

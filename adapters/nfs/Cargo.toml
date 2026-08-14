@@ -18,7 +18,7 @@ resolver = "3"
 # this LGPL package.
 blake3 = "=1.8.6"
 filebelt-vfs-protocol = { version = "=0.1.0", path = "../../source/crates/filebelt-vfs-protocol" }
-nix = { version = "=0.30.1", features = ["fs", "socket", "uio", "user"] }
+nix = { version = "=0.31.3", features = ["fs", "socket", "uio", "user"] }
 prost = "=0.14.4"
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls-webpki-roots-no-provider"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }

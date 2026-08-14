@@ -42,6 +42,17 @@ peer-version pair after deterministic OpenAPI regeneration was verified with
 TypeScript 6.0.3. Changing either exact version requires revalidating and
 updating or removing the exception.
 
+The development-only Vite graph pins `postcss>nanoid` to exact
+`nanoid@3.3.18`. FileBelt does not import Nano ID, and the resolved PostCSS
+path uses `nanoid/non-secure` with a fixed size rather than the React Native
+async custom generator affected by `GHSA-2v37-7h3g-55p8`; the patched release
+is still required because Node advisory admission fails closed. Version 3.3.18
+retains the reviewed MIT license and introduces no dependency, lifecycle
+script, native-code, or engine change. Changing Vite, PostCSS, the Nano ID
+entrypoint, or its runtime reachability invalidates this review. Remove the
+override only when the exact locked graph remains outside the advisory range
+and the frozen install, license, audit, test, and build gates pass.
+
 ### Cargo Vet acceptance baseline
 
 `supply-chain/config.toml` contains a generated, minimal baseline for the exact

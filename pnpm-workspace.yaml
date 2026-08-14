@@ -17,3 +17,5 @@ overrides:
   # officeparser pins a vulnerable PDF.js release; this audited compatible
   # override is required even though FileBelt's browser importer rejects PDFs.
   pdfjs-dist: 6.2.108
+  # PostCSS permits the patched Nano ID v3 release without a toolchain upgrade.
+  "postcss>nanoid": 3.3.18

@@ -34,7 +34,11 @@ COMPOSE_SUFFIX = {
 LOOPBACK_EDGE_HOST = "127.0.0.1"
 EDGE_NO_PROXY_HOSTS = ("filebelt.localhost", "localhost", "127.0.0.1", "::1")
 EDGE_PORT = 8443
+EDGE_RELAY_SERVICE = "filebelt-acceptance-relay"
 EDGE_SERVER_NAME = "filebelt.localhost"
+OUTSIDE_EDGE_PORT_START = 49152
+OUTSIDE_EDGE_PORT_END = 65535
+OUTSIDE_EDGE_PORT_RANGE = f"{OUTSIDE_EDGE_PORT_START}-{OUTSIDE_EDGE_PORT_END}"
 MAXIMUM_PROXY_ERROR_DETAIL = 240
 
 
@@ -144,8 +148,9 @@ def configure_topology_environment(
     """Own the Compose bind and acceptance route for the selected topology."""
     environment["FILEBELT_HTTPS_BIND_ADDRESS"] = LOOPBACK_EDGE_HOST
     if topology == "outside":
-        # An empty published port asks Compose to allocate one on the Docker host.
-        environment["FILEBELT_HTTPS_PORT"] = ""
+        # A nonempty range is portable across the supported Docker runners and
+        # lets the daemon atomically select an available loopback port.
+        environment["FILEBELT_HTTPS_PORT"] = OUTSIDE_EDGE_PORT_RANGE
         configure_outside_edge(environment)
     else:
         environment["FILEBELT_HTTPS_PORT"] = str(EDGE_PORT)
@@ -172,16 +177,16 @@ def validate_topology(topology: str, executor_containerized: bool) -> None:
 
 
 def parse_published_edge(value: str) -> tuple[str, int]:
-    """Accept the one runner-owned IPv4 loopback publication from Docker."""
+    """Accept the one relay-owned IPv4 loopback publication from Docker."""
     lines = [line.strip() for line in value.splitlines() if line.strip()]
     if len(lines) != 1:
-        raise RuntimeError("Docker web loopback publication is unavailable")
+        raise RuntimeError("Docker acceptance relay publication is unavailable")
     host, separator, port_text = lines[0].rpartition(":")
     if not separator or host != LOOPBACK_EDGE_HOST or not port_text.isdigit():
-        raise RuntimeError("Docker web publication is not an IPv4 loopback port")
+        raise RuntimeError("Docker acceptance relay is not on IPv4 loopback")
     port = int(port_text)
-    if not 1 <= port <= 65535:
-        raise RuntimeError("Docker web loopback port is outside the valid range")
+    if not OUTSIDE_EDGE_PORT_START <= port <= OUTSIDE_EDGE_PORT_END:
+        raise RuntimeError("Docker acceptance relay is outside the runner-owned range")
     return host, port
 
 
@@ -315,6 +320,7 @@ def main() -> int:
         "bridge_fatal": "none",
         "bridge_listeners": "0",
         "connect_endpoint": f"{EDGE_SERVER_NAME}:{EDGE_PORT}",
+        "published_edge": "not-resolved",
         "requested_topology": arguments.docker_topology,
         "selected_topology": topology,
         "target_edge": "not-resolved",
@@ -357,34 +363,45 @@ def main() -> int:
             if executor_containerized:
                 subprocess.run(["docker", "network", "connect", network, socket.gethostname()], check=True)
                 connected = True
-            web_container = subprocess.run(
-                compose_command(unit.compose_files, unit.profiles, project, "ps", "--quiet", "filebelt-web"),
+            relay_container = subprocess.run(
+                compose_command(
+                    unit.compose_files,
+                    unit.profiles,
+                    project,
+                    "ps",
+                    "--quiet",
+                    EDGE_RELAY_SERVICE,
+                ),
                 cwd=ROOT,
                 env=environment,
                 check=True,
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            if not web_container or "\n" in web_container:
-                raise RuntimeError("Docker web container identity is unavailable")
+            if not relay_container or "\n" in relay_container:
+                raise RuntimeError("Docker acceptance relay identity is unavailable")
+            publication = subprocess.run(
+                ["docker", "port", relay_container, f"{EDGE_PORT}/tcp"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            published_target = parse_published_edge(publication)
+            transport["published_edge"] = (
+                f"{published_target[0]}:{published_target[1]}"
+            )
             if executor_containerized:
                 address = subprocess.run(
-                    ["docker", "inspect", "--format", f"{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}", web_container],
+                    ["docker", "inspect", "--format", f"{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}", relay_container],
                     check=True,
                     capture_output=True,
                     text=True,
                 ).stdout.strip()
                 if not address:
-                    raise RuntimeError("Docker edge address is empty")
+                    raise RuntimeError("Docker acceptance relay edge address is empty")
                 target = (address, EDGE_PORT)
             else:
-                publication = subprocess.run(
-                    ["docker", "port", web_container, f"{EDGE_PORT}/tcp"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout
-                target = parse_published_edge(publication)
+                target = published_target
             transport["target_edge"] = f"{target[0]}:{target[1]}"
             transport["connect_endpoint"] = f"{LOOPBACK_EDGE_HOST}:{EDGE_PORT}"
             bridge = ManagedTcpBridge(target)

@@ -239,6 +239,10 @@ three independently. Every job downloads only the validated AMD64
 artifact, verifies that it binds the current revision and event channel, and
 loads it without rebuilding FileBelt. Unique Compose projects, disposable
 state, owned fixture tags, volumes, and networks make cleanup deterministic.
+Only a secretless, mountless, bounded raw TCP acceptance relay joins the
+ordinary publication network; it forwards exclusively to the web edge on the
+internal edge network. The runner requires exactly one IPv4 loopback mapping,
+while every FileBelt application service remains unpublished.
 Failure evidence is limited to bounded scrubbed logs and synthetic screenshots
 for 7 days on pull requests and 30 days otherwise; browser traces are disabled.
 The catalog and exact operator commands are documented in
@@ -454,7 +458,8 @@ signing-key mounts. The shared API configuration enables grant issuance and
 includes absolute collaboration paths only for typed validation; the API does
 not mount the collaboration database or signing key. Operators exercise the
 functional path with the `core` profile. Compose never publishes backend ports
-or a UDP/WebTransport port.
+or a UDP/WebTransport port. The development-only acceptance relay is the sole
+host-published service and does not carry application secrets or storage.
 
 ## Phase 8 deployment and rollout
 

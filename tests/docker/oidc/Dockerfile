@@ -5,6 +5,7 @@ FROM node:24-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e
 
 RUN install -d -o 10001 -g 10001 -m 0700 /var/lib/filebelt/payloads
 COPY --chmod=0555 server.mjs /opt/filebelt-oidc/server.mjs
+COPY --chmod=0555 relay.mjs /opt/filebelt-oidc/relay.mjs
 
 USER 10001:10001
 EXPOSE 8083/tcp

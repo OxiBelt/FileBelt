@@ -27,13 +27,26 @@ The runner's `--docker-topology` option controls how the acceptance client
 reaches the real Compose TLS edge. `auto`, the local default, selects `host`
 when the executor shares the Docker host and `outside` for a container using an
 external Docker daemon. `host` uses the fixed loopback port published by
-Compose. `outside` is also valid explicitly on a host executor: it assigns
-Compose an ephemeral loopback port and starts a separately bounded loopback
-bridge. A containerized executor is connected only to the web service's `edge`
-network and bridges to its network address; a host executor bridges to the
-ephemeral loopback publication. Backend services remain unpublished. Check and
-signed-release workflows pin `outside` so CI behavior does not depend on
-environment-detection heuristics. The client preserves
+acceptance relay. `outside` is also valid explicitly on a host executor: it
+assigns the relay one available loopback port from the IANA dynamic/private
+range `49152-65535` and starts a separately bounded loopback bridge. The
+nonempty published range is compatible with Docker runner versions that do not
+create a mapping for an empty or zero-valued Compose publication. Before
+selecting its bridge target, the runner requires Docker to report exactly one
+mapping in that range on `127.0.0.1`.
+
+Docker does not publish ports for a service attached only to an internal
+network. The raw TCP acceptance relay is therefore the only service attached to
+the ordinary `acceptance-publication` bridge. It has no Secret, config, or
+storage mount, runs read-only as the unprivileged fixture user with all
+capabilities dropped, bounds concurrent connections, and can forward only to
+`filebelt-web:8443` on the internal `edge` network. A containerized executor is
+connected only to `edge` and bridges to the relay's internal address after
+validating the host publication; a host executor bridges to the validated
+loopback publication. FileBelt application services, including the web edge,
+remain unpublished and on internal networks. Check and signed-release workflows
+pin `outside` so CI behavior does not depend on environment-detection
+heuristics. The client preserves
 `https://filebelt.localhost:8443`, its Host header, and TLS server name. Before
 the driver starts, the readiness probe validates that name against the
 runner-generated CA and certificate.
@@ -54,13 +67,20 @@ address, rebinding, malformed, oversized, slow, and session-confusion cases
 fail closed. This fixture does not qualify public DNS or a second TLS hop.
 
 On failure, the runner retains at most bounded scrubbed logs, a
-`transport-status.txt` record of the selected topology and bridge lifecycle,
-and synthetic browser screenshots. Successful runs discard transport
-diagnostics. Playwright traces are disabled because they can contain session
+`transport-status.txt` record of the selected topology, resolved publication,
+bridge target, and bridge lifecycle, and synthetic browser screenshots.
+Successful runs discard transport diagnostics. Playwright traces are disabled
+because they can contain session
 cookies. Pull-request diagnostics expire after 7 days; other workflow
 diagnostics expire after 30 days. Disposable tenant state and secrets are
 destroyed before artifact upload. For local diagnosis, explicitly select
 `--docker-topology host` or `--docker-topology outside`; a contradictory mode
-fails before the acceptance driver runs. Rollback first removes the explicit
-workflow arguments, then reverts the managed bridge and runner changes. It
+fails before the acceptance driver runs. If a local Docker installation cannot
+allocate from the range on a host executor, use `--docker-topology host` after
+confirming port 8443 is free. Reverting to an empty or zero-valued outside
+publication is not a safe CI rollback because affected Docker runners omit the
+host mapping; an alternative rollback must pin a qualified Docker toolchain
+while preserving the three-unit outside matrix. Removing the relay also
+requires replacing the host-executor route; attaching a FileBelt application
+service to the publication network is not an equivalent rollback. This change
 does not require a migration or production deployment change.

@@ -47,11 +47,11 @@ def secret_sources(service: dict[str, Any]) -> set[str]:
 
 
 def main() -> int:
-    subprocess.run(
-        ["node", "--test", str(ROOT / "tests/docker/mcp-egress/policy.test.mjs")],
-        cwd=ROOT,
-        check=True,
-    )
+    for test in (
+        ROOT / "tests/docker/mcp-egress/policy.test.mjs",
+        ROOT / "tests/docker/oidc/relay.test.mjs",
+    ):
+        subprocess.run(["node", "--test", str(test)], cwd=ROOT, check=True)
     configurations = {}
     for path in (
         ROOT / "deploy/compose/filebelt.toml",
@@ -148,7 +148,7 @@ def main() -> int:
         outside_rendered = subprocess.run(
             compose_config_command,
             cwd=ROOT,
-            env={**environment, "FILEBELT_HTTPS_PORT": ""},
+            env={**environment, "FILEBELT_HTTPS_PORT": "49152-65535"},
             check=True,
             capture_output=True,
             text=True,
@@ -167,6 +167,7 @@ def main() -> int:
     model = json.loads(rendered.stdout)
     services = model["services"]
     outside_services = json.loads(outside_rendered.stdout)["services"]
+    assert model["networks"]["acceptance-publication"].get("internal", False) is False
     assert model["networks"]["control"]["internal"] is True
     assert model["networks"]["edge"]["internal"] is True
     assert model["networks"]["internet-egress"].get("internal", False) is False
@@ -177,6 +178,7 @@ def main() -> int:
     assert services["filebelt-iggy"]["image"] == IGGY
 
     hardened = {
+        "filebelt-acceptance-relay",
         "filebelt-api",
         "filebelt-bootstrap",
         "filebelt-migrate",
@@ -203,6 +205,7 @@ def main() -> int:
     broker = services["filebelt-mcp-broker"]
     collaboration = services["filebelt-collaboration"]
     gateway = services["filebelt-mcp-egress"]
+    relay = services["filebelt-acceptance-relay"]
     web = services["filebelt-web"]
     assert not api.get("volumes"), "the API must not mount payload storage"
     assert targets(io.get("volumes"), "volume") == {"/var/lib/filebelt/payloads"}
@@ -210,6 +213,7 @@ def main() -> int:
     assert set(api["networks"]) == {"control", "edge"}
     assert set(io["networks"]) == {"control", "edge"}
     assert set(maintenance["networks"]) == {"control"}
+    assert set(relay["networks"]) == {"acceptance-publication", "edge"}
     assert set(web["networks"]) == {"edge"}
     assert set(broker["networks"]) == {"control"}
     assert set(collaboration["networks"]) == {"control", "edge"}
@@ -217,6 +221,12 @@ def main() -> int:
     assert not broker.get("volumes"), "the MCP broker must not mount payload storage"
     assert not collaboration.get("volumes"), "collaboration must not mount payload storage"
     assert not gateway.get("volumes"), "the egress gateway must not mount payload storage"
+    assert not relay.get("volumes"), "the acceptance relay must not mount storage"
+    assert not relay.get("secrets"), "the acceptance relay must not mount secrets"
+    assert not relay.get("configs"), "the acceptance relay must not mount configs"
+    assert relay["image"] == services["filebelt-oidc"]["image"]
+    assert relay["entrypoint"] == ["node", "/opt/filebelt-oidc/relay.mjs"]
+    assert relay["depends_on"]["filebelt-web"]["condition"] == "service_started"
     assert gateway["environment"] == {"FILEBELT_MCP_INTEGRATION_HOST": ""}
     assert not web.get("volumes")
     assert secret_sources(web) == {
@@ -288,11 +298,13 @@ def main() -> int:
     for name, service in services.items():
         if name != "filebelt-mcp-egress":
             assert "internet-egress" not in service.get("networks", {}), name
+        if name != "filebelt-acceptance-relay":
+            assert "acceptance-publication" not in service.get("networks", {}), name
 
     for name, service in services.items():
-        if name != "filebelt-web":
-            assert not service.get("ports"), f"backend service {name} publishes a host port"
-    assert web["ports"] == [
+        if name != "filebelt-acceptance-relay":
+            assert not service.get("ports"), f"service {name} publishes a host port"
+    assert relay["ports"] == [
         {
             "mode": "ingress",
             "host_ip": "127.0.0.1",
@@ -302,18 +314,19 @@ def main() -> int:
         }
     ]
     for name, service in outside_services.items():
-        if name != "filebelt-web":
+        if name != "filebelt-acceptance-relay":
             assert not service.get("ports"), (
-                f"outside backend service {name} publishes a host port"
+                f"outside service {name} publishes a host port"
             )
-    outside_edge_ports = outside_services["filebelt-web"]["ports"]
-    assert len(outside_edge_ports) == 1
-    outside_edge_port = outside_edge_ports[0]
-    assert outside_edge_port["mode"] == "ingress"
-    assert outside_edge_port["host_ip"] == "127.0.0.1"
-    assert outside_edge_port["target"] == 8443
-    assert outside_edge_port["protocol"] == "tcp"
-    assert outside_edge_port.get("published") in (None, "")
+    assert outside_services["filebelt-acceptance-relay"]["ports"] == [
+        {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 8443,
+            "published": "49152-65535",
+            "protocol": "tcp",
+        }
+    ]
 
     iggy = services["filebelt-iggy"]
     assert iggy["cap_add"] == ["SYS_NICE"]

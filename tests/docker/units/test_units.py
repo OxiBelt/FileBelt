@@ -150,17 +150,32 @@ class LifecycleTest(unittest.TestCase):
 
         RUN_UNIT.configure_topology_environment(environment, "outside")
         self.assertEqual(environment["FILEBELT_HTTPS_BIND_ADDRESS"], "127.0.0.1")
-        self.assertEqual(environment["FILEBELT_HTTPS_PORT"], "")
+        self.assertEqual(
+            environment["FILEBELT_HTTPS_PORT"], RUN_UNIT.OUTSIDE_EDGE_PORT_RANGE
+        )
         self.assertEqual(
             environment["FILEBELT_ACCEPTANCE_CONNECT_HOST"], "127.0.0.1"
         )
 
     def test_published_edge_parser_requires_one_ipv4_loopback_port(self) -> None:
-        self.assertEqual(
-            RUN_UNIT.parse_published_edge("127.0.0.1:49152\n"),
-            ("127.0.0.1", 49152),
-        )
-        for invalid in ("", "0.0.0.0:49152", "127.0.0.1:0", "::1:49152"):
+        for port in (
+            RUN_UNIT.OUTSIDE_EDGE_PORT_START,
+            RUN_UNIT.OUTSIDE_EDGE_PORT_END,
+        ):
+            with self.subTest(port=port):
+                self.assertEqual(
+                    RUN_UNIT.parse_published_edge(f"127.0.0.1:{port}\n"),
+                    ("127.0.0.1", port),
+                )
+        for invalid in (
+            "",
+            "0.0.0.0:49152",
+            "127.0.0.1:0",
+            "127.0.0.1:49151",
+            "127.0.0.1:65536",
+            "::1:49152",
+            "127.0.0.1:49152\n127.0.0.1:49153",
+        ):
             with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
                 RUN_UNIT.parse_published_edge(invalid)
 
@@ -410,6 +425,7 @@ class LifecycleTest(unittest.TestCase):
                 {
                     "bridge_cleanup": "stopped",
                     "bridge_fatal": "none",
+                    "published_edge": "127.0.0.1:49152",
                     "target_edge": secret.decode(),
                 },
                 (secret,),
@@ -418,6 +434,7 @@ class LifecycleTest(unittest.TestCase):
             output = (diagnostics / "transport-status.txt").read_bytes()
         self.assertLessEqual(len(output), MAXIMUM_DIAGNOSTIC_BYTES)
         self.assertNotIn(secret, output)
+        self.assertIn(b"published_edge=127.0.0.1:49152", output)
 
     def test_driver_is_terminated_and_reaped_when_bridge_fails(self) -> None:
         process = mock.Mock()

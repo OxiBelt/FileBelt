@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 ARCHITECTURES = {"amd64": "x86_64", "arm64": "aarch64"}
@@ -238,8 +238,6 @@ def run_suite(
     mounted = False
     driver = Path(configuration["adminDriver"])
     driver_environment = clean_environment(configuration)
-    cleanup_failure: Exception | None = None
-
     def admin(operation: str) -> subprocess.CompletedProcess[str]:
         if operation not in REQUIRED_ADMIN_OPERATIONS:
             raise RuntimeError(f"invalid admin operation: {operation}")
@@ -571,28 +569,7 @@ def run_suite(
         )
         require_pass(cases, "reject_cross_realm_principal")
     finally:
-        if mounted:
-            try:
-                unmount(mountpoint, force=True)
-            except Exception as error:  # cleanup must continue to the authority driver
-                cleanup_failure = error
-        destroy_ticket(ticket_cache)
-        try:
-            admin("cleanup")
-            cleanup_result = admin("assert-clean")
-            cleanup_evidence = json.loads(cleanup_result.stdout)
-            if cleanup_evidence != {"leftovers": []}:
-                raise RuntimeError("admin driver reported qualification leftovers")
-        except Exception as error:
-            cleanup_failure = cleanup_failure or error
-        for child in sorted(temporary.rglob("*"), key=lambda path: len(path.parts), reverse=True):
-            if child.is_symlink() or child.is_file():
-                child.unlink()
-            elif child.is_dir():
-                child.rmdir()
-        temporary.rmdir()
-        if cleanup_failure is not None:
-            raise cleanup_failure
+        cleanup_completed_run(temporary, ticket_cache, mounted=mounted, admin=admin)
 
     required = required_cases()
     missing = sorted(required - set(cases))
@@ -666,6 +643,92 @@ def qualification_identity(
     return run_id, f"filebelt-nfs-qualification-{run_id}"
 
 
+def verify_qualification_run_directory(directory: Path) -> None:
+    metadata = os.lstat(directory)
+    if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError("refusing non-directory qualification cleanup target")
+    if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+        raise RuntimeError("refusing unowned qualification cleanup target")
+
+
+def detach_mountpoint(
+    mountpoint: Path,
+    *,
+    mounted: bool | None,
+    lazy: bool,
+) -> None:
+    should_unmount = mountpoint.is_mount() if mounted is None else mounted
+    if should_unmount:
+        unmount(mountpoint, force=True, lazy=lazy)
+    if mountpoint.is_mount():
+        raise RuntimeError("refusing qualification cleanup while mount remains attached")
+
+
+def scrub_ticket_cache(ticket_cache: Path) -> None:
+    ticket_cache.unlink(missing_ok=True)
+
+
+def remove_detached_run_directory(directory: Path) -> None:
+    verify_qualification_run_directory(directory)
+    mountpoint = directory / "mount"
+    if mountpoint.is_mount():
+        raise RuntimeError("refusing qualification cleanup while mount remains attached")
+    if any(entry.name != "mount" for entry in directory.iterdir()):
+        raise RuntimeError("refusing qualification cleanup with unexpected local entries")
+    try:
+        metadata = os.lstat(mountpoint)
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None:
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise RuntimeError("refusing non-directory qualification mountpoint")
+        if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise RuntimeError("refusing unowned qualification mountpoint")
+        mountpoint.rmdir()
+    directory.rmdir()
+
+
+def cleanup_completed_run(
+    temporary: Path,
+    ticket_cache: Path,
+    *,
+    mounted: bool,
+    admin: Callable[[str], subprocess.CompletedProcess[str]],
+) -> None:
+    cleanup_failure: Exception | None = None
+    valid_directory = False
+    detached = False
+    ticket_scrubbed = False
+    try:
+        verify_qualification_run_directory(temporary)
+        valid_directory = True
+        detach_mountpoint(temporary / "mount", mounted=mounted, lazy=False)
+        detached = True
+    except Exception as error:
+        cleanup_failure = error
+    if valid_directory:
+        try:
+            destroy_ticket(ticket_cache)
+            ticket_scrubbed = True
+        except Exception as error:
+            cleanup_failure = cleanup_failure or error
+    try:
+        admin("cleanup")
+        cleanup_result = admin("assert-clean")
+        cleanup_evidence = json.loads(cleanup_result.stdout)
+        if cleanup_evidence != {"leftovers": []}:
+            raise RuntimeError("admin driver reported qualification leftovers")
+    except Exception as error:
+        cleanup_failure = cleanup_failure or error
+    if detached and ticket_scrubbed:
+        try:
+            remove_detached_run_directory(temporary)
+        except Exception as error:
+            cleanup_failure = cleanup_failure or error
+    if cleanup_failure is not None:
+        raise cleanup_failure
+
+
 def cleanup_abandoned_run(
     distribution: str,
     architecture: str,
@@ -675,37 +738,53 @@ def cleanup_abandoned_run(
     _, resource_prefix = qualification_identity(distribution, architecture, configuration)
     driver = Path(configuration["adminDriver"])
     environment = clean_environment(configuration)
+    cleanup_failure: Exception | None = None
     for operation in ("cleanup", "assert-clean"):
-        result = subprocess.run(
-            [driver, operation, resource_prefix, str(config_path)],
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=240,
-        )
-        if result.stderr or len(result.stdout.encode()) > 4096:
-            raise RuntimeError(f"admin driver {operation} emitted forbidden output")
-        if operation == "cleanup" and result.stdout:
-            raise RuntimeError("admin driver cleanup emitted forbidden output")
-        if operation == "assert-clean" and json.loads(result.stdout) != {"leftovers": []}:
-            raise RuntimeError("admin driver reported qualification leftovers")
+        try:
+            result = subprocess.run(
+                [driver, operation, resource_prefix, str(config_path)],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=240,
+            )
+            if result.stderr or len(result.stdout.encode()) > 4096:
+                raise RuntimeError(f"admin driver {operation} emitted forbidden output")
+            if operation == "cleanup" and result.stdout:
+                raise RuntimeError("admin driver cleanup emitted forbidden output")
+            if operation == "assert-clean" and json.loads(result.stdout) != {"leftovers": []}:
+                raise RuntimeError("admin driver reported qualification leftovers")
+        except Exception as error:
+            cleanup_failure = cleanup_failure or error
     temporary_root = Path("/var/tmp")
     for directory in temporary_root.glob(f"{resource_prefix}-*"):
-        metadata = os.lstat(directory)
-        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-            raise RuntimeError("refusing non-directory qualification cleanup target")
-        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
-            raise RuntimeError("refusing unowned qualification cleanup target")
-        mountpoint = directory / "mount"
-        subprocess.run(
-            ["umount", "-fl", mountpoint],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
-        )
-        shutil.rmtree(directory)
+        try:
+            verify_qualification_run_directory(directory)
+        except Exception as error:
+            cleanup_failure = cleanup_failure or error
+            continue
+        detach_failure: Exception | None = None
+        ticket_failure: Exception | None = None
+        try:
+            detach_mountpoint(directory / "mount", mounted=None, lazy=True)
+        except Exception as error:
+            detach_failure = error
+        try:
+            scrub_ticket_cache(directory / "krb5cc")
+        except Exception as error:
+            ticket_failure = error
+        if detach_failure is not None:
+            cleanup_failure = cleanup_failure or detach_failure
+        if ticket_failure is not None:
+            cleanup_failure = cleanup_failure or ticket_failure
+        if detach_failure is None and ticket_failure is None:
+            try:
+                remove_detached_run_directory(directory)
+            except Exception as error:
+                cleanup_failure = cleanup_failure or error
+    if cleanup_failure is not None:
+        raise cleanup_failure
 
 
 def required_cases() -> set[str]:
@@ -752,14 +831,16 @@ def authenticate(principal: str, keytab: str, ticket_cache: Path) -> None:
 
 
 def destroy_ticket(ticket_cache: Path) -> None:
-    subprocess.run(
-        ["kdestroy"],
-        env=ticket_environment(ticket_cache),
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    ticket_cache.unlink(missing_ok=True)
+    try:
+        subprocess.run(
+            ["kdestroy"],
+            env=ticket_environment(ticket_cache),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    finally:
+        scrub_ticket_cache(ticket_cache)
 
 
 def mount(
@@ -823,10 +904,15 @@ def rejected_principal_mount(
         destroy_ticket(ticket_cache)
 
 
-def unmount(mountpoint: Path, *, force: bool = False) -> None:
+def unmount(mountpoint: Path, *, force: bool = False, lazy: bool = False) -> None:
     arguments = ["umount"]
+    options = ""
     if force:
-        arguments.append("-f")
+        options += "f"
+    if lazy:
+        options += "l"
+    if options:
+        arguments.append(f"-{options}")
     arguments.append(str(mountpoint))
     subprocess.run(arguments, check=True, timeout=60)
 

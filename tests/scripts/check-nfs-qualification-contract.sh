@@ -24,6 +24,7 @@ for executable in "${native}" "${client}" "${validator}"; do
 done
 bash -n "${native}"
 python3 -m py_compile "${client}" "${validator}"
+python3 "${repo_root}/tests/scripts/test_run_nfs_client_qualification.py"
 
 if grep -Eq '^permissions:' "${workflow}"; then
   die "qualification workflow must scope permissions at the job level"

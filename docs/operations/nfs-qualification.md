@@ -191,6 +191,15 @@ that run's directory and driver-owned resources. An unmount, driver cleanup, or
 leftover assertion failure fails the run. Fault/recovery logs remain sensitive
 runner-local output and are not uploaded.
 
+Client-local cleanup never recursively traverses the run directory. It first
+detaches the exact mountpoint, verifies that the mount is absent, scrubs only
+the known Kerberos ticket cache, and removes the empty mountpoint and run root
+with non-recursive directory operations. A failed or unverifiable detachment
+still runs driver reconciliation and scrubs the ticket cache, but preserves the
+private mountpoint and run root for disposable-runner recovery. The reconciler
+retains the first failure while attempting both driver operations and every
+validated run directory that matches the exact prefix.
+
 ## Evidence and publication boundary
 
 Run the fast, non-networked contract checks with:

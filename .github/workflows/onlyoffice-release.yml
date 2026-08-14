@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Check adapter launcher
         run: |
           cd adapters/onlyoffice
@@ -83,6 +83,6 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Render the namespace-isolated chart
         run: tests/scripts/check-onlyoffice-helm-chart.sh

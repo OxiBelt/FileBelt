@@ -17,13 +17,13 @@
     "@filebelt/markdown": "workspace:*",
     "@filebelt/mcp-settings": "workspace:*",
     "@fluentui/react-components": "9.74.5",
-    "lucide-react": "1.28.0",
+    "lucide-react": "1.31.0",
     "openapi-fetch": "0.17.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0",
+    "@playwright/test": "1.62.1",
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",

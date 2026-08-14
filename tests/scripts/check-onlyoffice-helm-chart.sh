@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-readonly HELM_VERSION="v4.2.3"
+readonly HELM_VERSION="v4.2.4"
 
 repo_root="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 chart="${repo_root}/deploy/helm/filebelt-onlyoffice"

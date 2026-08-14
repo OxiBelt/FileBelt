@@ -30,7 +30,7 @@ x-filebelt-profiles: &filebelt-profiles [core]
 
 services:
   postgres:
-    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
     profiles: *filebelt-profiles
     environment:
       POSTGRES_DB: filebelt
@@ -100,7 +100,7 @@ services:
     restart: "no"
 
   postgres-migrator-role:
-    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
     profiles: *filebelt-profiles
     entrypoint: [/opt/filebelt/bootstrap-database-roles.sh]
     command: [migrator]
@@ -126,7 +126,7 @@ services:
     restart: "no"
 
   postgres-runtime-roles:
-    image: docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4
+    image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
     profiles: *filebelt-profiles
     entrypoint: [/opt/filebelt/bootstrap-database-roles.sh]
     command: [runtime]

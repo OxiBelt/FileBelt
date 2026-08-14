@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
-readonly HELM_VERSION="v4.2.3"
+readonly HELM_VERSION="v4.2.4"
 repo_root="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 chart="${repo_root}/deploy/helm/filebelt-git"
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/filebelt-git-helm.XXXXXX")"

@@ -42,6 +42,9 @@ impl GatewayIdentity {
             gateway_epoch: 0,
             operation: Some(Operation::GatewayHello(GatewayHelloRequest {
                 shard_key: shard_key.into(),
+                tenant_slug: String::new(),
+                boot_id: String::new(),
+                nfs_compatibility: None,
             })),
             ..VfsRequest::default()
         }

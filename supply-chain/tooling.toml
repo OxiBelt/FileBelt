@@ -5,7 +5,7 @@ version = 1
 [language]
 rust = "1.97.1"
 node = "24.19.0"
-pnpm = "11.20.0"
+pnpm = "11.21.0"
 
 # CI installers must update these exact versions and their checksums together.
 # Buf becomes a required download when the first .proto file is accepted.
@@ -28,14 +28,14 @@ native_full = ["linux/amd64", "linux/arm64"]
 qemu_smoke = ["linux/riscv64"]
 
 [image_build.native]
-builder = "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488"
+builder = "docker.io/library/rust@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f"
 debian_snapshot = "20260713T000000Z"
 binutils = "2.44-3"
 gcc = "14.2.0-19"
 musl = "1.2.5-3.1~deb13u1"
 
 [image_build.riscv64]
-builder = "docker.io/library/rust@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488"
+builder = "docker.io/library/rust@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f"
 cross_toolchain = "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl@sha256:60372bf6ad955bc04ac9b0689476b05955b4e90fc2030d311be687025672cc6d"
 cross_toolchain_revision = "55f847251389c5406df85579191c0eac412fab3a"
 compiler_sha256 = "3fe20d705129f8ba4ae6be393fd4c484479f688f576af78c0ff2bb10e59d5f86"

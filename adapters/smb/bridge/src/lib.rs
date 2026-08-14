@@ -136,6 +136,7 @@ pub fn list_request(
             directory_id,
             cursor: String::new(),
             limit,
+            directory_handle: Vec::new(),
         }),
     )
 }
@@ -147,6 +148,7 @@ pub fn stat_request(session: &BridgeSession, drive_id: String, resource_id: Stri
         VfsOperation::Stat(StatRequest {
             drive_id,
             resource_id,
+            persistent_handle: Vec::new(),
         }),
     )
 }
@@ -179,6 +181,7 @@ fn envelope(session: &BridgeSession, operation: VfsOperation) -> VfsRequest {
         session_id: session.session_id.clone(),
         credential_generation: session.credential_generation,
         authorization_generation: session.authorization_generation,
+        nfs_context: None,
         operation: Some(operation),
     }
 }

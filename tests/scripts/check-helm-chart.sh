@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-readonly HELM_VERSION="v4.2.3"
+readonly HELM_VERSION="v4.2.4"
 readonly OPERATION_ID="123e4567-e89b-42d3-a456-426614174000"
 
 repo_root="$(cd -- "$(dirname -- "$0")/../.." && pwd)"

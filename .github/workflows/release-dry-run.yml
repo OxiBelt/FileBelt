@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -49,7 +49,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare immutable image plan
         env:
@@ -89,7 +89,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -101,7 +101,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare immutable image plan
         env:

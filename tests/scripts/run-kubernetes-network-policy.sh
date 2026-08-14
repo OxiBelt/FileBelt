@@ -5,7 +5,8 @@ set -euo pipefail
 
 umask 077
 
-readonly MINIKUBE_KUBERNETES_VERSION="v1.34.10"
+readonly SUPPORTED_KUBERNETES_VERSION="v1.34.10"
+readonly PRERELEASE_KUBERNETES_VERSION="v1.37.0-rc.0"
 readonly RELEASE_NAME="network-policy"
 readonly FILEBELT_NAMESPACE="filebelt-ci"
 readonly CLIENT_NAMESPACE="filebelt-ci-clients"
@@ -29,7 +30,7 @@ die() {
 }
 
 usage() {
-  echo "usage: $0 --cni <calico|cilium>" >&2
+  echo "usage: $0 --cni <calico|cilium> [--kubernetes-version <version>]" >&2
 }
 
 require_command() {
@@ -146,11 +147,17 @@ wait_for_policy_denial() {
 }
 
 cni=""
+kubernetes_version="${SUPPORTED_KUBERNETES_VERSION}"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --cni)
       [[ "$#" -ge 2 ]] || { usage; exit 2; }
       cni="$2"
+      shift 2
+      ;;
+    --kubernetes-version)
+      [[ "$#" -ge 2 ]] || { usage; exit 2; }
+      kubernetes_version="$2"
       shift 2
       ;;
     --help)
@@ -168,6 +175,13 @@ case "${cni}" in
     ;;
   *)
     die "--cni must be calico or cilium"
+    ;;
+esac
+case "${kubernetes_version}" in
+  "${SUPPORTED_KUBERNETES_VERSION}"|"${PRERELEASE_KUBERNETES_VERSION}")
+    ;;
+  *)
+    die "--kubernetes-version must be the supported baseline or reviewed prerelease"
     ;;
 esac
 
@@ -202,7 +216,7 @@ if ! minikube start \
   --driver=docker \
   --container-runtime=containerd \
   --cni="${cni}" \
-  --kubernetes-version="${MINIKUBE_KUBERNETES_VERSION}" \
+  --kubernetes-version="${kubernetes_version}" \
   --output=json \
   --wait=all \
   --wait-timeout="${timeout_seconds}s" \
@@ -212,6 +226,12 @@ if ! minikube start \
 fi
 
 kubectl_cmd wait --for=condition=Ready node --all --timeout="${timeout_seconds}s"
+actual_version="$(kubectl_cmd get --raw /version \
+  | grep -Eo '"gitVersion"[[:space:]]*:[[:space:]]*"v[^"]+' \
+  | sed -E 's/^.*"(v[^"]+)$/\1/' \
+  | head -n 1)"
+[[ "${actual_version}" == "${kubernetes_version}" ]] \
+  || die "API server version ${actual_version:-unknown} does not match ${kubernetes_version}"
 if [[ "${cni}" == "calico" ]]; then
   kubectl_cmd wait --namespace kube-system --for=condition=Ready pod \
     --selector k8s-app=calico-node --timeout="${timeout_seconds}s"

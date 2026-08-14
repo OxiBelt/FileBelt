@@ -9,12 +9,152 @@ updates:
     groups:
       rust-bootstrap:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/protocol/media"
+    schedule:
+      interval: weekly
+    groups:
+      media-protocol:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/ftp-ftps"
+    schedule:
+      interval: weekly
+    groups:
+      ftp-ftps-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/git"
+    schedule:
+      interval: weekly
+    groups:
+      git-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/nfs"
+    schedule:
+      interval: weekly
+    groups:
+      nfs-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/onlyoffice"
+    schedule:
+      interval: weekly
+    groups:
+      onlyoffice-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/smb"
+    schedule:
+      interval: weekly
+    groups:
+      smb-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/transcode"
+    schedule:
+      interval: weekly
+    groups:
+      transcode-adapter:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
     groups:
       node-bootstrap:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/adapters/onlyoffice"
+    schedule:
+      interval: weekly
+    groups:
+      onlyoffice-launcher:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/ftp-ftps"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/git"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/nfs"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/onlyoffice"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/smb/ops"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/transcode"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/deploy/compose"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/source/ops"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/tests/docker/mcp-egress"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/tests/docker/oidc"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/tests/docker/qemu-riscv64"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/ui/web"
+    schedule:
+      interval: weekly
+    groups:
+      images:
         patterns: ["*"]
   - package-ecosystem: github-actions
     directory: "/"

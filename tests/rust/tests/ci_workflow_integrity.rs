@@ -68,9 +68,31 @@ fn bootstrap_workflow_is_least_privileged_and_complete() {
         "fuzz-sustained:",
         "docker-integration:",
         "docker-integration-gate:",
+        "phase3-kubernetes-prerelease:",
     ] {
         assert!(workflow.contains(job), "workflow is missing {job}");
     }
+}
+
+#[test]
+fn kubernetes_prerelease_qualification_does_not_expand_production_support() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("check workflow");
+    let prerelease = workflow_job(
+        &workflow,
+        "phase3-kubernetes-prerelease",
+        "phase3-network-calico",
+    );
+    let phase3_gate = final_workflow_job(&workflow, "phase3-gate");
+    let chart = fs::read_to_string(root.join("deploy/helm/filebelt/Chart.yaml"))
+        .expect("Helm chart metadata");
+
+    assert!(prerelease.contains("github.event_name == 'schedule'"));
+    assert!(prerelease.contains("github.event_name == 'workflow_dispatch'"));
+    assert!(prerelease.contains("--kubernetes-version v1.37.0-rc.0"));
+    assert!(!phase3_gate.contains("phase3-kubernetes-prerelease"));
+    assert!(chart.contains("kubeVersion: \">=1.34.0-0 <1.37.0-0\""));
 }
 
 #[test]
@@ -109,6 +131,24 @@ fn rust_boundary_job_is_advisory_for_size_and_blocks_the_bootstrap_gate() {
     ));
     assert!(workflow.contains("RUST_BOUNDARIES: ${{ needs.rust-boundaries.result }}"));
     assert!(workflow.contains("test \"$RUST_BOUNDARIES\" = success"));
+}
+
+#[test]
+fn dependency_admission_covers_independent_compositions() {
+    let root = repository_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/check-filebelt.yml"))
+        .expect("bootstrap workflow");
+    let source_structure = workflow_job(&workflow, "source-structure", "rust");
+    let supply_chain = workflow_job(&workflow, "supply-chain", "node");
+
+    assert!(source_structure.contains("tests/scripts/check-dependabot-coverage.py --repo-root ."));
+    assert!(supply_chain.contains("cargo install --locked cargo-audit --version 0.22.2"));
+    assert!(supply_chain.contains("cargo install --locked cargo-deny --version 0.20.2"));
+    assert!(
+        supply_chain
+            .contains("python3 tests/scripts/check-adapter-dependency-admission.py --repo-root .")
+    );
+    assert!(!supply_chain.contains("cargo vet --manifest-path adapters/"));
 }
 
 #[test]
@@ -168,7 +208,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(checks.contains("linux/riscv64"));
     assert!(checks.contains("--qemu-mode rootless"));
     assert!(checks.contains("azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310"));
-    assert!(checks.contains("version: v4.2.3"));
+    assert!(checks.contains("version: v4.2.4"));
     assert!(checks.contains("tests/scripts/check-helm-chart.sh"));
     assert!(checks.contains("tests/scripts/verify-release-tag.sh --check-trust"));
     assert!(checks.contains("python3 -m unittest discover -s tests/scripts -p 'test_*.py'"));
@@ -371,7 +411,7 @@ fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
         .find("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
         .expect("pinned Node setup");
     let activation = protocol
-        .find("corepack prepare pnpm@11.20.0 --activate")
+        .find("corepack prepare pnpm@11.21.0 --activate")
         .expect("pinned pnpm activation");
     let install = protocol
         .find("pnpm install --frozen-lockfile --ignore-scripts")

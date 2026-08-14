@@ -50,7 +50,7 @@ Security-sensitive invariants include:
 ## Deployment expectations
 
 Docker profiles are for development, integration, and fault verification.
-Kubernetes 1.34-1.36 with Helm 4.2.3 is the supported production topology after
+Kubernetes 1.34-1.36 with Helm 4.2.4 is the supported production topology after
 the required acceptance gates pass. Production requires the shipped hardened
 chart, external PostgreSQL/OIDC/optional Iggy, an operator OIDC egress gateway,
 operator-managed Secrets, and an existing RWX POSIX claim. It makes no HA,

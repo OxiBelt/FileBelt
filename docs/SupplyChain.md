@@ -22,8 +22,17 @@ repository; locally asserted audits remain reviewable in
 a dependency-policy review, not an implicit network trust decision at build
 time.
 
-Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.0,
-`@eslint/js` 10.0.1, `typescript-eslint` 8.66.0, TypeScript 6.0.3, and
+The root Cargo workspace and every independently locked media or adapter
+workspace receive weekly Dependabot coverage. CI additionally runs `cargo
+audit` and Cargo Deny's advisory, license, ban, and source policy against every
+registered adapter lock and manifest. Cargo Vet remains scoped to the Apache
+root workspace: adapter updates require their own license and source-offer
+artifacts, but do not inherit root audit exemptions or receive blanket Vet
+exemptions. Docker and Compose directories and the isolated ONLYOFFICE pnpm
+lock are likewise discovered by a fail-closed coverage check.
+
+Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.1,
+`@eslint/js` 10.0.1, `typescript-eslint` 8.67.0, TypeScript 6.0.3, and
 `@stylistic/eslint-plugin` 5.10.0. The Stylistic package supplies maintained
 layout rules without lifecycle scripts; its resolved license must remain
 admitted by `supply-chain/node-policy.toml`. Rust production-package closures
@@ -146,7 +155,7 @@ The immutable external integration inputs are:
 | Input | Accepted version and digest | Distribution role |
 | --- | --- | --- |
 | OxiBelt | `0.7.1-beta.2`, `ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030` | Base of `filebelt-web`; prerelease exception |
-| PostgreSQL | `18.4`, `docker.io/library/postgres@sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4` | Docker integration helper only |
+| PostgreSQL | `18.4`, `docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636` | Docker integration helper only |
 | Apache Iggy | `0.8.0`, `docker.io/apache/iggy@sha256:99b42016a898381d4bab3c2d4613456eb04ad06a7a0688314823d798a685636b` | Optional Docker integration helper only |
 | Iggy Rust client | exact crate `0.8.0` | Optional notification publisher/consumer |
 
@@ -193,7 +202,7 @@ not introduce overlapping authority sets. This wrapper is required because the
 admitted verifier version does not itself associate every pooled authority
 window with the material it selected.
 
-The browser workspace pins `@playwright/test@1.62.0` for Chromium and Firefox
+The browser workspace pins `@playwright/test@1.62.1` for Chromium and Firefox
 security-flow coverage. It remains development-only and installs browsers only
 in the test environment. `openapi-typescript@7.13.0` remains the sole
 deterministic public-client generator; Phase 4 regeneration covers all MCP
@@ -255,7 +264,7 @@ Each role/platform archive produces:
 
 - a SHA-256 archive checksum and machine-readable artifact contract;
 - a normalized CycloneDX JSON SBOM scoped to that platform;
-- a Trivy `0.73.0` JSON vulnerability report and policy decision; and
+- a Trivy `0.74.0` JSON vulnerability report and policy decision; and
 - extracted image metadata used by static, identity, and smoke checks.
 
 Static Rust SBOMs are augmented from the immutable image plan with the exact

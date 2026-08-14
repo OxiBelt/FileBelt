@@ -32,9 +32,13 @@ assert_contains "${workflow}" "MINIKUBE_VERSION: v1.38.1"
 assert_contains "${workflow}" "MINIKUBE_SHA256: 099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e"
 assert_contains "${workflow}" "phase3-kind-current:"
 assert_contains "${workflow}" "phase3-kind-supported:"
+assert_contains "${workflow}" "phase3-kubernetes-prerelease:"
 assert_contains "${workflow}" "phase3-network-calico:"
 assert_contains "${workflow}" "phase3-network-cilium:"
 assert_contains "${workflow}" "phase3-gate:"
+assert_contains "${workflow}" "Kubernetes v1.37.0-rc.0 prerelease qualification"
+assert_contains "${network_script}" 'PRERELEASE_KUBERNETES_VERSION="v1.37.0-rc.0"'
+assert_contains "${network_script}" '--kubernetes-version="${kubernetes_version}"'
 
 for node_image in \
   "kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256" \

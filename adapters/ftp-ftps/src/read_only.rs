@@ -163,6 +163,7 @@ impl VfsHttp {
             session_id: fence.id.to_string(),
             credential_generation: fence.credential_generation,
             authorization_generation: fence.authorization_generation,
+            nfs_context: None,
             operation: Some(operation),
         }
     }
@@ -400,6 +401,7 @@ impl ReadOnlyStorage {
                 directory_id: node.to_string(),
                 cursor: String::new(),
                 limit: 1000,
+                directory_handle: Vec::new(),
             }),
         )
         .await
@@ -432,6 +434,7 @@ impl ReadOnlyStorage {
             Operation::Stat(StatRequest {
                 drive_id: self.drive_id.to_string(),
                 resource_id: id.to_string(),
+                persistent_handle: Vec::new(),
             }),
         )
         .await?
@@ -523,6 +526,7 @@ impl StorageBackend<GatewayUser> for ReadOnlyStorage {
                     share_read: true,
                     share_write: false,
                     share_delete: false,
+                    persistent_handle: Vec::new(),
                 }),
             )
             .await?;

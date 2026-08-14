@@ -219,8 +219,8 @@ function NormalizeTrivy(
     throw new Error("Trivy report SchemaVersion must be 2");
   }
   const Trivy = AssertRecord(Report.Trivy, "Trivy report tool identity");
-  if (Trivy.Version !== "0.73.0") {
-    throw new Error("Trivy report must be produced by version 0.73.0");
+  if (Trivy.Version !== "0.74.0") {
+    throw new Error("Trivy report must be produced by version 0.74.0");
   }
   if (Report.Results === undefined) {
     throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`);

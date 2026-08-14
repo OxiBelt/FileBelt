@@ -20,7 +20,7 @@ MCP_COMPOSE = ROOT / "deploy/compose/compose.mcp.yaml"
 PREPARE = ROOT / "deploy/compose/prepare-state.sh"
 POSTGRES = (
     "docker.io/library/postgres@"
-    "sha256:d129b9577d274bb96cbd44d902bdeb1b935c89247d161241e9154cba64e13df4"
+    "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636"
 )
 IGGY = (
     "docker.io/apache/iggy@"

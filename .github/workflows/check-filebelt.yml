@@ -27,9 +27,11 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Check repository boundaries
         run: python3 tests/scripts/check-source-structure.py --repo-root .
+      - name: Check dependency update coverage
+        run: python3 tests/scripts/check-dependabot-coverage.py --repo-root .
       - name: Test repository scripts
         run: python3 -m unittest discover -s tests/scripts -p 'test_*.py'
       - name: Check local Markdown links
@@ -152,6 +154,8 @@ jobs:
         run: cargo deny check
       - name: Check review evidence
         run: cargo vet --locked
+      - name: Check adapter advisories, licenses, and sources
+        run: python3 tests/scripts/check-adapter-dependency-admission.py --repo-root .
 
   node:
     name: Node workspace
@@ -167,7 +171,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Install without lifecycle scripts
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Check dependency licenses
@@ -200,7 +204,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Install without lifecycle scripts
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install pinned Buf when schemas exist
@@ -329,7 +333,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -341,7 +345,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare read-only image plan
         run: tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase1/image-plan.json
@@ -375,7 +379,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -387,7 +391,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare read-only image plan
         run: tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase1/image-plan.json
@@ -461,7 +465,7 @@ jobs:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
         if: matrix.requires_playwright
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Install browser workspace without lifecycle scripts
         if: matrix.requires_playwright
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -518,7 +522,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Install pinned Kind and kubectl
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -567,7 +571,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Install pinned Kind and kubectl
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -589,6 +593,48 @@ jobs:
           --node-image
           ${{ matrix.node_image }}
 
+  phase3-kubernetes-prerelease:
+    name: Kubernetes v1.37.0-rc.0 prerelease qualification
+    if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: bootstrap-gate
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.4
+      - name: Install pinned Kubernetes client
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          version: v0.32.0
+          kubectl_version: v1.36.3
+          install_only: true
+      - name: Install checksum-pinned Minikube
+        env:
+          MINIKUBE_VERSION: v1.38.1
+          MINIKUBE_SHA256: 099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e
+        run: |
+          install_root="${RUNNER_TEMP}/minikube"
+          mkdir -p "${install_root}/bin"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+            "https://github.com/kubernetes/minikube/releases/download/${MINIKUBE_VERSION}/minikube-linux-amd64" \
+            --output "${install_root}/minikube"
+          printf '%s  %s\n' "${MINIKUBE_SHA256}" "${install_root}/minikube" | sha256sum --check --status
+          install -m 0755 "${install_root}/minikube" "${install_root}/bin/minikube"
+          echo "${install_root}/bin" >> "${GITHUB_PATH}"
+      - name: Run non-production prerelease acceptance
+        env:
+          FILEBELT_KUBERNETES_TIMEOUT_SECONDS: "600"
+        run: >-
+          tests/scripts/run-kubernetes-network-policy.sh
+          --cni calico
+          --kubernetes-version v1.37.0-rc.0
+
   phase3-network-calico:
     name: Kubernetes NetworkPolicy (Calico)
     if: ${{ !cancelled() && needs.bootstrap-gate.result == 'success' }}
@@ -603,7 +649,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Install pinned Kubernetes client
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -642,7 +688,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Install pinned Kubernetes client
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:

@@ -103,7 +103,7 @@ impl BridgeConfig {
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
             || endpoint.path() != "/internal/v1/vfs/execute"
-            || !endpoint_matches_expected_hostname(&self.vfs_url, &endpoint, &expected_hostname)
+            || !endpoint_matches_expected_hostname(&self.vfs_url, &endpoint, expected_hostname)
         {
             return Err(ConfigError::Invalid);
         }

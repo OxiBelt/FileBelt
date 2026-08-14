@@ -37,8 +37,8 @@ if [ ! -f "${repo_root}/devops/dist/cli.js" ]; then
   exit 1
 fi
 node "${repo_root}/devops/dist/cli.js" validate-image-plan --input "${plan}"
-if ! trivy --version | grep -Eq '^Version: 0\.73\.0$'; then
-  echo "Phase 1 requires Trivy 0.73.0" >&2
+if ! trivy --version | grep -Eq '^Version: 0\.74\.0$'; then
+  echo "Phase 1 requires Trivy 0.74.0" >&2
   exit 1
 fi
 mkdir -p "${output_dir}/first" "${output_dir}/second" "${output_dir}/comparisons"

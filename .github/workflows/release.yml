@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -52,7 +52,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
@@ -88,7 +88,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -100,7 +100,7 @@ jobs:
       - name: Set up Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.73.0
+          version: v0.74.0
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
@@ -133,7 +133,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -183,7 +183,7 @@ jobs:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
         if: matrix.requires_playwright
-        run: corepack enable && corepack prepare pnpm@11.20.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - name: Install browser workspace without lifecycle scripts
         if: matrix.requires_playwright
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -238,7 +238,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Install pinned Kind and kubectl
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -315,7 +315,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          version: v4.2.3
+          version: v4.2.4
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

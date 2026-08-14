@@ -4,7 +4,7 @@
 
 ## Support boundary
 
-FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.3. Kubernetes is
+FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.4. Kubernetes is
 the production topology; Compose remains development and integration only.
 The chart deploys web, API, I/O, and maintenance Deployments and explicit
 administrative Jobs. MCP broker and runner-controller Deployments are separate
@@ -16,6 +16,11 @@ VFS; only SMB or FTP/FTPS renders Headscale sync. NFS renders separate
 single-active tailnet relay and Ganesha/bridge backend StatefulSets with an
 exact NetworkPolicy-restricted TCP 2049 path between them. Separately licensed adapter delivery remains gated on its
 published image and protocol acceptance evidence.
+
+Kubernetes `v1.37.0-rc.0` is exercised only by the scheduled/manual prerelease
+qualification lane. It is not supported for production and does not change the
+chart's `kubeVersion`; operators must wait for a stable release and reviewed
+immutable Kind evidence before treating 1.37 as supported.
 
 Operators provide:
 

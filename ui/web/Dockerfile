@@ -15,7 +15,7 @@ COPY ui/markdown/package.json ui/markdown/package.json
 COPY ui/mcp-settings/package.json ui/mcp-settings/package.json
 COPY ui/web/package.json ui/web/package.json
 RUN corepack enable && \
-    corepack prepare pnpm@11.20.0 --activate && \
+    corepack prepare pnpm@11.21.0 --activate && \
     pnpm install --frozen-lockfile --ignore-scripts
 
 COPY ui/admin ui/admin

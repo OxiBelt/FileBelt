@@ -200,7 +200,7 @@ revision. Signer rotation is an explicit release-authority change; release
 validation never discovers trust through a live network lookup.
 
 Every platform archive has a checksum, machine-readable artifact contract,
-build metadata, normalized CycloneDX SBOM, and Trivy `0.73.0` vulnerability
+build metadata, normalized CycloneDX SBOM, and Trivy `0.74.0` vulnerability
 report. Rust SBOMs include the selected Cargo application, linked Rust standard
 library and musl runtime, and excluded build-tool evidence. Missing or partial
 inventory fails closed even when the static filesystem has no package-manager
@@ -256,7 +256,7 @@ Docker matrix.
 
 ## Kubernetes production contract
 
-FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.3. The chart
+FileBelt supports Kubernetes 1.34 through 1.36 with Helm 4.2.4. The chart
 always creates four replaceable workload definitions: OxiBelt web, API, I/O
 worker, and maintenance worker. `collaboration.enabled=true` additionally
 creates the collaboration Deployment and Service; it requires the approved
@@ -285,6 +285,14 @@ addresses, and the selected protocol's fail-closed inputs are present.
 Separately licensed adapters remain production-gated on published images and
 protocol acceptance evidence. The tools image runs explicit bounded
 administrative Jobs. FileBelt deploys no HPA.
+
+The scheduled and manually dispatched validation workflow also runs an
+isolated Minikube/Calico acceptance lane against Kubernetes `v1.37.0-rc.0`.
+That prerelease lane verifies the exact API-server version, restricted Pod
+Security admission, rendered objects, and NetworkPolicy behavior, but is not a
+release or support gate. Kubernetes 1.37 must not enter `kubeVersion`, the
+supported Kind matrix, or production guidance until a stable release and an
+immutable reviewed Kind node image are available.
 
 `documents.enabled=true` additionally renders the Apache document coordinator
 Deployment and Service only after migration 000006, grants verification, the

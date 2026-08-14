@@ -17,18 +17,18 @@
     "@filebelt/markdown": "workspace:*",
     "@filebelt/mcp-settings": "workspace:*",
     "@fluentui/react-components": "9.74.5",
-    "lucide-react": "1.28.0",
+    "lucide-react": "1.31.0",
     "openapi-fetch": "0.17.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0",
-    "@types/node": "24.13.3",
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "openapi-typescript": "7.13.0",
-    "vite": "7.3.6",
+    "vite": "8.2.1",
     "vitest": "4.1.10"
   }
 }

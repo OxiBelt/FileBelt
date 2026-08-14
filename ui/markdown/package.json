@@ -20,7 +20,7 @@
     "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.43.8",
     "dompurify": "3.4.13",
-    "katex": "0.18.1",
+    "katex": "0.18.4",
     "lib0": "0.2.117",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
@@ -40,7 +40,7 @@
   "devDependencies": {
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
-    "vite": "7.3.6",
+    "vite": "8.2.1",
     "vitest": "4.1.10"
   }
 }

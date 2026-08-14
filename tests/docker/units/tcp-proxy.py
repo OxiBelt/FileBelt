@@ -6,12 +6,56 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import selectors
 import socket
 import threading
 
 
 MAXIMUM_CONNECTIONS = 64
+LOOPBACK_PORT = 8443
+IPV6_OPTIONAL_ERRORS = frozenset(
+    error
+    for error in (
+        getattr(errno, "EAFNOSUPPORT", None),
+        getattr(errno, "EPROTONOSUPPORT", None),
+        getattr(errno, "EADDRNOTAVAIL", None),
+        getattr(errno, "ENOPROTOOPT", None),
+    )
+    if error is not None
+)
+
+
+def create_listener(family: socket.AddressFamily, address: tuple[str, int]) -> socket.socket:
+    """Create one loopback listener without relying on dual-stack defaults."""
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if family == socket.AF_INET6:
+            listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        listener.bind(address)
+        listener.listen()
+        return listener
+    except Exception:
+        listener.close()
+        raise
+
+
+def create_listeners() -> tuple[socket.socket, ...]:
+    """Bind the mandatory IPv4 edge and an IPv6 edge when the host supports it."""
+    listeners: list[socket.socket] = []
+    try:
+        listeners.append(create_listener(socket.AF_INET, ("127.0.0.1", LOOPBACK_PORT)))
+        try:
+            listeners.append(create_listener(socket.AF_INET6, ("::1", LOOPBACK_PORT)))
+        except OSError as error:
+            if error.errno not in IPV6_OPTIONAL_ERRORS:
+                raise RuntimeError("IPv6 loopback bridge listener could not be created") from error
+        return tuple(listeners)
+    except Exception:
+        for listener in listeners:
+            listener.close()
+        raise
 
 
 def forward(client: socket.socket, target: tuple[str, int], admission: threading.BoundedSemaphore) -> None:
@@ -67,15 +111,12 @@ def main() -> int:
     if not separator or not host or not port_text.isdigit():
         raise SystemExit("target must be HOST:PORT")
     target = (host, int(port_text))
-    ipv4 = socket.create_server(("127.0.0.1", 8443), reuse_port=False)
-    ipv6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-    ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    ipv6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-    ipv6.bind(("::1", 8443))
-    ipv6.listen()
+    listeners = create_listeners()
     admission = threading.BoundedSemaphore(MAXIMUM_CONNECTIONS)
-    threading.Thread(target=serve, args=(ipv6, target, admission), daemon=True).start()
-    serve(ipv4, target, admission)
+    for listener in listeners[1:]:
+        threading.Thread(target=serve, args=(listener, target, admission), daemon=True).start()
+    print("FileBelt browser TCP bridge is listening", flush=True)
+    serve(listeners[0], target, admission)
 
 
 if __name__ == "__main__":

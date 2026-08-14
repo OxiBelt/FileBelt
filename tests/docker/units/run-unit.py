@@ -9,6 +9,7 @@ import argparse
 import os
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,9 @@ COMPOSE_SUFFIX = {
 }
 LOOPBACK_EDGE_HOST = "127.0.0.1"
 EDGE_NO_PROXY_HOSTS = ("filebelt.localhost", "localhost", "127.0.0.1", "::1")
+EDGE_PORT = 8443
+EDGE_SERVER_NAME = "filebelt.localhost"
+MAXIMUM_PROXY_ERROR_DETAIL = 240
 
 
 def docker_host_root(root: Path) -> Path:
@@ -64,17 +68,78 @@ def compose_command(compose_files: tuple[Path, ...], profiles: tuple[str, ...], 
     return command
 
 
-def wait_proxy(address: str, process: subprocess.Popen[bytes]) -> None:
+def proxy_error_detail(error: BaseException) -> str:
+    """Keep bridge failures printable and safe to retain in runner diagnostics."""
+    return "".join(
+        character if character.isprintable() and character not in "\r\n\t" else "?"
+        for character in str(error)
+    )[:MAXIMUM_PROXY_ERROR_DETAIL]
+
+
+def check_proxy_liveness(process: subprocess.Popen[bytes]) -> None:
+    return_code = process.poll()
+    if return_code is not None:
+        raise RuntimeError(f"browser TCP proxy exited with status {return_code}")
+
+
+def probe_proxy(address: str, certificate: Path, port: int = EDGE_PORT) -> int:
+    """Exercise the TLS edge over the local bridge using the public origin name."""
+    context = ssl.create_default_context(cafile=str(certificate))
+    with socket.create_connection((address, port), timeout=1) as connection:
+        with context.wrap_socket(connection, server_hostname=EDGE_SERVER_NAME) as tls_connection:
+            tls_connection.sendall(
+                b"GET /api/v1/session HTTP/1.1\r\n"
+                b"Host: filebelt.localhost\r\n"
+                b"Accept: application/json\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            response = bytearray()
+            while b"\r\n" not in response and len(response) < 4096:
+                chunk = tls_connection.recv(1024)
+                if not chunk:
+                    break
+                response.extend(chunk)
+    status_line = bytes(response).split(b"\r\n", 1)[0]
+    parts = status_line.split(b" ", 2)
+    if len(parts) < 2 or not parts[0].startswith(b"HTTP/") or len(parts[1]) != 3 or not parts[1].isdigit():
+        raise RuntimeError("browser TCP proxy returned an invalid HTTP status line")
+    return int(parts[1])
+
+
+def wait_proxy(address: str, process: subprocess.Popen[bytes], certificate: Path) -> None:
     deadline = time.monotonic() + 10
+    last_error = "no TLS/HTTP response"
     while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError("browser TCP proxy exited before becoming ready")
+        check_proxy_liveness(process)
         try:
-            with socket.create_connection((address, 8443), timeout=0.2):
-                return
-        except OSError:
+            status = probe_proxy(address, certificate)
+        except (OSError, RuntimeError, ssl.SSLError) as error:
+            last_error = proxy_error_detail(error)
             time.sleep(0.1)
-    raise RuntimeError("browser TCP proxy did not become ready")
+            continue
+        check_proxy_liveness(process)
+        if status in {200, 401}:
+            return
+        last_error = f"unexpected HTTP status {status}"
+        time.sleep(0.1)
+    raise RuntimeError(f"browser TCP proxy did not become ready: {last_error}")
+
+
+def stop_proxy(
+    process: subprocess.Popen[bytes],
+    diagnostics: Path,
+    secrets: tuple[bytes, ...],
+    retain_diagnostics: bool,
+) -> None:
+    """Stop and reap the bridge, retaining scrubbed output only after failure."""
+    process.terminate()
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+    if retain_diagnostics:
+        write_scrubbed(diagnostics / "proxy-output.txt", stdout + stderr, secrets)
 
 
 def append_no_proxy(value: str) -> str:
@@ -211,10 +276,10 @@ def main() -> int:
             proxy = subprocess.Popen(
                 proxy_command(address),
                 cwd=ROOT,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-            wait_proxy(LOOPBACK_EDGE_HOST, proxy)
+            wait_proxy(LOOPBACK_EDGE_HOST, proxy, local_state / "tls/filebelt.crt")
         subprocess.run(unit.driver, cwd=ROOT, env=environment, check=True)
         status = 0
     except (OSError, subprocess.CalledProcessError, ValueError, RuntimeError) as error:
@@ -223,11 +288,12 @@ def main() -> int:
         status = 1
     finally:
         if proxy is not None:
-            proxy.terminate()
-            try:
-                proxy.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proxy.kill()
+            stop_proxy(
+                proxy,
+                diagnostics,
+                secret_values(local_state),
+                retain_diagnostics=status != 0,
+            )
         if status != 0 and started:
             secrets = secret_values(local_state)
             for name, arguments_tail in (

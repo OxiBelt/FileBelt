@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
+import shutil
 import socket
+import ssl
+import subprocess
 import sys
 import tempfile
 import threading
@@ -175,6 +179,167 @@ class LifecycleTest(unittest.TestCase):
         upstream_thread.join(timeout=2)
         self.assertFalse(proxy_thread.is_alive())
         self.assertFalse(upstream_thread.is_alive())
+
+    def test_tcp_proxy_ipv6_unavailable_keeps_mandatory_ipv4_listener(self) -> None:
+        ipv4 = mock.Mock()
+        with mock.patch.object(
+            TCP_PROXY,
+            "create_listener",
+            side_effect=[ipv4, OSError(errno.EAFNOSUPPORT, "unsupported")],
+        ):
+            self.assertEqual(TCP_PROXY.create_listeners(), (ipv4,))
+        ipv4.close.assert_not_called()
+
+    def test_tcp_proxy_ipv6_conflict_closes_partial_listener(self) -> None:
+        ipv4 = mock.Mock()
+        with mock.patch.object(
+            TCP_PROXY,
+            "create_listener",
+            side_effect=[ipv4, OSError(errno.EADDRINUSE, "in use")],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "IPv6 loopback"):
+                TCP_PROXY.create_listeners()
+        ipv4.close.assert_called_once_with()
+
+    def test_tcp_proxy_ipv4_conflict_fails_without_ipv6_fallback(self) -> None:
+        with mock.patch.object(
+            TCP_PROXY,
+            "create_listener",
+            side_effect=OSError(errno.EADDRINUSE, "in use"),
+        ) as create_listener:
+            with self.assertRaisesRegex(OSError, "in use"):
+                TCP_PROXY.create_listeners()
+        create_listener.assert_called_once_with(
+            socket.AF_INET, ("127.0.0.1", TCP_PROXY.LOOPBACK_PORT)
+        )
+
+    def test_proxy_readiness_requires_liveness_and_accepted_status(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = 9
+        with self.assertRaisesRegex(RuntimeError, "exited with status 9"):
+            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+
+        process.poll.return_value = None
+        with (
+            mock.patch.object(RUN_UNIT, "probe_proxy", side_effect=[503, 401]) as probe,
+            mock.patch.object(RUN_UNIT.time, "monotonic", side_effect=[0, 0, 0]),
+            mock.patch.object(RUN_UNIT.time, "sleep"),
+        ):
+            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+        self.assertEqual(probe.call_count, 2)
+
+        process.poll.return_value = None
+        with (
+            mock.patch.object(RUN_UNIT, "probe_proxy", return_value=503),
+            mock.patch.object(RUN_UNIT.time, "monotonic", side_effect=[0, 0, 11]),
+            mock.patch.object(RUN_UNIT.time, "sleep"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "unexpected HTTP status 503"):
+                RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+
+        process.poll.side_effect = [None, 11]
+        with mock.patch.object(RUN_UNIT, "probe_proxy", return_value=401):
+            with self.assertRaisesRegex(RuntimeError, "exited with status 11"):
+                RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+
+        process.poll.reset_mock()
+        process.poll.side_effect = None
+        process.poll.return_value = None
+        with mock.patch.object(RUN_UNIT, "probe_proxy", return_value=401) as probe:
+            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+        self.assertEqual(process.poll.call_count, 2)
+        probe.assert_called_once_with("127.0.0.1", Path("certificate.pem"))
+
+    def test_proxy_readiness_forwards_tls_http_request(self) -> None:
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl is unavailable for the TLS test certificate")
+        try:
+            upstream_listener = socket.create_server(("127.0.0.1", 0))
+            bridge_listener = socket.create_server(("127.0.0.1", 0))
+        except PermissionError as error:
+            self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
+        with tempfile.TemporaryDirectory() as directory:
+            certificate = Path(directory) / "certificate.pem"
+            key = Path(directory) / "key.pem"
+            try:
+                subprocess.run(
+                    [
+                        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                        "-days", "1", "-subj", "/CN=filebelt.localhost",
+                        "-addext", "subjectAltName=DNS:filebelt.localhost",
+                        "-keyout", str(key), "-out", str(certificate),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as error:
+                self.skipTest(f"openssl could not create TLS test certificate: {error}")
+            received = bytearray()
+            server_names: list[str | None] = []
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certificate, key)
+            context.set_servername_callback(
+                lambda _connection, server_name, _context: server_names.append(server_name)
+            )
+            admission = threading.BoundedSemaphore(1)
+            self.assertTrue(admission.acquire(blocking=False))
+
+            def upstream() -> None:
+                connection, _ = upstream_listener.accept()
+                with context.wrap_socket(connection, server_side=True) as tls_connection:
+                    received.extend(tls_connection.recv(4096))
+                    tls_connection.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
+
+            def bridge() -> None:
+                connection, _ = bridge_listener.accept()
+                TCP_PROXY.forward(
+                    connection,
+                    (str(upstream_listener.getsockname()[0]), int(upstream_listener.getsockname()[1])),
+                    admission,
+                )
+
+            upstream_thread = threading.Thread(target=upstream, daemon=True)
+            bridge_thread = threading.Thread(target=bridge, daemon=True)
+            upstream_thread.start()
+            bridge_thread.start()
+            try:
+                self.assertEqual(
+                    RUN_UNIT.probe_proxy(
+                        "127.0.0.1", certificate, int(bridge_listener.getsockname()[1])
+                    ),
+                    401,
+                )
+            finally:
+                bridge_listener.close()
+                upstream_listener.close()
+            bridge_thread.join(timeout=2)
+            upstream_thread.join(timeout=2)
+            self.assertFalse(bridge_thread.is_alive())
+            self.assertFalse(upstream_thread.is_alive())
+            self.assertIn(b"GET /api/v1/session HTTP/1.1\r\n", received)
+            self.assertIn(b"Host: filebelt.localhost\r\n", received)
+            self.assertEqual(server_names, ["filebelt.localhost"])
+
+    def test_proxy_teardown_scrubs_failure_output_and_discards_success_output(self) -> None:
+        secret = b"bridge-secret-value"
+        process = mock.Mock()
+        process.communicate.return_value = (
+            b"Authorization: Bearer exposed\n" + secret + b"\n" + b"x" * (MAXIMUM_DIAGNOSTIC_BYTES + 100),
+            b"",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = Path(directory)
+            RUN_UNIT.stop_proxy(process, diagnostics, (secret,), retain_diagnostics=True)
+            output = (diagnostics / "proxy-output.txt").read_bytes()
+            success = mock.Mock()
+            success.communicate.return_value = (b"ready", b"")
+            RUN_UNIT.stop_proxy(success, diagnostics, (), retain_diagnostics=False)
+        self.assertLessEqual(len(output), MAXIMUM_DIAGNOSTIC_BYTES)
+        self.assertNotIn(secret, output)
+        self.assertNotIn(b"Bearer exposed", output)
+        process.terminate.assert_called_once_with()
+        process.communicate.assert_called_once_with(timeout=5)
+        success.terminate.assert_called_once_with()
 
     def test_readiness_error_is_bounded_and_sanitized(self) -> None:
         reason = "transport\nsecret" + "x" * 400

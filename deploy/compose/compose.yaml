@@ -414,7 +414,7 @@ services:
       filebelt-api: {condition: service_started}
       filebelt-worker-io: {condition: service_started}
     ports:
-      - ${FILEBELT_HTTPS_BIND_ADDRESS:-127.0.0.1}:${FILEBELT_HTTPS_PORT:-8443}:8443/tcp
+      - ${FILEBELT_HTTPS_BIND_ADDRESS:-127.0.0.1}:${FILEBELT_HTTPS_PORT-8443}:8443/tcp
     restart: unless-stopped
 
   filebelt-iggy:

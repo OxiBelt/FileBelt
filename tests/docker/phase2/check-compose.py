@@ -79,6 +79,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="filebelt-phase2-compose-") as directory:
         state = Path(directory) / "state"
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
+        environment.pop("FILEBELT_HTTPS_BIND_ADDRESS", None)
+        environment.pop("FILEBELT_HTTPS_PORT", None)
         subprocess.run([str(PREPARE)], cwd=ROOT, env=environment, check=True)
         purposes = {
             "api-storage": "api-storage",
@@ -116,28 +118,37 @@ def main() -> int:
             capture_output=True,
             text=True,
         )
+        compose_config_command = [
+            "docker",
+            "compose",
+            "--file",
+            str(COMPOSE),
+            "--file",
+            str(MCP_COMPOSE),
+            "--profile",
+            "core",
+            "--profile",
+            "iggy",
+            "--profile",
+            "fault",
+            "--profile",
+            "mcp",
+            "config",
+            "--format",
+            "json",
+        ]
         rendered = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--file",
-                str(COMPOSE),
-                "--file",
-                str(MCP_COMPOSE),
-                "--profile",
-                "core",
-                "--profile",
-                "iggy",
-                "--profile",
-                "fault",
-                "--profile",
-                "mcp",
-                "config",
-                "--format",
-                "json",
-            ],
+            compose_config_command,
             cwd=ROOT,
             env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        outside_rendered = subprocess.run(
+            compose_config_command,
+            cwd=ROOT,
+            env={**environment, "FILEBELT_HTTPS_PORT": ""},
             check=True,
             capture_output=True,
             text=True,
@@ -155,6 +166,7 @@ def main() -> int:
     }
     model = json.loads(rendered.stdout)
     services = model["services"]
+    outside_services = json.loads(outside_rendered.stdout)["services"]
     assert model["networks"]["control"]["internal"] is True
     assert model["networks"]["edge"]["internal"] is True
     assert model["networks"]["internet-egress"].get("internal", False) is False
@@ -289,6 +301,19 @@ def main() -> int:
             "protocol": "tcp",
         }
     ]
+    for name, service in outside_services.items():
+        if name != "filebelt-web":
+            assert not service.get("ports"), (
+                f"outside backend service {name} publishes a host port"
+            )
+    outside_edge_ports = outside_services["filebelt-web"]["ports"]
+    assert len(outside_edge_ports) == 1
+    outside_edge_port = outside_edge_ports[0]
+    assert outside_edge_port["mode"] == "ingress"
+    assert outside_edge_port["host_ip"] == "127.0.0.1"
+    assert outside_edge_port["target"] == 8443
+    assert outside_edge_port["protocol"] == "tcp"
+    assert outside_edge_port.get("published") in (None, "")
 
     iggy = services["filebelt-iggy"]
     assert iggy["cap_add"] == ["SYS_NICE"]

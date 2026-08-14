@@ -150,7 +150,7 @@ class LifecycleTest(unittest.TestCase):
 
         RUN_UNIT.configure_topology_environment(environment, "outside")
         self.assertEqual(environment["FILEBELT_HTTPS_BIND_ADDRESS"], "127.0.0.1")
-        self.assertEqual(environment["FILEBELT_HTTPS_PORT"], "0")
+        self.assertEqual(environment["FILEBELT_HTTPS_PORT"], "")
         self.assertEqual(
             environment["FILEBELT_ACCEPTANCE_CONNECT_HOST"], "127.0.0.1"
         )

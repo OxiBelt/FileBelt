@@ -144,7 +144,8 @@ def configure_topology_environment(
     """Own the Compose bind and acceptance route for the selected topology."""
     environment["FILEBELT_HTTPS_BIND_ADDRESS"] = LOOPBACK_EDGE_HOST
     if topology == "outside":
-        environment["FILEBELT_HTTPS_PORT"] = "0"
+        # An empty published port asks Compose to allocate one on the Docker host.
+        environment["FILEBELT_HTTPS_PORT"] = ""
         configure_outside_edge(environment)
     else:
         environment["FILEBELT_HTTPS_PORT"] = str(EDGE_PORT)

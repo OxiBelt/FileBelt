@@ -27,6 +27,7 @@ from catalog import load_catalog  # noqa: E402
 from diagnostics import MAXIMUM_DIAGNOSTIC_BYTES, scrub  # noqa: E402
 from images import validate_role  # noqa: E402
 from lifecycle import fixture_tag, validate_project  # noqa: E402
+import tcp_proxy as TCP_PROXY  # noqa: E402
 
 
 RUN_UNIT_SPEC = importlib.util.spec_from_file_location(
@@ -36,13 +37,6 @@ if RUN_UNIT_SPEC is None or RUN_UNIT_SPEC.loader is None:
     raise RuntimeError("could not load the Docker unit runner")
 RUN_UNIT = importlib.util.module_from_spec(RUN_UNIT_SPEC)
 RUN_UNIT_SPEC.loader.exec_module(RUN_UNIT)
-TCP_PROXY_SPEC = importlib.util.spec_from_file_location(
-    "filebelt_docker_tcp_proxy", ROOT / "tests/docker/units/tcp-proxy.py"
-)
-if TCP_PROXY_SPEC is None or TCP_PROXY_SPEC.loader is None:
-    raise RuntimeError("could not load the Docker TCP proxy")
-TCP_PROXY = importlib.util.module_from_spec(TCP_PROXY_SPEC)
-TCP_PROXY_SPEC.loader.exec_module(TCP_PROXY)
 ACCEPTANCE_SPEC = importlib.util.spec_from_file_location(
     "filebelt_docker_acceptance", ROOT / "tests/docker/phase2/acceptance.py"
 )
@@ -127,14 +121,48 @@ class LifecycleTest(unittest.TestCase):
                     "ci.internal,127.0.0.1,filebelt.localhost,localhost,::1",
                 )
         self.assertEqual(
-            RUN_UNIT.proxy_command("172.31.0.8"),
-            [
-                "python3",
-                str(ROOT / "tests/docker/units/tcp-proxy.py"),
-                "--target",
-                "172.31.0.8:8443",
-            ],
+            RUN_UNIT.select_topology("auto", ROOT, Path("/host/FileBelt")),
+            "outside",
         )
+        self.assertEqual(RUN_UNIT.select_topology("auto", ROOT, ROOT), "host")
+        self.assertEqual(RUN_UNIT.select_topology("outside", ROOT, ROOT), "outside")
+        with mock.patch.object(RUN_UNIT.Path, "exists", return_value=False):
+            self.assertFalse(RUN_UNIT.executor_is_containerized(ROOT, ROOT))
+        with mock.patch.object(RUN_UNIT.Path, "exists", return_value=True):
+            self.assertTrue(RUN_UNIT.executor_is_containerized(ROOT, ROOT))
+        self.assertTrue(
+            RUN_UNIT.executor_is_containerized(ROOT, Path("/host/FileBelt"))
+        )
+        RUN_UNIT.validate_topology("outside", executor_containerized=True)
+        with self.assertRaisesRegex(ValueError, "containerized executor"):
+            RUN_UNIT.validate_topology("host", executor_containerized=True)
+
+    def test_topology_environment_overrides_inherited_edge_bindings(self) -> None:
+        environment = {
+            "FILEBELT_ACCEPTANCE_CONNECT_HOST": "untrusted.example",
+            "FILEBELT_HTTPS_BIND_ADDRESS": "0.0.0.0",
+            "FILEBELT_HTTPS_PORT": "0",
+        }
+        RUN_UNIT.configure_topology_environment(environment, "host")
+        self.assertEqual(environment["FILEBELT_HTTPS_BIND_ADDRESS"], "127.0.0.1")
+        self.assertEqual(environment["FILEBELT_HTTPS_PORT"], "8443")
+        self.assertNotIn("FILEBELT_ACCEPTANCE_CONNECT_HOST", environment)
+
+        RUN_UNIT.configure_topology_environment(environment, "outside")
+        self.assertEqual(environment["FILEBELT_HTTPS_BIND_ADDRESS"], "127.0.0.1")
+        self.assertEqual(environment["FILEBELT_HTTPS_PORT"], "0")
+        self.assertEqual(
+            environment["FILEBELT_ACCEPTANCE_CONNECT_HOST"], "127.0.0.1"
+        )
+
+    def test_published_edge_parser_requires_one_ipv4_loopback_port(self) -> None:
+        self.assertEqual(
+            RUN_UNIT.parse_published_edge("127.0.0.1:49152\n"),
+            ("127.0.0.1", 49152),
+        )
+        for invalid in ("", "0.0.0.0:49152", "127.0.0.1:0", "::1:49152"):
+            with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
+                RUN_UNIT.parse_published_edge(invalid)
 
     def test_tcp_proxy_forwards_synthetic_connection(self) -> None:
         try:
@@ -157,28 +185,88 @@ class LifecycleTest(unittest.TestCase):
 
         upstream_thread = threading.Thread(target=upstream, daemon=True)
         upstream_thread.start()
-        client, proxy_side = socket.socketpair()
-        admission = threading.BoundedSemaphore(1)
-        self.assertTrue(admission.acquire(blocking=False))
-        proxy_thread = threading.Thread(
-            target=TCP_PROXY.forward,
-            args=(proxy_side, (str(upstream_address[0]), int(upstream_address[1])), admission),
-            daemon=True,
+        bridge = TCP_PROXY.ManagedTcpBridge(
+            (str(upstream_address[0]), int(upstream_address[1])), port=0
         )
-        proxy_thread.start()
+        bridge.start()
         try:
-            client.sendall(payload)
-            self.assertEqual(
-                client.recv(64 * 1024),
-                b"edge:" + str(len(payload)).encode(),
-            )
+            with socket.create_connection(("127.0.0.1", bridge.bound_port)) as client:
+                client.sendall(payload)
+                self.assertEqual(
+                    client.recv(64 * 1024),
+                    b"edge:" + str(len(payload)).encode(),
+                )
         finally:
-            client.close()
+            self.assertEqual(bridge.stop(), "stopped")
             upstream_listener.close()
-        proxy_thread.join(timeout=2)
         upstream_thread.join(timeout=2)
-        self.assertFalse(proxy_thread.is_alive())
         self.assertFalse(upstream_thread.is_alive())
+
+    def test_tcp_proxy_bounds_admission_and_rebinds_after_cleanup(self) -> None:
+        try:
+            upstream_listener = socket.create_server(("127.0.0.1", 0))
+            reservation = socket.create_server(("127.0.0.1", 0))
+        except PermissionError as error:
+            self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
+        bridge_port = int(reservation.getsockname()[1])
+        reservation.close()
+        accepted = threading.Event()
+
+        def upstream() -> None:
+            connection, _ = upstream_listener.accept()
+            accepted.set()
+            with connection:
+                while connection.recv(1024):
+                    pass
+
+        upstream_thread = threading.Thread(target=upstream, daemon=True)
+        upstream_thread.start()
+        bridge = TCP_PROXY.ManagedTcpBridge(
+            (
+                str(upstream_listener.getsockname()[0]),
+                int(upstream_listener.getsockname()[1]),
+            ),
+            port=bridge_port,
+            maximum_connections=1,
+        )
+        bridge.start()
+        first = socket.create_connection(("127.0.0.1", bridge_port))
+        self.assertTrue(accepted.wait(timeout=2))
+        second = socket.create_connection(("127.0.0.1", bridge_port))
+        second.settimeout(2)
+        self.assertEqual(second.recv(1), b"")
+        second.close()
+        self.assertEqual(bridge.stop(), "stopped")
+        first.close()
+        upstream_listener.close()
+        upstream_thread.join(timeout=2)
+        self.assertFalse(upstream_thread.is_alive())
+        replacement = TCP_PROXY.create_listener(
+            socket.AF_INET, ("127.0.0.1", bridge_port)
+        )
+        replacement.close()
+
+    def test_tcp_proxy_start_failure_releases_listeners(self) -> None:
+        try:
+            reservation = socket.create_server(("127.0.0.1", 0))
+        except PermissionError as error:
+            self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
+        bridge_port = int(reservation.getsockname()[1])
+        reservation.close()
+        bridge = TCP_PROXY.ManagedTcpBridge(("127.0.0.1", 1), port=bridge_port)
+        with (
+            mock.patch.object(
+                TCP_PROXY.threading.Thread,
+                "start",
+                side_effect=RuntimeError("thread start failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "thread start failed"),
+        ):
+            bridge.start()
+        replacement = TCP_PROXY.create_listener(
+            socket.AF_INET, ("127.0.0.1", bridge_port)
+        )
+        replacement.close()
 
     def test_tcp_proxy_ipv6_unavailable_keeps_mandatory_ipv4_listener(self) -> None:
         ipv4 = mock.Mock()
@@ -214,40 +302,32 @@ class LifecycleTest(unittest.TestCase):
         )
 
     def test_proxy_readiness_requires_liveness_and_accepted_status(self) -> None:
-        process = mock.Mock()
-        process.poll.return_value = 9
-        with self.assertRaisesRegex(RuntimeError, "exited with status 9"):
-            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+        bridge = mock.Mock()
+        bridge.check.side_effect = RuntimeError("bridge failed")
+        with self.assertRaisesRegex(RuntimeError, "bridge failed"):
+            RUN_UNIT.wait_proxy("127.0.0.1", bridge, Path("certificate.pem"))
 
-        process.poll.return_value = None
+        bridge.check.side_effect = None
         with (
             mock.patch.object(RUN_UNIT, "probe_proxy", side_effect=[503, 401]) as probe,
             mock.patch.object(RUN_UNIT.time, "monotonic", side_effect=[0, 0, 0]),
             mock.patch.object(RUN_UNIT.time, "sleep"),
         ):
-            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+            RUN_UNIT.wait_proxy("127.0.0.1", bridge, Path("certificate.pem"))
         self.assertEqual(probe.call_count, 2)
 
-        process.poll.return_value = None
         with (
             mock.patch.object(RUN_UNIT, "probe_proxy", return_value=503),
             mock.patch.object(RUN_UNIT.time, "monotonic", side_effect=[0, 0, 11]),
             mock.patch.object(RUN_UNIT.time, "sleep"),
         ):
             with self.assertRaisesRegex(RuntimeError, "unexpected HTTP status 503"):
-                RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
+                RUN_UNIT.wait_proxy("127.0.0.1", bridge, Path("certificate.pem"))
 
-        process.poll.side_effect = [None, 11]
-        with mock.patch.object(RUN_UNIT, "probe_proxy", return_value=401):
-            with self.assertRaisesRegex(RuntimeError, "exited with status 11"):
-                RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
-
-        process.poll.reset_mock()
-        process.poll.side_effect = None
-        process.poll.return_value = None
+        bridge.check.reset_mock()
         with mock.patch.object(RUN_UNIT, "probe_proxy", return_value=401) as probe:
-            RUN_UNIT.wait_proxy("127.0.0.1", process, Path("certificate.pem"))
-        self.assertEqual(process.poll.call_count, 2)
+            RUN_UNIT.wait_proxy("127.0.0.1", bridge, Path("certificate.pem"))
+        self.assertEqual(bridge.check.call_count, 2)
         probe.assert_called_once_with("127.0.0.1", Path("certificate.pem"))
 
     def test_proxy_readiness_forwards_tls_http_request(self) -> None:
@@ -255,7 +335,6 @@ class LifecycleTest(unittest.TestCase):
             self.skipTest("openssl is unavailable for the TLS test certificate")
         try:
             upstream_listener = socket.create_server(("127.0.0.1", 0))
-            bridge_listener = socket.create_server(("127.0.0.1", 0))
         except PermissionError as error:
             self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
         with tempfile.TemporaryDirectory() as directory:
@@ -281,65 +360,77 @@ class LifecycleTest(unittest.TestCase):
             context.set_servername_callback(
                 lambda _connection, server_name, _context: server_names.append(server_name)
             )
-            admission = threading.BoundedSemaphore(1)
-            self.assertTrue(admission.acquire(blocking=False))
-
             def upstream() -> None:
-                connection, _ = upstream_listener.accept()
-                with context.wrap_socket(connection, server_side=True) as tls_connection:
-                    received.extend(tls_connection.recv(4096))
-                    tls_connection.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
-
-            def bridge() -> None:
-                connection, _ = bridge_listener.accept()
-                TCP_PROXY.forward(
-                    connection,
-                    (str(upstream_listener.getsockname()[0]), int(upstream_listener.getsockname()[1])),
-                    admission,
-                )
+                for _ in range(2):
+                    connection, _ = upstream_listener.accept()
+                    with context.wrap_socket(connection, server_side=True) as tls_connection:
+                        received.extend(tls_connection.recv(4096))
+                        tls_connection.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
 
             upstream_thread = threading.Thread(target=upstream, daemon=True)
-            bridge_thread = threading.Thread(target=bridge, daemon=True)
             upstream_thread.start()
-            bridge_thread.start()
+            bridge = TCP_PROXY.ManagedTcpBridge(
+                (
+                    str(upstream_listener.getsockname()[0]),
+                    int(upstream_listener.getsockname()[1]),
+                ),
+                port=0,
+            )
+            bridge.start()
             try:
-                self.assertEqual(
-                    RUN_UNIT.probe_proxy(
-                        "127.0.0.1", certificate, int(bridge_listener.getsockname()[1])
-                    ),
-                    401,
-                )
+                for _ in range(2):
+                    self.assertEqual(
+                        RUN_UNIT.probe_proxy(
+                            "127.0.0.1", certificate, bridge.bound_port
+                        ),
+                        401,
+                    )
             finally:
-                bridge_listener.close()
+                bridge.stop()
                 upstream_listener.close()
-            bridge_thread.join(timeout=2)
             upstream_thread.join(timeout=2)
-            self.assertFalse(bridge_thread.is_alive())
             self.assertFalse(upstream_thread.is_alive())
-            self.assertIn(b"GET /api/v1/session HTTP/1.1\r\n", received)
-            self.assertIn(b"Host: filebelt.localhost\r\n", received)
-            self.assertEqual(server_names, ["filebelt.localhost"])
+            self.assertEqual(received.count(b"GET /api/v1/session HTTP/1.1\r\n"), 2)
+            self.assertEqual(received.count(b"Host: filebelt.localhost\r\n"), 2)
+            self.assertEqual(server_names, ["filebelt.localhost", "filebelt.localhost"])
 
-    def test_proxy_teardown_scrubs_failure_output_and_discards_success_output(self) -> None:
+    def test_transport_diagnostics_are_scrubbed_and_failure_only(self) -> None:
         secret = b"bridge-secret-value"
-        process = mock.Mock()
-        process.communicate.return_value = (
-            b"Authorization: Bearer exposed\n" + secret + b"\n" + b"x" * (MAXIMUM_DIAGNOSTIC_BYTES + 100),
-            b"",
-        )
         with tempfile.TemporaryDirectory() as directory:
             diagnostics = Path(directory)
-            RUN_UNIT.stop_proxy(process, diagnostics, (secret,), retain_diagnostics=True)
-            output = (diagnostics / "proxy-output.txt").read_bytes()
-            success = mock.Mock()
-            success.communicate.return_value = (b"ready", b"")
-            RUN_UNIT.stop_proxy(success, diagnostics, (), retain_diagnostics=False)
+            RUN_UNIT.retain_transport_diagnostics(
+                diagnostics,
+                {"target_edge": "success"},
+                (),
+                failed=False,
+            )
+            self.assertFalse((diagnostics / "transport-status.txt").exists())
+            RUN_UNIT.retain_transport_diagnostics(
+                diagnostics,
+                {
+                    "bridge_cleanup": "stopped",
+                    "bridge_fatal": "none",
+                    "target_edge": secret.decode(),
+                },
+                (secret,),
+                failed=True,
+            )
+            output = (diagnostics / "transport-status.txt").read_bytes()
         self.assertLessEqual(len(output), MAXIMUM_DIAGNOSTIC_BYTES)
         self.assertNotIn(secret, output)
-        self.assertNotIn(b"Bearer exposed", output)
+
+    def test_driver_is_terminated_and_reaped_when_bridge_fails(self) -> None:
+        process = mock.Mock()
+        process.poll.return_value = None
+        bridge = mock.Mock()
+        bridge.check.side_effect = RuntimeError("listener failed")
+        with (
+            mock.patch.object(RUN_UNIT.subprocess, "Popen", return_value=process),
+            self.assertRaisesRegex(RuntimeError, "listener failed"),
+        ):
+            RUN_UNIT.run_driver(("driver",), {}, bridge)
         process.terminate.assert_called_once_with()
-        process.communicate.assert_called_once_with(timeout=5)
-        success.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
 
     def test_readiness_error_is_bounded_and_sanitized(self) -> None:
         reason = "transport\nsecret" + "x" * 400

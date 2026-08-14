@@ -64,7 +64,23 @@ printf '%s\n' "$*" >"$PYTHON_LOG"
         self.assertIn("--unit collaboration", invocation)
         self.assertIn(f"--image-dir {self.artifacts}", invocation)
         self.assertIn("--image-channel release", invocation)
+        self.assertIn("--docker-topology auto", invocation)
         self.assertIn(f"--diagnostics-dir {self.diagnostics}", invocation)
+
+    def test_forwards_explicit_docker_topology(self) -> None:
+        result = self.run_script(
+            "--image-dir",
+            str(self.artifacts),
+            "--unit",
+            "core",
+            "--docker-topology",
+            "outside",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "--docker-topology outside",
+            self.python_log.read_text(encoding="utf-8"),
+        )
 
     def test_rejects_unknown_unit_before_invoking_python(self) -> None:
         result = self.run_script(
@@ -76,6 +92,18 @@ printf '%s\n' "$*" >"$PYTHON_LOG"
     def test_requires_an_existing_image_directory(self) -> None:
         result = self.run_script(
             "--image-dir", str(self.root / "missing"), "--unit", "core"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.python_log.exists())
+
+    def test_rejects_unknown_docker_topology_before_invoking_python(self) -> None:
+        result = self.run_script(
+            "--image-dir",
+            str(self.artifacts),
+            "--unit",
+            "core",
+            "--docker-topology",
+            "public",
         )
         self.assertEqual(result.returncode, 2)
         self.assertFalse(self.python_log.exists())

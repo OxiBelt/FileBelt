@@ -23,6 +23,21 @@ python3 tests/docker/units/run-unit.py --unit collaboration --image-dir artifact
 python3 tests/docker/units/run-unit.py --unit mcp --image-dir artifacts/phase3 --image-channel release --diagnostics-dir artifacts/docker/mcp
 ```
 
+The runner's `--docker-topology` option controls how the acceptance client
+reaches the real Compose TLS edge. `auto`, the local default, selects `host`
+when the executor shares the Docker host and `outside` for a container using an
+external Docker daemon. `host` uses the fixed loopback port published by
+Compose. `outside` is also valid explicitly on a host executor: it assigns
+Compose an ephemeral loopback port and starts a separately bounded loopback
+bridge. A containerized executor is connected only to the web service's `edge`
+network and bridges to its network address; a host executor bridges to the
+ephemeral loopback publication. Backend services remain unpublished. Check and
+signed-release workflows pin `outside` so CI behavior does not depend on
+environment-detection heuristics. The client preserves
+`https://filebelt.localhost:8443`, its Host header, and TLS server name. Before
+the driver starts, the readiness probe validates that name against the
+runner-generated CA and certificate.
+
 The collaboration unit requires the frozen pnpm workspace plus the pinned
 Playwright Chromium and Firefox binaries. It drives two users through the real
 Compose TLS edge and covers convergence, durable save/checkpoint behavior,
@@ -38,10 +53,14 @@ does not weaken the broker's public-WebPKI port-443 policy. Redirect, private
 address, rebinding, malformed, oversized, slow, and session-confusion cases
 fail closed. This fixture does not qualify public DNS or a second TLS hop.
 
-On failure, the runner retains at most bounded scrubbed logs and synthetic
-browser screenshots. Playwright traces are disabled because they can contain
-session cookies. Pull-request diagnostics expire after 7 days; other workflow
-diagnostics expire after 30 days. Disposable tenant state and secrets
-are destroyed before artifact upload. Rollback removes the new CI consumers
-first and then the catalog/runner; it does not require a migration or a
-production deployment change.
+On failure, the runner retains at most bounded scrubbed logs, a
+`transport-status.txt` record of the selected topology and bridge lifecycle,
+and synthetic browser screenshots. Successful runs discard transport
+diagnostics. Playwright traces are disabled because they can contain session
+cookies. Pull-request diagnostics expire after 7 days; other workflow
+diagnostics expire after 30 days. Disposable tenant state and secrets are
+destroyed before artifact upload. For local diagnosis, explicitly select
+`--docker-topology host` or `--docker-topology outside`; a contradictory mode
+fails before the acceptance driver runs. Rollback first removes the explicit
+workflow arguments, then reverts the managed bridge and runner changes. It
+does not require a migration or production deployment change.

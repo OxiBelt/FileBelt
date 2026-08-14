@@ -21,6 +21,7 @@ from catalog import load_catalog
 from diagnostics import secret_values, write_scrubbed
 from images import load_roles
 from lifecycle import fixture_tag, validate_project
+from tcp_proxy import ManagedTcpBridge
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -76,12 +77,6 @@ def proxy_error_detail(error: BaseException) -> str:
     )[:MAXIMUM_PROXY_ERROR_DETAIL]
 
 
-def check_proxy_liveness(process: subprocess.Popen[bytes]) -> None:
-    return_code = process.poll()
-    if return_code is not None:
-        raise RuntimeError(f"browser TCP proxy exited with status {return_code}")
-
-
 def probe_proxy(address: str, certificate: Path, port: int = EDGE_PORT) -> int:
     """Exercise the TLS edge over the local bridge using the public origin name."""
     context = ssl.create_default_context(cafile=str(certificate))
@@ -106,40 +101,23 @@ def probe_proxy(address: str, certificate: Path, port: int = EDGE_PORT) -> int:
     return int(parts[1])
 
 
-def wait_proxy(address: str, process: subprocess.Popen[bytes], certificate: Path) -> None:
+def wait_proxy(address: str, bridge: ManagedTcpBridge, certificate: Path) -> None:
     deadline = time.monotonic() + 10
     last_error = "no TLS/HTTP response"
     while time.monotonic() < deadline:
-        check_proxy_liveness(process)
+        bridge.check()
         try:
             status = probe_proxy(address, certificate)
         except (OSError, RuntimeError, ssl.SSLError) as error:
             last_error = proxy_error_detail(error)
             time.sleep(0.1)
             continue
-        check_proxy_liveness(process)
+        bridge.check()
         if status in {200, 401}:
             return
         last_error = f"unexpected HTTP status {status}"
         time.sleep(0.1)
     raise RuntimeError(f"browser TCP proxy did not become ready: {last_error}")
-
-
-def stop_proxy(
-    process: subprocess.Popen[bytes],
-    diagnostics: Path,
-    secrets: tuple[bytes, ...],
-    retain_diagnostics: bool,
-) -> None:
-    """Stop and reap the bridge, retaining scrubbed output only after failure."""
-    process.terminate()
-    try:
-        stdout, stderr = process.communicate(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate(timeout=5)
-    if retain_diagnostics:
-        write_scrubbed(diagnostics / "proxy-output.txt", stdout + stderr, secrets)
 
 
 def append_no_proxy(value: str) -> str:
@@ -160,13 +138,96 @@ def configure_outside_edge(environment: dict[str, str]) -> None:
         environment[name] = append_no_proxy(environment.get(name, ""))
 
 
-def proxy_command(address: str) -> list[str]:
-    return [
-        "python3",
-        str(ROOT / "tests/docker/units/tcp-proxy.py"),
-        "--target",
-        f"{address}:8443",
-    ]
+def configure_topology_environment(
+    environment: dict[str, str], topology: str
+) -> None:
+    """Own the Compose bind and acceptance route for the selected topology."""
+    environment["FILEBELT_HTTPS_BIND_ADDRESS"] = LOOPBACK_EDGE_HOST
+    if topology == "outside":
+        environment["FILEBELT_HTTPS_PORT"] = "0"
+        configure_outside_edge(environment)
+    else:
+        environment["FILEBELT_HTTPS_PORT"] = str(EDGE_PORT)
+        environment.pop("FILEBELT_ACCEPTANCE_CONNECT_HOST", None)
+
+
+def select_topology(requested: str, root: Path, host_root: Path) -> str:
+    """Resolve local auto-detection without allowing CI to depend on it."""
+    if requested == "auto":
+        return "outside" if host_root != root else "host"
+    return requested
+
+
+def executor_is_containerized(root: Path, host_root: Path) -> bool:
+    """Detect an executor namespace that cannot use Docker-host loopback."""
+    return host_root != root or any(
+        marker.exists() for marker in (Path("/.dockerenv"), Path("/run/.containerenv"))
+    )
+
+
+def validate_topology(topology: str, executor_containerized: bool) -> None:
+    if topology == "host" and executor_containerized:
+        raise ValueError("host topology cannot be used from a containerized executor")
+
+
+def parse_published_edge(value: str) -> tuple[str, int]:
+    """Accept the one runner-owned IPv4 loopback publication from Docker."""
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise RuntimeError("Docker web loopback publication is unavailable")
+    host, separator, port_text = lines[0].rpartition(":")
+    if not separator or host != LOOPBACK_EDGE_HOST or not port_text.isdigit():
+        raise RuntimeError("Docker web publication is not an IPv4 loopback port")
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        raise RuntimeError("Docker web loopback port is outside the valid range")
+    return host, port
+
+
+def run_driver(
+    command: tuple[str, ...],
+    environment: dict[str, str],
+    bridge: ManagedTcpBridge | None,
+) -> None:
+    """Run the acceptance driver while continuously checking bridge health."""
+    process = subprocess.Popen(command, cwd=ROOT, env=environment)
+    while True:
+        return_code = process.poll()
+        if return_code is not None:
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, command)
+            return
+        if bridge is not None:
+            try:
+                bridge.check()
+            except RuntimeError:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+                raise
+        time.sleep(0.1)
+
+
+def transport_report(status: dict[str, str]) -> bytes:
+    """Render stable, bounded, non-secret bridge lifecycle evidence."""
+    return "".join(f"{name}={status[name]}\n" for name in sorted(status)).encode()
+
+
+def retain_transport_diagnostics(
+    diagnostics: Path,
+    status: dict[str, str],
+    secrets: tuple[bytes, ...],
+    failed: bool,
+) -> None:
+    if failed:
+        write_scrubbed(
+            diagnostics / "transport-status.txt",
+            transport_report(status),
+            secrets,
+        )
 
 
 def main() -> int:
@@ -179,6 +240,12 @@ def main() -> int:
     parser.add_argument("--image-channel", choices=("build", "release"))
     parser.add_argument("--diagnostics-dir", type=Path)
     parser.add_argument("--project-name")
+    parser.add_argument(
+        "--docker-topology",
+        choices=("auto", "host", "outside"),
+        default="auto",
+        help="select direct-host or isolated-bridge acceptance transport",
+    )
     arguments = parser.parse_args()
     if (arguments.image_dir is None) != (arguments.image_channel is None):
         parser.error("--image-dir and --image-channel must be supplied together")
@@ -195,11 +262,21 @@ def main() -> int:
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
+    host_root = docker_host_root(ROOT)
+    topology = select_topology(arguments.docker_topology, ROOT, host_root)
+    outside = topology == "outside"
+    executor_containerized = executor_is_containerized(ROOT, host_root)
+    if executor_containerized and host_root == ROOT:
+        raise SystemExit(
+            "containerized executor Docker-host checkout mapping is unavailable"
+        )
+    try:
+        validate_topology(topology, executor_containerized)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     local_state = Path(tempfile.mkdtemp(prefix=f".state.{unit.name}.", dir=ROOT / "deploy/compose"))
     unit_temp = Path(tempfile.mkdtemp(prefix=f"filebelt-{unit.name}-"))
     diagnostics = arguments.diagnostics_dir.resolve() if arguments.diagnostics_dir else unit_temp / "diagnostics"
-    host_root = docker_host_root(ROOT)
-    outside = host_root != ROOT
     host_state = host_root / local_state.relative_to(ROOT)
     environment = os.environ.copy()
     environment.update({
@@ -220,18 +297,32 @@ def main() -> int:
         "FILEBELT_OIDC_FIXTURE_IMAGE": fixture_tag("oidc", project),
         "FILEBELT_MCP_EGRESS_FIXTURE_IMAGE": fixture_tag("mcp-egress", project),
     })
-    if outside:
-        environment["FILEBELT_HTTPS_PORT"] = "0"
+    configure_topology_environment(environment, topology)
 
     loaded_images: list[str] = []
     fixture_images = [environment["FILEBELT_OIDC_FIXTURE_IMAGE"]]
     if unit.name == "mcp":
         fixture_images.append(environment["FILEBELT_MCP_EGRESS_FIXTURE_IMAGE"])
     connected = False
-    proxy: subprocess.Popen[bytes] | None = None
+    bridge: ManagedTcpBridge | None = None
     started = False
     fixture_tags_owned = False
     status = 1
+    failure_detail: str | None = None
+    transport = {
+        "bridge_cleanup": "not-started",
+        "bridge_fatal": "none",
+        "bridge_listeners": "0",
+        "connect_endpoint": f"{EDGE_SERVER_NAME}:{EDGE_PORT}",
+        "requested_topology": arguments.docker_topology,
+        "selected_topology": topology,
+        "target_edge": "not-resolved",
+    }
+    print(
+        f"Docker acceptance transport topology={topology} "
+        f"executor={'container' if executor_containerized else 'host'}",
+        flush=True,
+    )
     try:
         subprocess.run([str(PREPARE)], cwd=ROOT, env={**environment, "FILEBELT_STATE_DIR": str(local_state)}, check=True)
         for path in (local_state, local_state / "secrets", local_state / "tls"):
@@ -262,38 +353,68 @@ def main() -> int:
         subprocess.run(compose_command(unit.compose_files, unit.profiles, project, "up", build_option, "--wait"), cwd=ROOT, env=environment, check=True)
         if outside:
             network = f"{project}_edge"
-            subprocess.run(["docker", "network", "connect", network, socket.gethostname()], check=True)
-            connected = True
-            address = subprocess.run(
-                ["docker", "inspect", "--format", f"{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}", f"{project}-filebelt-web-1"],
+            if executor_containerized:
+                subprocess.run(["docker", "network", "connect", network, socket.gethostname()], check=True)
+                connected = True
+            web_container = subprocess.run(
+                compose_command(unit.compose_files, unit.profiles, project, "ps", "--quiet", "filebelt-web"),
+                cwd=ROOT,
+                env=environment,
                 check=True,
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            if not address:
-                raise RuntimeError("Docker edge address is empty")
-            configure_outside_edge(environment)
-            proxy = subprocess.Popen(
-                proxy_command(address),
-                cwd=ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            wait_proxy(LOOPBACK_EDGE_HOST, proxy, local_state / "tls/filebelt.crt")
-        subprocess.run(unit.driver, cwd=ROOT, env=environment, check=True)
+            if not web_container or "\n" in web_container:
+                raise RuntimeError("Docker web container identity is unavailable")
+            if executor_containerized:
+                address = subprocess.run(
+                    ["docker", "inspect", "--format", f"{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}", web_container],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                if not address:
+                    raise RuntimeError("Docker edge address is empty")
+                target = (address, EDGE_PORT)
+            else:
+                publication = subprocess.run(
+                    ["docker", "port", web_container, f"{EDGE_PORT}/tcp"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                target = parse_published_edge(publication)
+            transport["target_edge"] = f"{target[0]}:{target[1]}"
+            transport["connect_endpoint"] = f"{LOOPBACK_EDGE_HOST}:{EDGE_PORT}"
+            bridge = ManagedTcpBridge(target)
+            bridge.start()
+            transport["bridge_listeners"] = str(bridge.listener_count)
+            wait_proxy(LOOPBACK_EDGE_HOST, bridge, local_state / "tls/filebelt.crt")
+        run_driver(unit.driver, environment, bridge)
         status = 0
     except (OSError, subprocess.CalledProcessError, ValueError, RuntimeError) as error:
-        print(f"Docker integration unit {unit.name} failed: {error}", file=sys.stderr)
-        write_scrubbed(diagnostics / "runner-error.txt", f"Docker integration unit {unit.name} failed: {error}\n".encode(), secret_values(local_state))
+        failure_detail = f"Docker integration unit {unit.name} failed: {error}"
+        print(failure_detail, file=sys.stderr)
         status = 1
     finally:
-        if proxy is not None:
-            stop_proxy(
-                proxy,
-                diagnostics,
-                secret_values(local_state),
-                retain_diagnostics=status != 0,
+        if bridge is not None:
+            transport["bridge_fatal"] = bridge.fatal_error or "none"
+            try:
+                transport["bridge_cleanup"] = bridge.stop()
+            except RuntimeError as error:
+                transport["bridge_cleanup"] = proxy_error_detail(error)
+                if status == 0:
+                    failure_detail = f"Docker integration unit {unit.name} failed: {error}"
+                    print(failure_detail, file=sys.stderr)
+                    status = 1
+        if status != 0:
+            secrets = secret_values(local_state)
+            write_scrubbed(
+                diagnostics / "runner-error.txt",
+                ((failure_detail or f"Docker integration unit {unit.name} failed") + "\n").encode(),
+                secrets,
             )
+            retain_transport_diagnostics(diagnostics, transport, secrets, failed=True)
         if status != 0 and started:
             secrets = secret_values(local_state)
             for name, arguments_tail in (

@@ -200,6 +200,7 @@ jobs:
           tests/scripts/run-kubernetes-release-gate.sh
           --image-dir artifacts/docker/${{ matrix.unit }}-images
           --unit ${{ matrix.unit }}
+          --docker-topology outside
           --diagnostics-dir artifacts/docker/${{ matrix.unit }}
       - name: Upload scrubbed failure diagnostics for ${{ matrix.unit }}
         if: failure()

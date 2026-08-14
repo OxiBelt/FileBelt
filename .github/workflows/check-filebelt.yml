@@ -479,6 +479,7 @@ jobs:
           --unit ${{ matrix.unit }}
           --image-dir artifacts/docker/${{ matrix.unit }}-images
           --image-channel build
+          --docker-topology outside
           --diagnostics-dir artifacts/docker/${{ matrix.unit }}
       - name: Upload scrubbed failure diagnostics for ${{ matrix.unit }}
         if: failure()

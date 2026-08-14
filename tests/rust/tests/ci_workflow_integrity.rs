@@ -246,6 +246,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             .expect("release acceptance script");
     assert!(exact_artifact.contains("tests/docker/units/run-unit.py"));
     assert!(exact_artifact.contains("--image-channel release"));
+    assert!(exact_artifact.contains("--docker-topology"));
     assert!(exact_artifact.contains("core|collaboration|mcp"));
     assert!(!exact_artifact.contains("run-image-matrix.sh"));
     for required in [
@@ -490,6 +491,7 @@ fn docker_units_consume_exact_amd64_archives_in_matrices() {
         "path: artifacts/docker/${{ matrix.unit }}-images",
         "--unit ${{ matrix.unit }}",
         "--image-channel build",
+        "--docker-topology outside",
         "--diagnostics-dir artifacts/docker/${{ matrix.unit }}",
         "name: filebelt-docker-${{ matrix.unit }}-diagnostics",
         "retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}",
@@ -533,6 +535,7 @@ fn docker_units_consume_exact_amd64_archives_in_matrices() {
         "path: artifacts/docker/${{ matrix.unit }}-images",
         "tests/scripts/run-kubernetes-release-gate.sh",
         "--unit ${{ matrix.unit }}",
+        "--docker-topology outside",
         "--diagnostics-dir artifacts/docker/${{ matrix.unit }}",
         "name: filebelt-release-docker-${{ matrix.unit }}-diagnostics",
         "retention-days: 30",

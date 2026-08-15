@@ -26,9 +26,11 @@ import {
   SourceUrl,
   ValidateImagePlan,
   WebImageLicense,
-  AdapterImagePlan,
   AdapterImagePlanSchemaVersion,
   AdapterImageRoles,
+  CreateAdapterImagePlan,
+  SerializeAdapterImagePlan,
+  ValidateAdapterImagePlan,
 } from "../dist/index.js";
 
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
@@ -209,48 +211,86 @@ test("Rust Docker targets match their image-plan descriptions", () => {
   }
 });
 
-test("copyleft adapter evidence remains outside the Apache core image plan", () => {
-  assert.equal(AdapterImagePlanSchemaVersion, 1);
+test("adapter publication plan covers six roles without mutable release sources", () => {
+  const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
+  const AdapterImagePlan = CreateAdapterImagePlan({ Version: "0.1.0", Source });
+  assert.equal(AdapterImagePlanSchemaVersion, 2);
   assert.deepEqual(
-    AdapterImagePlan.map(({ role }) => role),
+    AdapterImagePlan.roles.map(({ role }) => role),
     AdapterImageRoles,
   );
-  for (const image of AdapterImagePlan) {
+  for (const image of AdapterImagePlan.roles) {
     assert.equal(image.repository, `ghcr.io/oxibelt/${image.role}`);
-    assert.ok(["AGPL-3.0-only", "GPL-3.0-or-later", "LGPL-3.0-or-later"].includes(image.license));
-    assert.match(image.correspondingSource, /^https:\/\/github\.com\/OxiBelt\/FileBelt\/tree\/(?:main|[0-9]+\.[0-9]+\.[0-9]+)(?:\/adapters\/[^/]+)?$/);
+    assert.equal(image.source.ref, `refs/commits/${REVISION}`);
+    assert.equal(image.source.revision, REVISION);
+    assert.match(image.sourceBundle.publicUrl, /\/releases\/download\/0\.1\.0\//);
+    assert.equal(image.sourceBundle.sha256, null);
+    assert.equal(image.imageBuild.state, "blocked");
+    assert.equal(image.publication.state, "blocked");
   }
+  ValidateAdapterImagePlan(JSON.parse(SerializeAdapterImagePlan(AdapterImagePlan)));
   assert.deepEqual(
-    AdapterImagePlan.find(({ role }) => role === "filebelt-onlyoffice-adapter"),
-    {
-      role: "filebelt-onlyoffice-adapter",
-      repository: "ghcr.io/oxibelt/filebelt-onlyoffice-adapter",
-      license: "AGPL-3.0-only",
-      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/0.1.0",
-      publishPlatforms: ["linux/amd64", "linux/arm64"],
-      riscv64Policy: "compile-and-probe-only",
-    },
+    AdapterImagePlan.roles.find(({ role }) => role === "filebelt-git-adapter")?.components,
+    [
+      { id: "filebelt-git-adapter", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
+      { id: "filebelt-revision-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
+      { id: "git-2.55.0", version: "2.55.0", license: "GPL-2.0-only", relationship: "separate-executable", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
+      { id: "zlib-1.3.1", version: "1.3.1", license: "Zlib", relationship: "linked", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
+    ],
   );
-  assert.deepEqual(
-    AdapterImagePlan.find(({ role }) => role === "filebelt-nfs-gateway"),
-    {
-      role: "filebelt-nfs-gateway",
-      repository: "ghcr.io/oxibelt/filebelt-nfs-gateway",
-      license: "LGPL-3.0-or-later",
-      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/nfs",
-      publishPlatforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
+});
+
+test("source and license qualification unlock image construction but not publication", () => {
+  const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
+  const Plan = CreateAdapterImagePlan({
+    Version: "0.1.0",
+    Source,
+    Evidence: {
+      "filebelt-git-adapter": {
+        sourceBundleSha256: "a".repeat(64),
+        platformBuildArguments: {
+          "linux/amd64": {
+            FILEBELT_GIT_BUILDER_IMAGE: `example.test/filebelt-git-builder@sha256:${"b".repeat(64)}`,
+            RUST_TARGET: "x86_64-unknown-linux-musl",
+            ZLIB_TARBALL_SHA256: "c".repeat(64),
+          },
+          "linux/arm64": {
+            FILEBELT_GIT_BUILDER_IMAGE: `example.test/filebelt-git-builder@sha256:${"b".repeat(64)}`,
+            RUST_TARGET: "aarch64-unknown-linux-musl",
+            ZLIB_TARBALL_SHA256: "c".repeat(64),
+          },
+        },
+        preImage: {
+          sourceBundle: "qualified",
+          dependencyCompatibility: "qualified",
+          componentPolicy: "qualified",
+          licenseNotices: "qualified",
+          buildInputs: "qualified",
+          immutableSource: "qualified",
+          buildContext: "qualified",
+        },
+      },
     },
+  });
+  const Git = Plan.roles.find(({ role }) => role === "filebelt-git-adapter");
+  assert.equal(Git?.imageBuild.state, "eligible");
+  assert.equal(Git?.publication.state, "blocked");
+  assert.ok(Git?.publication.blockingReasons.includes("functional qualification is not complete"));
+});
+
+test("adapter plans reject mutable source refs and false source qualification", () => {
+  assert.throws(
+    () => CreateAdapterImagePlan({ Version: "0.1.0", Source: buildSource() }),
+    /exact release tag or commit ref/,
   );
-  assert.deepEqual(
-    AdapterImagePlan.find(({ role }) => role === "filebelt-transcoder"),
-    {
-      role: "filebelt-transcoder",
-      repository: "ghcr.io/oxibelt/filebelt-transcoder",
-      license: "GPL-3.0-or-later",
-      correspondingSource: "https://github.com/OxiBelt/FileBelt/tree/main/adapters/transcode",
-      publishPlatforms: ["linux/amd64", "linux/arm64"],
-      riscv64Policy: "compile-and-probe-only",
-    },
+  const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
+  assert.throws(
+    () => CreateAdapterImagePlan({
+      Version: "0.1.0",
+      Source,
+      Evidence: { "filebelt-git-adapter": { preImage: { sourceBundle: "qualified" } } },
+    }),
+    /cannot qualify a source bundle without its SHA-256/,
   );
 });
 

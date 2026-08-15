@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import struct
 from pathlib import Path
 from types import ModuleType
 
@@ -66,6 +67,17 @@ def write_docker_archive(path: Path, layers: list[bytes]) -> None:
 
 
 class ImageOverlayTests(unittest.TestCase):
+    def test_static_elf_check_rejects_a_header_without_loadable_program(self) -> None:
+        fake = bytearray(64)
+        fake[:6] = b"\x7fELF\x02\x01"
+        struct.pack_into("<H", fake, 16, 2)
+        struct.pack_into("<H", fake, 18, 62)
+        struct.pack_into("<Q", fake, 24, 0x1000)
+        struct.pack_into("<Q", fake, 32, 64)
+        struct.pack_into("<H", fake, 54, 56)
+        with self.assertRaisesRegex(VALIDATOR.ValidationError, "no loadable segment"):
+            VALIDATOR.assert_static_elf(bytes(fake), "linux/amd64")
+
     def test_opaque_whiteout_removes_only_lower_layer_children(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "image.tar"
@@ -140,6 +152,59 @@ class ImageOverlayTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(VALIDATOR.ValidationError, message):
                     VALIDATOR.required_file({"/evidence": entry}, "/evidence")
+
+    def test_adapter_validator_rejects_a_blocked_image_plan(self) -> None:
+        plan = {
+            "schemaVersion": 2,
+            "roles": [{"role": "filebelt-git-adapter", "imageBuild": {"state": "blocked"}}],
+        }
+        with self.assertRaisesRegex(VALIDATOR.ValidationError, "image-build gate is not eligible"):
+            VALIDATOR.validate_adapter(plan, "filebelt-git-adapter", "linux/amd64", {}, {})
+
+    def test_adapter_validator_binds_source_bundle_labels(self) -> None:
+        revision = "1" * 40
+        plan = {
+            "schemaVersion": 2,
+            "source": {"created": "2026-08-15T00:00:00Z"},
+            "roles": [{
+                "role": "filebelt-git-adapter",
+                "imageBuild": {"state": "eligible"},
+                "platforms": ["linux/amd64"],
+                "source": {
+                    "url": "https://github.com/OxiBelt/FileBelt",
+                    "ref": "refs/tags/0.1.0",
+                    "revision": revision,
+                },
+                "sourceBundle": {"publicUrl": "https://example.test/0.1.0/source.tar.gz", "sha256": "a" * 64},
+                "firstPartyLicense": "Apache-2.0",
+                "imageLicense": "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib",
+                "executablePaths": ["/usr/local/bin/filebelt-git-adapter"],
+                "entrypoint": "/usr/local/bin/filebelt-git-adapter",
+            }],
+        }
+        config = {
+            "os": "linux",
+            "architecture": "amd64",
+            "config": {
+                "User": "10001:10001",
+                "Entrypoint": ["/usr/local/bin/filebelt-git-adapter"],
+                "Labels": {
+                    "org.opencontainers.image.source": "https://github.com/OxiBelt/FileBelt",
+                    "org.opencontainers.image.version": "refs/tags/0.1.0",
+                    "org.opencontainers.image.revision": revision,
+                    "org.opencontainers.image.created": "2026-08-15T00:00:00Z",
+                    "org.opencontainers.image.licenses": "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib",
+                    "io.filebelt.image.role": "filebelt-git-adapter",
+                    "io.filebelt.first-party-license": "Apache-2.0",
+                    "io.filebelt.corresponding-source": "https://example.test/0.1.0/source.tar.gz",
+                    "io.filebelt.corresponding-source.sha256": "b" * 64,
+                    "io.filebelt.qualification.license": "qualified",
+                    "io.filebelt.qualification.image-build": "eligible",
+                },
+            },
+        }
+        with self.assertRaisesRegex(VALIDATOR.ValidationError, "corresponding-source.sha256"):
+            VALIDATOR.validate_adapter(plan, "filebelt-git-adapter", "linux/amd64", config, {})
 
 
 if __name__ == "__main__":

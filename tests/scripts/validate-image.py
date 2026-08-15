@@ -9,6 +9,7 @@ import argparse
 import io
 import json
 import struct
+import subprocess
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -86,6 +87,24 @@ class FileEntry:
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def validate_canonical_adapter_plan(path: Path) -> None:
+    cli = Path(__file__).resolve().parents[2] / "devops" / "dist" / "cli.js"
+    if not cli.is_file():
+        raise ValidationError(
+            "canonical adapter plan validator is absent; build @filebelt/devops first"
+        )
+    result = subprocess.run(
+        ["node", str(cli), "validate-adapter-image-plan", "--input", str(path)],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "validation failed"
+        raise ValidationError(f"adapter image plan is not canonical: {detail}")
 
 
 def normalized_path(name: str) -> str:
@@ -232,15 +251,41 @@ def assert_static_elf(data: bytes, platform: str) -> None:
         raise ValidationError(
             f"ELF machine {machine} does not match {platform} ({MACHINES[platform]})"
         )
+    executable_type = struct.unpack_from("<H", data, 16)[0]
+    entry_point = struct.unpack_from("<Q", data, 24)[0]
+    if executable_type not in {2, 3} or entry_point == 0:
+        raise ValidationError("role executable is not a runnable ELF executable")
     phoff = struct.unpack_from("<Q", data, 32)[0]
     phentsize = struct.unpack_from("<H", data, 54)[0]
     phnum = struct.unpack_from("<H", data, 56)[0]
+    if phentsize < 56 or phoff + phentsize * phnum > len(data):
+        raise ValidationError("ELF program-header table is malformed")
+    load_segments = 0
     for index in range(phnum):
         offset = phoff + index * phentsize
-        if offset + 4 > len(data):
-            raise ValidationError("ELF program header is truncated")
-        if struct.unpack_from("<I", data, offset)[0] == 3:
+        segment_type = struct.unpack_from("<I", data, offset)[0]
+        if segment_type == 3:
             raise ValidationError("role executable contains a dynamic interpreter")
+        if segment_type == 1:
+            file_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+            file_size = struct.unpack_from("<Q", data, offset + 32)[0]
+            memory_size = struct.unpack_from("<Q", data, offset + 40)[0]
+            if file_size > memory_size or file_offset + file_size > len(data):
+                raise ValidationError("ELF load segment is malformed")
+            load_segments += 1
+        if segment_type == 2:
+            dynamic_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+            dynamic_size = struct.unpack_from("<Q", data, offset + 32)[0]
+            if dynamic_offset + dynamic_size > len(data) or dynamic_size % 16 != 0:
+                raise ValidationError("ELF dynamic table is malformed")
+            for entry_offset in range(dynamic_offset, dynamic_offset + dynamic_size, 16):
+                tag = struct.unpack_from("<q", data, entry_offset)[0]
+                if tag == 1:
+                    raise ValidationError("role executable declares a dynamic shared-library dependency")
+                if tag == 0:
+                    break
+    if load_segments == 0:
+        raise ValidationError("role executable has no loadable segment")
 
 
 def plan_image(plan: dict[str, Any], role: str) -> dict[str, Any]:
@@ -251,6 +296,132 @@ def plan_image(plan: dict[str, Any], role: str) -> dict[str, Any]:
     if len(matches) != 1:
         raise ValidationError(f"image plan must contain exactly one {role} row")
     return matches[0]
+
+
+def adapter_plan_image(plan: dict[str, Any], role: str) -> dict[str, Any]:
+    roles = plan.get("roles")
+    if not isinstance(roles, list):
+        raise ValidationError("adapter image plan has no roles array")
+    matches = [item for item in roles if isinstance(item, dict) and item.get("role") == role]
+    if len(matches) != 1:
+        raise ValidationError(f"adapter image plan must contain exactly one {role} row")
+    image = matches[0]
+    if image.get("imageBuild", {}).get("state") != "eligible":
+        raise ValidationError(f"{role} image-build gate is not eligible")
+    return image
+
+
+def validate_adapter(
+    plan: dict[str, Any], role: str, platform: str, config: dict[str, Any], files: dict[str, FileEntry]
+) -> dict[str, Any]:
+    image = adapter_plan_image(plan, role)
+    if platform not in image.get("platforms", []):
+        raise ValidationError(f"{role} does not declare {platform}")
+    if config.get("os") != "linux" or config.get("architecture") != ARCHITECTURES[platform]:
+        raise ValidationError("adapter image config platform does not match the plan")
+    runtime = config.get("config")
+    if not isinstance(runtime, dict) or runtime.get("User") != "10001:10001":
+        raise ValidationError("adapter image runtime user must be 10001:10001")
+    labels = runtime.get("Labels")
+    source = image.get("source")
+    bundle = image.get("sourceBundle")
+    if not isinstance(labels, dict) or not isinstance(source, dict) or not isinstance(bundle, dict):
+        raise ValidationError("adapter image labels or source identity are missing")
+    expected = {
+        "org.opencontainers.image.source": source.get("url"),
+        "org.opencontainers.image.version": source.get("ref"),
+        "org.opencontainers.image.revision": source.get("revision"),
+        "org.opencontainers.image.created": plan.get("source", {}).get("created"),
+        "org.opencontainers.image.licenses": image.get("imageLicense"),
+        "io.filebelt.image.role": role,
+        "io.filebelt.first-party-license": image.get("firstPartyLicense"),
+        "io.filebelt.corresponding-source": bundle.get("publicUrl"),
+        "io.filebelt.corresponding-source.sha256": bundle.get("sha256"),
+        "io.filebelt.qualification.license": "qualified",
+        "io.filebelt.qualification.image-build": "eligible",
+    }
+    for key, value in expected.items():
+        if labels.get(key) != value:
+            raise ValidationError(f"adapter label {key} is {labels.get(key)!r}, expected {value!r}")
+    executables = image.get("executablePaths")
+    if not isinstance(executables, list) or not executables:
+        raise ValidationError("adapter plan has no executable inventory")
+    entrypoint = runtime.get("Entrypoint")
+    if entrypoint != [image.get("entrypoint")] or runtime.get("Cmd") not in (None, []):
+        raise ValidationError(f"unexpected runtime command for {role}")
+    for executable in executables:
+        if not isinstance(executable, str):
+            raise ValidationError("adapter executable path is malformed")
+        entry = required_file(files, executable, mode=0o555)
+        if role in {"filebelt-git-adapter", "filebelt-onlyoffice-adapter"}:
+            assert_static_elf(entry.data, platform)
+    if role == "filebelt-git-adapter":
+        required_paths = [
+            "/usr/share/licenses/filebelt-git-adapter/Apache-2.0.txt",
+            "/usr/share/licenses/git/GPL-2.0-only.txt",
+            "/usr/share/licenses/zlib/Zlib.txt",
+            "/usr/share/licenses/filebelt-git-adapter/musl-COPYRIGHT",
+            "/usr/share/doc/filebelt-git-adapter/THIRD_PARTY_NOTICES.md",
+            "/usr/share/doc/filebelt-git-adapter/SOURCE_OFFER.md",
+            "/usr/share/doc/filebelt-git-adapter/SOURCE-MANIFEST.json",
+        ]
+    elif role == "filebelt-onlyoffice-adapter":
+        required_paths = [
+            "/licenses/AGPL-3.0-only.txt",
+            "/licenses/Apache-2.0.txt",
+            "/doc/THIRD_PARTY_NOTICES.md",
+            "/doc/SOURCE_OFFER.md",
+            "/doc/SOURCE-MANIFEST.json",
+            "/doc/BUILD.md",
+        ]
+        forbidden = [path for path in files if "documentserver" in path.lower() or path.endswith("/api.js")]
+        if forbidden:
+            raise ValidationError("ONLYOFFICE adapter image contains external provider assets")
+    else:
+        required_paths = []
+    for required in required_paths:
+        if not required_file(files, required).data:
+            raise ValidationError(f"adapter legal/source evidence is empty: {required}")
+    allowed_paths = set(required_paths).union(executables)
+    if role == "filebelt-onlyoffice-adapter":
+        for path, entry in files.items():
+            if path.startswith("/licenses/third-party/"):
+                if entry.link_target is not None or entry.uid != 0 or entry.gid != 0 or entry.mode != 0o644 or not entry.data:
+                    raise ValidationError(f"ONLYOFFICE third-party notice is unsafe or empty: {path}")
+                allowed_paths.add(path)
+    unexpected = sorted(set(files) - allowed_paths)
+    if unexpected:
+        raise ValidationError(f"scratch adapter image contains an undeclared file: {unexpected[0]}")
+    forbidden_exact = {
+        "/bin/bash",
+        "/bin/sh",
+        "/usr/bin/apt",
+        "/usr/bin/apt-get",
+        "/usr/bin/cargo",
+        "/usr/bin/git",
+        "/usr/bin/make",
+        "/usr/bin/rustc",
+    }
+    forbidden = [
+        path
+        for path in files
+        if path in forbidden_exact
+        or path.startswith(("/root/", "/src/", "/var/cache/", "/var/lib/apt/"))
+        or path.endswith((".key", ".pem"))
+    ]
+    if forbidden:
+        raise ValidationError(f"adapter image contains forbidden build or secret material: {forbidden[0]}")
+    return {
+        "schemaVersion": 1,
+        "role": role,
+        "platform": platform,
+        "sourceRevision": source.get("revision"),
+        "sourceBundleSha256": bundle.get("sha256"),
+        "license": image.get("imageLicense"),
+        "runtimeUser": runtime.get("User"),
+        "executables": executables,
+        "fileCount": len(files),
+    }
 
 
 def validate(
@@ -449,7 +620,11 @@ def main() -> int:
     if not isinstance(plan, dict):
         raise ValidationError("image plan must be a JSON object")
     config, files, repo_tag = load_archive(args.archive)
-    result = validate(plan, args.role, args.platform, config, files)
+    if plan.get("schemaVersion") == 2:
+        validate_canonical_adapter_plan(args.plan)
+        result = validate_adapter(plan, args.role, args.platform, config, files)
+    else:
+        result = validate(plan, args.role, args.platform, config, files)
     result["repositoryTag"] = repo_tag
     serialized = json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
     if args.output is None:

@@ -7,6 +7,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "adapter-image-plan": "node dist/cli.js adapter-image-plan",
     "image-plan": "node dist/cli.js image-plan",
     "test": "pnpm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit --composite false --incremental false"

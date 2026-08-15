@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Adapter license qualification
+
+on:
+  pull_request:
+    paths:
+      - "adapters/**"
+      - "deploy/helm/filebelt-git/**"
+      - "deploy/helm/filebelt-onlyoffice/**"
+      - "devops/source/adapter-image-plan.ts"
+      - "tests/scripts/*adapter*"
+      - "supply-chain/license-compatibility-v1.toml"
+      - "supply-chain/license-regions.toml"
+      - ".github/workflows/adapter-*.yml"
+      - ".github/workflows/release.yml"
+      - "docs/**"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-policy:
+    name: Source and directional-license policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install pinned Cargo policy tools
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo install --locked cargo-deny --version 0.20.2
+      - name: Check source regions and deterministic bundle tooling
+        run: |
+          python3 tests/scripts/check-source-structure.py --repo-root .
+          python3 -m unittest \
+            tests.scripts.test_check_license_compatibility \
+            tests.scripts.test_package_adapter_source_bundle \
+            tests.scripts.test_validate_adapter_source_bundle
+      - name: Prime exact locked dependency sources
+        run: |
+          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,transcode}/Cargo.toml; do
+            cargo fetch --locked --manifest-path "$manifest"
+          done
+      - name: Check every independent locked dependency graph
+        run: python3 tests/scripts/check-license-compatibility.py --repo-root .
+      - name: Check adapter dependency advisories and licenses
+        run: python3 tests/scripts/check-adapter-dependency-admission.py --repo-root .
+
+  adapter-workspaces:
+    name: ${{ matrix.adapter }} locked workspace
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [smb, ftp-ftps, onlyoffice, git, nfs, transcode]
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Cargo policy tools
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo install --locked cargo-deny --version 0.20.2
+      - name: Check formatting, lint, tests, licenses, and advisories
+        env:
+          FILEBELT_SOURCE_URL: https://github.com/OxiBelt/FileBelt
+          FILEBELT_SOURCE_REF: refs/tags/0.1.0
+          FILEBELT_SOURCE_REVISION: 0123456789abcdef0123456789abcdef01234567
+          FILEBELT_CORRESPONDING_SOURCE_URL: https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-onlyoffice-adapter-source-0.1.0.tar.gz
+          FILEBELT_CORRESPONDING_SOURCE_SHA256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          FILEBELT_CHART_VERSION: 0.1.0
+        run: |
+          cargo fetch --locked --manifest-path "adapters/${{ matrix.adapter }}/Cargo.toml"
+          cargo fmt --manifest-path "adapters/${{ matrix.adapter }}/Cargo.toml" --check
+          cargo clippy --manifest-path "adapters/${{ matrix.adapter }}/Cargo.toml" --all-targets --all-features --locked -- -D warnings
+          cargo test --manifest-path "adapters/${{ matrix.adapter }}/Cargo.toml" --all-features --locked
+          cargo deny --config "adapters/${{ matrix.adapter }}/deny.toml" --manifest-path "adapters/${{ matrix.adapter }}/Cargo.toml" check
+          cargo audit --file "adapters/${{ matrix.adapter }}/Cargo.lock"
+
+  immutable-plan:
+    name: Immutable plan and fail-closed image gate
+    needs: [source-and-policy, adapter-workspaces]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+      - name: Activate pinned pnpm
+        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
+      - name: Test immutable publication tooling
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @filebelt/devops test
+      - name: Generate exact commit plan
+        run: tests/scripts/prepare-adapter-image-plan.sh --channel build --output artifacts/adapter-image-plan.json
+      - name: Verify blocked roles emitted no image evidence
+        run: |
+          mkdir -p artifacts/evidence
+          python3 tests/scripts/validate-adapter-publication.py \
+            --plan artifacts/adapter-image-plan.json \
+            --policy supply-chain/license-compatibility-v1.toml \
+            --evidence-root artifacts/evidence \
+            --output artifacts/adapter-pre-image-evidence.json
+          python3 tests/scripts/check-license-compatibility.py --repo-root . \
+            --pre-image-evidence artifacts/adapter-pre-image-evidence.json
+      - name: Upload bounded read-only qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filebelt-adapter-license-qualification
+          path: |
+            artifacts/adapter-image-plan.json
+            artifacts/adapter-pre-image-evidence.json
+          if-no-files-found: error
+          retention-days: 14

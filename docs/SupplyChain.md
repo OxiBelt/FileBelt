@@ -483,15 +483,39 @@ Changing provider version or edition, copying provider JavaScript, embedding a
 provider image in the chart, or changing the AGPL expression repeats the full
 license, source, dependency, browser, threat-model, and release review.
 
-The coordinated tag-only release publishes the Apache core chart, document
-image, and Apache-authored `filebelt-onlyoffice` deployment chart through the
-ordinary promotion workflow. The latter contains no adapter/provider binary
-and retains a sentinel adapter digest, so publishing it does not admit an
-adapter image. The separately licensed adapter workflow remains read-only
-until every adapter release input is digest pinned and its complete source
-bundle has passed readback. Once separately admitted, it may publish only
-immutable amd64/arm64 adapter manifests; it may not rebuild in the
-write-authorized job or publish DocumentServer.
+The coordinated tag-only release publishes the Apache core chart and images.
+Adapter charts are excluded from the core asset packager while their checked-in
+values remain blocked. The release invokes a separate read-only reusable
+adapter workflow that produces a schema-v2 six-role plan and pre-image
+evidence; the existing release promotion job remains the only write-authorized
+GitHub Release owner. It attaches the blocked adapter plan as review evidence
+but does not publish adapter images or charts. The schema intentionally keeps
+adapter publication blocked until a separately reviewed subject-map and
+promotion implementation binds every platform archive, SBOM, provenance
+statement, source bundle, registry digest, and readback result. No promotion
+job may rebuild an adapter or publish DocumentServer.
+
+Every adapter source archive is named
+`filebelt-<role>-source-<version>.tar.gz`, contains one normalized root, and
+uses release-commit mtimes, numeric zero ownership, sorted paths, and a
+timestamp-free gzip header. The archive contains the complete tracked FileBelt
+tree plus `SOURCE-MANIFEST.json`, offline build instructions, license and
+notice inventories, upstream source, patches, build inputs, and the complete
+Cargo vendor closure. The final archive hash is external evidence and never
+self-references from its manifest. Archive validation rejects unsafe paths,
+duplicates, mutable source URLs, checksum drift, missing vendor packages, and
+image-plan revision or license mismatches.
+
+`supply-chain/license-compatibility-v1.toml` is the directional policy source
+of truth. The image gate requires seven independently qualified inputs:
+source bundle, dependency compatibility, component policy, licenses/notices,
+build inputs, immutable source, and build context. Blocked roles may retain a
+source bundle, but they must have no image archive, image SBOM, provenance,
+chart digest, promotion subject, or nonzero image digest. Once those seven
+inputs qualify, `run-adapter-bundle-image.py` constructs the Docker context
+only from the validated bundle and permits an OCI build; publication remains a
+separate decision over security, functionality, native platforms, and the
+currently unimplemented signed-tag adapter subject map.
 
 ## Phase 8 NFS, transcoder, and WebTransport evidence
 

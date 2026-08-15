@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  CreateAdapterImagePlan,
   CreateImagePlan,
   EvaluateVulnerabilityPolicy,
   ImagePlatforms,
   ImageRoles,
+  SerializeAdapterImagePlan,
   SerializeImagePlan,
   SourceUrl,
+  ValidateAdapterImagePlan,
   ValidateImagePlan,
+  type AdapterImageRole,
+  type AdapterRoleQualificationInput,
   type ImagePlanChannel,
   type ImagePlatform,
   type ImageRole,
@@ -61,6 +66,14 @@ function Run(InputArguments: readonly string[]): void {
     CreateImagePlanFile(CommandArguments);
     return;
   }
+  if (Command === "adapter-image-plan") {
+    CreateAdapterImagePlanFile(CommandArguments);
+    return;
+  }
+  if (Command === "validate-adapter-image-plan") {
+    ValidateAdapterImagePlanFile(CommandArguments);
+    return;
+  }
   if (Command === "validate-image-plan") {
     ValidateImagePlanFile(CommandArguments);
     return;
@@ -70,8 +83,51 @@ function Run(InputArguments: readonly string[]): void {
     return;
   }
   throw new Error(
-    "expected the image-plan, validate-image-plan, or evaluate-vulnerabilities command",
+    "expected the image-plan, adapter-image-plan, validate-image-plan, validate-adapter-image-plan, or evaluate-vulnerabilities command",
   );
+}
+
+function CreateAdapterImagePlanFile(InputArguments: readonly string[]): void {
+  const Options = ParseOptions(InputArguments, [
+    "version",
+    "revision",
+    "source-ref",
+    "created",
+    "dirty",
+    "kind",
+    "evidence",
+    "output",
+  ]);
+  const Kind = ReadKind(Options);
+  const Source = {
+    url: SourceUrl,
+    ref: ReadOption(Options, "source-ref"),
+    revision: ReadOption(Options, "revision"),
+    created: ReadOption(Options, "created"),
+    dirty: ReadBoolean(Options, "dirty"),
+    kind: Kind,
+  } as const;
+  let Evidence: Partial<Record<AdapterImageRole, AdapterRoleQualificationInput>> | undefined;
+  const EvidencePath = Options.get("evidence");
+  if (EvidencePath !== undefined) {
+    Evidence = ReadJson(EvidencePath) as Partial<
+      Record<AdapterImageRole, AdapterRoleQualificationInput>
+    >;
+  }
+  const Plan = CreateAdapterImagePlan({
+    Version: ReadOption(Options, "version"),
+    Source,
+    ...(Evidence === undefined ? {} : { Evidence }),
+  });
+  const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
+  FileSystemModule.writeFileSync(ReadOption(Options, "output"), SerializeAdapterImagePlan(Plan), {
+    encoding: "utf8", flag: "w",
+  });
+}
+
+function ValidateAdapterImagePlanFile(InputArguments: readonly string[]): void {
+  const Options = ParseOptions(InputArguments, ["input"]);
+  ValidateAdapterImagePlan(ReadJson(ReadOption(Options, "input")));
 }
 
 function CreateImagePlanFile(InputArguments: readonly string[]): void {

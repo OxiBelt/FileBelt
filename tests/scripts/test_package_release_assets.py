@@ -71,11 +71,10 @@ exit 1
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         chart = self.output / f"filebelt-{self.version}.tgz"
-        onlyoffice_chart = self.output / f"filebelt-onlyoffice-{self.version}.tgz"
         admin = self.output / f"filebelt-postgresql-admin-{self.version}.tar.gz"
         checksums = self.output / "SHA256SUMS"
         self.assertTrue(chart.is_file())
-        self.assertTrue(onlyoffice_chart.is_file())
+        self.assertFalse((self.output / f"filebelt-onlyoffice-{self.version}.tgz").exists())
         self.assertTrue(admin.is_file())
         with tarfile.open(admin, "r:gz") as archive:
             names = {
@@ -85,7 +84,7 @@ exit 1
         self.assertTrue({"LICENSE", "README.md", "roles.sql", "grants.sql"} <= names)
         expected = {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in (chart, onlyoffice_chart, admin)
+            for path in (chart, admin)
         }
         observed = {
             line.split("  ", 1)[1]: line.split("  ", 1)[0]

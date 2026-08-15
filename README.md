@@ -40,10 +40,23 @@ and Helm chart with attestations.
   are Apache-2.0.
 - `adapters/smb/` and `adapters/ftp-ftps/` are GPL-3.0-or-later regions.
 - `adapters/onlyoffice/` is an AGPL-3.0-only region.
+- `adapters/git/` contains the Apache-2.0 FileBelt wrapper. Its release image
+  also carries Git `2.55.0` as a separate GPL-2.0-only executable and zlib as
+  a linked component; the image license is therefore an aggregate expression.
 - `adapters/nfs/` is reserved as an LGPL-3.0-or-later region.
 - `adapters/transcode/` is a GPL-3.0-or-later implementation workspace. Its
   image remains disabled and non-publishable until the existing FFmpeg,
   source-offer, SBOM, provenance, and platform-evidence gates pass.
+
+All six adapter roles use a separate schema-v2 publication plan and a
+deterministic corresponding-source bundle. A blocked role may produce its
+source bundle and diagnostic evidence, but it cannot produce an image, SBOM,
+provenance statement, chart digest, or promotion subject. Qualifying every
+pre-image source and license prerequisite unlocks bundle-based image builds;
+publication remains blocked until the independent security, functional, and
+native-platform gates also pass. The current tree deliberately has no adapter
+subject-map promotion path, so satisfying those fields still cannot publish an
+adapter; that write-authorized path requires a separate reviewed change.
 
 See [the license map](docs/LicenseMap.md), [contribution guide](CONTRIBUTING.md),
 and [engineering documentation index](docs/README.md) before making changes.

@@ -199,11 +199,15 @@ fn onlyoffice_source_recipe_includes_its_protocol_build_inputs() {
         .expect("ONLYOFFICE adapter Docker ignore file");
     assert!(dockerfile.contains("WORKDIR /src\n"));
     assert!(dockerfile.contains("COPY . ."));
-    assert!(
-        dockerfile.contains(
-            "cargo build --locked --release --manifest-path adapters/onlyoffice/Cargo.toml"
-        )
-    );
+    for contract in [
+        "cargo build --locked --offline --release",
+        "--features qualified-release",
+        "--target \"${RUST_TARGET}\"",
+        "--manifest-path adapters/onlyoffice/Cargo.toml",
+        "! readelf -d /filebelt-onlyoffice-adapter",
+    ] {
+        assert!(dockerfile.contains(contract), "missing {contract}");
+    }
     assert!(dockerignore.contains("!adapters/onlyoffice/**"));
     assert!(!dockerignore.lines().any(|line| line == "source"));
 }

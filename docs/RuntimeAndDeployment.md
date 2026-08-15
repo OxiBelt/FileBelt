@@ -94,14 +94,19 @@ evidence because the upstream provider has no qualified RISC-V runtime. The
 separately versioned deployment chart does not create or redistribute
 DocumentServer, a database, a Secret, a Namespace, or a volume.
 
-The `GPL-2.0-only` `filebelt-git-adapter` is also a separately released process
-and chart. It requires exactly system Git `2.55.0`, a Git-only RWX PVC, a
+The Apache-2.0 `filebelt-git-adapter` wrapper is also a separately released
+process and chart. Its scratch image contains exactly the static wrapper, a
+separate static GPL-2.0-only Git `2.55.0` executable, required license and
+notice files, and the source manifest. It requires a Git-only RWX PVC, a
 private TLS-1.3/mTLS listener on 8092, a distinct operations listener, and no
 general egress, PostgreSQL credential, payload mount, API route, or browser
 identity. The Apache coordinator listens privately on 8091 without either
 byte-plane mount. Adapter images remain non-publishable until their exact Git
 source, build inputs, license notices, SBOM/provenance, amd64/arm64 behavior,
-SHA-256 repository behavior, and restore/fsck matrix are admitted. The chart
+SHA-256 repository behavior, and restore/fsck matrix are admitted. Git and
+Cargo sources are staged from the checksummed corresponding-source bundle;
+the Dockerfile has no downloader or package-manager fallback and compiles the
+wrapper locked and offline. The chart
 does not create its Namespace, Secrets, database, or operator-owned adapter
 ConfigMap. It bounds admitted private tasks at eight and concurrent system-Git
 processes at two. A raw connection above the private-task limit closes without
@@ -113,6 +118,16 @@ Other reserved adapter roles are future `filebelt-nfs-gateway` and
 `filebelt-transcoder`. Each has an independently truthful platform and license contract. Transcode implementation remains
 prohibited until its exact FFmpeg composition has been reviewed and the
 license map, supply-chain evidence, and runtime contract are updated together.
+
+Adapter charts default to `qualification: blocked` with zero sentinel digests.
+Helm rendering fails until promotion supplies a qualified state, an exact
+nonzero image digest, and the exact source-bundle SHA-256. Core asset packaging
+does not publish adapter charts. Once all seven pre-image prerequisites pass,
+the bundle-image runner may build OCI archives without publishing them; only
+the signed-tag release owner may later publish roles whose security,
+functional, and native-platform states are also qualified. No adapter
+subject-map or promotion implementation exists in this revision, so the plan
+keeps publication blocked even if those qualification fields are supplied.
 
 Every FileBelt process normally runs as numeric UID/GID `10001:10001`. The NFS
 StatefulSet is the narrow exception: its bridge remains `10001:10001`, Ganesha

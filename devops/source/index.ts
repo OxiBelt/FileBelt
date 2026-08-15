@@ -34,11 +34,24 @@ export {
 } from "./image-plan.js";
 
 export {
-  AdapterImagePlan,
   AdapterImagePlanSchemaVersion,
   AdapterImageRoles,
+  CreateAdapterImagePlan,
+  SerializeAdapterImagePlan,
+  ValidateAdapterImagePlan,
+  type AdapterComponent,
+  type AdapterComponentRelationship,
+  type AdapterEvidenceNames,
   type AdapterImageEvidence,
+  type AdapterImagePlanV2,
   type AdapterImageRole,
+  type AdapterPublicationDecision,
+  type AdapterPreImageQualification,
+  type AdapterQualification,
+  type AdapterQualificationState,
+  type AdapterRoleQualificationInput,
+  type AdapterSourceBundle,
+  type CreateAdapterImagePlanInput,
 } from "./adapter-image-plan.js";
 
 export {

@@ -8,6 +8,12 @@ on:
       - "[0-9]*.[0-9]*.[0-9]*"
 
 jobs:
+  adapter-release:
+    name: Prepare separate adapter artifacts
+    permissions:
+      contents: read
+    uses: ./.github/workflows/adapter-release.yml
+
   image-platforms:
     name: Validate release images (${{ matrix.platform }})
     strategy:
@@ -253,7 +259,7 @@ jobs:
   release-gate:
     name: Require every release check
     if: always()
-    needs: [image-platforms, normalized-rebuild, package-assets, docker-integration-acceptance, kubernetes-compatibility]
+    needs: [adapter-release, image-platforms, normalized-rebuild, package-assets, docker-integration-acceptance, kubernetes-compatibility]
     runs-on: ubuntu-26.04
     permissions: {}
     timeout-minutes: 5
@@ -265,12 +271,14 @@ jobs:
           ASSETS: ${{ needs.package-assets.result }}
           DOCKER_INTEGRATION: ${{ needs.docker-integration-acceptance.result }}
           KUBERNETES: ${{ needs.kubernetes-compatibility.result }}
+          ADAPTERS: ${{ needs.adapter-release.result }}
         run: |
           test "$IMAGES" = success
           test "$REBUILD" = success
           test "$ASSETS" = success
           test "$DOCKER_INTEGRATION" = success
           test "$KUBERNETES" = success
+          test "$ADAPTERS" = success
 
   promote:
     name: Promote validated immutable subjects
@@ -307,6 +315,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: filebelt-release-assets
+          path: artifacts/release
+      - name: Download separate adapter release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: filebelt-adapter-release-evidence
           path: artifacts/release
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -374,20 +387,10 @@ jobs:
           helm pull oci://ghcr.io/oxibelt/charts/filebelt --version "$VERSION" --destination artifacts/release/readback
           cmp "artifacts/release/filebelt-${VERSION}.tgz" "artifacts/release/readback/filebelt-${VERSION}.tgz"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          if helm show chart oci://ghcr.io/oxibelt/charts/filebelt-onlyoffice --version "$VERSION" >/dev/null 2>&1; then
-            echo "refusing to replace existing ONLYOFFICE Helm release ${VERSION}" >&2
-            exit 1
-          fi
-          output=$(helm push "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz" oci://ghcr.io/oxibelt/charts)
-          onlyoffice_digest=$(awk '$1 == "Digest:" { print $2 }' <<<"$output")
-          test "${onlyoffice_digest#sha256:}" != "$onlyoffice_digest"
-          helm pull oci://ghcr.io/oxibelt/charts/filebelt-onlyoffice --version "$VERSION" --destination artifacts/release/readback
-          cmp "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz" "artifacts/release/readback/filebelt-onlyoffice-${VERSION}.tgz"
-          echo "onlyoffice_digest=$onlyoffice_digest" >> "$GITHUB_OUTPUT"
       - name: Complete release checksums
         run: |
           cd artifacts/release
-          sha256sum image-subjects.json >>SHA256SUMS
+          sha256sum image-subjects.json adapter-image-plan.json adapter-pre-image-evidence.json >>SHA256SUMS
       - name: Attest API image index
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -460,12 +463,6 @@ jobs:
           subject-name: ghcr.io/oxibelt/charts/filebelt
           subject-digest: ${{ steps.chart.outputs.digest }}
           push-to-registry: false
-      - name: Attest ONLYOFFICE Helm OCI subject
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ghcr.io/oxibelt/charts/filebelt-onlyoffice
-          subject-digest: ${{ steps.chart.outputs.onlyoffice_digest }}
-          push-to-registry: false
       - name: Create immutable GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -473,10 +470,11 @@ jobs:
         run: >-
           gh release create "$VERSION"
           "artifacts/release/filebelt-${VERSION}.tgz"
-          "artifacts/release/filebelt-onlyoffice-${VERSION}.tgz"
           "artifacts/release/filebelt-postgresql-admin-${VERSION}.tar.gz"
           "artifacts/release/SHA256SUMS"
           "artifacts/release/image-subjects.json"
+          "artifacts/release/adapter-image-plan.json"
+          "artifacts/release/adapter-pre-image-evidence.json"
           --verify-tag
           --title "FileBelt ${VERSION}"
           --generate-notes

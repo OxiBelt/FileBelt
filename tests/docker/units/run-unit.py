@@ -316,9 +316,13 @@ def main() -> int:
     status = 1
     failure_detail: str | None = None
     transport = {
+        "bridge_admission_rejections": "0",
         "bridge_cleanup": "not-started",
         "bridge_fatal": "none",
         "bridge_listeners": "0",
+        "bridge_retry_exhaustions": "0",
+        "bridge_upstream_attempts": "0",
+        "bridge_upstream_failures": "0",
         "connect_endpoint": f"{EDGE_SERVER_NAME}:{EDGE_PORT}",
         "published_edge": "not-resolved",
         "requested_topology": arguments.docker_topology,
@@ -425,6 +429,8 @@ def main() -> int:
                     failure_detail = f"Docker integration unit {unit.name} failed: {error}"
                     print(failure_detail, file=sys.stderr)
                     status = 1
+            for name, value in bridge.statistics.items():
+                transport[f"bridge_{name}"] = str(value)
         if status != 0:
             secrets = secret_values(local_state)
             write_scrubbed(

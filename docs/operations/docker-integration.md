@@ -35,6 +35,13 @@ create a mapping for an empty or zero-valued Compose publication. Before
 selecting its bridge target, the runner requires Docker to report exactly one
 mapping in that range on `127.0.0.1`.
 
+The separately bounded bridge retains each admitted client while retrying only
+its initial connection to that validated publication. Attempts use a one-second
+timeout with 100-millisecond backoff and stop after five seconds. The bridge
+never retries after forwarding begins, and an exhausted client does not stop
+other acceptance connections. Each retrying client continues to count against
+the 64-connection admission bound.
+
 Docker does not publish ports for a service attached only to an internal
 network. The raw TCP acceptance relay is therefore the only service attached to
 the ordinary `acceptance-publication` bridge. It has no Secret, config, or
@@ -68,7 +75,9 @@ fail closed. This fixture does not qualify public DNS or a second TLS hop.
 
 On failure, the runner retains at most bounded scrubbed logs, a
 `transport-status.txt` record of the selected topology, resolved publication,
-bridge target, and bridge lifecycle, and synthetic browser screenshots.
+bridge target, bridge lifecycle, and aggregate admission, connection-attempt,
+connection-failure, and retry-exhaustion counters, and synthetic browser
+screenshots. These counters contain no client address or forwarded bytes.
 Successful runs discard transport diagnostics. Playwright traces are disabled
 because they can contain session
 cookies. Pull-request diagnostics expire after 7 days; other workflow

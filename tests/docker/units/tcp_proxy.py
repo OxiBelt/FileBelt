@@ -14,6 +14,9 @@ import time
 
 MAXIMUM_CONNECTIONS = 64
 LOOPBACK_PORT = 8443
+UPSTREAM_CONNECT_TIMEOUT_SECONDS = 1.0
+UPSTREAM_RETRY_DELAY_SECONDS = 0.1
+UPSTREAM_RETRY_WINDOW_SECONDS = 5.0
 IPV6_OPTIONAL_ERRORS = frozenset(
     error
     for error in (
@@ -85,6 +88,12 @@ class ManagedTcpBridge:
         self._stop = threading.Event()
         self._fatal_error: str | None = None
         self._admission = threading.BoundedSemaphore(maximum_connections)
+        self._statistics = {
+            "admission_rejections": 0,
+            "retry_exhaustions": 0,
+            "upstream_attempts": 0,
+            "upstream_failures": 0,
+        }
 
     @property
     def listener_count(self) -> int:
@@ -100,6 +109,12 @@ class ManagedTcpBridge:
     def fatal_error(self) -> str | None:
         with self._lock:
             return self._fatal_error
+
+    @property
+    def statistics(self) -> dict[str, int]:
+        """Return non-secret aggregate connection lifecycle counters."""
+        with self._lock:
+            return dict(self._statistics)
 
     def start(self) -> None:
         if self._listeners:
@@ -173,6 +188,10 @@ class ManagedTcpBridge:
                 self._fatal_error = detail or error.__class__.__name__
         self._stop.set()
 
+    def _increment_statistic(self, name: str) -> None:
+        with self._lock:
+            self._statistics[name] += 1
+
     def _serve(self, listener: socket.socket) -> None:
         while not self._stop.is_set():
             try:
@@ -187,6 +206,7 @@ class ManagedTcpBridge:
                 client.close()
                 return
             if not self._admission.acquire(blocking=False):
+                self._increment_statistic("admission_rejections")
                 client.close()
                 continue
             thread = threading.Thread(
@@ -214,9 +234,8 @@ class ManagedTcpBridge:
     def _forward(self, client: socket.socket) -> None:
         upstream: socket.socket | None = None
         try:
-            try:
-                upstream = socket.create_connection(self.target, timeout=1)
-            except OSError:
+            upstream = self._connect_upstream()
+            if upstream is None:
                 return
             with self._lock:
                 self._active_sockets.add(upstream)
@@ -252,3 +271,26 @@ class ManagedTcpBridge:
                     self._active_sockets.discard(upstream)
                 self._worker_threads.discard(threading.current_thread())
             self._admission.release()
+
+    def _connect_upstream(self) -> socket.socket | None:
+        deadline = time.monotonic() + UPSTREAM_RETRY_WINDOW_SECONDS
+        while not self._stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._increment_statistic("retry_exhaustions")
+                return None
+            self._increment_statistic("upstream_attempts")
+            try:
+                return socket.create_connection(
+                    self.target,
+                    timeout=min(UPSTREAM_CONNECT_TIMEOUT_SECONDS, remaining),
+                )
+            except OSError:
+                self._increment_statistic("upstream_failures")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._increment_statistic("retry_exhaustions")
+                return None
+            if self._stop.wait(min(UPSTREAM_RETRY_DELAY_SECONDS, remaining)):
+                return None
+        return None

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -216,6 +217,70 @@ class LifecycleTest(unittest.TestCase):
             upstream_listener.close()
         upstream_thread.join(timeout=2)
         self.assertFalse(upstream_thread.is_alive())
+        self.assertEqual(bridge.statistics, {
+            "admission_rejections": 0,
+            "retry_exhaustions": 0,
+            "upstream_attempts": 1,
+            "upstream_failures": 0,
+        })
+
+    def test_tcp_proxy_retries_before_forwarding_without_losing_client_bytes(self) -> None:
+        try:
+            reservation = socket.create_server(("127.0.0.1", 0))
+        except PermissionError as error:
+            self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
+        upstream_port = int(reservation.getsockname()[1])
+        reservation.close()
+        bridge = TCP_PROXY.ManagedTcpBridge(("127.0.0.1", upstream_port), port=0)
+        bridge.start()
+        client = socket.create_connection(("127.0.0.1", bridge.bound_port))
+        client.settimeout(3)
+        client.sendall(b"buffered-before-upstream")
+        deadline = time.monotonic() + 2
+        while bridge.statistics["upstream_failures"] == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertGreaterEqual(bridge.statistics["upstream_failures"], 1)
+        upstream_listener = socket.create_server(("127.0.0.1", upstream_port))
+        try:
+            upstream, _ = upstream_listener.accept()
+            with upstream:
+                self.assertEqual(upstream.recv(64 * 1024), b"buffered-before-upstream")
+                upstream.sendall(b"recovered")
+            self.assertEqual(client.recv(64 * 1024), b"recovered")
+        finally:
+            client.close()
+            self.assertEqual(bridge.stop(), "stopped")
+            upstream_listener.close()
+        self.assertGreaterEqual(bridge.statistics["upstream_attempts"], 2)
+        self.assertEqual(bridge.statistics["retry_exhaustions"], 0)
+
+    def test_tcp_proxy_bounds_exhausted_retry_to_one_client(self) -> None:
+        try:
+            reservation = socket.create_server(("127.0.0.1", 0))
+        except PermissionError as error:
+            self.skipTest(f"sandbox prohibits synthetic TCP listener: {error}")
+        upstream_port = int(reservation.getsockname()[1])
+        reservation.close()
+        bridge = TCP_PROXY.ManagedTcpBridge(("127.0.0.1", upstream_port), port=0)
+        with (
+            mock.patch.object(TCP_PROXY, "UPSTREAM_CONNECT_TIMEOUT_SECONDS", 0.05),
+            mock.patch.object(TCP_PROXY, "UPSTREAM_RETRY_DELAY_SECONDS", 0.02),
+            mock.patch.object(TCP_PROXY, "UPSTREAM_RETRY_WINDOW_SECONDS", 0.2),
+        ):
+            bridge.start()
+            client = socket.create_connection(("127.0.0.1", bridge.bound_port))
+            client.settimeout(2)
+            self.assertEqual(client.recv(1), b"")
+            client.close()
+            bridge.check()
+            self.assertEqual(bridge.stop(), "stopped")
+        self.assertGreaterEqual(bridge.statistics["upstream_attempts"], 1)
+        self.assertEqual(
+            bridge.statistics["upstream_failures"],
+            bridge.statistics["upstream_attempts"],
+        )
+        self.assertEqual(bridge.statistics["retry_exhaustions"], 1)
+        self.assertIsNone(bridge.fatal_error)
 
     def test_tcp_proxy_bounds_admission_and_rebinds_after_cleanup(self) -> None:
         try:
@@ -256,6 +321,7 @@ class LifecycleTest(unittest.TestCase):
         upstream_listener.close()
         upstream_thread.join(timeout=2)
         self.assertFalse(upstream_thread.is_alive())
+        self.assertEqual(bridge.statistics["admission_rejections"], 1)
         replacement = TCP_PROXY.create_listener(
             socket.AF_INET, ("127.0.0.1", bridge_port)
         )
@@ -425,6 +491,9 @@ class LifecycleTest(unittest.TestCase):
                 {
                     "bridge_cleanup": "stopped",
                     "bridge_fatal": "none",
+                    "bridge_retry_exhaustions": "1",
+                    "bridge_upstream_attempts": "4",
+                    "bridge_upstream_failures": "4",
                     "published_edge": "127.0.0.1:49152",
                     "target_edge": secret.decode(),
                 },
@@ -435,6 +504,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertLessEqual(len(output), MAXIMUM_DIAGNOSTIC_BYTES)
         self.assertNotIn(secret, output)
         self.assertIn(b"published_edge=127.0.0.1:49152", output)
+        self.assertIn(b"bridge_retry_exhaustions=1", output)
 
     def test_driver_is_terminated_and_reaped_when_bridge_fails(self) -> None:
         process = mock.Mock()

@@ -51,16 +51,38 @@ peer-version pair after deterministic OpenAPI regeneration was verified with
 TypeScript 6.0.3. Changing either exact version requires revalidating and
 updating or removing the exception.
 
+The browser packages use Vite `8.2.1` with TypeScript remaining at `6.0.3` and
+Fluent UI React Components `9.74.6`. Vite reaches Rolldown `1.2.4` and its
+optional platform bindings under MIT, plus Lightning CSS `1.33.0` and its
+optional platform bindings under MPL-2.0. These registry-integrity-pinned
+native packages declare no install-time lifecycle hooks, and FileBelt disables
+all dependency script execution. They run only while building or testing the
+browser bundle; neither their binaries nor Node modules are copied into the
+published SPA or OxiBelt image. The Node policy admits every Lightning CSS
+package by exact name and version rather than globally allowing MPL-2.0.
+Changing Vite, Rolldown, Lightning CSS, a binding identity, native loading, or
+the final-image copy boundary repeats the source, license, architecture,
+vulnerability, and notice review.
+
+Vite 8's test server does not add the missing `.js` suffix to one exact
+`@fluentui/react-icons` ESM edge. Fluent-consuming Vitest configurations inline
+that package and a serve-only resolver maps only `lib/providers.js` importing
+`./contexts/index` to the already shipped `contexts/index.js`. It does not
+patch dependencies or affect production builds. Remove the workaround when
+Fluent ships the suffix or Vite resolves the edge, and keep a regression test
+that rejects unrelated importers and specifiers.
+
 The development-only Vite graph pins `postcss>nanoid` to exact
 `nanoid@3.3.18`. FileBelt does not import Nano ID, and the resolved PostCSS
 path uses `nanoid/non-secure` with a fixed size rather than the React Native
 async custom generator affected by `GHSA-2v37-7h3g-55p8`; the patched release
 is still required because Node advisory admission fails closed. Version 3.3.18
 retains the reviewed MIT license and introduces no dependency, lifecycle
-script, native-code, or engine change. Changing Vite, PostCSS, the Nano ID
-entrypoint, or its runtime reachability invalidates this review. Remove the
-override only when the exact locked graph remains outside the advisory range
-and the frozen install, license, audit, test, and build gates pass.
+script, native-code, or engine change. The Vite 8.2.1 graph retains
+`postcss@8.5.25` and the same non-secure entrypoint. Changing Vite, PostCSS, the
+Nano ID entrypoint, or its runtime reachability invalidates this review. Remove
+the override only when the exact locked graph remains outside the advisory
+range and the frozen install, license, audit, test, and build gates pass.
 
 ### Cargo Vet acceptance baseline
 

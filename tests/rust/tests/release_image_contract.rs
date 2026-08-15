@@ -81,6 +81,10 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
             "web image must copy the {workspace} workspace before building"
         );
     }
+    assert!(
+        web.contains("COPY ui/vitest-fluent-icons-resolver.ts ui/vitest-fluent-icons-resolver.ts"),
+        "web image must copy shared Vite configuration dependencies before building"
+    );
     for dockerfile in [&rust, &web] {
         assert!(dockerfile.contains("USER 10001:10001"));
         assert!(dockerfile.contains("LICENSES/Apache-2.0.txt"));

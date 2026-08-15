@@ -254,6 +254,21 @@ def check(root: Path) -> list[str]:
         set(allowed_node_licenses)
     ):
         failures.append("Node license allowlist must be non-empty and contain no duplicates")
+    node_license_admissions = node_policy.get("package_license_admissions", {})
+    if not isinstance(node_license_admissions, dict) or any(
+        not isinstance(selector, str)
+        or not re.fullmatch(
+            r"(?:@[^/@]+/[^@]+|[^@]+)@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?",
+            selector,
+        )
+        or not isinstance(license_name, str)
+        or not license_name
+        or license_name in allowed_node_licenses
+        for selector, license_name in node_license_admissions.items()
+    ):
+        failures.append(
+            "Node package license admissions must be exact and outside the global allowlist"
+        )
 
     for path in iter_files(root):
         if path.suffix not in SPDX_EXTENSIONS:

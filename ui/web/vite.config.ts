@@ -5,6 +5,7 @@ import { cp } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
+import { ResolveFluentIconsContext } from "../vitest-fluent-icons-resolver.js";
 
 export function ParentContentSecurityPolicy(DocumentLaunchAction = process.env.FILEBELT_DOCUMENT_LAUNCH_ACTION): string {
   const EditorOrigin = DocumentLaunchAction === undefined ? "" : ` ${DocumentLaunchOrigin(DocumentLaunchAction)}`;
@@ -79,10 +80,13 @@ export default defineConfig({
         Warn(Warning);
       },
       output: {
-        manualChunks: {
-          fluent: ["@fluentui/react-components"],
-          icons: ["lucide-react"],
-          react: ["react", "react-dom/client"],
+        manualChunks(Id) {
+          if (Id.includes("/node_modules/@fluentui/")) return "fluent";
+          if (Id.includes("/node_modules/lucide-react/")) return "icons";
+          if (Id.includes("/node_modules/react/") || Id.includes("/node_modules/react-dom/")) {
+            return "react";
+          }
+          return undefined;
         },
       },
     },
@@ -97,9 +101,12 @@ export default defineConfig({
       "@filebelt/mcp-settings": fileURLToPath(new URL("../mcp-settings/source/index.tsx", import.meta.url)),
     },
   },
-  plugins: [BrowserSecurityHeaders(), CopyMarkdownPreview()],
+  plugins: [BrowserSecurityHeaders(), CopyMarkdownPreview(), ResolveFluentIconsContext()],
   test: {
     environment: "node",
     exclude: ["browser/**", "dist/**", "node_modules/**"],
+    server: {
+      deps: { inline: [/@fluentui/] },
+    },
   },
 });

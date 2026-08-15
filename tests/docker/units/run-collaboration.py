@@ -57,6 +57,7 @@ def exercise() -> None:
             nodes[f"{browser_name}:{scenario}"] = committed["node_id"]
     environment = {
         **os.environ,
+        "CI": "true",
         "FILEBELT_COLLABORATION_DRIVE_ID": drive["id"],
         "FILEBELT_COLLABORATION_NODE_IDS": json.dumps(nodes, separators=(",", ":")),
         "FILEBELT_COLLABORATION_MEMBER_ID": member_session["principal_id"],

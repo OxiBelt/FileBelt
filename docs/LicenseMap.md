@@ -35,6 +35,8 @@ licenses and notices of its linked runtime and copied upstream contents.
 | `filebelt-mcp-broker` and `filebelt-controller` | `Apache-2.0 AND MIT AND CDLA-Permissive-2.0` | Apache FileBelt source, Rust/musl runtime, and admitted WebPKI certificate data; the controller also contains the reviewed Sigstore verifier graph |
 | `filebelt-web` | `Apache-2.0 AND MIT AND ISC AND 0BSD` | FileBelt Apache SPA/config, ISC Lucide assets, and 0BSD `tslib` copied onto the digest-pinned Apache-2.0 OxiBelt runtime; no source linkage or copied reference code |
 | `tslib@2.8.1` | `0BSD` | Lockfile-pinned Fluent UI runtime helper admitted by the Node license policy; distributed only as part of the browser bundle |
+| Rolldown `1.2.4` and `@rolldown/binding-*` `1.2.4` | `MIT` | Registry-integrity-pinned native Vite build/test tooling with no install-time lifecycle hooks; selected only for the runner platform and not copied into `filebelt-web` or another release image |
+| Lightning CSS `1.33.0` and `lightningcss-*` `1.33.0` | `MPL-2.0` | Exact package-and-version Node policy admission for unmodified native Vite build/test tooling. Preserve upstream license/source evidence; no package or binary is copied into `filebelt-web` or another release image. |
 | PostgreSQL 18.4 helper | Upstream PostgreSQL License | External Docker integration process; retain upstream label/notices; never republish as a FileBelt image |
 | Apache Iggy 0.8.0 helper and client | Upstream Apache-2.0 evidence | Optional external event process and reviewed generic client; never authoritative and never republished as a FileBelt image |
 | OIDC test provider | Exact upstream composition recorded by the Docker plan | External integration fixture only; not a FileBelt release image |

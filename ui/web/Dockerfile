@@ -24,6 +24,7 @@ COPY ui/design-system ui/design-system
 COPY ui/markdown ui/markdown
 COPY ui/mcp-settings ui/mcp-settings
 COPY ui/web ui/web
+COPY ui/vitest-fluent-icons-resolver.ts ui/vitest-fluent-icons-resolver.ts
 RUN --network=none pnpm --filter @filebelt/design-system build && \
     pnpm --filter @filebelt/admin build && \
     pnpm --filter @filebelt/markdown build && \

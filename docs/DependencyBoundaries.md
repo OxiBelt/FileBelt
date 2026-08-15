@@ -108,12 +108,22 @@ never widens a serving role. Prometheus and OTLP are output protocols and
 cannot become policy or durability inputs.
 
 The SMB and explicit-FTPS crates live in independent GPL workspaces and may
-depend on the committed Apache VFS protocol through an ordinary replaceable
-client boundary. They may not be root Cargo members or path dependencies of an
+link the committed Apache VFS protocol crate to implement an ordinary
+replaceable process client. The Rust linkage is part of each adapter executable
+and its license graph; the runtime call to the Apache VFS service crosses the
+documented process boundary. They may not be root Cargo members or path dependencies of an
 Apache package. Their adapter-local lockfiles, notices, source offers, build
 roots, and image evidence remain separate. Helm may describe both processes,
 but rendering a Pod neither changes dependency direction nor proves license or
 release readiness.
+
+The machine-readable compatibility policy registers the root and every one of
+the six independently locked adapter workspaces. It distinguishes linked,
+copied, separate-executable, external, and build-only relationships, rejects
+reverse Apache-to-adapter edges, and rejects known Git implementation crates.
+The pre-image gate is eligible only when source-bundle, dependency,
+component, notice, build-input, immutable-source, and build-context evidence
+are each qualified.
 
 The Phase 8 NFS FSAL and its adapter-local bridge live in the independent LGPL
 workspace. The FSAL may link to the selected NFS-Ganesha ABI and exchange only

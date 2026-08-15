@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: Apache-2.0
 
 [graph]
 all-features = true
@@ -9,9 +9,8 @@ yanked = "deny"
 
 [licenses]
 confidence-threshold = 0.93
-unused-allowed-license = "allow"
-allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "MIT", "MIT-0", "MPL-2.0", "Unicode-3.0", "Zlib"]
-exceptions = [{ crate = "filebelt-git-adapter@0.1.0", allow = ["GPL-2.0-only"] }]
+unused-allowed-license = "deny"
+allow = ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT", "MIT-0", "Unicode-3.0"]
 
 [bans]
 multiple-versions = "warn"

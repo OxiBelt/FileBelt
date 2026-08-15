@@ -1,10 +1,12 @@
-<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # FileBelt Git revision adapter
 
-This is the separate GPL-2.0-only system-Git adapter for FileBelt revision
-storage. It consumes only the Apache-2.0 `filebelt-revision-protocol` private
-protobuf framing contract. Apache core has no dependency on this workspace.
+The FileBelt Git adapter is an Apache-2.0 wrapper distributed with and invoking
+a separate GPL-2.0-only Git executable. The wrapper links only the Apache-2.0
+`filebelt-revision-protocol` private protobuf framing contract and reviewed
+Rust dependencies; it never links Git or another Git implementation. Apache
+core has no dependency on this workspace.
 
 The adapter requires exactly Git `2.55.0`. It manages one SHA-256 bare
 repository per opaque FileBelt node UUID, permits only `refs/heads/filebelt`,
@@ -31,8 +33,14 @@ with typed admission exhaustion and a five-second retry hint, while other
 authenticated operations wait within their existing bounded request lifetime.
 Permits are released on success, failure, timeout, and cancellation.
 
-The source-first Dockerfile and Helm chart are non-publishable sentinels. The
-operator supplies the Git-only RWX claim and every mTLS Secret. There is no
+The source-first Dockerfile accepts only a staged, verified build context. It
+cannot download source and refuses to build until the adapter qualification
+plan marks both source/license evidence and image construction eligible. A
+qualified build produces a static scratch aggregate containing the Apache
+wrapper and separate GPL Git executable; publication remains blocked until the
+independent platform, SBOM, vulnerability, restore, and fsck gates pass.
+
+The operator supplies the Git-only RWX claim and every mTLS Secret. There is no
 database credential, payload mount, browser route, general egress, or Git
 transport in this adapter.
 

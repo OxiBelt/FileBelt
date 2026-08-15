@@ -209,7 +209,7 @@ filebelt-onlyoffice-adapter = []
 filebelt-document-protocol = []
 
 [[graph_profiles]]
-label = "GPL Git revision adapter"
+label = "Apache Git revision wrapper"
 package = "filebelt-git-adapter"
 manifest = "adapters/git/Cargo.toml"
 feature_arguments = []

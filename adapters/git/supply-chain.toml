@@ -1,11 +1,68 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: Apache-2.0
+
+[first_party]
+package = "filebelt-git-adapter"
+license = "Apache-2.0"
+relationship = "application"
+image_path = "/usr/local/bin/filebelt-git-adapter"
 
 [git]
 version = "2.55.0"
 source = "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz"
 sha256 = "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357"
 license = "GPL-2.0-only"
+boundary = "separate-executable"
+image_path = "/opt/filebelt-git/bin/git"
 
-[admission]
-status = "source-sentinel-only"
-requires = ["digest-pinned-builder", "digest-pinned-runtime", "source-offer", "sbom", "vulnerability-report", "provenance", "platform-qualification"]
+[zlib]
+version = "1.3.1"
+license = "Zlib"
+relationship = "static-linked-into-bundled-git"
+admission = "blocked"
+requires = ["immutable-source-url", "verified-sha256", "license-and-notice"]
+
+[image]
+minimum_license_expression = "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib"
+reviewed_license_expression_source = "normalized-sbom"
+
+[source_qualification]
+state = "blocked"
+state_scope = "checked-in-default"
+derived_by = "schema-v2 adapter plan preImage evidence"
+required = [
+  "exact-filebelt-revision",
+  "git-2.55.0-archive",
+  "zlib-1.3.1-archive-and-checksum",
+  "versioned-cargo-vendor-closure",
+  "source-manifest",
+  "licenses-and-notices",
+  "immutable-source-bundle-url-and-checksum",
+]
+
+[image_build]
+state = "blocked"
+state_scope = "checked-in-default"
+derived_from = "source_qualification"
+eligible_by = "schema-v2 adapter plan plus digest-bound platform build arguments"
+unblock_when = "all-source-and-license-requirements-qualified"
+required = [
+  "digest-pinned-builder",
+  "static-rust-musl-toolchain",
+  "static-git-and-zlib-toolchain",
+  "network-disabled-compilation",
+  "reviewed-image-license-expression",
+]
+
+[publication]
+state = "blocked"
+state_scope = "checked-in-default-and-current-release"
+derived_by = "schema-v2 adapter plan and signed-tag adapter subject map"
+required = [
+  "image-sbom",
+  "vulnerability-report",
+  "provenance",
+  "amd64-native-qualification",
+  "arm64-native-qualification",
+  "sha256-repository-behavior",
+  "restore-and-fsck-matrix",
+]

@@ -12,7 +12,8 @@ is `supply-chain/license-regions.toml`.
 | `adapters/smb/` | GPL-3.0-or-later | `@PiQuark6046` | Separate workspace/process/image |
 | `adapters/ftp-ftps/` | GPL-3.0-or-later | `@PiQuark6046` | Separate workspace/process/image |
 | `adapters/onlyoffice/` | AGPL-3.0-only | `@PiQuark6046` | Separate workspace/process/image; network source access required |
-| `adapters/git/` | GPL-2.0-only | `@PiQuark6046` | Separate workspace/process/image and RWX repository volume; Apache services use only the revision protocol over mTLS |
+| `adapters/git/` | Apache-2.0 | `@PiQuark6046` | Apache wrapper in a separate workspace/process/image and RWX repository volume; its bundled Git executable remains GPL-2.0-only |
+| `adapters/git/GIT_COMPONENT.toml` | GPL-2.0-only | Git contributors | Reviewed upstream component record; not FileBelt wrapper source |
 | `adapters/nfs/` | LGPL-3.0-or-later | `@PiQuark6046` | Separate dynamic FSAL/bridge workspace and image; no reverse Apache dependency |
 | `adapters/transcode/` | GPL-3.0-or-later | `@PiQuark6046` | Separate FFmpeg-linked wrapper workspace and image; no reverse Apache dependency |
 
@@ -44,7 +45,7 @@ licenses and notices of its linked runtime and copied upstream contents.
 | `filebelt-smb-gateway` | `GPL-3.0-or-later` final image | Separate adapter workspace plus exact Samba `4.24.4` source/patch/build context. The scaffold pins the official archive SHA-256 and ships notices/source-offer requirements, but no image may publish until the complete corresponding source and working reviewed bridge are packaged. |
 | `filebelt-ftp-ftps-gateway` | `GPL-3.0-or-later` final image | Separate adapter workspace with exact `libunftp 0.23.0` lock and notice evidence. Its Docker recipe is deliberately blocked until digest-pinned build/runtime bases, the complete buildable source context, SBOM, and corresponding-source offer are reviewed. |
 | `filebelt-onlyoffice-adapter` | `AGPL-3.0-only` final image plus permissively licensed locked Rust dependencies | Separate first-party adapter workspace and AGPL launcher. Its exact `hmac@0.13.0`, `sha2@0.11.0`, and `zip@8.6.0` graph and notices are included in the SBOM and corresponding-source bundle. Network users receive exact version/revision/license/corresponding-source/build metadata. The release contains no copied DocumentServer program or `api.js`; the operator supplies the separately licensed provider and retains required ONLYOFFICE branding. |
-| `filebelt-git-adapter` | `GPL-2.0-only` final image | Separate first-party adapter workspace using the system Git executable. It owns only its dedicated RWX bare-repository PVC and exposes the protocol-neutral revision service over mTLS; the Apache coordinator never mounts Git state or links to the adapter. |
+| `filebelt-git-adapter` | `Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib` final image | The FileBelt-authored Apache wrapper links the Apache revision protocol and permissive Rust/runtime dependencies, then invokes the separate static Git `2.55.0` GPL executable. It owns only its dedicated RWX bare-repository PVC; the Apache coordinator never mounts Git state or links to the adapter. |
 | ONLYOFFICE Docs Community `9.4.0` | Upstream `AGPL-3.0-only` external process | Operator-supplied, separately deployed provider. FileBelt does not build, copy, republish, or cluster it. Its 20-simultaneous-connection Community limit, branding, complete corresponding source, image digest, database, and operational terms remain the operator's responsibility and are not satisfied by the FileBelt adapter source offer. |
 | `filebelt-nfs-gateway` | `LGPL-3.0-or-later` FileBelt adapter plus the exact licenses of Ubuntu, NFS-Ganesha `6.5-8`, Kerberos, `nix@0.31.3`, and runtime packages | Dynamic LGPL FSAL and adapter-local bridge remain outside the Apache workspace. The MIT-licensed Rust `nix` wrapper does not change the Ganesha ABI or dynamic relinking boundary. Publish the dated Ubuntu 26.04 package snapshot, upstream and modified source, patches, build scripts, exact Rust lock and crate sources, notices, replacement/relink instructions, ABI probe, per-platform SBOM, and corresponding-source URL. |
 | `filebelt-transcoder` | `GPL-3.0-or-later` final image | First-party GPL wrapper dynamically links a GPL-enabled FFmpeg `8.1.2` build with libaom `3.14.1`, libvpx `1.16.0`, and Opus `1.5.2`. Configure with `--enable-gpl` and without `--enable-version3` or `--enable-nonfree`; publish exact source, patches, flags, notices, build instructions, SBOM, and corresponding-source URL. |
@@ -96,3 +97,10 @@ relicensing authority where applicable and update this map, the machine-readable
 region policy, [dependency boundaries](DependencyBoundaries.md),
 [supply-chain policy](SupplyChain.md), and
 [runtime specification](RuntimeAndDeployment.md) together.
+
+For the Git wrapper relicense, contributor-history review at commit
+`1769aeb841b9fa48fa64cea093d58df54ef8eb91d` found exactly one author identity
+under `adapters/git/`: `PiQuark6046 <piquark6046@proton.me>`. The relicense
+changes only FileBelt-authored wrapper material. Upstream Git `2.55.0`, its
+COPYING text, source archive, notices, and source-offer obligations remain
+GPL-2.0-only evidence for a separate executable.

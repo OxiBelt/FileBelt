@@ -2,7 +2,7 @@
 
 apiVersion: v2
 name: filebelt-git
-description: Isolated GPL system-Git revision adapter contract
+description: Isolated Apache wrapper with a separate GPL system-Git executable
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -11,6 +11,7 @@ home: https://github.com/OxiBelt/FileBelt
 sources:
   - https://github.com/OxiBelt/FileBelt/tree/0.1.0/adapters/git
 annotations:
-  artifacthub.io/license: GPL-2.0-only
+  artifacthub.io/license: Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib
   filebelt.dev/adapter-role: filebelt-git-adapter
-  filebelt.dev/qualification: source-sentinel-only
+  filebelt.dev/qualification: blocked
+  filebelt.dev/corresponding-source: https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-git-adapter-source-0.1.0.tar.gz

@@ -7,8 +7,12 @@ app.kubernetes.io/component: git-adapter
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 filebelt.dev/adapter-license: {{ .Values.image.license | quote }}
 filebelt.dev/adapter-source: {{ .Values.image.correspondingSource | quote }}
+filebelt.dev/adapter-source-sha256: {{ .Values.image.correspondingSourceSha256 | quote }}
 {{- end -}}
 {{- define "filebelt-git.image" -}}
+{{- if ne .Values.image.qualification "qualified" -}}{{- fail "filebelt-git image qualification is blocked" -}}{{- end -}}
+{{- if eq .Values.image.digest "sha256:0000000000000000000000000000000000000000000000000000000000000000" -}}{{- fail "filebelt-git requires a promoted nonzero image digest" -}}{{- end -}}
+{{- if eq .Values.image.correspondingSourceSha256 "0000000000000000000000000000000000000000000000000000000000000000" -}}{{- fail "filebelt-git requires the published source-bundle SHA-256" -}}{{- end -}}
 {{- $registry := coalesce .Values.image.registryMirror .Values.global.registryMirror .Values.global.registry -}}
 {{- printf "%s/%s@%s" $registry .Values.image.repository .Values.image.digest -}}
 {{- end -}}

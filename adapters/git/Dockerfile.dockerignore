@@ -1,7 +1,27 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: Apache-2.0
+
+# Release builds receive only the exact source and evidence inputs named by
+# the Dockerfile. The shared assembler constructs this context from a clean,
+# verified source bundle rather than the contributor worktree.
+**
+!Cargo.toml
+!LICENSES/
+!LICENSES/Apache-2.0.txt
+!adapters/
+!adapters/git/
+!adapters/git/**
+!adapter-inputs/
+!adapter-inputs/git/
+!adapter-inputs/git/**
+!source/
+!source/**
+!protocol/
+!protocol/**
+!fuzz/
+!fuzz/**
+!tests/
+!tests/**
 
 **/target
 .git
 .agents
-ui
-deploy

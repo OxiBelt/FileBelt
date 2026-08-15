@@ -12,7 +12,7 @@ ignore = ["RUSTSEC-2023-0071"]
 
 [licenses]
 confidence-threshold = 0.93
-unused-allowed-license = "allow"
+unused-allowed-license = "deny"
 allow = [
   "Apache-2.0",
   "BSD-2-Clause",
@@ -21,12 +21,12 @@ allow = [
   "ISC",
   "MIT",
   "MIT-0",
-  "MPL-2.0",
   "Unicode-3.0",
   "Zlib",
 ]
 exceptions = [
   { crate = "libfuzzer-sys@0.4.13", allow = ["NCSA"] },
+  { crate = "option-ext@0.2.0", allow = ["MPL-2.0"] },
 ]
 
 [bans]

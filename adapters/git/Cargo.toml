@@ -1,11 +1,11 @@
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: Apache-2.0
 
 [package]
 name = "filebelt-git-adapter"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
-license = "GPL-2.0-only"
+license = "Apache-2.0"
 publish = false
 
 [workspace]

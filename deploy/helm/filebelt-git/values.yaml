@@ -13,8 +13,10 @@ image:
   repository: oxibelt/filebelt-git-adapter
   registryMirror: ""
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  license: GPL-2.0-only
-  correspondingSource: https://github.com/OxiBelt/FileBelt/tree/0.1.0
+  license: Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib
+  correspondingSource: https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-git-adapter-source-0.1.0.tar.gz
+  correspondingSourceSha256: 0000000000000000000000000000000000000000000000000000000000000000
+  qualification: blocked
 
 config:
   existingConfigMap: filebelt-git-config

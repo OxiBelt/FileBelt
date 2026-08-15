@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: Apache-2.0
 
-//! GPL adapter implementation for the isolated FileBelt Git revision store.
+//! Apache-2.0 wrapper for the isolated, separately licensed Git revision store.
 
 #![deny(unsafe_code)]
 
@@ -557,6 +557,7 @@ impl GitRepository {
         let mut command = Command::new(&self.git);
         command
             .args(args)
+            .env_clear()
             .envs(git_environment())
             .envs(extra_env.iter().copied())
             .stdin(Stdio::null())
@@ -592,6 +593,7 @@ impl GitRepository {
         ]);
         command
             .args(args)
+            .env_clear()
             .envs(git_environment())
             .envs(extra_env.iter().copied());
         command

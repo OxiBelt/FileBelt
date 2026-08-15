@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: Apache-2.0
 
 #![allow(clippy::enum_variant_names, dead_code, unused_imports)]
 

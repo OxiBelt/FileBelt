@@ -27,6 +27,18 @@ criteria = "safe-to-deploy"
 version = "3.4.2"
 notes = "Reviewed complete checksum-matched source with the default std feature. It has no build script, filesystem, network, or process authority. Its UnsafeCell, guard lifetime, and atomic reader/writer transitions keep mutation behind acquired locks; misuse-capable raw operations are internal or explicitly unsafe. An untrusted workload can cause ordinary lock contention but cannot obtain a second mutable reference through the safe API."
 
+[[audits.async-trait]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.1.91 -> 0.1.92"
+notes = "Reviewed the checksum-matched proc-macro delta. It only stops attaching must_use to transformed default async trait methods, adds no build script or unsafe code, and changes no runtime authority."
+
+[[audits.cc]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.4.0 -> 1.4.3"
+notes = "Reviewed the checksum-matched compiler-helper delta. Target and flag handling fixes preserve the existing caller-directed compiler process boundary and add no unsafe or ambient capability."
+
 [[audits.cmpv2]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -44,6 +56,12 @@ who = "OpenAI Codex"
 criteria = "filebelt-constrained-deployment"
 version = "0.2.0"
 notes = "Reviewed complete checksum-matched source. EncKeyWithIdChoice::tag recursively calls itself for GeneralName and can stack overflow if that public variant is encoded. FileBelt reaches CRMF only through dormant Sigstore TSA type dependencies, disallows TSA bundles, and never calls CRMF decoding or encoding."
+
+[[audits.crypto-common]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.1.6 -> 0.1.7"
+notes = "Reviewed the checksum-matched delta; source is unchanged and only package metadata and resolution inputs differ."
 
 [[audits.defmt]]
 who = "OpenAI Codex"
@@ -75,11 +93,77 @@ criteria = "safe-to-deploy"
 version = "1.0.11"
 notes = "Reviewed complete checksum-matched source. Formatting uses a fixed 25-byte buffer with bounds derived from IEEE-754 inputs, has no build script or ambient I/O, and FileBelt reaches it only through metrics formatting."
 
+[[audits.find-msvc-tools]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.1.9 -> 0.1.11"
+notes = "Reviewed the checksum-matched Windows tool-discovery delta. It improves MSVC discovery and version selection while retaining the existing Windows registry, loader, and FFI boundary without new authority."
+
 [[audits.flagset]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.4.7"
 notes = "Reviewed complete checksum-matched no_std source. It has no build script or ambient I/O; unsafe construction documents the valid-bit precondition, while macro-generated and DER-decoded uses satisfy it through static declarations and checked construction."
+
+[[audits.generic-array]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.14.9 -> 0.14.7"
+notes = "Reviewed the resolver-selected reverse delta. Unsafe implementation code is unchanged; the newer release only added deprecation and check-cfg build output that is absent from 0.14.7."
+
+[[audits.icu_collections]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched ICU collection delta. Unicode data/API updates preserve validated zero-copy invariants and add no build, native, network, filesystem, or process authority."
+
+[[audits.icu_locale_core]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched locale-core delta. Locale and generated-data updates add no unsafe capability, build-script change, or ambient I/O."
+
+[[audits.icu_normalizer]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched normalizer delta. Refactored unsafe paths retain validated UTF-8 and Hangul invariants; no new ambient capability or build behavior is introduced."
+
+[[audits.icu_normalizer_data]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched generated normalization tables. The build script is byte-identical and the crate adds no ambient I/O or executable behavior."
+
+[[audits.icu_properties]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched Unicode-properties delta. Data and query API changes preserve existing validation boundaries and add no build, native, or ambient capability."
+
+[[audits.icu_properties_data]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched generated property tables. The build script is byte-identical and no executable authority is added."
+
+[[audits.icu_provider]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "2.2.0 -> 2.3.0"
+notes = "Reviewed the checksum-matched provider delta. Segmented marker attributes remain validated, raw Box casts preserve transparent str layout, and no ambient capability or build behavior is added."
+
+[[audits.io-uring]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.7.13 -> 0.7.14"
+notes = "Reviewed the checksum-matched Linux io_uring delta. New registered-ring and raw completion snapshot APIs are opt-in and unused by FileBelt; existing syscall and unsafe boundaries remain unchanged for the resolved graph."
+
+[[audits.itertools]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+version = "0.13.0"
+notes = "Reviewed complete checksum-matched source as a bindgen build dependency. It has no build script or ambient I/O; its two internal unsafe state transitions immediately restore the matching initialized enum variant."
 
 [[audits.jiff-tzdb]]
 who = "OpenAI Codex"
@@ -98,6 +182,18 @@ who = "OpenAI Codex"
 criteria = "safe-to-run"
 version = "0.4.13"
 notes = "Reviewed complete checksum-matched Rust shim, build script, and bundled LLVM libFuzzer C++ source with the default link_libfuzzer feature. The FFI wrapper constructs the target slice from libFuzzer's valid pointer/length callback and aborts on panic; the bundled mutators keep copies and moves within caller-provided sizes. The build script compiles packaged C++17 sources to OUT_DIR, while FileBelt's runner clears the custom-library and debug-path environment inputs and does not enable fork, jobs, merge, or data-flow subprocess modes. Runtime filesystem access is limited to operator-selected ephemeral corpus and artifact paths. This native test-only dependency is admitted for bounded fuzz jobs and never enters a deployed FileBelt graph."
+
+[[audits.libredox]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.1.19 -> 0.1.20"
+notes = "Reviewed the checksum-matched Redox-only delta. It adds checked TtyCall conversion while leaving existing syscall and FFI unsafe code unchanged."
+
+[[audits.litemap]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.8.2 -> 0.8.3"
+notes = "Reviewed the checksum-matched pure collection delta. New iterator conveniences add no unsafe, build script, or ambient I/O."
 
 [[audits.md4]]
 who = "OpenAI Codex"
@@ -165,11 +261,23 @@ criteria = "safe-to-deploy"
 version = "0.32.1"
 notes = "Reviewed complete checksum-matched source with the resolved trace and metrics features. The W3C Baggage propagator rejects headers above 8192 bytes before parsing and caps extraction at 64 members, fixing GHSA-w9wp-h8wv-79jx; FileBelt installs no inbound propagator. The crate has no build script or unsafe code, uses OS-random trace identifiers and bounded synchronous batch channels, and FileBelt caps the queue at 1024, batch at 256, delay at five seconds, and HTTP at three seconds."
 
+[[audits.pkg-config]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.3.33 -> 0.3.34"
+notes = "Reviewed the checksum-matched build-helper delta. The existing caller-directed pkg-config process boundary is unchanged; additions only support cflags opt-out, filename reporting, and non-exhaustive errors."
+
 [[audits.portable-atomic-util]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.2.7"
 notes = "Reviewed complete checksum-matched source, build script, and std-derived Arc, Weak, and RawWaker unsafe contracts. It is target-only for platforms without pointer atomics and is absent from FileBelt's Linux amd64, arm64, and riscv64 builds."
+
+[[audits.potential_utf]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.1.5 -> 0.1.6"
+notes = "Reviewed the checksum-matched UTF validation delta. The raw Box conversion preserves the documented transparent unsized layout and adds no ambient capability or build behavior."
 
 [[audits.prometheus-client]]
 who = "OpenAI Codex"
@@ -177,11 +285,23 @@ criteria = "safe-to-deploy"
 version = "0.24.0"
 notes = "Reviewed complete checksum-matched source and selected empty default features. It forbids unsafe code and has no runtime I/O; the protobuf build path is unselected, FileBelt labels are bounded and static, and FileBelt does not use exemplars."
 
+[[audits.prometheus-client]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.24.0 -> 0.24.1"
+notes = "Reviewed the checksum-matched patch delta with empty default features. It omits empty metric families and fixes integer encoding bounds, adds only opt-in test utilities, keeps the protobuf build path unselected, and adds no unsafe or ambient capability."
+
 [[audits.prometheus-client-derive-encode]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.5.0"
 notes = "Reviewed complete checksum-matched compiler-only proc-macro source. It has no unsafe code, build script, or ambient I/O and generated runtime code directly delegates field and variant encoders."
+
+[[audits.rcgen]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.14.8 -> 0.14.9"
+notes = "Reviewed the checksum-matched certificate delta. BasicConstraints and CSR encoding is corrected to standards-compliant DER; no build script, unsafe code, FFI, or native behavior is added."
 
 [[audits.reqwest]]
 who = "OpenAI Codex"
@@ -195,6 +315,12 @@ criteria = "safe-to-deploy"
 version = "3.1.1"
 notes = "Reviewed complete checksum-matched source with default features disabled. FileBelt uses bounded model response types only and the crate has no runtime unsafe code. Its build script can set core.hooksPath only in a special vendored repository layout, which is absent from the registry layout and FileBelt builds."
 
+[[audits.rmcp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "3.1.1 -> 3.1.2"
+notes = "Reviewed the checksum-matched delta with default features disabled. OAuth issuer validation is tightened, challenged responses are mapped explicitly, recursive SSE polling becomes an iterative loop, and FileBelt continues to use bounded model types only."
+
 [[audits.ryu-js]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -206,6 +332,18 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.3.2"
 notes = "Reviewed complete checksum-matched source. It recursively buffers and sorts input and casts integers through binary64, so FileBelt's sole wrapper recursively rejects integers outside the I-JSON safe range before every security-sensitive canonicalization; direct arbitrary-Value use is prohibited."
+
+[[audits.serde_with]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "3.21.0 -> 3.22.0"
+notes = "Reviewed the checksum-matched serialization delta. Existing unsafe utilities are unchanged, untrusted deserializer size hints are capped, and the new optional jiff feature is not enabled."
+
+[[audits.serde_with_macros]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "3.21.0 -> 3.22.0"
+notes = "Reviewed the checksum-matched proc-macro delta. Runtime generation behavior is unchanged apart from versioned documentation links, unsafe remains forbidden, and there is no build script or ambient I/O."
 
 [[audits.sigstore-bundle]]
 who = "OpenAI Codex"
@@ -261,6 +399,12 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 notes = "Reviewed complete checksum-matched source with the union feature selected by Yrs. It has no build script or ambient I/O. Unsafe UTF-8, slice, and union operations remain behind checked string construction and character-boundary calculations; the two unchecked public constructors require an explicit unsafe caller contract and are not used by FileBelt."
 
+[[audits.tinystr]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.8.3 -> 0.8.4"
+notes = "Reviewed the checksum-matched locale-string delta. Validation and representation invariants are preserved, with no build-script change or ambient capability."
+
 [[audits.tls_codec]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -315,6 +459,30 @@ criteria = "safe-to-deploy"
 version = "0.29.0"
 notes = "Reviewed complete checksum-matched source with the locked handshake features. It has no build script. UTF-8 unchecked conversions follow validation of the retained byte prefix, and masking uses alignment-safe slices; protocol input is length-checked before frame allocation and state transitions reject invalid handshakes. Stream I/O is supplied by the caller and carries no ambient credentials or authority."
 
+[[audits.uuid]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.24.0 -> 1.24.1"
+notes = "Reviewed the checksum-matched parser hardening delta. Hex validation now rejects non-ASCII characters before conversion, the public API is unchanged, and no build, unsafe, FFI, or native path is added."
+
+[[audits.wasm-bindgen-futures]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.4.76 -> 0.4.77"
+notes = "Reviewed the checksum-matched wasm-only delta. Source is unchanged and only synchronized wasm package versions move."
+
+[[audits.web-sys]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.3.103 -> 0.3.104"
+notes = "Reviewed the checksum-matched generated bindings delta. New WebGPU, Navigation, and LockManager families are not enabled by FileBelt's wasm graph, and no new unsafe or build behavior is introduced."
+
+[[audits.writeable]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.6.3 -> 0.6.4"
+notes = "Reviewed the checksum-matched formatting delta. Convenience APIs add no unsafe code, build script, or ambient I/O."
+
 [[audits.x509-cert]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -332,3 +500,21 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 version = "0.27.3"
 notes = "Reviewed complete checksum-matched source with default features only; sync and weak features are unselected. It has no build script or ambient I/O. The CRDT's pointer, interior-mutability, and transaction unsafe blocks retain ownership in document/block-store lifetimes, while decoder unchecked UTF-8 follows validated wire-string reads. FileBelt additionally bounds each yjs-v1 group to 2 MiB and chunk to 256 KiB, serializes durable ordering through fenced PostgreSQL manifests, and does not expose Yrs raw-pointer APIs to untrusted callers."
+
+[[audits.zerotrie]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.2.4 -> 0.2.5"
+notes = "Reviewed the checksum-matched trie delta. New query conveniences preserve validated zero-copy storage and add no ambient capability or build behavior."
+
+[[audits.zerovec]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.11.6 -> 0.11.7"
+notes = "Reviewed the checksum-matched zero-copy delta. Box metadata reconstruction is provenance-preserving and checked arithmetic hardens owned variable vectors; no ambient capability is added."
+
+[[audits.zerovec-derive]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.11.3 -> 0.11.4"
+notes = "Reviewed the checksum-matched proc-macro delta. Generated ULE conversion now validates exact sparse enum discriminants instead of a permissive range, with no unsafe or ambient capability in the macro crate."

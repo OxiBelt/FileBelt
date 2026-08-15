@@ -18,9 +18,9 @@ ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.yaml"
 MCP_COMPOSE = ROOT / "deploy/compose/compose.mcp.yaml"
 PREPARE = ROOT / "deploy/compose/prepare-state.sh"
-POSTGRES = (
+POSTGRES_18_6 = (
     "docker.io/library/postgres@"
-    "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636"
+    "sha256:ae6c78831cbc35fa3a4aaf4d763ddacf6183d6004774cc2dc28b3920410d1d1a"
 )
 IGGY = (
     "docker.io/apache/iggy@"
@@ -171,8 +171,8 @@ def main() -> int:
     assert model["networks"]["control"]["internal"] is True
     assert model["networks"]["edge"]["internal"] is True
     assert model["networks"]["internet-egress"].get("internal", False) is False
-    assert services["postgres"]["image"] == POSTGRES
-    assert services["postgres-runtime-roles"]["image"] == POSTGRES
+    for name in ("postgres", "postgres-migrator-role", "postgres-runtime-roles"):
+        assert services[name]["image"] == POSTGRES_18_6, name
     assert services["postgres"]["user"] == "999:999"
     assert services["postgres-runtime-roles"]["user"] == "999:999"
     assert services["filebelt-iggy"]["image"] == IGGY

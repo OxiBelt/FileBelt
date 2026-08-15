@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[advisories]
+# Root exceptions are justified by OIDC and Iggy reachability and must not
+# silently transfer to this independently locked Apache composition.
+ignore = []

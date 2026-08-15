@@ -44,8 +44,10 @@ class CargoVetPolicyTests(unittest.TestCase):
 
         self.assertEqual(actual_versions, expected_versions)
 
-    def test_exemptions_are_exact_locked_safe_to_deploy_records(self) -> None:
+    def test_exemptions_are_exact_locked_or_reviewed_delta_baselines(self) -> None:
         config = load_toml("supply-chain/config.toml")
+        audits = load_toml("supply-chain/audits.toml").get("audits", {})
+        imported_audits = load_toml("supply-chain/imports.lock").get("audits", {})
         cargo_lock = load_toml("Cargo.lock")
         exemptions = config.get("exemptions")
 
@@ -56,6 +58,23 @@ class CargoVetPolicyTests(unittest.TestCase):
             (package["name"], package["version"])
             for package in cargo_lock.get("package", [])
         }
+        reviewed_delta_baselines: set[tuple[str, str]] = set()
+        audit_stores = [audits]
+        audit_stores.extend(
+            store.get("audits", {})
+            for store in imported_audits.values()
+            if isinstance(store, dict)
+        )
+        for audit_store in audit_stores:
+            for crate_name, records in audit_store.items():
+                for record in records:
+                    delta = record.get("delta")
+                    criteria = record.get("criteria")
+                    if not isinstance(delta, str) or criteria != "safe-to-deploy":
+                        continue
+                    baseline, separator, target = delta.partition(" -> ")
+                    if separator and (crate_name, target) in locked_packages:
+                        reviewed_delta_baselines.add((crate_name, baseline))
         seen: set[tuple[str, str]] = set()
 
         for crate_name, records in exemptions.items():
@@ -70,7 +89,12 @@ class CargoVetPolicyTests(unittest.TestCase):
                 self.assertIsInstance(version, str)
                 self.assertRegex(version, EXACT_VERSION)
                 self.assertEqual(record["criteria"], "safe-to-deploy")
-                self.assertIn((crate_name, version), locked_packages)
+                self.assertTrue(
+                    (crate_name, version) in locked_packages
+                    or (crate_name, version) in reviewed_delta_baselines,
+                    f"{crate_name}@{version} is neither locked nor a reviewed "
+                    "safe-to-deploy delta baseline for a locked version",
+                )
                 self.assertNotIn((crate_name, version), seen)
                 seen.add((crate_name, version))
 

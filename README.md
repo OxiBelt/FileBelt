@@ -41,9 +41,9 @@ and Helm chart with attestations.
 - `adapters/smb/` and `adapters/ftp-ftps/` are GPL-3.0-or-later regions.
 - `adapters/onlyoffice/` is an AGPL-3.0-only region.
 - `adapters/nfs/` is reserved as an LGPL-3.0-or-later region.
-- `adapters/transcode/` contains only Apache-2.0 governance material until an
-  explicit review updates the license and runtime contracts with the exact
-  FFmpeg composition.
+- `adapters/transcode/` is a GPL-3.0-or-later implementation workspace. Its
+  image remains disabled and non-publishable until the existing FFmpeg,
+  source-offer, SBOM, provenance, and platform-evidence gates pass.
 
 See [the license map](docs/LicenseMap.md), [contribution guide](CONTRIBUTING.md),
 and [engineering documentation index](docs/README.md) before making changes.

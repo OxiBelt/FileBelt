@@ -61,12 +61,12 @@ publish = false
 [workspace.dependencies]
 anyhow = "=1.0.104"
 argon2 = { version = "=0.5.3", features = ["std"] }
-aws-lc-rs = { version = "=1.17.3", default-features = false }
+aws-lc-rs = { version = "=1.18.0", default-features = false }
 axum = { version = "=0.8.9", features = ["http1", "http2", "json", "macros", "tokio", "ws"] }
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 blake3 = "=1.8.6"
 bytes = "=1.12.1"
-clap = { version = "=4.6.5", features = ["derive"] }
+clap = { version = "=4.6.6", features = ["derive"] }
 filebelt-authz = { version = "=0.1.0", path = "source/crates/filebelt-authz" }
 filebelt-capability-keyset = { version = "=0.1.0", path = "source/crates/filebelt-capability-keyset" }
 filebelt-collaboration-protocol = { version = "=0.1.0", path = "source/crates/filebelt-collaboration-protocol" }
@@ -83,7 +83,7 @@ filebelt-secret-vault = { version = "=0.1.0", path = "source/crates/filebelt-sec
 filebelt-runtime = { version = "=0.1.0", path = "source/crates/filebelt-runtime" }
 filebelt-storage = { version = "=0.1.0", path = "source/crates/filebelt-storage" }
 filebelt-storage-protocol = { version = "=0.1.0", path = "source/crates/filebelt-storage-protocol" }
-futures-util = "=0.3.33"
+futures-util = "=0.3.34"
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 http = "=1.5.0"
@@ -100,12 +100,12 @@ opentelemetry = { version = "=0.32.0", default-features = false, features = ["tr
 opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
 opentelemetry_sdk = { version = "=0.32.1", default-features = false, features = ["trace"] }
 opentelemetry-reqwest = { package = "reqwest", version = "=0.13.4", default-features = false, features = ["blocking", "rustls-no-provider"] }
-prometheus-client = "=0.24.0"
-rcgen = "=0.14.8"
+prometheus-client = "=0.24.1"
+rcgen = "=0.14.9"
 prost = "=0.14.4"
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls-webpki-roots-no-provider"] }
 quinn = { version = "=0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
-rmcp = { version = "=3.1.1", default-features = false }
+rmcp = { version = "=3.1.2", default-features = false }
 rustix = { version = "=1.1.4", features = ["fs"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -116,7 +116,7 @@ sqlx = { version = "=0.9.0", default-features = false, features = ["json", "macr
 subtle = "=2.6.1"
 syn = { version = "=3.0.3", features = ["full", "visit"] }
 tempfile = "=3.27.0"
-thiserror = "=2.0.18"
+thiserror = "=2.0.20"
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "=0.7.19", features = ["io"] }
 tokio-rustls = "=0.26.4"
@@ -126,7 +126,7 @@ tracing = "=0.1.44"
 tracing-opentelemetry = { version = "=0.33.0", default-features = false }
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json", "std"] }
 url = { version = "=2.5.8", features = ["serde"] }
-uuid = { version = "=1.24.0", features = ["serde", "v4"] }
+uuid = { version = "=1.24.1", features = ["serde", "v4"] }
 webpki-roots = "=1.0.9"
 zeroize = "=1.9.0"
 x509-parser = "=0.18.1"

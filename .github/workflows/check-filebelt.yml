@@ -156,6 +156,8 @@ jobs:
         run: cargo vet --locked
       - name: Check adapter advisories, licenses, and sources
         run: python3 tests/scripts/check-adapter-dependency-admission.py --repo-root .
+      - name: Check independent media-protocol dependency admission
+        run: python3 tests/scripts/check-media-dependency-admission.py --repo-root .
 
   node:
     name: Node workspace

@@ -40,7 +40,7 @@ The reserved regions have these additional constraints:
   JWT and callback handling, branding, and provider-specific browser code.
 - `nfs/` is LGPL-3.0-or-later; any NFS-Ganesha FSAL review must define the exact
   ABI, linkage, replacement and relinking path, and protocol integration.
-- `transcode/` remains an Apache-2.0 governance-only region. Do not add FFmpeg
-  configuration, source, manifests, binaries, or images until the review fixes
-  the exact upstream composition, GPL/LGPL result, notices, source mapping, and
-  per-platform functional tests.
+- `transcode/` is GPL-3.0-or-later and wraps the reviewed GPL-enabled FFmpeg
+  composition through an independent workspace and image. Its image remains
+  disabled and non-publishable until exact source, notices, SBOM, provenance,
+  and per-platform functional evidence are admitted.

@@ -19,7 +19,7 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [target.'cfg(all(target_arch = "riscv64", target_os = "linux", target_env = "musl"))'.dependencies]
-aws-lc-rs = { version = "=1.17.3", default-features = false, features = ["bindgen"] }
+aws-lc-rs = { version = "=1.18.0", default-features = false, features = ["bindgen"] }
 
 [lints]
 workspace = true

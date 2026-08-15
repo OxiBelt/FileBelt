@@ -25,11 +25,15 @@ time.
 The root Cargo workspace and every independently locked media or adapter
 workspace receive weekly Dependabot coverage. CI additionally runs `cargo
 audit` and Cargo Deny's advisory, license, ban, and source policy against every
-registered adapter lock and manifest. Cargo Vet remains scoped to the Apache
-root workspace: adapter updates require their own license and source-offer
-artifacts, but do not inherit root audit exemptions or receive blanket Vet
-exemptions. Docker and Compose directories and the isolated ONLYOFFICE pnpm
-lock are likewise discovered by a fail-closed coverage check.
+registered adapter lock and manifest. Cargo Vet uses the root Apache audit
+store for both the root workspace and the independently locked Apache
+media-protocol graph. Media keeps local Cargo Audit and Cargo Deny policies
+with no root reachability exceptions. Adapter updates require their own license
+and source-offer artifacts, but do not inherit root audit exemptions or receive
+blanket Vet exemptions. Docker and Compose directories and the isolated ONLYOFFICE pnpm
+lock are likewise discovered by a fail-closed coverage check. The ONLYOFFICE
+launcher lock must remain dependency-free; adding a package requires a
+separate adapter-local admission review before its frozen install may run.
 
 Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.1,
 `@eslint/js` 10.0.1, `typescript-eslint` 8.67.0, TypeScript 6.0.3, and
@@ -177,7 +181,7 @@ The immutable external integration inputs are:
 | Input | Accepted version and digest | Distribution role |
 | --- | --- | --- |
 | OxiBelt | `0.7.1-beta.2`, `ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030` | Base of `filebelt-web`; prerelease exception |
-| PostgreSQL | `18.4`, `docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636` | Docker integration helper only |
+| PostgreSQL | `18.6`, `docker.io/library/postgres@sha256:ae6c78831cbc35fa3a4aaf4d763ddacf6183d6004774cc2dc28b3920410d1d1a` | Docker integration helper only |
 | Apache Iggy | `0.8.0`, `docker.io/apache/iggy@sha256:99b42016a898381d4bab3c2d4613456eb04ad06a7a0688314823d798a685636b` | Optional Docker integration helper only |
 | Iggy Rust client | exact crate `0.8.0` | Optional notification publisher/consumer |
 
@@ -193,7 +197,7 @@ exception reaches a FileBelt container or another profile service.
 
 ## Phase 4 MCP dependency admission
 
-Phase 4 admits `rmcp@3.1.1` with default features disabled for bounded MCP
+Phase 4 admits `rmcp@3.1.2` with default features disabled for bounded MCP
 model decoding and `sigstore-verify@0.11.0` with default features disabled for
 offline runner-catalog verification. They are lockfile exact. The broker still
 owns HTTP transport, size/deadline enforcement, egress-gateway routing,

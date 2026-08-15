@@ -6,7 +6,10 @@ import process from "node:process";
 
 import { expect, test } from "@playwright/test";
 
-import { GotoWithNetworkChangeRetry } from "./docker-network-retry.mjs";
+import {
+  CompleteLoginWithNetworkChangeRetry,
+  GotoWithNetworkChangeRetry,
+} from "./docker-network-retry.mjs";
 
 const NodeIds = JSON.parse(process.env.FILEBELT_COLLABORATION_NODE_IDS ?? "{}");
 const DriveId = process.env.FILEBELT_COLLABORATION_DRIVE_ID;
@@ -29,7 +32,7 @@ function Compose(...Arguments) {
 async function Login(Context, User) {
   const Page = await Context.newPage();
   await GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F");
-  await Page.getByRole("link", { name: User === "admin" ? "Administrator" : "Member" }).click();
+  await CompleteLoginWithNetworkChangeRetry(Page, User === "admin" ? "Administrator" : "Member");
   await expect(Page.getByRole("heading", { name: "My Drive" })).toBeVisible();
   return Page;
 }

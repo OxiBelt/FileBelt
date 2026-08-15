@@ -62,7 +62,14 @@ The collaboration unit requires the frozen pnpm workspace plus the pinned
 Playwright Chromium and Firefox binaries. It drives two users through the real
 Compose TLS edge and covers convergence, durable save/checkpoint behavior,
 one-use grants, restart/reconnect, revocation within 60 seconds, and dirty-room
-freeze/conflict after an external head change.
+freeze/conflict after an external head change. Docker interface changes during
+the exercised restart can make Chromium report an exact
+`net::ERR_NETWORK_CHANGED`. The acceptance driver retries the initial login
+navigation once and, when Playwright observes that exact failure during the
+signed-in workspace bootstrap, invokes the existing `Refresh` action once.
+Every other failure and any failed retry remain visible. The driver retains
+only whether the exact error occurred; it does not retain the failed request's
+URL, headers, or body.
 
 The MCP unit covers two-user registration isolation, discovery, immutable
 review, intent/approval/invocation, replay and argument mismatch, revocation,

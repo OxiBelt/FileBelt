@@ -54,6 +54,9 @@ test("opens an eligible Markdown file through its lazy editor route", async ({ p
 });
 
 test("reconnects after an initial collaboration failure and closes a live session after guarded navigation", async ({ page: Page }) => {
+  let CollaborationGrantRequests = 0;
+  let ReleaseReconnect: (() => void) | undefined;
+  const ReconnectGate = new Promise<void>((Resolve) => { ReleaseReconnect = Resolve; });
   await Page.addInitScript(() => {
     let Connections = 0;
     (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets = 0;
@@ -110,7 +113,11 @@ test("reconnects after an initial collaboration failure and closes a live sessio
     if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`) return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
     if (Path === `/api/v1/drives/${DriveId}/nodes/${NodeId}`) return Route.fulfill({ json: Node(NodeId, "README.md", "file", RootId, VersionId) });
     if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`) return Route.fulfill({ json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null } });
-    if (Path.endsWith("/collaboration-grants")) return Route.fulfill({ status: 201, json: { authorization: "test-grant", endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }], presence_label: "Avery", room: { room_id: "00000000-0000-4000-8000-000000000009" } } });
+    if (Path.endsWith("/collaboration-grants")) {
+      CollaborationGrantRequests += 1;
+      if (CollaborationGrantRequests > 1) await ReconnectGate;
+      return Route.fulfill({ status: 201, json: { authorization: "test-grant", endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }], presence_label: "Avery", room: { room_id: "00000000-0000-4000-8000-000000000009" } } });
+    }
     if (Path === `/api/v1/drives/${DriveId}/trash`) return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path.endsWith("/versions")) return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path.endsWith("/shares")) return Route.fulfill({ json: [] });
@@ -123,8 +130,13 @@ test("reconnects after an initial collaboration failure and closes a live sessio
 
   await Page.goto(`/markdown/${NodeId}`);
   await expect(Page.getByText("Live collaboration disconnected.")).toBeVisible();
-  await expect(Page.getByRole("button", { name: "Reconnect" })).toBeVisible();
-  await Page.getByRole("button", { name: "Reconnect" }).click();
+  const Reconnect = Page.getByRole("button", { name: "Reconnect" });
+  await expect(Reconnect).toBeVisible();
+  await Reconnect.click();
+  await expect(Reconnect).toBeVisible();
+  await expect(Reconnect).toBeDisabled();
+  await expect(Page.getByText("Connecting live collaboration…")).toBeVisible();
+  ReleaseReconnect?.();
   await expect(Page.getByText("Live collaboration connected.")).toBeVisible();
   const Editor = Page.getByRole("textbox", { name: "Markdown source" });
   await Editor.click();

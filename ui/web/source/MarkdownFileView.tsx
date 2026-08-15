@@ -37,10 +37,20 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   const [LeaveDialogOpen, SetLeaveDialogOpen] = useState(false);
   const [TextLimits, SetTextLimits] = useState({ Edit: 2 * 1024 * 1024, Inline: 8 * 1024 * 1024 });
   const [InvalidText, SetInvalidText] = useState(false);
+  const [ReconnectPending, SetReconnectPending] = useState(false);
   const PendingNavigation = useRef<(() => void) | undefined>(undefined);
+  const ReconnectPendingRef = useRef(false);
+  const Mounted = useRef(true);
   const IsMarkdown = Entry.MediaType === "text/markdown";
   const CanInline = Entry.Size === null || Entry.Size <= TextLimits.Inline;
   const CanEdit = Entry.TextEligibility === "editable" && (Entry.Size === null || Entry.Size <= TextLimits.Edit);
+  useEffect(() => {
+    Mounted.current = true;
+    return () => {
+      Mounted.current = false;
+      ReconnectPendingRef.current = false;
+    };
+  }, []);
   useEffect(() => {
     let Active = true;
     void Client.getTextPreferences().then(({ Value }) => {
@@ -92,7 +102,9 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   }, [CanEdit, Client, Entry.HeadVersionId, Entry.Id, Entry.TextEligibility]);
 
   const Reconnect = async (): Promise<void> => {
-    if (Source === null || ExpectedHeadVersionId === null) return;
+    if (ReconnectPendingRef.current || Source === null || ExpectedHeadVersionId === null) return;
+    ReconnectPendingRef.current = true;
+    SetReconnectPending(true);
     const LocalText = Collaboration?.CurrentText() ?? Source.Text;
     let FallbackRemote = { ...Source, Text: SavedText };
     let FallbackVersionId = ExpectedHeadVersionId;
@@ -128,6 +140,9 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     } catch (Cause) {
       ApplyFallbackMerge(LocalText, FallbackRemote, FallbackVersionId);
       SetError(Cause instanceof Error ? Cause.message : En.markdownUnavailable);
+    } finally {
+      ReconnectPendingRef.current = false;
+      if (Mounted.current) SetReconnectPending(false);
     }
   };
 
@@ -283,7 +298,7 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   return <section aria-labelledby="markdown-heading" className="fb-markdown-view">
     <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.file}</p><h1 id="markdown-heading">{Entry.Name}</h1></div><div className="fb-heading-actions"><Button icon={<ArrowLeft />} onClick={OnClose}>{En.backToFiles}</Button>{Entry.TextEligibility === "editable" ? <Button appearance="primary" disabled={Saving || !Dirty || EditingDisabled} icon={<SaveIcon />} onClick={() => void SaveMarkdown()}>{En.save}</Button> : null}</div></header>
     {Entry.TextEligibility === "editable" && CollaborationState !== "fallback" ? <p aria-live="polite" className="fb-muted">{CollaborationState === "connected" ? En.markdownCollaborationConnected : CollaborationState === "connecting" ? En.markdownCollaborationConnecting : En.markdownCollaborationDisconnected}</p> : null}
-    {CollaborationState === "disconnected" ? <div className="fb-heading-actions"><Button onClick={ExportLocal}>{En.markdownExportLocal}</Button><Button onClick={() => void Reconnect()}>{En.markdownReconnect}</Button></div> : null}
+    {CollaborationState === "disconnected" || ReconnectPending ? <div className="fb-heading-actions"><Button onClick={ExportLocal}>{En.markdownExportLocal}</Button><Button disabled={ReconnectPending} onClick={() => void Reconnect()}>{En.markdownReconnect}</Button></div> : null}
     {ErrorMessage === null ? null : <div className="fb-error" role="alert">{ErrorMessage}</div>}
     {InvalidText ? <div className="fb-heading-actions"><p>{En.textInvalidGuide}</p><Button onClick={() => void Client.setNodeContentClass(Entry.Id, "binary")}>{En.textMarkBinary}</Button></div> : null}
     {ConflictCopyAvailable ? <div><Button disabled={Saving} onClick={() => void SaveConflictCopy()}>{En.markdownSaveConflictCopy}</Button></div> : null}

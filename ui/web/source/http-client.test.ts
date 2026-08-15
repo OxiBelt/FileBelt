@@ -269,6 +269,117 @@ describe("HttpFileBeltClient", () => {
     await expect(Client.getWorkspace()).rejects.toBeInstanceOf(AuthenticationRequiredError);
   });
 
+  it("keeps the last complete routing state when a refresh fails late", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    const Requests: Request[] = [];
+    let FailRefresh = false;
+    let SessionReads = 0;
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
+      Requests.push(HttpRequest);
+      const Path = new URL(HttpRequest.url).pathname;
+      if (Path === "/api/v1/session" && HttpRequest.method === "GET") {
+        SessionReads += 1;
+        return Json({ ...Session, csrf_token: `csrf-${SessionReads}` });
+      }
+      if (FailRefresh && Path === "/api/v1/drives" && HttpRequest.method === "GET") {
+        return Json({ items: [], next_cursor: null });
+      }
+      if (FailRefresh && Path === "/api/v1/sessions" && HttpRequest.method === "GET") {
+        return Json({ code: "test.refresh_failed", status: 503, title: "Refresh failed", type: "about:blank" }, 503);
+      }
+      if (Path.endsWith(`/versions/${FirstVersionId}/restore`) && HttpRequest.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      return Server.fetch(HttpRequest);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    const Initial = await Client.getWorkspace();
+    const InitialShare = Initial.Shares[0];
+    expect(InitialShare).toBeDefined();
+    if (InitialShare === undefined) return;
+
+    FailRefresh = true;
+    await expect(Client.getWorkspace()).rejects.toThrow("Refresh failed");
+    expect(await (await Client.download(FirstNodeId)).text()).toBe("data");
+    await Client.revokeShare(InitialShare.Id);
+    await Client.restoreVersion(FirstVersionId);
+    await Client.upload([{ Data: new Blob(["data"]), Name: "after-failure.txt", Size: 4 }]);
+
+    const Revocation = FindRequest(Requests, "DELETE", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/shares/${PrincipalId}`);
+    const Restore = FindRequest(Requests, "POST", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/restore`);
+    const Allocation = Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    expect(Restore.headers.get("x-filebelt-csrf")).toBe("csrf-1");
+    expect(Revocation.headers.get("x-filebelt-csrf")).toBe("csrf-1");
+    expect(Allocation).toBeDefined();
+    if (Allocation !== undefined) expect(Allocation.headers.get("x-filebelt-csrf")).toBe("csrf-1");
+  });
+
+  it("keeps the last complete routing state when a refresh is aborted", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    let AbortRefresh = false;
+    let MarkAbortRequestReached = (): void => undefined;
+    const AbortRequestReached = new Promise<void>((Resolve) => { MarkAbortRequestReached = Resolve; });
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
+      const Path = new URL(HttpRequest.url).pathname;
+      if (AbortRefresh && Path === "/api/v1/sessions" && HttpRequest.method === "GET") {
+        MarkAbortRequestReached();
+        return new Promise<Response>((IgnoredResolve, Reject) => {
+          void IgnoredResolve;
+          const RejectAbort = (): void => Reject(new DOMException("The operation was aborted.", "AbortError"));
+          if (HttpRequest.signal.aborted) RejectAbort();
+          else HttpRequest.signal.addEventListener("abort", RejectAbort, { once: true });
+        });
+      }
+      return Server.fetch(HttpRequest);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    const Initial = await Client.getWorkspace();
+    const InitialShare = Initial.Shares[0];
+    expect(InitialShare).toBeDefined();
+    if (InitialShare === undefined) return;
+
+    AbortRefresh = true;
+    const Controller = new AbortController();
+    const Refresh = Client.getWorkspace(Controller.signal);
+    await AbortRequestReached;
+    Controller.abort();
+    await expect(Refresh).rejects.toMatchObject({ name: "AbortError" });
+    await Client.revokeShare(InitialShare.Id);
+  });
+
+  it("prevents a superseded refresh from replacing newer routing state", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    let SessionListReads = 0;
+    let MarkFirstRefreshReached = (): void => undefined;
+    let ReleaseFirstRefresh = (): void => undefined;
+    const FirstRefreshReached = new Promise<void>((Resolve) => { MarkFirstRefreshReached = Resolve; });
+    const FirstRefreshGate = new Promise<void>((Resolve) => { ReleaseFirstRefresh = Resolve; });
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
+      const Path = new URL(HttpRequest.url).pathname;
+      if (Path === "/api/v1/sessions" && HttpRequest.method === "GET") {
+        SessionListReads += 1;
+        if (SessionListReads === 1) {
+          MarkFirstRefreshReached();
+          await FirstRefreshGate;
+        }
+      }
+      return Server.fetch(HttpRequest);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    const FirstRefresh = Client.getWorkspace();
+    await FirstRefreshReached;
+    const Newer = await Client.getWorkspace();
+    const NewerShare = Newer.Shares[0];
+    ReleaseFirstRefresh();
+    expect(NewerShare).toBeDefined();
+    await expect(FirstRefresh).rejects.toMatchObject({ name: "AbortError" });
+    if (NewerShare === undefined) return;
+    await Client.revokeShare(NewerShare.Id);
+  });
+
   it("binds an Office conversion to an exact source version and one new sibling upload", async () => {
     const Source = Node(FirstNodeId, "Source.docx");
     const Server = new ContractServer([Source]);

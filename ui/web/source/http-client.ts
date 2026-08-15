@@ -60,6 +60,14 @@ interface DirectShareLocation {
   PrincipalId: string;
 }
 
+interface WorkspaceRoutingState {
+  Locations: Map<string, NodeLocation>;
+  Session: SessionResponse | null;
+  Shares: Map<string, DirectShareLocation>;
+  UploadTarget: { DriveId: string; NamespaceGeneration: number; RootId: string } | null;
+  Versions: Map<string, { DriveId: string; NodeId: string }>;
+}
+
 interface Page<T> {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI page responses expose this exact key.
   readonly items: readonly T[];
@@ -118,11 +126,14 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   readonly #Api: Client<paths>;
   readonly #BaseUrl: string;
   readonly #Fetch: typeof fetch;
-  readonly #Locations = new Map<string, NodeLocation>();
-  readonly #Shares = new Map<string, DirectShareLocation>();
-  readonly #Versions = new Map<string, { DriveId: string; NodeId: string }>();
-  #Session: SessionResponse | null = null;
-  #UploadTarget: { DriveId: string; NamespaceGeneration: number; RootId: string } | null = null;
+  #Routing: WorkspaceRoutingState = {
+    Locations: new Map(),
+    Session: null,
+    Shares: new Map(),
+    UploadTarget: null,
+    Versions: new Map(),
+  };
+  #WorkspaceRefreshGeneration = 0;
 
   constructor(
     FetchImplementation: typeof fetch = globalThis.fetch.bind(globalThis),
@@ -138,8 +149,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
+    const RefreshGeneration = ++this.#WorkspaceRefreshGeneration;
     const Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session", SignalInit(Signal)));
-    this.#Session = Session;
     const Drives = await this.#collectPages<DriveResponse>(async (Cursor) => RequireData<DrivePage>(
       await this.#Api.GET("/api/v1/drives", {
         params: { query: PageQuery(Cursor) },
@@ -147,24 +158,25 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       }),
     ));
     const PrivateDrive = Drives.find(({ kind: Kind }) => Kind === "private") ?? null;
+    let UploadTarget: WorkspaceRoutingState["UploadTarget"];
     if (PrivateDrive === null) {
-      this.#UploadTarget = null;
+      UploadTarget = null;
     } else {
       const Root = await this.#getNode(PrivateDrive.id, PrivateDrive.root_id, Signal);
       if (Root.kind !== "directory") throw new Error("The private drive root is unavailable.");
-      this.#UploadTarget = {
+      UploadTarget = {
         DriveId: PrivateDrive.id,
         NamespaceGeneration: Root.namespace_generation,
         RootId: PrivateDrive.root_id,
       };
     }
-    this.#Locations.clear();
-    this.#Shares.clear();
-    this.#Versions.clear();
 
     const Entries: FileEntry[] = [];
     const Versions: VersionRecord[] = [];
     const Shares: ShareRecord[] = [];
+    const Locations = new Map<string, NodeLocation>();
+    const ShareLocations = new Map<string, DirectShareLocation>();
+    const VersionLocations = new Map<string, { DriveId: string; NodeId: string }>();
     for (const Drive of Drives) {
       const Nodes: NodeResponse[] = [];
       const Directories = [Drive.root_id];
@@ -177,7 +189,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       }
       Nodes.push(...await this.#listTrash(Drive.id, Signal));
       for (const Node of Nodes) {
-        this.#Locations.set(Node.id, {
+        Locations.set(Node.id, {
           DriveId: Drive.id,
           HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
           Kind: Node.kind,
@@ -188,13 +200,13 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           ? await this.#listVersions(Drive.id, Node.id, Signal)
           : [];
         for (const Version of NodeVersions) {
-          this.#Versions.set(Version.id, { DriveId: Drive.id, NodeId: Node.id });
+          VersionLocations.set(Version.id, { DriveId: Drive.id, NodeId: Node.id });
           Versions.push(VersionRecord(Version));
         }
         const NodeShares = await this.#optionalShares(Drive.id, Node.id, Signal);
         for (const Share of NodeShares) {
           const ShareId = crypto.randomUUID();
-          this.#Shares.set(ShareId, {
+          ShareLocations.set(ShareId, {
             DriveId: Drive.id,
             NodeId: Node.id,
             PrincipalId: Share.principal_id,
@@ -221,7 +233,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     ));
     for (const Node of SharedNodes) {
       if (KnownEntries.has(Node.id)) continue;
-      this.#Locations.set(Node.id, {
+      Locations.set(Node.id, {
         DriveId: Node.drive_id,
         HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
         Kind: Node.kind,
@@ -231,7 +243,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       if (Node.kind === "file") {
         const NodeVersions = await this.#listVersions(Node.drive_id, Node.id, Signal);
         for (const Version of NodeVersions) {
-          this.#Versions.set(Version.id, { DriveId: Node.drive_id, NodeId: Node.id });
+          VersionLocations.set(Version.id, { DriveId: Node.drive_id, NodeId: Node.id });
           Versions.push(VersionRecord(Version));
         }
       }
@@ -249,7 +261,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Location: Item.current ? "Current device" : "Location unavailable",
     }));
 
-    return {
+    const Snapshot: WorkspaceSnapshot = {
       Admin: {
         Drives: Drives.filter(({ kind: Kind }) => Kind === "shared").map((Drive) => ({
           Id: Drive.id,
@@ -272,10 +284,21 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Uploads: [],
       Versions,
     };
+    if (RefreshGeneration !== this.#WorkspaceRefreshGeneration) {
+      throw new DOMException("Workspace refresh was superseded.", "AbortError");
+    }
+    this.#Routing = {
+      Locations,
+      Session,
+      Shares: ShareLocations,
+      UploadTarget,
+      Versions: VersionLocations,
+    };
+    return Snapshot;
   }
 
   async upload(Files: readonly UploadCandidate[]): Promise<void> {
-    const Target = this.#UploadTarget;
+    const Target = this.#Routing.UploadTarget;
     if (Target === null) throw new Error("No writable private drive is available.");
     await this.#ensureSession();
     for (const Candidate of Files) {
@@ -391,7 +414,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     const Page = RequireData<VersionPage>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
       params: { path: { drive_id: Location.DriveId, node_id: EntryId }, query: PageQuery(Cursor) },
     }));
-    for (const Version of Page.items) this.#Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
+    for (const Version of Page.items) this.#Routing.Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
     return { Items: Page.items.map(VersionRecord), NextCursor: Page.next_cursor };
   }
 
@@ -562,7 +585,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async revokeShare(ShareId: string): Promise<void> {
-    const Location = this.#Shares.get(ShareId);
+    const Location = this.#Routing.Shares.get(ShareId);
     if (Location === undefined) throw new Error("The selected share is unavailable.");
     await this.#ensureSession();
     RequireSuccess(await this.#Api.DELETE(
@@ -581,7 +604,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async restoreVersion(VersionId: string): Promise<void> {
-    const Location = this.#Versions.get(VersionId);
+    const Location = this.#Routing.Versions.get(VersionId);
     if (Location === undefined) throw new Error("The selected version is unavailable.");
     const Node = this.#location(Location.NodeId);
     if (Node.HeadVersionId === null) throw new Error("The selected file head is unavailable.");
@@ -637,7 +660,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   #location(EntryId: string): NodeLocation {
-    const Location = this.#Locations.get(EntryId);
+    const Location = this.#Routing.Locations.get(EntryId);
     if (Location === undefined) throw new Error("The selected resource is unavailable.");
     return Location;
   }
@@ -742,17 +765,18 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async #ensureSession(): Promise<SessionResponse> {
-    if (this.#Session !== null) return this.#Session;
-    this.#Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session"));
-    return this.#Session;
+    if (this.#Routing.Session !== null) return this.#Routing.Session;
+    const Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session"));
+    this.#Routing = { ...this.#Routing, Session };
+    return Session;
   }
 
   #mutationHeaders(): MutationHeaders {
-    if (this.#Session === null) throw new Error("The session is unavailable.");
+    if (this.#Routing.Session === null) throw new Error("The session is unavailable.");
     return {
       Origin: new URL(this.#BaseUrl).origin,
       "Sec-Fetch-Site": "same-origin",
-      "X-FileBelt-Csrf": this.#Session.csrf_token,
+      "X-FileBelt-Csrf": this.#Routing.Session.csrf_token,
     };
   }
 

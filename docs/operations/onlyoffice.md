@@ -66,15 +66,25 @@ conflict never overwrites the current FileBelt head.
    provider-configuration generation whenever its ConfigMap content changes so
    every adapter replica rolls to the same reviewed configuration.
 8. Verify the adapter image labels, SBOM, signature, provenance, AGPL license,
-   immutable corresponding-source URL, build instructions, notices, and exact
-   source/about endpoint response. Verify the operator-supplied provider
-   independently.
+   immutable corresponding-source bundle URL and SHA-256, build instructions,
+   notices, exact source/about endpoint response, and visible `Source &
+   License` link. Verify the operator-supplied provider independently.
 9. Configure OxiBelt's two fixed adapter virtual hosts with write retries and
    caching disabled. The public host admits only input, callback, source/about,
    and health paths. The editor host admits only `POST /onlyoffice/launch` and
    `GET /onlyoffice/launcher.js`; it has no API route. Strip client-supplied
    identity, session, CSRF, and forwarding authority at the editor boundary
    while preserving external Host and Origin for the adapter's exact checks.
+
+An unmodified deployment may use the immutable source bundle published for its
+exact FileBelt adapter version. A downstream operator who changes the AGPL
+adapter and exposes that modified version over a network must make the visible
+source opportunity identify the corresponding source for that modified
+version; retaining the upstream URL would be inaccurate. Redistribution must
+preserve equivalent source access, notices, and license texts. These duties do
+not require publishing unrelated deployment configuration, credentials,
+database contents, user data, or secrets, and they do not satisfy the separate
+obligations for an operator-supplied ONLYOFFICE Docs image.
 
 ## Activation and acceptance
 

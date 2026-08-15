@@ -16,7 +16,9 @@ image:
   registryMirror: ""
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   license: AGPL-3.0-only
-  correspondingSource: https://github.com/OxiBelt/FileBelt/tree/0.1.0
+  correspondingSource: https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-onlyoffice-adapter-source-0.1.0.tar.gz
+  correspondingSourceSha256: 0000000000000000000000000000000000000000000000000000000000000000
+  qualification: blocked
 
 providerConfig:
   existingConfigMap: filebelt-onlyoffice-provider-config

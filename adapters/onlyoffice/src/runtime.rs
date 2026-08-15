@@ -3,9 +3,11 @@
 //! Concrete, narrowly scoped transports used by the standalone adapter.
 //!
 //! These implementations deliberately know only the documented document
-//! protobuf envelope and the egress-gateway fetch contract. They do not link
-//! adapter types into Apache code, open a database connection, or make a
-//! direct connection to DocumentServer.
+//! protobuf envelope and the egress-gateway fetch contract. This AGPL crate
+//! directly links the Apache document-protocol crate and generated types at
+//! compile time. At runtime the adapter and Apache Core remain separate mTLS
+//! processes; Apache code does not link adapter types. The adapter opens no
+//! database connection and makes no direct connection to DocumentServer.
 
 use crate::config::{AdapterConfig, JwtKeySet, MAX_OUTPUT_BYTES, MtlsClientConfig};
 use crate::routes::{

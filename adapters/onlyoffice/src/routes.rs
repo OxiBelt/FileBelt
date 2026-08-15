@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::config::{AdapterConfig, JwtKeySet, MAX_ACTIVE_TABS, MAX_OUTPUT_BYTES};
+use crate::release_metadata::RELEASE_METADATA;
 use quick_xml::events::{BytesStart, Event as XmlEvent};
 use quick_xml::name::ResolveResult;
 use quick_xml::reader::NsReader;
@@ -46,25 +47,47 @@ impl Response {
 /// Public, unauthenticated source and license information. This remains
 /// available even while private Core integration is deliberately fail-closed.
 pub fn public_info_response(method: &str, path: &str) -> Option<Response> {
-    let revision = option_env!("FILEBELT_SOURCE_REVISION").unwrap_or("unreleased-worktree");
-    let source_root =
-        option_env!("FILEBELT_SOURCE_URL").unwrap_or("https://github.com/OxiBelt/FileBelt");
-    let source_ref = option_env!("FILEBELT_SOURCE_REF").unwrap_or("unreleased");
+    let metadata = &RELEASE_METADATA;
+    let build_instructions_url = metadata.build_instructions_url();
+    let notices_url = metadata.notices_url();
+    let provider_assets = if metadata.provider_assets_included {
+        "yes"
+    } else {
+        "no"
+    };
     match (method, path) {
         ("GET", "/health/live") => Some(Response::text(200, "live\n")),
         ("GET", "/health/ready") => Some(Response::text(200, "ready\n")),
         ("GET", "/onlyoffice/source") => Some(Response::text(
             200,
             &format!(
-                "Component: FileBelt ONLYOFFICE Adapter\nLicense: AGPL-3.0-only\nVersion: {}\nRevision: {revision}\nCorresponding Source: {source_root}/tree/{revision}\nSource Ref: {source_ref}\nBuild instructions: {source_root}/blob/{revision}/adapters/onlyoffice/README.md\nUpstream ONLYOFFICE version: 9.4.0\nProvider assets included: no\n",
-                env!("CARGO_PKG_VERSION")
+                "Component: {}\nVersion: {}\nFirst-party license: {}\nRelease tag: {}\nSource ref: {}\nRevision: {}\nCorresponding source: {}\nCorresponding source SHA-256: {}\nBuild instructions: {build_instructions_url}\nNotices: {notices_url}\nProvider: {}\nProvider assets included: {provider_assets}\nBuild metadata: {}\n",
+                metadata.component,
+                metadata.version,
+                metadata.license,
+                metadata.release_tag,
+                metadata.source_ref,
+                metadata.source_revision,
+                metadata.corresponding_source_url,
+                metadata.corresponding_source_sha256,
+                metadata.provider,
+                metadata.build_kind.as_str(),
             ),
         )),
         ("GET", "/onlyoffice/about") => Some(Response::text(
             200,
             &format!(
-                "Component: FileBelt ONLYOFFICE Adapter\nVersion: {}\nRevision: {revision}\nSource Ref: {source_ref}\nLicense: AGPL-3.0-only\nCorresponding Source: {source_root}/tree/{revision}\nBuild instructions: {source_root}/blob/{revision}/adapters/onlyoffice/README.md\nProvider: operator-supplied ONLYOFFICE Docs Community 9.4.0\nNotices: {source_root}/blob/{revision}/adapters/onlyoffice/THIRD_PARTY_NOTICES.md\n",
-                env!("CARGO_PKG_VERSION")
+                "Component: {}\nVersion: {}\nFirst-party license: {}\nRelease tag: {}\nSource ref: {}\nRevision: {}\nCorresponding source: {}\nCorresponding source SHA-256: {}\nBuild instructions: {build_instructions_url}\nNotices: {notices_url}\nProvider: {}\nProvider assets included: {provider_assets}\nBuild metadata: {}\n",
+                metadata.component,
+                metadata.version,
+                metadata.license,
+                metadata.release_tag,
+                metadata.source_ref,
+                metadata.source_revision,
+                metadata.corresponding_source_url,
+                metadata.corresponding_source_sha256,
+                metadata.provider,
+                metadata.build_kind.as_str(),
             ),
         )),
         _ => None,
@@ -1398,12 +1421,28 @@ mod tests {
 
     #[test]
     fn source_information_is_public_without_core_authority() {
-        let response = public_info_response("GET", "/onlyoffice/source").unwrap();
-        assert_eq!(response.status, 200);
-        let body = String::from_utf8(response.body).unwrap();
-        assert!(body.to_ascii_lowercase().contains("source"));
-        assert!(body.contains("Corresponding Source: https://github.com/OxiBelt/FileBelt/tree/"));
-        assert!(!body.contains("/adapters/onlyoffice\nSource Ref:"));
+        for path in ["/onlyoffice/source", "/onlyoffice/about"] {
+            let response = public_info_response("GET", path).unwrap();
+            assert_eq!(response.status, 200);
+            let body = String::from_utf8(response.body).unwrap();
+            for value in [
+                RELEASE_METADATA.component,
+                RELEASE_METADATA.version,
+                RELEASE_METADATA.license,
+                RELEASE_METADATA.release_tag,
+                RELEASE_METADATA.source_ref,
+                RELEASE_METADATA.source_revision,
+                RELEASE_METADATA.corresponding_source_url,
+                RELEASE_METADATA.corresponding_source_sha256,
+                RELEASE_METADATA.provider,
+                RELEASE_METADATA.build_kind.as_str(),
+            ] {
+                assert!(body.contains(value), "{path} omitted {value}");
+            }
+            assert!(body.contains(&RELEASE_METADATA.build_instructions_url()));
+            assert!(body.contains(&RELEASE_METADATA.notices_url()));
+            assert!(body.contains("Provider assets included: no"));
+        }
         assert!(public_info_response("POST", "/onlyoffice/source").is_none());
     }
 

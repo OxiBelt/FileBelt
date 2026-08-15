@@ -23,3 +23,11 @@ test("browser launcher uses an inert descriptor and an external provider script"
   assert.match(Source, /DocEditor\("onlyoffice-editor", descriptor.editorConfig\)/);
   assert.doesNotMatch(Source, /localStorage|sessionStorage|indexedDB|document\.cookie/);
 });
+
+test("launch shell keeps the static source link outside provider-controlled state", async () => {
+  const Source = await import("node:fs/promises").then((Fs) => Fs.readFile(new URL("../src/main.rs", import.meta.url), "utf8"));
+  assert.match(Source, /config\.public_origin\.as_str\(\)/);
+  assert.match(Source, /\/onlyoffice\/source/);
+  assert.match(Source, /target=\\\"_blank\\\" rel=\\\"noopener noreferrer\\\">Source &amp; License/);
+  assert.doesNotMatch(Source, /descriptor[^\n]*source_and_license_url/);
+});

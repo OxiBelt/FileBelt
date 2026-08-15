@@ -11,6 +11,11 @@ adapter's one-use launch endpoint has redeemed a Core-issued launch ID.
 
 ## Security and process boundary
 
+- At compile time, this AGPL executable directly links the Apache-2.0
+  `filebelt-document-protocol` crate and generated types. At runtime, the
+  adapter and Apache Core are separate processes communicating through the
+  documented TLS 1.3 mutual-TLS protocol. Apache Core has no dependency on
+  this AGPL adapter.
 - The adapter has no payload mount, host-path access, browser session
   authority, general PostgreSQL credential, or direct Internet client.
 - The runtime uses private TLS 1.3 mutual-TLS clients for the documented Core
@@ -73,6 +78,10 @@ adapter's one-use launch endpoint has redeemed a Core-issued launch ID.
   `launching`, `ready`, and `error` states. It uses no browser storage. Its
   embedding view must expose progress in an `aria-live` region and errors with
   `role="alert"`, and must disable the launch control while launching.
+- The launch shell always renders a visible `Source & License` link outside
+  the provider editor and live-status regions. Its absolute destination is
+  derived only from the validated `public_origin`; provider-controlled launch
+  data and request headers cannot change it.
 
 `20` active tabs is the enforced maximum for any one Core launch subject. The
 Core transport must atomically count/redeem launches and bind each grant to its
@@ -208,12 +217,21 @@ pnpm --dir . test
 pnpm --dir . typecheck
 ```
 
-## Image and network source
+Local builds compile explicitly marked development metadata. They do not claim
+to identify a published source bundle and are not publication evidence.
 
-The Dockerfile is source-first and not a publishable artifact until an exact,
-digest-pinned image plan, provider source/distribution terms, notices, SBOM,
-vulnerability evidence, supported-platform tests, and corresponding-source
-publication are reviewed. Once those inputs are admitted, invoke it from the
-repository root with `docker build -f adapters/onlyoffice/Dockerfile .` so the
-linked Apache protocol source and generated protobuf source are in the build
-context. See [SOURCE_OFFER.md](SOURCE_OFFER.md).
+## Qualified image and network source
+
+The Dockerfile accepts an exact source-bundle build context whose qualified
+inputs live under `adapter-inputs/onlyoffice/`. It requires the complete Cargo
+vendor closure, source-replacement configuration, source manifest, build
+instructions, license texts, generated third-party notices, exact SemVer tag
+and 40-hex revision, immutable corresponding-source URL and lowercase SHA-256,
+and matching chart/package versions. The Cargo build is locked, offline, and
+network-disabled; missing or inconsistent inputs fail before an image exists.
+
+The scratch image contains the executable plus `/licenses` and `/doc` evidence
+trees. It contains no ONLYOFFICE Docs binary, `api.js`, connector, fonts,
+branding, image, database, assets, or provider source. See
+[BUILD.md](BUILD.md) for the exact build interface and
+[SOURCE_OFFER.md](SOURCE_OFFER.md) for downstream network-source obligations.

@@ -11,9 +11,19 @@ app.kubernetes.io/component: onlyoffice-adapter
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 filebelt.dev/adapter-license: {{ .Values.image.license | quote }}
 filebelt.dev/adapter-source: {{ .Values.image.correspondingSource | quote }}
+filebelt.dev/adapter-source-sha256: {{ .Values.image.correspondingSourceSha256 | quote }}
 {{- end -}}
 
 {{- define "filebelt-onlyoffice.image" -}}
+{{- if ne .Values.image.qualification "qualified" -}}
+{{- fail "filebelt-onlyoffice image qualification is blocked" -}}
+{{- end -}}
+{{- if eq .Values.image.digest "sha256:0000000000000000000000000000000000000000000000000000000000000000" -}}
+{{- fail "filebelt-onlyoffice requires a promoted nonzero image digest" -}}
+{{- end -}}
+{{- if eq .Values.image.correspondingSourceSha256 "0000000000000000000000000000000000000000000000000000000000000000" -}}
+{{- fail "filebelt-onlyoffice requires the published source-bundle SHA-256" -}}
+{{- end -}}
 {{- $registry := coalesce .Values.image.registryMirror .Values.global.registryMirror .Values.global.registry -}}
 {{- printf "%s/%s@%s" $registry .Values.image.repository .Values.image.digest -}}
 {{- end -}}

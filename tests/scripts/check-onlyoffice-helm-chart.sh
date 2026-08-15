@@ -33,10 +33,17 @@ done
   || die "requires Helm ${HELM_VERSION}"
 
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/filebelt-onlyoffice-helm.XXXXXX")"
+readonly admitted_digest="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+readonly admitted_source_sha="1111111111111111111111111111111111111111111111111111111111111111"
+qualified=(--set image.qualification=qualified --set "image.digest=${admitted_digest}" --set "image.correspondingSourceSha256=${admitted_source_sha}")
+if helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-integrations \
+    >"${temporary}/blocked.log" 2>&1; then
+  die "chart rendered a blocked image"
+fi
 helm lint "${chart}" --strict --kube-version 1.36.0 --namespace filebelt-integrations \
-  >"${temporary}/lint.log"
+  "${qualified[@]}" >"${temporary}/lint.log"
 helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-integrations \
-  >"${temporary}/rendered.yaml"
+  "${qualified[@]}" >"${temporary}/rendered.yaml"
 
 manifest="${temporary}/rendered.yaml"
 for required in \
@@ -78,12 +85,12 @@ if grep -F -- 'path: retiring' "${manifest}" >/dev/null; then
 fi
 
 helm template onlyoffice "${chart}" --kube-version 1.36.0 \
-  --namespace filebelt-integrations --set secrets.outboxJwt.retiringKey=previous \
+  --namespace filebelt-integrations "${qualified[@]}" --set secrets.outboxJwt.retiringKey=previous \
   >"${temporary}/rotating.yaml"
 grep -F -- 'path: retiring' "${temporary}/rotating.yaml" >/dev/null \
   || die "configured retiring outbox key was not mounted"
 
 if helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-core \
-    >"${temporary}/wrong-namespace.log" 2>&1; then
+    "${qualified[@]}" >"${temporary}/wrong-namespace.log" 2>&1; then
   die "chart rendered into the core namespace"
 fi

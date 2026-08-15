@@ -11,6 +11,10 @@ edition = "2024"
 rust-version = "1.97.1"
 license = "AGPL-3.0-only"
 publish = false
+build = "build.rs"
+
+[features]
+qualified-release = []
 
 [dependencies]
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
@@ -27,8 +31,10 @@ toml = "=1.1.4"
 url = "=2.5.8"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
-# The adapter may consume this Apache-2.0 schema over its documented process
-# boundary.  The Apache workspace has no reverse dependency on this package.
+# The AGPL adapter directly links this Apache-2.0 protocol crate and its
+# generated types at compile time. At runtime, the adapter and Apache Core are
+# separate processes communicating over the documented mTLS protocol. The
+# Apache workspace has no reverse dependency on this package.
 filebelt-document-protocol = { version = "=0.1.0", path = "../../source/crates/filebelt-document-protocol" }
 tokio = { version = "=1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-rustls = "=0.26.4"

@@ -336,7 +336,10 @@ provider origin and schema, and has no FileBelt public-origin browser
 credential with which to call generic APIs.
 `GET /onlyoffice/source` and `/onlyoffice/about` remain accessible to network
 users and report the adapter version, revision, license, immutable
-corresponding-source URL, build instructions, provider version, and notices.
+corresponding-source bundle URL and SHA-256, build instructions, provider
+version, and notices. The launch shell always renders a visible `Source &
+License` link derived from the configured public origin, outside
+provider-controlled content.
 
 ## MCP mediation contracts
 

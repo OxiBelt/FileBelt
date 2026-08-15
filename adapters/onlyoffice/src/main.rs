@@ -426,8 +426,9 @@ fn launch_shell_response(config: &AdapterConfig, mut launch: Response) -> Respon
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
     let document_server = config.document_server_origin.as_str();
+    let source_and_license_url = format!("{}/onlyoffice/source", config.public_origin.as_str());
     let body = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>FileBelt document editor</title></head><body><main><p id=\"onlyoffice-launch-state\" aria-live=\"polite\"></p><button id=\"onlyoffice-launch-button\" type=\"button\">Open editor</button><div id=\"onlyoffice-editor\"></div></main><script id=\"onlyoffice-launch-descriptor\" type=\"application/json\">{descriptor}</script><script type=\"module\" src=\"/onlyoffice/launcher.js\"></script></body></html>"
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>FileBelt document editor</title></head><body><main><p id=\"onlyoffice-launch-state\" aria-live=\"polite\"></p><button id=\"onlyoffice-launch-button\" type=\"button\">Open editor</button><div id=\"onlyoffice-editor\"></div></main><footer><a href=\"{source_and_license_url}\" target=\"_blank\" rel=\"noopener noreferrer\">Source &amp; License</a></footer><script id=\"onlyoffice-launch-descriptor\" type=\"application/json\">{descriptor}</script><script type=\"module\" src=\"/onlyoffice/launcher.js\"></script></body></html>"
     );
     launch.body = body.into_bytes();
     launch.headers.remove("Set-Cookie");
@@ -832,6 +833,11 @@ mod tests {
         assert!(body.contains("type=\"application/json\""));
         assert!(body.contains("src=\"/onlyoffice/launcher.js\""));
         assert!(body.contains("\\u003c/script\\u003e"));
+        let link = "<a href=\"https://files.example.test/onlyoffice/source\" target=\"_blank\" rel=\"noopener noreferrer\">Source &amp; License</a>";
+        assert!(body.contains(link));
+        assert!(body.find(link).unwrap() < body.find("onlyoffice-launch-descriptor").unwrap());
+        assert_eq!(body.matches("/onlyoffice/source").count(), 1);
+        assert!(!body.contains("https://office.example.test/onlyoffice/source"));
         let csp = shell.headers.get("Content-Security-Policy").unwrap();
         assert!(csp.contains("script-src 'self' https://office.example.test"));
         assert!(csp.contains("connect-src https://office.example.test"));

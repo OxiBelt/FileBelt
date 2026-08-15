@@ -13,4 +13,5 @@ sources:
 annotations:
   artifacthub.io/license: AGPL-3.0-only
   filebelt.dev/adapter-role: filebelt-onlyoffice-adapter
-  filebelt.dev/corresponding-source: https://github.com/OxiBelt/FileBelt/tree/0.1.0
+  filebelt.dev/qualification: blocked
+  filebelt.dev/corresponding-source: https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-onlyoffice-adapter-source-0.1.0.tar.gz

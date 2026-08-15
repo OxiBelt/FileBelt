@@ -24,6 +24,11 @@ SPEC.loader.exec_module(CORE)
 
 
 def exercise() -> None:
+    subprocess.run(
+        ["node", "--test", str(ROOT / "ui/web/browser/docker-network-retry.test.mjs")],
+        cwd=ROOT,
+        check=True,
+    )
     admin = CORE.Browser()
     member = CORE.Browser()
     CORE.wait_api(admin)

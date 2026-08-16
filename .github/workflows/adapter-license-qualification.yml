@@ -105,6 +105,11 @@ jobs:
           pnpm --filter @filebelt/devops test
       - name: Generate exact commit plan
         run: tests/scripts/prepare-adapter-image-plan.sh --channel build --output artifacts/adapter-image-plan.json
+      - name: Prime exact locked dependency sources
+        run: |
+          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,transcode}/Cargo.toml; do
+            cargo fetch --locked --manifest-path "$manifest"
+          done
       - name: Verify blocked roles emitted no image evidence
         run: |
           mkdir -p artifacts/evidence

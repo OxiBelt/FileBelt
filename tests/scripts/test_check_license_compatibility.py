@@ -24,6 +24,67 @@ sys.modules[SPEC.name] = CHECKER
 SPEC.loader.exec_module(CHECKER)
 POLICY = CHECKER.load_policy(REPO_ROOT / CHECKER.POLICY_FILENAME)
 WORKSPACES = {workspace.id: workspace for workspace in POLICY.workspaces}
+CHECK_COMMAND = "python3 tests/scripts/check-license-compatibility.py"
+FETCH_LOOP = (
+    "for manifest in Cargo.toml "
+    "adapters/{smb,ftp-ftps,onlyoffice,git,nfs,transcode}/Cargo.toml; do"
+)
+FETCH_COMMAND = 'cargo fetch --locked --manifest-path "$manifest"'
+
+
+def workflow_job_run_lines(source: str) -> dict[str, tuple[str, ...]]:
+    jobs: dict[str, tuple[str, ...]] = {}
+    current: str | None = None
+    body: list[str] = []
+    in_jobs = False
+
+    def finish_job() -> None:
+        if current is None:
+            return
+        scripts: list[str] = []
+        index = 0
+        while index < len(body):
+            line = body[index]
+            stripped = line.lstrip().removeprefix("- ")
+            if not stripped.startswith("run:"):
+                index += 1
+                continue
+            indent = len(line) - len(line.lstrip())
+            value = stripped.removeprefix("run:").strip()
+            if value not in {"|", ">", ">-", "|-"}:
+                if value and not value.startswith("#"):
+                    scripts.append(value)
+                index += 1
+                continue
+            index += 1
+            while index < len(body):
+                candidate = body[index]
+                if candidate.strip() and len(candidate) - len(candidate.lstrip()) <= indent:
+                    break
+                command = candidate.strip()
+                if command and not command.startswith("#"):
+                    scripts.append(command)
+                index += 1
+        jobs[current] = tuple(scripts)
+
+    for line in source.splitlines():
+        if line == "jobs:":
+            in_jobs = True
+            continue
+        if in_jobs and line and not line.startswith(" "):
+            break
+        if in_jobs and line.startswith("  ") and not line.startswith("    "):
+            job, separator, value = line.strip().partition(":")
+            if not separator or (value.strip() and not value.lstrip().startswith("#")):
+                continue
+            finish_job()
+            current = job
+            body = []
+            continue
+        if current is not None:
+            body.append(line)
+    finish_job()
+    return jobs
 
 
 def package(
@@ -432,6 +493,61 @@ source_required = true
             )
             with self.assertRaisesRegex(CHECKER.CompatibilityError, "lacks locked/offline provenance"):
                 CHECKER._load_supplied_metadata(path, workspace)
+
+    def test_workflow_jobs_prime_every_graph_before_checking_licenses(self) -> None:
+        checked_jobs: set[str] = set()
+        workflow_root = REPO_ROOT / ".github/workflows"
+        paths = sorted([*workflow_root.glob("*.yml"), *workflow_root.glob("*.yaml")])
+        for path in paths:
+            for job, lines in workflow_job_run_lines(path.read_text(encoding="utf-8")).items():
+                checks = [index for index, line in enumerate(lines) if line.startswith(CHECK_COMMAND)]
+                if not checks:
+                    continue
+                identity = f"{path.name}:{job}"
+                checked_jobs.add(identity)
+                with self.subTest(job=identity):
+                    loops = [index for index, line in enumerate(lines) if line == FETCH_LOOP]
+                    fetches = [index for index, line in enumerate(lines) if line == FETCH_COMMAND]
+                    self.assertTrue(loops, f"{identity} does not enumerate every Cargo graph")
+                    self.assertTrue(fetches, f"{identity} does not fetch locked Cargo sources")
+                    self.assertLess(loops[0], fetches[0], f"{identity} fetches outside the loop")
+                    self.assertLess(fetches[0], checks[0], f"{identity} primes Cargo sources too late")
+        self.assertTrue(
+            {
+                "adapter-license-qualification.yml:source-and-policy",
+                "adapter-license-qualification.yml:immutable-plan",
+                "adapter-release.yml:qualification",
+            }
+            <= checked_jobs
+        )
+
+    def test_workflow_run_parser_ignores_names_and_comments(self) -> None:
+        jobs = workflow_job_run_lines(
+            f"""jobs:
+  qualification: # a valid job header comment
+    name: {FETCH_LOOP}
+    steps:
+      - run: |
+          # {FETCH_LOOP}
+          {CHECK_COMMAND} --repo-root .
+"""
+        )
+        self.assertEqual(jobs["qualification"], (f"{CHECK_COMMAND} --repo-root .",))
+
+    def test_workflow_run_parser_preserves_command_order(self) -> None:
+        jobs = workflow_job_run_lines(
+            f"""jobs:
+  qualification:
+    steps:
+      - run: |
+          {CHECK_COMMAND} --repo-root .
+          {FETCH_LOOP}
+"""
+        )
+        self.assertEqual(
+            jobs["qualification"],
+            (f"{CHECK_COMMAND} --repo-root .", FETCH_LOOP),
+        )
 
 
 if __name__ == "__main__":

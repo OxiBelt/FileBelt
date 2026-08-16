@@ -26,3 +26,8 @@ cargo test --manifest-path Cargo.toml --locked --offline
 `Dockerfile` is not a release recipe until the independent image plan supplies
 immutable builder/runtime inputs and the complete source/SBOM/provenance
 evidence described in [SOURCE_OFFER.md](SOURCE_OFFER.md).
+
+When that plan permits an AMD64 image, its closed
+`FILEBELT_AMD64_ISA=x86-64-v3` argument must apply to both the GPL wrapper and
+FFmpeg plus every native dependency. This records a future build obligation;
+it does not qualify or complete the current Dockerfile.

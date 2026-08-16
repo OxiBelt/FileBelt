@@ -67,6 +67,34 @@ def write_docker_archive(path: Path, layers: list[bytes]) -> None:
 
 
 class ImageOverlayTests(unittest.TestCase):
+    @staticmethod
+    def static_amd64_elf(*, isa_needed: int | None) -> bytes:
+        program_headers = 2
+        note_offset = 64 + 56 * program_headers
+        note = b""
+        if isa_needed is not None:
+            descriptor = struct.pack("<III", 0xC0008002, 4, isa_needed) + b"\x00" * 4
+            note = struct.pack("<III", 4, len(descriptor), 5) + b"GNU\x00" + descriptor
+        data = bytearray(note_offset + len(note))
+        data[:6] = b"\x7fELF\x02\x01"
+        struct.pack_into("<H", data, 16, 2)
+        struct.pack_into("<H", data, 18, 62)
+        struct.pack_into("<Q", data, 24, 0x1000)
+        struct.pack_into("<Q", data, 32, 64)
+        struct.pack_into("<H", data, 54, 56)
+        struct.pack_into("<H", data, 56, program_headers)
+        struct.pack_into("<I", data, 64, 1)
+        struct.pack_into("<Q", data, 72, 0)
+        struct.pack_into("<Q", data, 96, len(data))
+        struct.pack_into("<Q", data, 104, len(data))
+        if note:
+            note_header = 64 + 56
+            struct.pack_into("<I", data, note_header, 4)
+            struct.pack_into("<Q", data, note_header + 8, note_offset)
+            struct.pack_into("<Q", data, note_header + 32, len(note))
+            data[note_offset:] = note
+        return bytes(data)
+
     def test_static_elf_check_rejects_a_header_without_loadable_program(self) -> None:
         fake = bytearray(64)
         fake[:6] = b"\x7fELF\x02\x01"
@@ -77,6 +105,18 @@ class ImageOverlayTests(unittest.TestCase):
         struct.pack_into("<H", fake, 54, 56)
         with self.assertRaisesRegex(VALIDATOR.ValidationError, "no loadable segment"):
             VALIDATOR.assert_static_elf(bytes(fake), "linux/amd64")
+
+    def test_static_elf_requires_exact_amd64_v3_isa_note(self) -> None:
+        for value in (4, 5):
+            VALIDATOR.assert_static_elf(
+                self.static_amd64_elf(isa_needed=value), "linux/amd64", "x86-64-v3"
+            )
+        for value in (None, 1, 2, 3, 6, 7, 8, 9):
+            with self.subTest(isa_needed=value):
+                with self.assertRaisesRegex(VALIDATOR.ValidationError, "ISA-needed v3"):
+                    VALIDATOR.assert_static_elf(
+                        self.static_amd64_elf(isa_needed=value), "linux/amd64", "x86-64-v3"
+                    )
 
     def test_opaque_whiteout_removes_only_lower_layer_children(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -155,7 +195,8 @@ class ImageOverlayTests(unittest.TestCase):
 
     def test_adapter_validator_rejects_a_blocked_image_plan(self) -> None:
         plan = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
+            "amd64IsaBaseline": "x86-64-v3",
             "roles": [{"role": "filebelt-git-adapter", "imageBuild": {"state": "blocked"}}],
         }
         with self.assertRaisesRegex(VALIDATOR.ValidationError, "image-build gate is not eligible"):
@@ -164,7 +205,8 @@ class ImageOverlayTests(unittest.TestCase):
     def test_adapter_validator_binds_source_bundle_labels(self) -> None:
         revision = "1" * 40
         plan = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
+            "amd64IsaBaseline": "x86-64-v3",
             "source": {"created": "2026-08-15T00:00:00Z"},
             "roles": [{
                 "role": "filebelt-git-adapter",
@@ -195,6 +237,7 @@ class ImageOverlayTests(unittest.TestCase):
                     "org.opencontainers.image.created": "2026-08-15T00:00:00Z",
                     "org.opencontainers.image.licenses": "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib",
                     "io.filebelt.image.role": "filebelt-git-adapter",
+                    "io.filebelt.build.target-cpu": "x86-64-v3",
                     "io.filebelt.first-party-license": "Apache-2.0",
                     "io.filebelt.corresponding-source": "https://example.test/0.1.0/source.tar.gz",
                     "io.filebelt.corresponding-source.sha256": "b" * 64,

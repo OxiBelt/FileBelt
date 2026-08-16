@@ -69,6 +69,7 @@ ARG BUILDARCH
 ARG TARGETARCH
 ARG FILEBELT_ROLE
 ARG FILEBELT_BUILDER_STAGE
+ARG FILEBELT_TARGET_CPU=architecture-default
 ARG FILEBELT_BUILD_VERSION=0.1.0-build.000000000000
 ARG FILEBELT_BUILD_REVISION=unknown
 ARG FILEBELT_BUILD_SOURCE_REF=unknown
@@ -96,6 +97,14 @@ RUN case "${TARGETARCH}" in \
     else \
       test "${TARGETARCH}" = "${BUILDARCH}"; \
       test "${FILEBELT_BUILDER_STAGE}" = builder-native; \
+    fi && \
+    if [ "${TARGETARCH}" = amd64 ]; then \
+      test "${FILEBELT_TARGET_CPU}" = x86-64-v3; \
+      export RUSTFLAGS="-Ctarget-cpu=${FILEBELT_TARGET_CPU} -Clink-arg=-Wl,-z,${FILEBELT_TARGET_CPU}"; \
+      export CFLAGS="-march=${FILEBELT_TARGET_CPU}"; \
+      export CXXFLAGS="${CFLAGS}"; \
+    else \
+      test "${FILEBELT_TARGET_CPU}" = architecture-default; \
     fi && \
     rustup target add "${target}" && \
     case "${FILEBELT_ROLE}" in \
@@ -167,6 +176,9 @@ RUN install -d -m 0755 \
     esac
 
 FROM scratch AS runtime-files
+
+ARG FILEBELT_TARGET_CPU
+LABEL io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}"
 
 COPY --from=runtime-rootfs /out/rootfs/ /
 

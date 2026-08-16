@@ -190,12 +190,41 @@ derived from the exact OxiBelt input recorded in the image plan and copies only
 FileBelt assets, reviewed configuration, identity metadata, licenses, and
 notices. The current pin is OxiBelt `0.7.1-beta.2` at
 `sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030`.
+Its admitted AMD64 child is
+`sha256:bda2474f0ae5b7413751381009990d0627228aba0658e03549a00b953fddb130`,
+and its retained GitHub/Sigstore rebuild predicate binds role `standalone`,
+source revision `bf40172e40298325775ca9d708162a9d8d14e6d4`, and target CPU
+`x86-64-v3`. The retained raw index and AMD64 manifests provide the exact
+attestation subjects, and the retained Sigstore trusted-root snapshot permits
+offline signature, certificate-identity, OIDC-issuer, transparency-log, source,
+and GitHub-hosted-runner verification. The admission validator also binds this
+index digest directly to the `ui/web/Dockerfile` base. FileBelt does not rebuild
+that upstream binary.
 Changing that prerelease input requires a focused source, route, mTLS,
 architecture, vulnerability, license, and notice review.
 
 ## Platform and artifact evidence
 
-AMD64 and ARM64 run native behavior suites. RISC-V cross-compiles with the
+Canonical `linux/amd64` images require the `x86-64-v3` ISA baseline and have
+no v2 fallback. FileBelt-built Rust uses
+`-Ctarget-cpu=x86-64-v3` and FileBelt-built C/C++ uses
+`-march=x86-64-v3`; final links use GNU `-z x86-64-v3`. Each in-scope AMD64
+ELF must carry the GNU `x86-64-v3` ISA-needed property; a toolchain may also
+include its redundant baseline bit.
+ARM64 and RISC-V retain their architecture-default compiler settings.
+
+Core image-plan schema v2 and adapter image-plan schema v3 carry the exact
+`amd64IsaBaseline`. Build metadata, validation receipts, OCI label
+`io.filebelt.build.target-cpu`, and CycloneDX subject properties bind the
+platform value; normalized SBOMs also bind the canonical plan SHA-256. New
+validators accept only these schema versions. Rollback of an older release
+uses that release's retained tooling and evidence rather than weakening current
+validators.
+
+AMD64 and ARM64 run native behavior suites. Before an AMD64 build or native
+test, the FileBelt host checker verifies every `/proc/cpuinfo` processor and
+emits only a bounded compatibility result. This proves the execution host, not
+a remote Docker daemon. RISC-V cross-compiles with the
 digest-pinned toolchain in `supply-chain/tooling.toml` and runs bounded
 rootless-QEMU configuration, crypto-provider, unavailable-database, identity,
 health, non-root, and shutdown checks without host `binfmt_misc` registration.
@@ -268,6 +297,14 @@ Kubernetes, Helm rollout, CNI, NFS/Kerberos/Ganesha, public DNS, provider, or
 external MCP TLS qualification. Kubernetes compatibility and Calico/Cilium
 jobs remain separate blocking gates and their definitions are unchanged by the
 Docker matrix.
+
+Production AMD64 node pools must be homogeneous `x86-64-v3`. Operators run the
+digest-pinned DaemonSet preflight described in
+[Kubernetes operations](operations/kubernetes.md) before rollout and after a
+pool, autoscaler, hypervisor, or VM CPU-model change. FileBelt does not add a
+custom ISA label or scheduling affinity. Rollback may select a previously
+verified generic-AMD64 digest on the already-qualified v3 pool; it must not use
+rollback as evidence that an untested pool supports current images.
 
 ## Kubernetes production contract
 

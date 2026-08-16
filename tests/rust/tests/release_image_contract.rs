@@ -102,11 +102,18 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
             "io.filebelt.build.source-ref",
             "io.filebelt.build.dirty",
             "io.filebelt.build.kind",
+            "io.filebelt.build.target-cpu",
         ] {
             assert!(dockerfile.contains(label), "missing OCI label {label}");
         }
     }
     assert!(rust.contains("FROM scratch"));
+    assert!(rust.contains("test \"${FILEBELT_TARGET_CPU}\" = x86-64-v3"));
+    assert!(rust.contains("-Ctarget-cpu=${FILEBELT_TARGET_CPU}"));
+    assert!(rust.contains("-Clink-arg=-Wl,-z,${FILEBELT_TARGET_CPU}"));
+    assert!(rust.contains("CFLAGS=\"-march=${FILEBELT_TARGET_CPU}\""));
+    assert!(rust.contains("CXXFLAGS=\"${CFLAGS}\""));
+    assert!(web.contains("FILEBELT_TARGET_CPU"));
     assert!(rust.contains("riscv64gc-unknown-linux-musl"));
     assert!(rust.contains("LICENSES/MIT.txt"));
     assert!(rust.contains("LICENSES/CDLA-Permissive-2.0.txt"));

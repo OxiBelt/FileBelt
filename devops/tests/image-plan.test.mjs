@@ -13,6 +13,7 @@ import { URL, fileURLToPath } from "node:url";
 import {
   CreateImagePlan,
   CreateLocalBuildTag,
+  Amd64IsaBaseline,
   ImagePlatforms,
   ImageRoles,
   IsReleaseTag,
@@ -51,7 +52,8 @@ function buildSource(overrides = {}) {
 test("build plan contains the fifteen fixed roles and immutable runtime contract", () => {
   const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
 
-  assert.equal(plan.schemaVersion, 1);
+  assert.equal(plan.schemaVersion, 2);
+  assert.equal(plan.amd64IsaBaseline, Amd64IsaBaseline);
   assert.equal(plan.tag, "0.1.0-build.0123456789ab");
   assert.deepEqual(plan.runtime, { uid: 10001, gid: 10001 });
   assert.deepEqual(
@@ -82,6 +84,11 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
     }[image.role];
     assert.equal(image.license, expectedLicense);
     assert.equal(image.build.target, image.role);
+    assert.deepEqual(image.artifact.targetCpu, {
+      "linux/amd64": Amd64IsaBaseline,
+      "linux/arm64": null,
+      "linux/riscv64": null,
+    });
     if (image.artifact.kind === "rust-binary") {
       assert.deepEqual(Object.keys(image.artifact.components), ImagePlatforms);
       for (const platform of ImagePlatforms) {
@@ -180,6 +187,11 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
   }
   assert.deepEqual(plan.images.at(-1).artifact, {
     kind: "oxibelt-edge",
+    targetCpu: {
+      "linux/amd64": Amd64IsaBaseline,
+      "linux/arm64": null,
+      "linux/riscv64": null,
+    },
     packages: ["ui/web", "ui/markdown"],
     base: {
       image: OxibeltImage,
@@ -196,6 +208,10 @@ test("Rust Docker targets match their image-plan descriptions", () => {
     new URL("../../source/ops/Dockerfile.roles", import.meta.url),
     "utf8",
   );
+  assert.ok(Dockerfile.includes("ARG FILEBELT_TARGET_CPU="));
+  assert.ok(Dockerfile.includes("test \"${FILEBELT_TARGET_CPU}\" = x86-64-v3"));
+  assert.ok(Dockerfile.includes("-Ctarget-cpu=${FILEBELT_TARGET_CPU}"));
+  assert.ok(Dockerfile.includes("-Clink-arg=-Wl,-z,${FILEBELT_TARGET_CPU}"));
 
   for (const Image of Plan.images.filter(({ artifact }) => artifact.kind === "rust-binary")) {
     assert.equal(Image.build.dockerfile, "source/ops/Dockerfile.roles");
@@ -214,7 +230,8 @@ test("Rust Docker targets match their image-plan descriptions", () => {
 test("adapter publication plan covers six roles without mutable release sources", () => {
   const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
   const AdapterImagePlan = CreateAdapterImagePlan({ Version: "0.1.0", Source });
-  assert.equal(AdapterImagePlanSchemaVersion, 2);
+  assert.equal(AdapterImagePlanSchemaVersion, 3);
+  assert.equal(AdapterImagePlan.amd64IsaBaseline, "x86-64-v3");
   assert.deepEqual(
     AdapterImagePlan.roles.map(({ role }) => role),
     AdapterImageRoles,
@@ -238,6 +255,45 @@ test("adapter publication plan covers six roles without mutable release sources"
       { id: "zlib-1.3.1", version: "1.3.1", license: "Zlib", relationship: "linked", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
     ],
   );
+});
+
+test("adapter plans reject a missing or altered AMD64 ISA baseline", () => {
+  const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
+  const Plan = CreateAdapterImagePlan({ Version: "0.1.0", Source });
+  const Missing = clone(Plan);
+  delete Missing.amd64IsaBaseline;
+  assert.throws(() => ValidateAdapterImagePlan(Missing), /schema v3/);
+  const Altered = clone(Plan);
+  Altered.amd64IsaBaseline = "x86-64-v2";
+  assert.throws(() => ValidateAdapterImagePlan(Altered), /amd64IsaBaseline/);
+});
+
+test("adapter native Dockerfiles reject AMD64 ISA drift", () => {
+  const Contracts = {
+    "../../adapters/git/Dockerfile": [
+      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      "-march=${FILEBELT_AMD64_ISA}",
+      "-C target-cpu=${FILEBELT_AMD64_ISA}",
+      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+    ],
+    "../../adapters/onlyoffice/Dockerfile": [
+      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      "-C target-cpu=${FILEBELT_AMD64_ISA}",
+      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+    ],
+    "../../adapters/nfs/Dockerfile": [
+      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      "-C target-cpu=${FILEBELT_AMD64_ISA}",
+      "-march=${FILEBELT_AMD64_ISA}",
+      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+    ],
+  };
+  for (const [Path, Fragments] of Object.entries(Contracts)) {
+    const Dockerfile = readFileSync(new URL(Path, import.meta.url), "utf8");
+    for (const Fragment of Fragments) {
+      assert.ok(Dockerfile.includes(Fragment), `${Path} must retain ${Fragment}`);
+    }
+  }
 });
 
 test("source and license qualification unlock image construction but not publication", () => {
@@ -410,6 +466,14 @@ test("validation rejects role, platform, runtime, source, and property drift", (
   wrongRuntime.runtime.uid = 0;
   assert.throws(() => ValidateImagePlan(wrongRuntime), /10001/);
 
+  const wrongAmd64IsaBaseline = clone(original);
+  wrongAmd64IsaBaseline.amd64IsaBaseline = "x86-64-v2";
+  assert.throws(() => ValidateImagePlan(wrongAmd64IsaBaseline), /amd64IsaBaseline/);
+
+  const wrongTargetCpu = clone(original);
+  wrongTargetCpu.images[0].artifact.targetCpu["linux/amd64"] = "x86-64-v2";
+  assert.throws(() => ValidateImagePlan(wrongTargetCpu), /fixed image contract/);
+
   const missingComponents = clone(original);
   missingComponents.images[0].artifact.components["linux/amd64"] = [];
   assert.throws(() => ValidateImagePlan(missingComponents), /fixed image contract/);
@@ -436,13 +500,14 @@ test("validation accepts property order changes and serialization is canonical",
     tag: plan.tag,
     version: plan.version,
     channel: plan.channel,
+    amd64IsaBaseline: plan.amd64IsaBaseline,
     schemaVersion: plan.schemaVersion,
   };
   const serialized = SerializeImagePlan(reordered);
 
   assert.ok(serialized.endsWith("\n"));
   assert.equal(serialized, SerializeImagePlan(JSON.parse(serialized)));
-  assert.match(serialized, /^\{\n {2}"schemaVersion": 1,/);
+  assert.match(serialized, /^\{\n {2}"schemaVersion": 2,/);
 });
 
 test("compiled CLI writes a validated canonical plan", () => {
@@ -475,7 +540,7 @@ test("compiled CLI writes a validated canonical plan", () => {
     );
 
     const invalidOutput = `${output}.invalid`;
-    writeFileSync(invalidOutput, JSON.stringify({ ...JSON.parse(contents), schemaVersion: 2 }));
+    writeFileSync(invalidOutput, JSON.stringify({ ...JSON.parse(contents), schemaVersion: 1 }));
     assert.throws(() =>
       execFileSync(process.execPath, ["dist/cli.js", "validate-image-plan", "--input", invalidOutput]),
     );

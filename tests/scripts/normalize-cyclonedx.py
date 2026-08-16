@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -140,6 +141,8 @@ def main() -> int:
     args = parser.parse_args()
 
     plan = load_object(args.plan, "image plan")
+    if plan.get("schemaVersion") != 2 or plan.get("amd64IsaBaseline") != "x86-64-v3":
+        raise ValueError("image plan AMD64 ISA contract is invalid")
     source = plan.get("source")
     images = plan.get("images")
     if not isinstance(source, dict) or not isinstance(images, list):
@@ -148,6 +151,15 @@ def main() -> int:
     if len(matches) != 1 or args.platform not in matches[0].get("platforms", []):
         raise ValueError("role and platform do not match exactly one image-plan row")
     image = matches[0]
+    artifact = image.get("artifact")
+    target_cpus = artifact.get("targetCpu") if isinstance(artifact, dict) else None
+    if not isinstance(target_cpus, dict):
+        raise ValueError("image-plan target CPU contract is missing")
+    target_cpu = target_cpus.get(args.platform)
+    if target_cpu != ("x86-64-v3" if args.platform == "linux/amd64" else None):
+        raise ValueError("image-plan target CPU contract is invalid")
+    target_cpu_label = target_cpu if target_cpu is not None else "architecture-default"
+    plan_sha256 = hashlib.sha256(args.plan.read_bytes()).hexdigest()
 
     raw = load_object(args.input, "Trivy CycloneDX document")
     if raw.get("bomFormat") != "CycloneDX" or raw.get("specVersion") != "1.7":
@@ -171,6 +183,8 @@ def main() -> int:
             {"name": "io.filebelt.image.license", "value": image.get("license")},
             {"name": "io.filebelt.build.revision", "value": source.get("revision")},
             {"name": "io.filebelt.build.source-ref", "value": source.get("ref")},
+            {"name": "io.filebelt.build.target-cpu", "value": target_cpu_label},
+            {"name": "io.filebelt.build.plan-sha256", "value": plan_sha256},
         ],
     }
     raw_subject = metadata.get("component")

@@ -61,13 +61,21 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                 "role": role,
                 "repository": f"ghcr.io/oxibelt/{role}",
                 "platforms": [f"linux/{architecture}" for architecture in ARCHITECTURES],
+                "artifact": {
+                    "targetCpu": {
+                        "linux/amd64": "x86-64-v3",
+                        "linux/arm64": None,
+                        "linux/riscv64": None,
+                    }
+                },
             }
             for role in (*ACTIVE_ROLES, "filebelt-media-controller")
         ]
         self.plan.write_text(
             json.dumps(
                 {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
+                    "amd64IsaBaseline": "x86-64-v3",
                     "channel": "release",
                     "version": "1.2.3",
                     "tag": "1.2.3",
@@ -109,7 +117,8 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                     "localRef": f"ghcr.io/oxibelt/{role}:1.2.3-{architecture}",
                     "archive": archive.name,
                     "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
+                    "targetCpu": "x86-64-v3" if architecture == "amd64" else None,
                 }
                 metadata_path = directory / f"{role}-{architecture}.build.json"
                 metadata_path.write_text(
@@ -118,7 +127,7 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                 (directory / f"{role}-{architecture}.evidence.json").write_text(
                     json.dumps(
                         {
-                            "schemaVersion": 1,
+                            "schemaVersion": 2,
                             "planSha256": plan_sha,
                             "role": role,
                             "platform": f"linux/{architecture}",
@@ -126,6 +135,7 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                             "tag": "1.2.3",
                             "localRef": metadata["localRef"],
                             "sourceRevision": REVISION,
+                            "targetCpu": metadata["targetCpu"],
                             "archive": archive.name,
                             "archiveSha256": metadata["archiveSha256"],
                             "metadataSha256": hashlib.sha256(
@@ -141,10 +151,11 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                 (directory / f"{role}-{architecture}.validation.json").write_text(
                     json.dumps(
                         {
-                            "schemaVersion": 1,
+                            "schemaVersion": 2,
                             "role": role,
                             "platform": f"linux/{architecture}",
                             "sourceRevision": REVISION,
+                            "targetCpu": metadata["targetCpu"],
                             "repositoryTag": metadata["localRef"],
                         }
                     ),

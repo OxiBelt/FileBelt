@@ -158,6 +158,8 @@ jobs:
         run: python3 tests/scripts/check-adapter-dependency-admission.py --repo-root .
       - name: Check independent media-protocol dependency admission
         run: python3 tests/scripts/check-media-dependency-admission.py --repo-root .
+      - name: Check retained OxiBelt image admission
+        run: tests/scripts/verify-oxibelt-admission.sh .
 
   node:
     name: Node workspace

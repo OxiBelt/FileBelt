@@ -63,6 +63,13 @@ source_ref=$(jq -er '.source.ref' "${plan}")
 created=$(jq -er '.source.created' "${plan}")
 dirty=$(jq -er '.source.dirty | tostring' "${plan}")
 kind=$(jq -er '.source.kind' "${plan}")
+target_cpu_json=$(jq -c --arg role "${role}" --arg platform "${platform}" \
+  '.images[] | select(.role == $role) | .artifact.targetCpu[$platform]' "${plan}")
+case "${target_cpu_json}" in
+  '"x86-64-v3"') target_cpu=x86-64-v3 ;;
+  null) target_cpu="architecture-default" ;;
+  *) echo "${role} ${platform} has an unsupported target CPU" >&2; exit 1 ;;
+esac
 
 case "${platform}" in
   linux/amd64) artifact_arch=amd64; builder_stage=builder-native ;;
@@ -91,6 +98,7 @@ docker buildx build \
   --provenance=false \
   --build-arg "FILEBELT_ROLE=${role}" \
   --build-arg "FILEBELT_BUILDER_STAGE=${builder_stage}" \
+  --build-arg "FILEBELT_TARGET_CPU=${target_cpu}" \
   --build-arg "FILEBELT_BUILD_VERSION=${version}" \
   --build-arg "FILEBELT_BUILD_REVISION=${revision}" \
   --build-arg "FILEBELT_BUILD_SOURCE_REF=${source_ref}" \
@@ -115,11 +123,12 @@ jq -n \
   --arg sourceCreated "${created}" \
   --argjson sourceDirty "${dirty}" \
   --arg sourceKind "${kind}" \
+  --argjson targetCpu "${target_cpu_json}" \
   --arg dockerfile "${dockerfile}" \
   --arg buildTarget "${target}" \
   --arg archive "$(basename -- "${archive}")" \
   --arg archiveSha256 "${archive_sha}" \
-  '{schemaVersion:1,planSha256:$planSha256,role:$role,platform:$platform,repository:$repository,version:$version,tag:$tag,localRef:$localRef,sourceRevision:$sourceRevision,sourceRef:$sourceRef,sourceCreated:$sourceCreated,sourceDirty:$sourceDirty,sourceKind:$sourceKind,dockerfile:$dockerfile,buildTarget:$buildTarget,archive:$archive,archiveSha256:$archiveSha256}' \
+  '{schemaVersion:2,planSha256:$planSha256,role:$role,platform:$platform,repository:$repository,version:$version,tag:$tag,localRef:$localRef,sourceRevision:$sourceRevision,sourceRef:$sourceRef,sourceCreated:$sourceCreated,sourceDirty:$sourceDirty,sourceKind:$sourceKind,targetCpu:$targetCpu,dockerfile:$dockerfile,buildTarget:$buildTarget,archive:$archive,archiveSha256:$archiveSha256}' \
   >"${metadata}"
 
 echo "${archive}"

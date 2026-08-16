@@ -48,7 +48,11 @@ if ! trivy --version | grep -Eq '^Version: 0\.74\.0$'; then
 fi
 
 case "${platform}" in
-  linux/amd64) artifact_arch=amd64 ;;
+  linux/amd64)
+    artifact_arch=amd64
+    "${repo_root}/tests/scripts/check-amd64-v3-host.sh" \
+      >"${output_dir}/amd64-v3-host-preflight.json"
+    ;;
   linux/arm64) artifact_arch=arm64 ;;
   linux/riscv64) artifact_arch=riscv64 ;;
   *) echo "unsupported platform: ${platform}" >&2; exit 1 ;;

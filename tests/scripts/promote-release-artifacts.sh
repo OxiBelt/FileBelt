@@ -47,7 +47,8 @@ done
 }
 
 jq -e --arg registry "${registry}" '
-  .schemaVersion == 1
+  .schemaVersion == 2
+  and .amd64IsaBaseline == "x86-64-v3"
   and .channel == "release"
   and .version == .tag
   and (.tag | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$"))
@@ -79,6 +80,11 @@ jq -e --arg registry "${registry}" '
   and all(.images[];
     .repository == ($registry + "/oxibelt/" + .role)
     and ([.platforms[]] | sort) == (["linux/amd64", "linux/arm64", "linux/riscv64"] | sort)
+    and .artifact.targetCpu == {
+      "linux/amd64":"x86-64-v3",
+      "linux/arm64":null,
+      "linux/riscv64":null
+    }
   )
 ' "${plan}" >/dev/null
 
@@ -159,6 +165,8 @@ for role in "${active_roles[@]}"; do
       exit 1
     }
     local_reference="${repository}:${version}-${architecture}"
+    target_cpu_json=$(jq -c --arg role "${role}" --arg platform "linux/${architecture}" \
+      '.images[] | select(.role == $role) | .artifact.targetCpu[$platform]' "${plan}")
     jq -e \
       --arg role "${role}" \
       --arg platform "linux/${architecture}" \
@@ -169,8 +177,9 @@ for role in "${active_roles[@]}"; do
       --arg revision "${source_revision}" \
       --arg source_ref "${source_ref}" \
       --arg source_created "${source_created}" \
-      --arg archive "$(basename -- "${archive}")" '
-        .schemaVersion == 1
+      --arg archive "$(basename -- "${archive}")" \
+      --argjson target_cpu "${target_cpu_json}" '
+        .schemaVersion == 2
         and .planSha256 == $plan_sha
         and .role == $role
         and .platform == $platform
@@ -183,6 +192,7 @@ for role in "${active_roles[@]}"; do
         and .sourceCreated == $source_created
         and .sourceKind == "release"
         and .sourceDirty == false
+        and .targetCpu == $target_cpu
         and .archive == $archive
       ' "${metadata}" >/dev/null
     jq -e \
@@ -195,9 +205,10 @@ for role in "${active_roles[@]}"; do
       --arg revision "${source_revision}" \
       --arg archive "$(basename -- "${archive}")" \
       --arg archive_sha "${actual_sha}" \
-      --arg metadata_sha "${metadata_sha}" '
+      --arg metadata_sha "${metadata_sha}" \
+      --argjson target_cpu "${target_cpu_json}" '
         . == {
-          schemaVersion:1,
+          schemaVersion:2,
           planSha256:$plan_sha,
           role:$role,
           platform:$platform,
@@ -205,6 +216,7 @@ for role in "${active_roles[@]}"; do
           tag:$version,
           localRef:$local_reference,
           sourceRevision:$revision,
+          targetCpu:$target_cpu,
           archive:$archive,
           archiveSha256:$archive_sha,
           metadataSha256:$metadata_sha
@@ -214,11 +226,13 @@ for role in "${active_roles[@]}"; do
       --arg role "${role}" \
       --arg platform "linux/${architecture}" \
       --arg revision "${source_revision}" \
-      --arg local_reference "${local_reference}" '
-        .schemaVersion == 1
+      --arg local_reference "${local_reference}" \
+      --argjson target_cpu "${target_cpu_json}" '
+        .schemaVersion == 2
         and .role == $role
         and .platform == $platform
         and .sourceRevision == $revision
+        and .targetCpu == $target_cpu
         and .repositoryTag == $local_reference
       ' "${validation}" >/dev/null
     jq -e \

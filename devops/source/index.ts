@@ -3,6 +3,7 @@
 export {
   CreateImagePlan,
   CreateLocalBuildTag,
+  Amd64IsaBaseline,
   ImagePlatforms,
   ImagePlanSchemaVersion,
   ImageRegistry,
@@ -24,17 +25,19 @@ export {
   type ImageLicense,
   type ImagePlanChannel,
   type ImagePlanSource,
-  type ImagePlanV1,
+  type ImagePlanV2,
   type ImagePlatform,
   type ImageRole,
   type ImageRow,
   type PlatformComponentInventory,
+  type PlatformTargetCpu,
   type ComponentRelationship,
   type SourceKind,
 } from "./image-plan.js";
 
 export {
   AdapterImagePlanSchemaVersion,
+  AdapterAmd64IsaBaseline,
   AdapterImageRoles,
   CreateAdapterImagePlan,
   SerializeAdapterImagePlan,
@@ -43,7 +46,7 @@ export {
   type AdapterComponentRelationship,
   type AdapterEvidenceNames,
   type AdapterImageEvidence,
-  type AdapterImagePlanV2,
+  type AdapterImagePlanV3,
   type AdapterImageRole,
   type AdapterPublicationDecision,
   type AdapterPreImageQualification,

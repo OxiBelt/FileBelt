@@ -124,6 +124,12 @@ a complete exact-source configured ABI and link build, live owner/group and
 MDCACHE checks, live NFSv4.1/krb5p qualification, generated SBOM/notices, and
 release evidence.
 
+The native ABI probe requires `FILEBELT_AMD64_ISA=x86-64-v3` only for its
+`linux/amd64` build. The Dockerfile applies it to the Rust bridge, Ganesha, and
+the FILEBELT FSAL C/C++ sources; ARM64 and RISC-V builds must omit it. This
+build requirement does not change the probe-only qualification state. Each
+build labels the plan-derived target with `io.filebelt.build.target-cpu`.
+
 Run the local framing and C boundary checks with:
 
 ```sh

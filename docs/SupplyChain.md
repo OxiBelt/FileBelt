@@ -270,7 +270,10 @@ its own license, notices, source, signature, digest, and vulnerability review.
 Phase 1 image builds use digest-pinned Dockerfile frontends and bases and create
 local Docker image archives only. Each of the ten image roles is checked against an
 immutable plan containing its repository, version, source revision and ref,
-build kind, license, and platform. The archive must contain the corresponding
+build kind, license, platform, and canonical `x86-64-v3` AMD64 baseline. The
+core plan is schema v2; separately governed adapter plans are schema v3. New
+validators reject earlier schemas, whose releases retain their matching old
+tooling and evidence. The archive must contain the corresponding
 static Rust probe or web assets, the expected license evidence, numeric
 user/group `10001:10001`, and the complete OCI label contract from the
 [runtime and deployment specification](RuntimeAndDeployment.md).
@@ -293,9 +296,21 @@ Each role/platform archive produces:
 - a Trivy `0.74.0` JSON vulnerability report and policy decision; and
 - extracted image metadata used by static, identity, and smoke checks.
 
+AMD64 source builds are v3-only. Rust receives
+`-Ctarget-cpu=x86-64-v3`, C/C++ receives `-march=x86-64-v3`, and final links
+receive GNU `-z x86-64-v3`. Static validation parses ELF program notes and
+requires the GNU `x86-64-v3` ISA-needed property, with only the optional
+redundant baseline bit, for
+every FileBelt-built AMD64 executable or shared object in scope. It does not
+infer the baseline from disassembly. ARM64 and RISC-V remain
+`architecture-default`.
+
 Static Rust SBOMs are augmented from the immutable image plan with the exact
 FileBelt Cargo application and per-platform Rust standard-library, musl,
 compiler, and linker inventory.
+The CycloneDX subject also records `io.filebelt.build.target-cpu` and the
+canonical plan SHA-256; the OCI image and versioned build/validation receipts
+carry the corresponding exact platform value.
 Every entry records its package URL, version, license, relationship, standard
 CycloneDX scope, and immutable evidence source. A Rust SBOM must contain both
 runtime and build-tool records; an empty or partial inventory fails even when
@@ -339,6 +354,17 @@ their probe contracts with role-specific runtime contracts. Evidence adds:
   shutdown; and
 - the exact OxiBelt base/source/route relationship for `filebelt-web`.
 
+The OxiBelt relationship is admitted offline through
+`supply-chain/oxibelt-admission-v1.json` and the retained index and AMD64-child
+GitHub/Sigstore rebuild bundles. Admission verified the public-good signature,
+GitHub-hosted runner, `OxiBelt/OxiBelt` release workflow identity, tag, and
+source revision. Routine checks use the retained raw OCI manifest subjects and
+Sigstore trusted-root snapshot to repeat the signature, certificate identity,
+OIDC issuer, transparency-log, source, and runner-policy verification without a
+network lookup. They also bind retained bundle and trusted-root hashes, decoded
+predicates, the index-to-child digest, child `targetCpu: x86-64-v3`, and the
+admitted index directly to the `ui/web/Dockerfile` base.
+
 The media-controller image remains probe-only and its evidence must continue to
 say so. Broker, controller, and runner evidence instead proves their active
 runtime modes, listeners, database/mount/Secret boundaries, mTLS identities,
@@ -349,7 +375,12 @@ MPL-2.0, and the web role includes ISC and 0BSD. Every upstream copyright and
 notice discovered from the final image and dependency graph is shipped and
 mapped to the SBOM.
 
-AMD64 and ARM64 run native runtime and Docker behavior tests. RISC-V
+AMD64 and ARM64 run native runtime and Docker behavior tests. The AMD64 host
+checker evaluates every processor stanza before native image, rebuild, adapter,
+and NFS execution and emits a bounded report without raw CPU flags. A separate
+digest-pinned Kubernetes DaemonSet check covers every selected schedulable
+AMD64 node; neither check qualifies an unobserved remote Docker daemon or
+cluster. RISC-V
 cross-compiles and runs bounded rootless-QEMU smoke tests, including native
 crypto initialization. The official Iggy helper is not required on RISC-V;
 that job validates the PostgreSQL polling fallback and must not substitute an

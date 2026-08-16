@@ -32,9 +32,9 @@ for command in awk docker find git grep jq pgrep readelf sha256sum tar; do
   command -v "${command}" >/dev/null 2>&1 || die "missing required command: ${command}"
 done
 case "${platform}" in
-  linux/amd64) expected_machine=x86_64; architecture=amd64 ;;
-  linux/arm64) expected_machine=aarch64; architecture=arm64 ;;
-  linux/riscv64) expected_machine=riscv64; architecture=riscv64 ;;
+  linux/amd64) expected_machine=x86_64; architecture=amd64; amd64_isa="x86-64-v3"; target_cpu="x86-64-v3" ;;
+  linux/arm64) expected_machine=aarch64; architecture=arm64; amd64_isa=; target_cpu="architecture-default" ;;
+  linux/riscv64) expected_machine=riscv64; architecture=riscv64; amd64_isa=; target_cpu="architecture-default" ;;
   *) die "unsupported platform ${platform}" ;;
 esac
 
@@ -42,6 +42,11 @@ actual_machine=$(uname -m)
 [[ "${actual_machine}" == "${expected_machine}" ]] || {
   die "${platform} must build on native ${expected_machine}; runner is ${actual_machine}"
 }
+if [[ "${platform}" == linux/amd64 ]]; then
+  mkdir -p -- "$(dirname -- "${output}")"
+  "${repo_root}/tests/scripts/check-amd64-v3-host.sh" \
+    >"${output}.amd64-v3-host-preflight.json"
+fi
 if [[ -d /proc/sys/fs/binfmt_misc ]] && find /proc/sys/fs/binfmt_misc -maxdepth 1 \
     -type f -name 'qemu-*' -print -quit | grep -q .; then
   die "QEMU binfmt registration is forbidden for native NFS qualification"
@@ -78,6 +83,8 @@ trap 'exit 143' TERM
 DOCKER_BUILDKIT=1 docker build \
   --platform "${platform}" \
   --build-arg "RELEASE_REVISION=${revision}" \
+  --build-arg "FILEBELT_AMD64_ISA=${amd64_isa}" \
+  --build-arg "FILEBELT_TARGET_CPU=${target_cpu}" \
   --file "${repo_root}/adapters/nfs/Dockerfile" \
   --tag "${image}" \
   "${repo_root}"

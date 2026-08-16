@@ -48,7 +48,7 @@ and Helm chart with attestations.
   image remains disabled and non-publishable until the existing FFmpeg,
   source-offer, SBOM, provenance, and platform-evidence gates pass.
 
-All six adapter roles use a separate schema-v2 publication plan and a
+All six adapter roles use a separate schema-v3 publication plan and a
 deterministic corresponding-source bundle. A blocked role may produce its
 source bundle and diagnostic evidence, but it cannot produce an image, SBOM,
 provenance statement, chart digest, or promotion subject. Qualifying every
@@ -125,12 +125,18 @@ these boundaries.
 
 ## Image checks
 
+Canonical AMD64 images require `x86-64-v3`; there is no v2 fallback. The image
+matrix runs the bounded host preflight before AMD64 builds, and production
+clusters require the separate all-node preflight in the Kubernetes operator
+guide.
+
 Build the TypeScript planning tools, create an immutable build plan, and run a
 native platform matrix with:
 
 ```sh
 pnpm --filter @filebelt/devops build
 tests/scripts/prepare-image-plan.sh --channel build --output artifacts/phase4/image-plan.json
+tests/scripts/check-amd64-v3-host.sh
 tests/scripts/run-image-matrix.sh --plan artifacts/phase4/image-plan.json --platform linux/amd64 --output-dir artifacts/phase4/amd64
 tests/scripts/check-helm-chart.sh
 ```

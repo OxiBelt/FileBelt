@@ -17,6 +17,9 @@ ARG CHART_VERSION
 ARG LICENSE_QUALIFICATION
 ARG IMAGE_BUILD_STATE
 ARG RUST_TARGET
+ARG TARGETARCH
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 ENV FILEBELT_SOURCE_URL=${SOURCE_URL} \
     FILEBELT_SOURCE_REF=${SOURCE_REF} \
     FILEBELT_SOURCE_REVISION=${SOURCE_REVISION} \
@@ -36,19 +39,27 @@ RUN --network=none set -eu; \
     test "${LICENSE_QUALIFICATION}" = qualified; \
     test "${IMAGE_BUILD_STATE}" = eligible; \
     test -n "${RUST_TARGET}"; \
+    case "${TARGETARCH}" in \
+      amd64) test "${FILEBELT_AMD64_ISA}" = x86-64-v3; test "${FILEBELT_TARGET_CPU}" = x86-64-v3; RUSTFLAGS="-C target-cpu=${FILEBELT_AMD64_ISA} -C link-arg=-Wl,-z,${FILEBELT_AMD64_ISA}"; CFLAGS="-march=${FILEBELT_AMD64_ISA}"; CXXFLAGS="${CFLAGS}" ;; \
+      arm64) test -z "${FILEBELT_AMD64_ISA}"; test "${FILEBELT_TARGET_CPU}" = architecture-default; RUSTFLAGS=; CFLAGS=; CXXFLAGS= ;; \
+      *) exit 1 ;; \
+    esac; \
     test -s adapter-inputs/onlyoffice/SOURCE-MANIFEST.json \
     && test -s adapter-inputs/onlyoffice/BUILD.md \
     && test -s adapter-inputs/onlyoffice/LICENSES/AGPL-3.0-only.txt \
     && test -s adapter-inputs/onlyoffice/LICENSES/Apache-2.0.txt \
     && test -s adapter-inputs/onlyoffice/NOTICES/THIRD_PARTY_NOTICES.md \
-    && cargo build --locked --offline --release \
+    && RUSTFLAGS="${RUSTFLAGS}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" cargo build --locked --offline --release \
       --features qualified-release \
       --target "${RUST_TARGET}" \
       --manifest-path adapters/onlyoffice/Cargo.toml \
     && cp "adapters/onlyoffice/target/${RUST_TARGET}/release/filebelt-onlyoffice-adapter" /filebelt-onlyoffice-adapter \
     && chmod 0555 /filebelt-onlyoffice-adapter \
     && ! readelf -l /filebelt-onlyoffice-adapter | grep -q 'Requesting program interpreter' \
-    && ! readelf -d /filebelt-onlyoffice-adapter 2>&1 | grep -q '(NEEDED)'
+    && ! readelf -d /filebelt-onlyoffice-adapter 2>&1 | grep -q '(NEEDED)' \
+    && if [ "${TARGETARCH}" = amd64 ]; then \
+      readelf -n /filebelt-onlyoffice-adapter | grep -Eq 'x86 ISA needed: (x86-64-baseline, )?x86-64-v3$'; \
+    fi
 
 FROM scratch
 ARG SOURCE_URL
@@ -60,6 +71,8 @@ ARG CREATED
 ARG LICENSE_EXPRESSION
 ARG LICENSE_QUALIFICATION
 ARG IMAGE_BUILD_STATE
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 LABEL org.opencontainers.image.title="filebelt-onlyoffice-adapter" \
       org.opencontainers.image.description="FileBelt AGPL ONLYOFFICE adapter" \
       org.opencontainers.image.source="${SOURCE_URL}" \
@@ -70,6 +83,7 @@ LABEL org.opencontainers.image.title="filebelt-onlyoffice-adapter" \
       org.opencontainers.image.licenses="${LICENSE_EXPRESSION}" \
       io.filebelt.image.role="filebelt-onlyoffice-adapter" \
       io.filebelt.first-party-license="AGPL-3.0-only" \
+      io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}" \
       io.filebelt.corresponding-source="${CORRESPONDING_SOURCE_URL}" \
       io.filebelt.corresponding-source.sha256="${CORRESPONDING_SOURCE_SHA256}" \
       io.filebelt.qualification.license="${LICENSE_QUALIFICATION}" \

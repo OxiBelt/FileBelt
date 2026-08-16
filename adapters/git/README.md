@@ -39,6 +39,10 @@ plan marks both source/license evidence and image construction eligible. A
 qualified build produces a static scratch aggregate containing the Apache
 wrapper and separate GPL Git executable; publication remains blocked until the
 independent platform, SBOM, vulnerability, restore, and fsck gates pass.
+For `linux/amd64`, the closed adapter plan passes only
+`FILEBELT_AMD64_ISA=x86-64-v3`; the Dockerfile applies it to the Rust wrapper,
+zlib, and Git C executable. ARM64 receives no AMD64 ISA argument. Every
+platform labels the plan-derived target as `io.filebelt.build.target-cpu`.
 
 The operator supplies the Git-only RWX claim and every mTLS Secret. There is no
 database credential, payload mount, browser route, general egress, or Git

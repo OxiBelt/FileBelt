@@ -63,16 +63,36 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
    Secrets in that namespace.
 2. Confirm every application image is a lowercase `sha256:` digest and the
    OxiBelt digest is the version accepted by FileBelt's supply-chain policy.
-3. Confirm the external PVC advertises RWX and is not owned by this Helm
+3. Before a release that enables AMD64 native images, run
+   `tests/scripts/run-kubernetes-amd64-v3-preflight.py` against the target
+   cluster. Supply a unique, lowercase `--run-id` of at most 25 characters, a
+   target `--namespace`, protected new `--output` evidence path, and an
+   operator-approved immutable `--probe-image` reference of the form
+   `registry/path@sha256:<64-lowercase-hex>`. The probe image must supply
+   `/bin/bash`, `awk`, `sed`, `sort`, `uname`, `wc`, and `sleep`; FileBelt does
+   not prescribe its image or digest. The helper creates an immutable,
+   run-specific ConfigMap and a digest-pinned DaemonSet, collects one bounded
+   result from every schedulable `kubernetes.io/arch=amd64` node, and deletes
+   both resources before returning. It exits nonzero if discovery, scheduling,
+   logs, report shape, cleanup, or any node's v3 feature check fails.
+
+   The DaemonSet's standard architecture selector is only probe placement. It
+   does not add a CPU capability label, node affinity, or scheduler enforcement
+   to FileBelt workloads. Operators must keep AMD64 pools homogeneous at
+   x86-64-v3 and rerun the preflight before an AMD64 rollout and after a pool,
+   autoscaler, hypervisor, or VM CPU-model change. This cluster check does not
+   qualify a local or remote Docker daemon, CI runner, or any node outside its
+   selected cluster scope.
+4. Confirm the external PVC advertises RWX and is not owned by this Helm
    release. Provision its root for UID/GID 10001; do not add a chown init Pod.
-4. Confirm all Secret names and required keys exist. Record their generation
+5. Confirm all Secret names and required keys exist. Record their generation
    values in the release values; the chart never reads or creates them.
-5. Confirm NetworkPolicy peer selectors resolve to the intended Pods and ports.
+6. Confirm NetworkPolicy peer selectors resolve to the intended Pods and ports.
    In particular, the API may reach the OIDC gateway but not the Internet.
-6. Confirm the API and I/O server certificates contain their exact Service DNS
+7. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-7. Confirm `filebelt.toml` uses format 8. If MCP is enabled, validate the
+8. Confirm `filebelt.toml` uses format 8. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
@@ -88,11 +108,11 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
    TUN, or tailnet auth; only the backend may contain the keytab, VFS client
    key, recovery claim, or IPC sockets. Its policy must contain no DNS or
    Headscale egress before exposing TCP 2049.
-8. While workloads remain quiesced, run the chart's `keys-audit` operation with
+9. While workloads remain quiesced, run the chart's `keys-audit` operation with
    all configured purpose public keysets projected. Require successful proof
    that every current generation is present and no public key bytes occur in
    two purposes; retain the Job output with the candidate release evidence.
-9. Render with strict lint and server-side dry-run before changing the release.
+10. Render with strict lint and server-side dry-run before changing the release.
    For runners, inspect the namespaced Role and prove it cannot read or mutate
    resources outside the runner namespace.
 

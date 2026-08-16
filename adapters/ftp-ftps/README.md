@@ -88,3 +88,8 @@ digest-pinned builder/base image and the release-reviewed cross-workspace VFS
 source input. Do not replace those inputs with a mutable image tag or copy a
 host payload mount into the build. See [SOURCE_OFFER.md](SOURCE_OFFER.md) for
 required published materials.
+
+Any future AMD64 image build must take only the adapter-plan-derived
+`FILEBELT_AMD64_ISA=x86-64-v3` and apply it to the gateway and native
+dependencies. This preserves the currently blocked image-build and
+publication state.

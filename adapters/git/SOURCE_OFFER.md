@@ -11,6 +11,11 @@ linked Apache revision-protocol source and generated output, the exact Git and
 zlib source archives, the versioned Cargo vendor closure, build recipes and
 flags, patches (if any), licenses, and notices. The release manifest and image
 label bind that bundle URL and SHA-256 to the image index and platform digests.
+For `linux/amd64`, those reproducible inputs include the closed
+`FILEBELT_AMD64_ISA=x86-64-v3` and `FILEBELT_TARGET_CPU=x86-64-v3` arguments,
+Rust `-Ctarget-cpu=x86-64-v3`, C/C++ `-march=x86-64-v3`, and the GNU linker
+`-z x86-64-v3` property requirement. Other architectures retain their
+architecture-default compiler settings.
 
 The source/license qualification gate must pass before an image is built.
 Image publication additionally requires complete SBOM, vulnerability,

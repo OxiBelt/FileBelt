@@ -11,6 +11,10 @@ URL in `io.filebelt.corresponding-source` and publish, for that image digest:
 - the complete configure invocation generated from
   `ffmpeg-build/configure-contract.sh`, including every enabled parser,
   decoder, demuxer, encoder, muxer, and filter;
+- for `linux/amd64`, the plan-bound `x86-64-v3` target and the exact Rust,
+  C/C++, configure/CMake, and GNU linker flags used by the wrapper, FFmpeg,
+  libaom, libvpx, and Opus; other architectures keep architecture-default
+  compiler settings;
 - immutable builder/runtime inputs, dynamic-linkage evidence, notices, SBOM,
   vulnerability result, provenance, and per-platform digest mapping; and
 - the malicious-input corpus result and normalized rebuild evidence for native

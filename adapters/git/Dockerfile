@@ -17,6 +17,9 @@ ARG LICENSE_QUALIFICATION
 ARG IMAGE_BUILD_STATE
 ARG RUST_TARGET
 ARG ZLIB_TARBALL_SHA256
+ARG TARGETARCH
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 
 FROM ${FILEBELT_GIT_BUILDER_IMAGE} AS build
 
@@ -32,6 +35,9 @@ ARG LICENSE_QUALIFICATION
 ARG IMAGE_BUILD_STATE
 ARG RUST_TARGET
 ARG ZLIB_TARBALL_SHA256
+ARG TARGETARCH
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 
 ARG GIT_VERSION=2.55.0
 ARG GIT_TARBALL_SHA256=457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357
@@ -70,6 +76,11 @@ RUN --network=none set -eu; \
     case "${CORRESPONDING_SOURCE_URL}" in */tree/main|*/tree/master|*/latest/*) exit 1 ;; esac; \
     printf '%s' "${CORRESPONDING_SOURCE_SHA256}" | grep -Eq '^[0-9a-f]{64}$'; \
     test -n "${RUST_TARGET}"; \
+    case "${TARGETARCH}" in \
+      amd64) test "${FILEBELT_AMD64_ISA}" = x86-64-v3; test "${FILEBELT_TARGET_CPU}" = x86-64-v3 ;; \
+      arm64) test -z "${FILEBELT_AMD64_ISA}"; test "${FILEBELT_TARGET_CPU}" = architecture-default ;; \
+      *) exit 1 ;; \
+    esac; \
     printf '%s' "${ZLIB_TARBALL_SHA256}" | grep -Eq '^[0-9a-f]{64}$'; \
     printf '%s  %s\n' "${GIT_TARBALL_SHA256}" /inputs/git-2.55.0.tar.xz | sha256sum -c -; \
     printf '%s  %s\n' "${ZLIB_TARBALL_SHA256}" /inputs/zlib-1.3.1.tar.gz | sha256sum -c -; \
@@ -79,23 +90,33 @@ RUN --network=none set -eu; \
     test -s /evidence/musl-COPYRIGHT
 
 RUN --network=none set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) CFLAGS="-O2 -march=${FILEBELT_AMD64_ISA}"; CXXFLAGS="${CFLAGS}" ;; \
+      arm64) CFLAGS="-O2"; CXXFLAGS="${CFLAGS}" ;; \
+      *) exit 1 ;; \
+    esac; \
     mkdir -p /build/zlib /opt/filebelt-git-deps; \
     tar -xzf /inputs/zlib-1.3.1.tar.gz -C /build/zlib --strip-components=1; \
     cd /build/zlib; \
     test "$(cat zlib.h | sed -n 's/^#define ZLIB_VERSION "\([^"]*\)"/\1/p')" = "${ZLIB_VERSION}"; \
     test -s LICENSE; \
     cp LICENSE /evidence/Zlib.txt; \
-    ./configure --static --prefix=/opt/filebelt-git-deps; \
+    CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ./configure --static --prefix=/opt/filebelt-git-deps; \
     make -j1; \
     make install
 
 RUN --network=none set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) CFLAGS="-O2 -march=${FILEBELT_AMD64_ISA} -static -I/opt/filebelt-git-deps/include"; LDFLAGS="-static -Wl,-z,${FILEBELT_AMD64_ISA} -L/opt/filebelt-git-deps/lib" ;; \
+      arm64) CFLAGS="-O2 -static -I/opt/filebelt-git-deps/include"; LDFLAGS="-static -L/opt/filebelt-git-deps/lib" ;; \
+      *) exit 1 ;; \
+    esac; \
     mkdir -p /build/git /opt/filebelt-git/bin; \
     tar -xJf /inputs/git-2.55.0.tar.xz -C /build/git --strip-components=1; \
     make -C /build/git -j1 git \
       prefix=/opt/filebelt-git \
-      CFLAGS="-O2 -static -I/opt/filebelt-git-deps/include" \
-      LDFLAGS="-static -L/opt/filebelt-git-deps/lib" \
+      CFLAGS="${CFLAGS}" \
+      LDFLAGS="${LDFLAGS}" \
       NO_CURL=YesPlease \
       NO_EXPAT=YesPlease \
       NO_GETTEXT=YesPlease \
@@ -108,9 +129,18 @@ RUN --network=none set -eu; \
     chmod 0555 /opt/filebelt-git/bin/git; \
     /opt/filebelt-git/bin/git --version | grep -Fx "git version ${GIT_VERSION}"; \
     ! readelf -l /opt/filebelt-git/bin/git | grep -q 'Requesting program interpreter'; \
-    ! readelf -d /opt/filebelt-git/bin/git 2>&1 | grep -q '(NEEDED)'
+    ! readelf -d /opt/filebelt-git/bin/git 2>&1 | grep -q '(NEEDED)'; \
+    if [ "${TARGETARCH}" = amd64 ]; then \
+      readelf -n /opt/filebelt-git/bin/git | grep -Eq 'x86 ISA needed: (x86-64-baseline, )?x86-64-v3$'; \
+    fi
 
-RUN --network=none cargo \
+RUN --network=none set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) RUSTFLAGS="-C target-cpu=${FILEBELT_AMD64_ISA} -C link-arg=-Wl,-z,${FILEBELT_AMD64_ISA}"; CFLAGS="-march=${FILEBELT_AMD64_ISA}"; CXXFLAGS="${CFLAGS}" ;; \
+      arm64) RUSTFLAGS=; CFLAGS=; CXXFLAGS= ;; \
+      *) exit 1 ;; \
+    esac; \
+    RUSTFLAGS="${RUSTFLAGS}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" cargo \
       --config 'source.crates-io.replace-with="vendored-sources"' \
       --config 'source.vendored-sources.directory="/inputs/vendor"' \
       build --locked --offline --release \
@@ -121,6 +151,9 @@ RUN --network=none cargo \
     chmod 0555 /out/filebelt-git-adapter && \
     ! readelf -l /out/filebelt-git-adapter | grep -q 'Requesting program interpreter' && \
     ! readelf -d /out/filebelt-git-adapter 2>&1 | grep -q '(NEEDED)' && \
+    if [ "${TARGETARCH}" = amd64 ]; then \
+      readelf -n /out/filebelt-git-adapter | grep -Eq 'x86 ISA needed: (x86-64-baseline, )?x86-64-v3$'; \
+    fi && \
     test "$(find /out -maxdepth 1 -type f | wc -l)" -eq 1
 
 FROM scratch
@@ -134,6 +167,8 @@ ARG CORRESPONDING_SOURCE_URL
 ARG CORRESPONDING_SOURCE_SHA256
 ARG LICENSE_QUALIFICATION
 ARG IMAGE_BUILD_STATE
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 
 LABEL org.opencontainers.image.title="filebelt-git-adapter" \
       org.opencontainers.image.description="FileBelt Apache wrapper with a separate GPL system-Git executable" \
@@ -145,6 +180,7 @@ LABEL org.opencontainers.image.title="filebelt-git-adapter" \
       io.filebelt.image.role="filebelt-git-adapter" \
       io.filebelt.first-party-license="Apache-2.0" \
       io.filebelt.git.version="2.55.0" \
+      io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}" \
       io.filebelt.corresponding-source="${CORRESPONDING_SOURCE_URL}" \
       io.filebelt.corresponding-source.sha256="${CORRESPONDING_SOURCE_SHA256}" \
       io.filebelt.qualification.license="${LICENSE_QUALIFICATION}" \

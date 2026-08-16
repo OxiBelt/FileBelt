@@ -14,6 +14,12 @@ Dockerfile, build inputs, notices, source manifest, and rebuild instructions.
 The OCI labels and external release evidence map the same bundle to exact
 platform and image-index digests.
 
+For `linux/amd64`, the complete build inputs include the closed
+`FILEBELT_AMD64_ISA=x86-64-v3` and `FILEBELT_TARGET_CPU=x86-64-v3` arguments,
+Rust `-Ctarget-cpu=x86-64-v3`, C/C++ `-march=x86-64-v3`, and the GNU linker
+`-z x86-64-v3` property requirement. Other architectures retain their
+architecture-default compiler settings.
+
 An unmodified upstream deployment may use the matching upstream immutable
 source bundle. A downstream operator who modifies this AGPL adapter and exposes
 that modified version over a network must point the visible source opportunity

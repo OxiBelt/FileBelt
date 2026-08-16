@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const ImagePlanSchemaVersion = 1 as const;
+export const ImagePlanSchemaVersion = 2 as const;
+export const Amd64IsaBaseline = "x86-64-v3" as const;
 export const ImageRegistry = "ghcr.io/oxibelt" as const;
 export const SourceUrl = "https://github.com/OxiBelt/FileBelt" as const;
 export const RuntimeIdentity = Object.freeze({ uid: 10001, gid: 10001 });
@@ -65,6 +66,7 @@ export interface ImageComponent {
 export type PlatformComponentInventory = Readonly<
   Record<ImagePlatform, readonly ImageComponent[]>
 >;
+export type PlatformTargetCpu = Readonly<Record<ImagePlatform, typeof Amd64IsaBaseline | null>>;
 
 export interface ImagePlanSource {
   readonly url: typeof SourceUrl;
@@ -79,10 +81,12 @@ export type ImageArtifact =
   | {
     readonly kind: "rust-binary";
     readonly binary: string;
+    readonly targetCpu: PlatformTargetCpu;
     readonly components: PlatformComponentInventory;
   }
   | {
     readonly kind: "oxibelt-edge";
+    readonly targetCpu: PlatformTargetCpu;
     readonly packages: readonly ["ui/web", "ui/markdown"];
     readonly base: {
       readonly image: typeof OxibeltImage;
@@ -105,8 +109,9 @@ export interface ImageRow {
   readonly artifact: ImageArtifact;
 }
 
-export interface ImagePlanV1 {
+export interface ImagePlanV2 {
   readonly schemaVersion: typeof ImagePlanSchemaVersion;
+  readonly amd64IsaBaseline: typeof Amd64IsaBaseline;
   readonly channel: ImagePlanChannel;
   readonly version: string;
   readonly tag: string;
@@ -333,6 +338,7 @@ const RoleDefinitions: readonly RoleDefinition[] = [
     License: WebImageLicense,
     Artifact: {
       kind: "oxibelt-edge",
+      targetCpu: PlatformTargetCpuContract(),
       packages: ["ui/web", "ui/markdown"],
       base: {
         image: OxibeltImage,
@@ -377,8 +383,17 @@ function RustRole(
     Artifact: {
       kind: "rust-binary",
       binary: Binary,
+      targetCpu: PlatformTargetCpuContract(),
       components: RustComponents(Binary, ExtraRuntimeComponents),
     },
+  };
+}
+
+function PlatformTargetCpuContract(): PlatformTargetCpu {
+  return {
+    "linux/amd64": Amd64IsaBaseline,
+    "linux/arm64": null,
+    "linux/riscv64": null,
   };
 }
 
@@ -539,7 +554,7 @@ export function CreateLocalBuildTag(Version: string, Revision: string): string {
   return `${Version}-build.${Revision.slice(0, 12)}`;
 }
 
-export function CreateImagePlan(Input: CreateImagePlanInput): ImagePlanV1 {
+export function CreateImagePlan(Input: CreateImagePlanInput): ImagePlanV2 {
   AssertChannel(Input.Channel);
   AssertReleaseTag(Input.Version, "version");
   ValidateSource(Input.Source, Input.Channel, Input.Version);
@@ -551,6 +566,7 @@ export function CreateImagePlan(Input: CreateImagePlanInput): ImagePlanV1 {
 
   return {
     schemaVersion: ImagePlanSchemaVersion,
+    amd64IsaBaseline: Amd64IsaBaseline,
     channel: Input.Channel,
     version: Input.Version,
     tag: Tag,
@@ -567,15 +583,18 @@ export function CreateImagePlan(Input: CreateImagePlanInput): ImagePlanV1 {
   };
 }
 
-export function ValidateImagePlan(Value: unknown): ImagePlanV1 {
+export function ValidateImagePlan(Value: unknown): ImagePlanV2 {
   const Plan = AssertRecord(Value, "image plan");
   AssertExactKeys(
     Plan,
-    ["schemaVersion", "channel", "version", "tag", "source", "runtime", "images"],
+    ["schemaVersion", "amd64IsaBaseline", "channel", "version", "tag", "source", "runtime", "images"],
     "image plan",
   );
   if (Plan.schemaVersion !== ImagePlanSchemaVersion) {
     throw new Error(`image plan schemaVersion must be ${ImagePlanSchemaVersion}`);
+  }
+  if (Plan.amd64IsaBaseline !== Amd64IsaBaseline) {
+    throw new Error(`image plan amd64IsaBaseline must be ${Amd64IsaBaseline}`);
   }
   AssertChannel(Plan.channel);
   if (typeof Plan.version !== "string") {
@@ -597,7 +616,7 @@ export function ValidateImagePlan(Value: unknown): ImagePlanV1 {
   return CreateImagePlan({ Channel: Plan.channel, Version: Plan.version, Source });
 }
 
-export function SerializeImagePlan(Value: ImagePlanV1 | unknown): string {
+export function SerializeImagePlan(Value: ImagePlanV2 | unknown): string {
   return `${JSON.stringify(ValidateImagePlan(Value), null, 2)}\n`;
 }
 
@@ -618,10 +637,12 @@ function CreateImageRow(Definition: RoleDefinition): ImageRow {
         ? {
           kind: "rust-binary",
           binary: Definition.Artifact.binary,
+          targetCpu: { ...Definition.Artifact.targetCpu },
           components: CloneComponentInventory(Definition.Artifact.components),
         }
         : {
           kind: "oxibelt-edge",
+          targetCpu: { ...Definition.Artifact.targetCpu },
           packages: [...Definition.Artifact.packages],
           base: { ...Definition.Artifact.base },
         },

@@ -58,7 +58,8 @@ class CycloneDxNormalizationTests(unittest.TestCase):
             for platform in ("linux/amd64", "linux/arm64", "linux/riscv64")
         }
         self.plan_value: dict[str, Any] = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
+            "amd64IsaBaseline": "x86-64-v3",
             "version": "0.1.0",
             "tag": "0.1.0-build.0123456789ab",
             "source": {
@@ -75,6 +76,11 @@ class CycloneDxNormalizationTests(unittest.TestCase):
                     "artifact": {
                         "kind": "rust-binary",
                         "binary": "filebelt-api",
+                        "targetCpu": {
+                            "linux/amd64": "x86-64-v3",
+                            "linux/arm64": None,
+                            "linux/riscv64": None,
+                        },
                         "components": inventory,
                     },
                 }
@@ -127,6 +133,12 @@ class CycloneDxNormalizationTests(unittest.TestCase):
         result = self.run_normalizer()
         self.assertEqual(result.returncode, 0, result.stderr)
         normalized = json.loads(self.output.read_text(encoding="utf-8"))
+        subject_properties = {
+            item["name"]: item["value"]
+            for item in normalized["metadata"]["component"]["properties"]
+        }
+        self.assertEqual(subject_properties["io.filebelt.build.target-cpu"], "x86-64-v3")
+        self.assertEqual(len(subject_properties["io.filebelt.build.plan-sha256"]), 64)
         self.assertEqual(len(normalized["components"]), 4)
         subject_dependency = normalized["dependencies"][-1]
         self.assertEqual(

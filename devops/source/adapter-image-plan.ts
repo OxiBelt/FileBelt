@@ -3,7 +3,8 @@
 import { IsReleaseTag, SourceUrl, type ImagePlanSource, type ImagePlatform } from "./image-plan.js";
 
 /** Copyleft adapter artifacts have a separate, release-aware publication plan. */
-export const AdapterImagePlanSchemaVersion = 2 as const;
+export const AdapterImagePlanSchemaVersion = 3 as const;
+export const AdapterAmd64IsaBaseline = "x86-64-v3" as const;
 
 export const AdapterImageRoles = [
   "filebelt-smb-gateway",
@@ -24,7 +25,7 @@ export type AdapterComponentRelationship =
   | "linked"
   | "separate-executable";
 
-/* eslint-disable @typescript-eslint/naming-convention -- Stable adapter plan schema v2 JSON keys. */
+/* eslint-disable @typescript-eslint/naming-convention -- Stable adapter plan schema v3 JSON keys. */
 export interface AdapterComponent {
   readonly id: string;
   readonly version: string;
@@ -110,8 +111,9 @@ export interface AdapterImageEvidence {
   readonly publication: AdapterPublication;
 }
 
-export interface AdapterImagePlanV2 {
+export interface AdapterImagePlanV3 {
   readonly schemaVersion: typeof AdapterImagePlanSchemaVersion;
+  readonly amd64IsaBaseline: typeof AdapterAmd64IsaBaseline;
   readonly version: string;
   readonly source: ImagePlanSource;
   readonly roles: readonly AdapterImageEvidence[];
@@ -283,7 +285,7 @@ const AdapterCatalog: readonly AdapterCatalogRow[] = [
 const Sha256Pattern = /^[0-9a-f]{64}$/u;
 const RevisionPattern = /^[0-9a-f]{40}$/u;
 
-export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): AdapterImagePlanV2 {
+export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): AdapterImagePlanV3 {
   ValidateSource(Input.Version, Input.Source);
   ValidateEvidenceInput(Input.Evidence);
   const Roles = AdapterCatalog.map((Catalog): AdapterImageEvidence => {
@@ -365,7 +367,13 @@ export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): Adap
       },
     };
   });
-  const Plan = { schemaVersion: AdapterImagePlanSchemaVersion, version: Input.Version, source: Input.Source, roles: Roles } as const;
+  const Plan = {
+    schemaVersion: AdapterImagePlanSchemaVersion,
+    amd64IsaBaseline: AdapterAmd64IsaBaseline,
+    version: Input.Version,
+    source: Input.Source,
+    roles: Roles,
+  } as const;
   return Plan;
 }
 
@@ -422,12 +430,15 @@ function ValidateEvidenceInput(
   }
 }
 
-export function ValidateAdapterImagePlan(Value: unknown): asserts Value is AdapterImagePlanV2 {
+export function ValidateAdapterImagePlan(Value: unknown): asserts Value is AdapterImagePlanV3 {
   if (!IsRecord(Value) || Value.schemaVersion !== AdapterImagePlanSchemaVersion) {
-    throw new Error("adapter image plan schemaVersion must be 2");
+    throw new Error("adapter image plan schemaVersion must be 3");
   }
-  if (!ExactKeys(Value, ["schemaVersion", "version", "source", "roles"])) {
-    throw new Error("adapter image plan top-level properties differ from schema v2");
+  if (!ExactKeys(Value, ["schemaVersion", "amd64IsaBaseline", "version", "source", "roles"])) {
+    throw new Error("adapter image plan top-level properties differ from schema v3");
+  }
+  if (Value.amd64IsaBaseline !== AdapterAmd64IsaBaseline) {
+    throw new Error(`adapter image plan amd64IsaBaseline must be ${AdapterAmd64IsaBaseline}`);
   }
   if (typeof Value.version !== "string" || !IsReleaseTag(Value.version)) {
     throw new Error("adapter image plan version must be exact SemVer");
@@ -436,7 +447,7 @@ export function ValidateAdapterImagePlan(Value: unknown): asserts Value is Adapt
     throw new Error("adapter image plan source must be an object");
   }
   if (!ExactKeys(Value.source, ["url", "ref", "revision", "created", "dirty", "kind"])) {
-    throw new Error("adapter image plan source properties differ from schema v2");
+    throw new Error("adapter image plan source properties differ from schema v3");
   }
   ValidateSource(Value.version, Value.source as unknown as ImagePlanSource);
   if (!Array.isArray(Value.roles) || Value.roles.length !== AdapterImageRoles.length) {
@@ -463,7 +474,7 @@ export function ValidateAdapterImagePlan(Value: unknown): asserts Value is Adapt
   }
 }
 
-export function SerializeAdapterImagePlan(Plan: AdapterImagePlanV2): string {
+export function SerializeAdapterImagePlan(Plan: AdapterImagePlanV3): string {
   ValidateAdapterImagePlan(Plan);
   return `${JSON.stringify(Plan, null, 2)}\n`;
 }

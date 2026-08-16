@@ -51,7 +51,8 @@ class ValidateAdapterSourceBundleTests(unittest.TestCase):
     def write_plan(self, *, revision: str = REVISION, license_expression: str = "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib") -> pathlib.Path:
         plan_path = pathlib.Path(self.temporary.name) / "plan.json"
         plan_path.write_text(json.dumps({
-            "schemaVersion": 2,
+            "schemaVersion": 3,
+            "amd64IsaBaseline": "x86-64-v3",
             "version": VERSION,
             "roles": [{
                 "role": ROLE,

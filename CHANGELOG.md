@@ -9,6 +9,9 @@ All notable changes to FileBelt are documented here. The project uses
 
 ### Added
 
+- A canonical `x86-64-v3` AMD64 image contract with plan-derived Rust, C/C++,
+  and linker flags; GNU ISA-note, OCI label, SBOM, build-evidence, host, and
+  Kubernetes-node validation; and retained OxiBelt AMD64 attestation evidence.
 - Repository governance, workspace, license, architecture, and CI bootstrap.
 - Read-only Docker image archives with OCI labels for seven Apache image roles
   on AMD64, ARM64, and RISC-V, with deterministic build identity and scratch

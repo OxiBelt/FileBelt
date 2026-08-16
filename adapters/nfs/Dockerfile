@@ -5,6 +5,8 @@ ARG UBUNTU_IMAGE=docker.io/library/ubuntu:26.04@sha256:678c6550cc43645e08669028b
 
 FROM ${UBUNTU_IMAGE} AS bridge-builder
 ARG TARGETARCH
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 ENV DEBIAN_FRONTEND=noninteractive
 COPY adapters/nfs/container/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
 RUN rm -f /etc/apt/sources.list && \
@@ -26,10 +28,22 @@ WORKDIR /src
 COPY adapters/nfs adapters/nfs
 COPY source/crates/filebelt-vfs-protocol source/crates/filebelt-vfs-protocol
 COPY protocol/generated/rust/filebelt/vfs/v1/filebelt.vfs.v1.rs protocol/generated/rust/filebelt/vfs/v1/filebelt.vfs.v1.rs
-RUN cargo build --locked --release --manifest-path adapters/nfs/Cargo.toml && \
-    install -D -m 0755 adapters/nfs/target/release/filebelt-nfs-bridge /out/usr/local/bin/filebelt-nfs-bridge
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) test "${FILEBELT_AMD64_ISA}" = x86-64-v3; test "${FILEBELT_TARGET_CPU}" = x86-64-v3; RUSTFLAGS="-C target-cpu=${FILEBELT_AMD64_ISA} -C link-arg=-Wl,-z,${FILEBELT_AMD64_ISA}"; CFLAGS="-march=${FILEBELT_AMD64_ISA}"; CXXFLAGS="${CFLAGS}" ;; \
+      arm64|riscv64) test -z "${FILEBELT_AMD64_ISA}"; test "${FILEBELT_TARGET_CPU}" = architecture-default; RUSTFLAGS= ;; \
+      *) exit 1 ;; \
+    esac; \
+    RUSTFLAGS="${RUSTFLAGS}" CFLAGS="${CFLAGS:-}" CXXFLAGS="${CXXFLAGS:-}" cargo build --locked --release --manifest-path adapters/nfs/Cargo.toml && \
+    install -D -m 0755 adapters/nfs/target/release/filebelt-nfs-bridge /out/usr/local/bin/filebelt-nfs-bridge && \
+    if [ "${TARGETARCH}" = amd64 ]; then \
+      readelf -n /out/usr/local/bin/filebelt-nfs-bridge | grep -Eq 'x86 ISA needed: (x86-64-baseline, )?x86-64-v3$'; \
+    fi
 
 FROM ${UBUNTU_IMAGE} AS ganesha-builder
+ARG TARGETARCH
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 ENV DEBIAN_FRONTEND=noninteractive
 COPY adapters/nfs/container/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
 RUN rm -f /etc/apt/sources.list && \
@@ -56,8 +70,17 @@ RUN echo '8ecc34f8b9e50d0e062f23c5d93045f13634b89265278a14e16b6dc8f0bf2aff  /bui
     patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0003-delegate-mdcache-test-access.patch && \
     patch -d /build/nfs-ganesha-6.5 -p1 < /build/filebelt-patches/0004-project-authoritative-owner-group-names.patch
 COPY adapters/nfs/ganesha-fsal-filebelt /build/nfs-ganesha-6.5/src/FSAL/FSAL_FILEBELT
-RUN cmake -S /build/nfs-ganesha-6.5/src -B /build/ganesha \
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) test "${FILEBELT_AMD64_ISA}" = x86-64-v3; test "${FILEBELT_TARGET_CPU}" = x86-64-v3; export CFLAGS="-march=${FILEBELT_AMD64_ISA}" CXXFLAGS="-march=${FILEBELT_AMD64_ISA}"; LINKER_FLAGS="-Wl,-z,${FILEBELT_AMD64_ISA}" ;; \
+      arm64|riscv64) test -z "${FILEBELT_AMD64_ISA}"; test "${FILEBELT_TARGET_CPU}" = architecture-default; LINKER_FLAGS= ;; \
+      *) exit 1 ;; \
+    esac; \
+    cmake -S /build/nfs-ganesha-6.5/src -B /build/ganesha \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_EXE_LINKER_FLAGS="${LINKER_FLAGS}" \
+      -DCMAKE_SHARED_LINKER_FLAGS="${LINKER_FLAGS}" \
+      -DCMAKE_MODULE_LINKER_FLAGS="${LINKER_FLAGS}" \
       -DCMAKE_INSTALL_PREFIX=/usr \
       -DLIB_INSTALL_DIR=/usr/lib/ganesha \
       -DFSAL_DESTINATION=/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/ganesha \
@@ -75,7 +98,14 @@ RUN cmake -S /build/nfs-ganesha-6.5/src -B /build/ganesha \
     make -C /build/nfs-ganesha-6.5/src/FSAL/FSAL_FILEBELT abi-check \
       GANESHA_SOURCE=/build/nfs-ganesha-6.5 GANESHA_BUILD=/build/ganesha && \
     cmake --build /build/ganesha --parallel && \
-    DESTDIR=/out cmake --install /build/ganesha
+    DESTDIR=/out cmake --install /build/ganesha && \
+    if [ "${TARGETARCH}" = amd64 ]; then \
+      set -- $(find /out -type f \( -name ganesha.nfsd -o -name 'libfsalfilebelt.so*' \) -print); \
+      test "$#" -eq 2; \
+      for artifact do \
+        readelf -n "${artifact}" | grep -Eq 'x86 ISA needed: (x86-64-baseline, )?x86-64-v3$'; \
+      done; \
+    fi
 RUN curl -fsSLO 'https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/ntirpc/6.3-4/ntirpc_6.3-4.dsc' && \
     curl -fsSLO 'https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/ntirpc/6.3-4/ntirpc_6.3.orig.tar.gz' && \
     curl -fsSLO 'https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/ntirpc/6.3-4/ntirpc_6.3-4.debian.tar.xz' && \
@@ -90,6 +120,8 @@ RUN curl -fsSLO 'https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/ntir
 
 FROM ${UBUNTU_IMAGE}
 ARG RELEASE_REVISION=unreleased
+ARG FILEBELT_AMD64_ISA
+ARG FILEBELT_TARGET_CPU
 ENV DEBIAN_FRONTEND=noninteractive
 COPY adapters/nfs/container/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources
 RUN rm -f /etc/apt/sources.list && \
@@ -112,6 +144,7 @@ LABEL org.opencontainers.image.source="https://github.com/OxiBelt/FileBelt" \
       filebelt.dev.nfs-ganesha="6.5-8" \
       filebelt.dev.ntirpc="6.3-4" \
       filebelt.dev.fsal-api="13.0" \
+      io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}" \
       filebelt.dev.qualification="abi-probe-only"
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/filebelt-nfs"]

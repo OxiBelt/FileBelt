@@ -357,8 +357,13 @@ def validate_bundle_against_plan(path: pathlib.Path, plan_path: pathlib.Path, ro
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise BundleError(f"invalid adapter image plan: {error}") from error
-    if not isinstance(plan, dict) or plan.get("schemaVersion") != 2 or not isinstance(plan.get("roles"), list):
-        raise BundleError("adapter image plan schemaVersion must be 2")
+    if (
+        not isinstance(plan, dict)
+        or plan.get("schemaVersion") != 3
+        or plan.get("amd64IsaBaseline") != "x86-64-v3"
+        or not isinstance(plan.get("roles"), list)
+    ):
+        raise BundleError("adapter image plan schemaVersion must be 3 with amd64IsaBaseline x86-64-v3")
     matches = [item for item in plan["roles"] if isinstance(item, dict) and item.get("role") == role]
     if len(matches) != 1:
         raise BundleError("adapter image plan must contain exactly one matching role")

@@ -45,7 +45,8 @@ class ImageEvidenceTests(unittest.TestCase):
         self.checksum = self.directory / f"{self.archive.name}.sha256"
         self.output = self.directory / "evidence.json"
         self.plan_value = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
+            "amd64IsaBaseline": "x86-64-v3",
             "version": VERSION,
             "tag": TAG,
             "source": {
@@ -63,6 +64,14 @@ class ImageEvidenceTests(unittest.TestCase):
                     "build": {
                         "dockerfile": "source/ops/Dockerfile.roles",
                         "target": ROLE,
+                    },
+                    "artifact": {
+                        "kind": "rust-binary",
+                        "targetCpu": {
+                            "linux/amd64": "x86-64-v3",
+                            "linux/arm64": None,
+                            "linux/riscv64": None,
+                        },
                     },
                 }
             ],
@@ -88,7 +97,7 @@ class ImageEvidenceTests(unittest.TestCase):
 
     def expected_metadata(self) -> dict[str, Any]:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "planSha256": sha256(self.plan),
             "role": ROLE,
             "platform": PLATFORM,
@@ -101,6 +110,7 @@ class ImageEvidenceTests(unittest.TestCase):
             "sourceCreated": "2026-08-06T12:34:56Z",
             "sourceDirty": False,
             "sourceKind": "ci",
+            "targetCpu": "x86-64-v3",
             "dockerfile": "source/ops/Dockerfile.roles",
             "buildTarget": ROLE,
             "archive": self.archive.name,
@@ -159,6 +169,8 @@ class ImageEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence["planSha256"], sha256(self.plan))
         self.assertEqual(evidence["archiveSha256"], sha256(self.archive))
         self.assertEqual(evidence["localRef"], LOCAL_REF)
+        self.assertEqual(evidence["schemaVersion"], 2)
+        self.assertEqual(evidence["targetCpu"], "x86-64-v3")
 
     def test_rejects_archive_checksum_tampering(self) -> None:
         self.write_fixture(checksum_digest="f" * 64)
@@ -191,6 +203,7 @@ class ImageEvidenceTests(unittest.TestCase):
             "sourceKind": "local",
             "dockerfile": "Dockerfile.untrusted",
             "buildTarget": "untrusted",
+            "targetCpu": None,
         }
         for key, value in mutations.items():
             with self.subTest(key=key):

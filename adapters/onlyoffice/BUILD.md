@@ -17,7 +17,9 @@ the source bundle as the ordinary Docker context, and the tracked Dockerfile:
 ```sh
 docker build --network=none \
   --file adapters/onlyoffice/Dockerfile \
+  --platform linux/amd64 \
   --build-arg FILEBELT_ONLYOFFICE_BUILDER_IMAGE=<reviewed-builder-digest> \
+  --build-arg FILEBELT_AMD64_ISA=x86-64-v3 \
   --build-arg SOURCE_URL=<https-source-repository> \
   --build-arg SOURCE_REF=refs/tags/<version> \
   --build-arg SOURCE_REVISION=<40-lowercase-hex-commit> \
@@ -34,6 +36,10 @@ The Docker build also disables networking for the Cargo step and uses
 vendor closure, source manifest, license texts, or generated notices are
 missing. It does not download or include ONLYOFFICE Docs, `api.js`, a provider
 connector, provider fonts, branding, image, database, assets, or source.
+For AMD64, `FILEBELT_AMD64_ISA` is a closed argument derived from adapter-plan
+schema v3 and must be exactly `x86-64-v3`; it applies to the Rust executable
+and its native Cargo dependencies. ARM64 builds omit this argument. The plan
+also supplies `FILEBELT_TARGET_CPU`, recorded as `io.filebelt.build.target-cpu`.
 
 For direct Rust verification from an unpacked source bundle, copy the staged
 Cargo configuration and vendor tree to the locations used by the Dockerfile,

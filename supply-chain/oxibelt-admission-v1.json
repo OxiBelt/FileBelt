@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "baseline": "x86-64-v3",
+  "source": {
+    "repository": "https://github.com/OxiBelt/OxiBelt",
+    "ref": "refs/tags/0.7.1-beta.2",
+    "revision": "bf40172e40298325775ca9d708162a9d8d14e6d4"
+  },
+  "image": {
+    "name": "ghcr.io/oxibelt/oxibelt",
+    "role": "standalone",
+    "indexDigest": "sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030",
+    "amd64Digest": "sha256:bda2474f0ae5b7413751381009990d0627228aba0658e03549a00b953fddb130"
+  },
+  "verification": {
+    "admittedAt": "2026-08-16",
+    "repository": "OxiBelt/OxiBelt",
+    "predicateType": "https://oxibelt.dev/attestations/rebuild/v1",
+    "oidcIssuer": "https://token.actions.githubusercontent.com",
+    "denySelfHostedRunners": true
+  },
+  "trustedRoot": {
+    "path": "supply-chain/attestations/sigstore/trusted-root-2026-08-16.jsonl",
+    "sha256": "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c"
+  },
+  "bundles": [
+    {
+      "kind": "index",
+      "certificateIdentity": "https://github.com/OxiBelt/OxiBelt/.github/workflows/release.yml@refs/tags/0.7.1-beta.2",
+      "path": "supply-chain/attestations/oxibelt/0.7.1-beta.2/index-rebuild.json",
+      "subjectPath": "supply-chain/attestations/oxibelt/0.7.1-beta.2/index-manifest.json",
+      "sha256": "30b100e98c771f2673fbfba7cfe9ac9ec1de59894ce25a60b145be7fc5650e0a"
+    },
+    {
+      "kind": "platform",
+      "certificateIdentity": "https://github.com/OxiBelt/OxiBelt/.github/workflows/release-image-arch.yml@refs/tags/0.7.1-beta.2",
+      "path": "supply-chain/attestations/oxibelt/0.7.1-beta.2/amd64-rebuild.json",
+      "subjectPath": "supply-chain/attestations/oxibelt/0.7.1-beta.2/amd64-manifest.json",
+      "sha256": "96aa17b53fe66bdef6906f3d1427080fca8beb1124136a55807b4d863976c155"
+    }
+  ]
+}

@@ -33,6 +33,7 @@ METADATA_KEYS = {
     "sourceCreated",
     "sourceDirty",
     "sourceKind",
+    "targetCpu",
     "dockerfile",
     "buildTarget",
     "archive",
@@ -63,8 +64,10 @@ def load_object(path: Path, description: str) -> dict[str, Any]:
 
 
 def plan_row(plan: dict[str, Any], role: str, platform: str) -> dict[str, Any]:
-    if plan.get("schemaVersion") != 1:
-        raise EvidenceError("image plan schemaVersion must be 1")
+    if plan.get("schemaVersion") != 2:
+        raise EvidenceError("image plan schemaVersion must be 2")
+    if plan.get("amd64IsaBaseline") != "x86-64-v3":
+        raise EvidenceError("image plan AMD64 ISA baseline must be x86-64-v3")
     images = plan.get("images")
     if not isinstance(images, list):
         raise EvidenceError("image plan images must be an array")
@@ -90,7 +93,8 @@ def expected_metadata(
 ) -> dict[str, Any]:
     source = plan.get("source")
     build = row.get("build")
-    if not isinstance(source, dict) or not isinstance(build, dict):
+    artifact = row.get("artifact")
+    if not isinstance(source, dict) or not isinstance(build, dict) or not isinstance(artifact, dict):
         raise EvidenceError("image plan source or build identity is missing")
     repository = row.get("repository")
     version = plan.get("version")
@@ -112,12 +116,20 @@ def expected_metadata(
     if not isinstance(source.get("dirty"), bool):
         raise EvidenceError("image plan source dirty must be a boolean")
     architecture = ARCHITECTURES[platform]
+    if artifact.get("kind") not in {"rust-binary", "oxibelt-edge"}:
+        raise EvidenceError("image plan artifact kind is invalid")
+    target_cpus = artifact.get("targetCpu")
+    if not isinstance(target_cpus, dict):
+        raise EvidenceError("image plan artifact target CPU is missing")
+    target_cpu = target_cpus.get(platform)
+    if target_cpu != ("x86-64-v3" if platform == "linux/amd64" else None):
+        raise EvidenceError("image plan artifact target CPU is invalid")
     expected_archive = f"{role}-{architecture}.docker.tar"
     if archive.name != expected_archive:
         raise EvidenceError(f"archive name is {archive.name!r}, expected {expected_archive!r}")
     local_ref = f"{repository}:{tag}-{architecture}"
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "planSha256": plan_digest,
         "role": role,
         "platform": platform,
@@ -130,6 +142,7 @@ def expected_metadata(
         "sourceCreated": source["created"],
         "sourceDirty": source["dirty"],
         "sourceKind": source["kind"],
+        "targetCpu": target_cpu,
         "dockerfile": build["dockerfile"],
         "buildTarget": build["target"],
         "archive": expected_archive,
@@ -226,7 +239,7 @@ def validate_evidence(
         raise EvidenceError("Docker archive config platform does not match build metadata")
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "planSha256": plan_digest,
         "role": role,
         "platform": platform,
@@ -234,6 +247,7 @@ def validate_evidence(
         "tag": expected["tag"],
         "localRef": expected["localRef"],
         "sourceRevision": expected["sourceRevision"],
+        "targetCpu": expected["targetCpu"],
         "archive": archive_path.name,
         "archiveSha256": archive_digest,
         "metadataSha256": file_sha256(metadata_path),

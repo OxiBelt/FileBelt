@@ -40,6 +40,7 @@ BUILD_ARGUMENTS = {
         "RUST_TARGET",
     },
 }
+AMD64_ISA_BASELINE = "x86-64-v3"
 
 
 def fail(message: str) -> None:
@@ -48,12 +49,28 @@ def fail(message: str) -> None:
 
 def read_role(plan_path: pathlib.Path, role: str) -> tuple[dict[str, object], dict[str, object]]:
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    if plan.get("schemaVersion") != 2 or not isinstance(plan.get("roles"), list):
-        fail("adapter plan schemaVersion must be 2")
+    if (
+        plan.get("schemaVersion") != 3
+        or plan.get("amd64IsaBaseline") != AMD64_ISA_BASELINE
+        or not isinstance(plan.get("roles"), list)
+    ):
+        fail("adapter plan schemaVersion must be 3 with amd64IsaBaseline x86-64-v3")
     matches = [row for row in plan["roles"] if isinstance(row, dict) and row.get("role") == role]
     if len(matches) != 1:
         fail("adapter plan must contain exactly one requested role")
     return plan, matches[0]
+
+
+def platform_cpu_build_arguments(plan: dict[str, object], platform: str) -> dict[str, str]:
+    amd64_isa = plan.get("amd64IsaBaseline")
+    if amd64_isa != AMD64_ISA_BASELINE:
+        fail("adapter plan AMD64 ISA baseline is invalid")
+    if platform == "linux/amd64":
+        return {
+            "FILEBELT_AMD64_ISA": amd64_isa,
+            "FILEBELT_TARGET_CPU": amd64_isa,
+        }
+    return {"FILEBELT_TARGET_CPU": "architecture-default"}
 
 
 def validate_tracked_source_revision(
@@ -172,6 +189,7 @@ def build(arguments: argparse.Namespace) -> None:
         "IMAGE_BUILD_STATE": "eligible",
         "CHART_VERSION": version,
     }
+    common.update(platform_cpu_build_arguments(plan, arguments.platform))
     if set(common).intersection(custom):
         fail("custom build arguments must not override plan-derived arguments")
     common.update(custom)
@@ -226,6 +244,11 @@ def build(arguments: argparse.Namespace) -> None:
         if arguments.dry_run:
             print(json.dumps(command))
             return
+        if arguments.platform == "linux/amd64":
+            subprocess.run(
+                [str(pathlib.Path(__file__).with_name("check-amd64-v3-host.sh"))],
+                check=True,
+            )
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(command, check=True)
         subprocess.run(

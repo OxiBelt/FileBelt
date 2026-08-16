@@ -241,7 +241,7 @@ def required_file(
     return entry
 
 
-def assert_static_elf(data: bytes, platform: str) -> None:
+def assert_static_elf(data: bytes, platform: str, target_cpu: str | None = None) -> None:
     if len(data) < 64 or data[:4] != b"\x7fELF":
         raise ValidationError("role executable is not an ELF binary")
     if data[4] != 2 or data[5] != 1:
@@ -261,6 +261,7 @@ def assert_static_elf(data: bytes, platform: str) -> None:
     if phentsize < 56 or phoff + phentsize * phnum > len(data):
         raise ValidationError("ELF program-header table is malformed")
     load_segments = 0
+    has_amd64_v3_note = False
     for index in range(phnum):
         offset = phoff + index * phentsize
         segment_type = struct.unpack_from("<I", data, offset)[0]
@@ -284,8 +285,51 @@ def assert_static_elf(data: bytes, platform: str) -> None:
                     raise ValidationError("role executable declares a dynamic shared-library dependency")
                 if tag == 0:
                     break
+        if segment_type == 4:
+            note_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+            note_size = struct.unpack_from("<Q", data, offset + 32)[0]
+            if note_offset + note_size > len(data):
+                raise ValidationError("ELF note segment is malformed")
+            cursor = note_offset
+            note_end = note_offset + note_size
+            while cursor < note_end:
+                if note_end - cursor < 12:
+                    raise ValidationError("ELF note header is malformed")
+                namesz, descsz, note_type = struct.unpack_from("<III", data, cursor)
+                cursor += 12
+                name_end = cursor + namesz
+                name_padded_end = cursor + ((namesz + 3) & ~3)
+                desc_end = name_padded_end + descsz
+                cursor = name_padded_end + ((descsz + 3) & ~3)
+                if name_end > note_end or desc_end > note_end or cursor > note_end:
+                    raise ValidationError("ELF note is malformed")
+                if note_type != 5 or data[name_end - namesz:name_end] != b"GNU\x00":
+                    continue
+                descriptor = data[name_padded_end:desc_end]
+                property_offset = 0
+                while property_offset < len(descriptor):
+                    if len(descriptor) - property_offset < 8:
+                        raise ValidationError("GNU property note is malformed")
+                    property_type, property_size = struct.unpack_from("<II", descriptor, property_offset)
+                    property_offset += 8
+                    property_end = property_offset + property_size
+                    property_padded_end = property_offset + ((property_size + 7) & ~7)
+                    if property_end > len(descriptor) or property_padded_end > len(descriptor):
+                        raise ValidationError("GNU property note is malformed")
+                    if property_type == 0xC0008002:
+                        if property_size != 4:
+                            raise ValidationError("GNU x86 ISA-needed property is malformed")
+                        # Musl links emit the v3 bit alone; some startup objects also add
+                        # the baseline bit. Both decode to an exact v3 requirement.
+                        isa_needed = struct.unpack_from("<I", descriptor, property_offset)[0]
+                        has_amd64_v3_note = isa_needed in {4, 5}
+                    property_offset = property_padded_end
     if load_segments == 0:
         raise ValidationError("role executable has no loadable segment")
+    if target_cpu == "x86-64-v3" and (platform != "linux/amd64" or not has_amd64_v3_note):
+        raise ValidationError("role executable lacks GNU x86 ISA-needed v3 note")
+    if target_cpu not in {None, "x86-64-v3"}:
+        raise ValidationError("role executable target CPU is invalid")
 
 
 def plan_image(plan: dict[str, Any], role: str) -> dict[str, Any]:
@@ -314,6 +358,8 @@ def adapter_plan_image(plan: dict[str, Any], role: str) -> dict[str, Any]:
 def validate_adapter(
     plan: dict[str, Any], role: str, platform: str, config: dict[str, Any], files: dict[str, FileEntry]
 ) -> dict[str, Any]:
+    if plan.get("schemaVersion") != 3 or plan.get("amd64IsaBaseline") != "x86-64-v3":
+        raise ValidationError("adapter image plan AMD64 ISA contract is invalid")
     image = adapter_plan_image(plan, role)
     if platform not in image.get("platforms", []):
         raise ValidationError(f"{role} does not declare {platform}")
@@ -327,6 +373,8 @@ def validate_adapter(
     bundle = image.get("sourceBundle")
     if not isinstance(labels, dict) or not isinstance(source, dict) or not isinstance(bundle, dict):
         raise ValidationError("adapter image labels or source identity are missing")
+    target_cpu = "x86-64-v3" if platform == "linux/amd64" else None
+    target_cpu_label = target_cpu if target_cpu is not None else "architecture-default"
     expected = {
         "org.opencontainers.image.source": source.get("url"),
         "org.opencontainers.image.version": source.get("ref"),
@@ -334,6 +382,7 @@ def validate_adapter(
         "org.opencontainers.image.created": plan.get("source", {}).get("created"),
         "org.opencontainers.image.licenses": image.get("imageLicense"),
         "io.filebelt.image.role": role,
+        "io.filebelt.build.target-cpu": target_cpu_label,
         "io.filebelt.first-party-license": image.get("firstPartyLicense"),
         "io.filebelt.corresponding-source": bundle.get("publicUrl"),
         "io.filebelt.corresponding-source.sha256": bundle.get("sha256"),
@@ -354,7 +403,7 @@ def validate_adapter(
             raise ValidationError("adapter executable path is malformed")
         entry = required_file(files, executable, mode=0o555)
         if role in {"filebelt-git-adapter", "filebelt-onlyoffice-adapter"}:
-            assert_static_elf(entry.data, platform)
+            assert_static_elf(entry.data, platform, target_cpu)
     if role == "filebelt-git-adapter":
         required_paths = [
             "/usr/share/licenses/filebelt-git-adapter/Apache-2.0.txt",
@@ -412,10 +461,11 @@ def validate_adapter(
     if forbidden:
         raise ValidationError(f"adapter image contains forbidden build or secret material: {forbidden[0]}")
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "role": role,
         "platform": platform,
         "sourceRevision": source.get("revision"),
+        "targetCpu": target_cpu,
         "sourceBundleSha256": bundle.get("sha256"),
         "license": image.get("imageLicense"),
         "runtimeUser": runtime.get("User"),
@@ -427,6 +477,8 @@ def validate_adapter(
 def validate(
     plan: dict[str, Any], role: str, platform: str, config: dict[str, Any], files: dict[str, FileEntry]
 ) -> dict[str, Any]:
+    if plan.get("schemaVersion") != 2 or plan.get("amd64IsaBaseline") != "x86-64-v3":
+        raise ValidationError("core image plan AMD64 ISA contract is invalid")
     image = plan_image(plan, role)
     if platform not in image.get("platforms", []):
         raise ValidationError(f"{role} does not declare {platform}")
@@ -440,6 +492,20 @@ def validate(
     labels = runtime.get("Labels")
     if not isinstance(labels, dict):
         raise ValidationError("image labels are missing")
+    artifact = image.get("artifact")
+    if not isinstance(artifact, dict):
+        raise ValidationError("image artifact is missing")
+    if artifact.get("kind") not in {"rust-binary", "oxibelt-edge"}:
+        raise ValidationError("image artifact kind is invalid")
+    target_cpus = artifact.get("targetCpu")
+    if not isinstance(target_cpus, dict):
+        raise ValidationError("image target CPU contract is missing")
+    target_cpu = target_cpus.get(platform)
+    if target_cpu != ("x86-64-v3" if platform == "linux/amd64" else None):
+        raise ValidationError("image target CPU contract is invalid")
+    target_cpu_label = target_cpu if target_cpu is not None else "architecture-default"
+    if labels.get("io.filebelt.build.target-cpu") != target_cpu_label:
+        raise ValidationError("image target CPU label does not match the plan")
 
     source = plan.get("source")
     if not isinstance(source, dict):
@@ -590,16 +656,17 @@ def validate(
             or b"standard MIT license" not in musl_notice.data
         ):
             raise ValidationError("Rust image has invalid musl copyright evidence")
-        assert_static_elf(entry.data, platform)
+        assert_static_elf(entry.data, platform, target_cpu)
 
     forbidden = [path for path in files if path.startswith("/adapters/")]
     if forbidden:
         raise ValidationError("Apache image contains adapter paths")
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "role": role,
         "platform": platform,
         "sourceRevision": source.get("revision"),
+        "targetCpu": target_cpu,
         "license": image.get("license"),
         "runtimeUser": runtime.get("User"),
         "executable": executable,
@@ -620,7 +687,7 @@ def main() -> int:
     if not isinstance(plan, dict):
         raise ValidationError("image plan must be a JSON object")
     config, files, repo_tag = load_archive(args.archive)
-    if plan.get("schemaVersion") == 2:
+    if "roles" in plan:
         validate_canonical_adapter_plan(args.plan)
         result = validate_adapter(plan, args.role, args.platform, config, files)
     else:

@@ -37,4 +37,9 @@ image digest, SBOM, and exact public source URL, and label the image GPL-3.0-or-
 `io.filebelt.corresponding-source`. Never fetch an unverified upstream archive
 during Docker build.
 
+A future AMD64 build contract must accept only the adapter-plan-derived
+`FILEBELT_AMD64_ISA=x86-64-v3` and apply it to both Samba and the FileBelt VFS
+bridge. This is a recorded prerequisite, not a completed image-build or
+publication qualification.
+
 Run the adapter-only checks with `cargo test --manifest-path adapters/smb/Cargo.toml` and `tests/run-tests.sh`.

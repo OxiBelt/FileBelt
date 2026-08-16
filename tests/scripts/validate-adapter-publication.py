@@ -28,6 +28,7 @@ PRECONDITION_KEYS = {
     "immutableSource": "immutable-source",
     "buildContext": "build-context",
 }
+AMD64_ISA_BASELINE = "x86-64-v3"
 
 
 def fail(message: str) -> None:
@@ -47,12 +48,20 @@ def json_object(path: pathlib.Path, description: str) -> dict[str, object]:
     return value
 
 
+def validate_plan_header(plan: dict[str, object]) -> None:
+    if (
+        plan.get("schemaVersion") != 3
+        or plan.get("amd64IsaBaseline") != AMD64_ISA_BASELINE
+        or not isinstance(plan.get("roles"), list)
+    ):
+        fail("adapter plan schemaVersion must be 3 with amd64IsaBaseline x86-64-v3")
+
+
 def validate(plan_path: pathlib.Path, policy_path: pathlib.Path, evidence_root: pathlib.Path) -> dict[str, object]:
     validate_canonical_adapter_plan(plan_path)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     policy = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-    if plan.get("schemaVersion") != 2 or not isinstance(plan.get("roles"), list):
-        fail("adapter plan schemaVersion must be 2")
+    validate_plan_header(plan)
     artifacts = policy.get("artifacts")
     if not isinstance(artifacts, list):
         fail("compatibility policy artifacts are missing")
@@ -153,7 +162,15 @@ def validate(plan_path: pathlib.Path, policy_path: pathlib.Path, evidence_root: 
             produced.append("image-provenance")
         if nonempty_file(image_validation):
             validation = json_object(image_validation, f"{role} image validation")
-            if validation.get("role") != role or validation.get("sourceBundleSha256") != source_bundle.get("sha256"):
+            platform = validation.get("platform")
+            target_cpu = "x86-64-v3" if platform == "linux/amd64" else None
+            if (
+                validation.get("schemaVersion") != 2
+                or validation.get("role") != role
+                or platform not in row.get("platforms", [])
+                or validation.get("targetCpu") != target_cpu
+                or validation.get("sourceBundleSha256") != source_bundle.get("sha256")
+            ):
                 fail(f"{role} image validation differs from the plan")
             produced.append("image-validation")
         if nonempty_file(vulnerability):

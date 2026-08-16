@@ -9,17 +9,24 @@ import {
   GotoWithNetworkChangeRetry,
 } from "./docker-network-retry.mjs";
 
+const LoginUrl = "/api/v1/auth/login?return_path=%2F";
+
 function WorkspacePage({
   Failure,
   FailureDuringDelay,
+  GotoFailure,
   InitialState,
   LinkFailure,
+  ReplayFailure,
+  ReplayState = InitialState,
   RefreshFailure,
   RefreshState = "ready",
   WaitForFailure,
+  WaitFailures,
 }) {
   const Listeners = new Set();
-  const State = { Delays: [], Refreshes: 0, Value: "identity" };
+  const OutcomeFailures = [...(WaitFailures ?? (WaitForFailure === undefined ? [] : [WaitForFailure]))];
+  const State = { Delays: [], Gotos: [], Links: 0, Refreshes: 0, Value: "identity" };
   const EmitFailedRequest = (ErrorText) => {
     const Request = new Proxy({
       failure: () => ({ errorText: ErrorText }),
@@ -54,7 +61,7 @@ function WorkspacePage({
       return {
         async waitFor(Options) {
           assert.deepEqual(Options, { state: "visible", timeout: 15_000 });
-          if (WaitForFailure !== undefined) throw WaitForFailure;
+          if (OutcomeFailures.length > 0) throw OutcomeFailures.shift();
           assert.equal(await Locator(Kind).isVisible() || await Other.isVisible(), true);
         },
       };
@@ -75,10 +82,17 @@ function WorkspacePage({
       return {
         async click() {
           if (LinkFailure !== undefined) throw LinkFailure;
-          if (Failure !== undefined) EmitFailedRequest(Failure);
-          State.Value = InitialState;
+          State.Links += 1;
+          const RequestFailure = State.Links === 1 ? Failure : ReplayFailure;
+          if (RequestFailure !== undefined) EmitFailedRequest(RequestFailure);
+          State.Value = State.Links === 1 ? InitialState : ReplayState;
         },
       };
+    },
+    async goto(Url) {
+      State.Gotos.push(Url);
+      if (GotoFailure !== undefined) throw GotoFailure;
+      State.Value = "identity";
     },
     off(Event, Listener) {
       assert.equal(Event, "requestfailed");
@@ -114,8 +128,8 @@ test("retries one Chromium network-change navigation after 250 ms", async () => 
     },
   };
 
-  assert.equal(await GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F"), Response);
-  assert.deepEqual(Calls, ["/api/v1/auth/login?return_path=%2F", "/api/v1/auth/login?return_path=%2F"]);
+  assert.equal(await GotoWithNetworkChangeRetry(Page, LoginUrl), Response);
+  assert.deepEqual(Calls, [LoginUrl, LoginUrl]);
   assert.deepEqual(Delays, [250]);
 });
 
@@ -133,8 +147,8 @@ test("propagates a nonmatching navigation error without retrying", async () => {
     },
   };
 
-  await assert.rejects(GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F"), Failure);
-  assert.deepEqual(Calls, ["/api/v1/auth/login?return_path=%2F"]);
+  await assert.rejects(GotoWithNetworkChangeRetry(Page, LoginUrl), Failure);
+  assert.deepEqual(Calls, [LoginUrl]);
   assert.deepEqual(Delays, []);
 });
 
@@ -153,17 +167,17 @@ test("propagates the single retry failure", async () => {
     },
   };
 
-  await assert.rejects(GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F"), Failure);
-  assert.deepEqual(Calls, ["/api/v1/auth/login?return_path=%2F", "/api/v1/auth/login?return_path=%2F"]);
+  await assert.rejects(GotoWithNetworkChangeRetry(Page, LoginUrl), Failure);
+  assert.deepEqual(Calls, [LoginUrl, LoginUrl]);
   assert.deepEqual(Delays, [250]);
 });
 
 test("keeps a successful workspace bootstrap unchanged", async () => {
   const Fixture = WorkspacePage({ InitialState: "ready" });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, LoginReplayed: false, RefreshClicked: false });
   assert.deepEqual(Fixture.State.Delays, []);
   assert.equal(Fixture.State.Value, "ready");
   assert.equal(Fixture.State.Refreshes, 0);
@@ -176,9 +190,9 @@ test("refreshes once when a later task reports the exact failure during the sett
     InitialState: "failure",
   });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, LoginReplayed: false, RefreshClicked: true });
   assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "ready");
   assert.equal(Fixture.State.Refreshes, 1);
@@ -191,9 +205,9 @@ test("uses only the immediate exact request failure metadata after the settle wi
     InitialState: "failure",
   });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, LoginReplayed: false, RefreshClicked: true });
   assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Refreshes, 1);
   assert.equal(Fixture.ListenerCount(), 0);
@@ -205,9 +219,9 @@ test("does not refresh a delayed generic workspace failure", async () => {
     InitialState: "failure",
   });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, LoginReplayed: false, RefreshClicked: false });
   assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "failure");
   assert.equal(Fixture.State.Refreshes, 0);
@@ -217,9 +231,9 @@ test("does not refresh a delayed generic workspace failure", async () => {
 test("does not refresh a workspace failure without a request failure signal", async () => {
   const Fixture = WorkspacePage({ InitialState: "failure" });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, LoginReplayed: false, RefreshClicked: false });
   assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Refreshes, 0);
   assert.equal(Fixture.ListenerCount(), 0);
@@ -232,12 +246,99 @@ test("does not repeat an exhausted workspace refresh", async () => {
     RefreshState: "failure",
   });
 
-  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
 
-  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, LoginReplayed: false, RefreshClicked: true });
   assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "failure");
   assert.equal(Fixture.State.Refreshes, 1);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("replays the synthetic login once after an exact-signal blank timeout", async () => {
+  const Timeout = new Error("workspace outcome timed out");
+  Timeout.name = "TimeoutError";
+  const Fixture = WorkspacePage({
+    Failure: "net::ERR_NETWORK_CHANGED",
+    InitialState: "blank",
+    ReplayState: "ready",
+    WaitFailures: [Timeout],
+  });
+
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
+
+  assert.deepEqual(Disposition, {
+    ExactNetworkChangeObserved: true,
+    LoginReplayed: true,
+    RefreshClicked: false,
+  });
+  assert.deepEqual(Fixture.State.Gotos, [LoginUrl]);
+  assert.equal(Fixture.State.Links, 2);
+  assert.equal(Fixture.State.Refreshes, 0);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("does not refresh after spending the recovery budget on login replay", async () => {
+  const Timeout = new Error("workspace outcome timed out");
+  Timeout.name = "TimeoutError";
+  const Fixture = WorkspacePage({
+    Failure: "net::ERR_NETWORK_CHANGED",
+    InitialState: "blank",
+    ReplayFailure: "net::ERR_NETWORK_CHANGED",
+    ReplayState: "failure",
+    WaitFailures: [Timeout],
+  });
+
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl);
+
+  assert.deepEqual(Disposition, {
+    ExactNetworkChangeObserved: true,
+    LoginReplayed: true,
+    RefreshClicked: false,
+  });
+  assert.deepEqual(Fixture.State.Delays, []);
+  assert.deepEqual(Fixture.State.Gotos, [LoginUrl]);
+  assert.equal(Fixture.State.Refreshes, 0);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("propagates a failed login replay and removes the request listener", async () => {
+  const Timeout = new Error("workspace outcome timed out");
+  Timeout.name = "TimeoutError";
+  const GotoFailure = new Error("login replay navigation failed");
+  const Fixture = WorkspacePage({
+    Failure: "net::ERR_NETWORK_CHANGED",
+    GotoFailure,
+    InitialState: "blank",
+    WaitFailures: [Timeout],
+  });
+
+  await assert.rejects(
+    CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl),
+    GotoFailure,
+  );
+
+  assert.deepEqual(Fixture.State.Gotos, [LoginUrl]);
+  assert.equal(Fixture.State.Links, 1);
+  assert.equal(Fixture.State.Refreshes, 0);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("does not replay a blank workspace after a generic outcome failure", async () => {
+  const OutcomeFailure = new Error("workspace outcome failed");
+  const Fixture = WorkspacePage({
+    Failure: "net::ERR_NETWORK_CHANGED",
+    InitialState: "blank",
+    WaitForFailure: OutcomeFailure,
+  });
+
+  await assert.rejects(
+    CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl),
+    OutcomeFailure,
+  );
+
+  assert.deepEqual(Fixture.State.Gotos, []);
+  assert.equal(Fixture.State.Links, 1);
   assert.equal(Fixture.ListenerCount(), 0);
 });
 
@@ -245,7 +346,7 @@ test("removes the failed-request listener when workspace bootstrap throws", asyn
   const LinkFailure = new Error("identity click failed");
   const Fixture = WorkspacePage({ InitialState: "identity", LinkFailure });
 
-  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), LinkFailure);
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl), LinkFailure);
 
   assert.equal(Fixture.ListenerCount(), 0);
 });
@@ -257,7 +358,7 @@ test("removes the failed-request listener when the workspace outcome wait throws
     WaitForFailure,
   });
 
-  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), WaitForFailure);
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl), WaitForFailure);
 
   assert.equal(Fixture.ListenerCount(), 0);
 });
@@ -270,7 +371,7 @@ test("removes the failed-request listener when the single refresh throws", async
     RefreshFailure,
   });
 
-  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), RefreshFailure);
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator", LoginUrl), RefreshFailure);
 
   assert.equal(Fixture.State.Refreshes, 1);
   assert.equal(Fixture.ListenerCount(), 0);

@@ -69,11 +69,21 @@ navigation once. When the signed-in workspace bootstrap shows `Failed to
 fetch`, it keeps its failed-request listener active for one 250 ms settle
 window before rechecking the workspace. It invokes the existing `Refresh`
 action once only if that alert remains visible and Playwright observed the
-exact failure. Every other failure and any failed retry remain visible. The
+exact failure. If the exact failure instead leaves neither the workspace nor
+its alert visible until the bounded outcome wait expires, the synthetic login
+fixture is replayed once from its login route. Refresh and login replay share a
+single recovery budget; neither path recurses, and every other failure and any
+failed retry remain visible. The
 failure-only workspace-heading assertion receives a scrubbed disposition with
-only the exact-network-change-observed and refresh-clicked booleans; the driver
-does not retain the failed request's URL, headers, body, method, or resource
-type.
+only the exact-network-change-observed, login-replayed, and refresh-clicked
+booleans; the driver does not retain the failed request's URL, headers, body,
+method, or resource type. To exercise a restart without racing past the browser
+close event, the driver holds collaboration stopped until both browser
+principals observe disconnection. It then starts the service, waits for the
+internal operations endpoint and collaboration listener, and reconnects both
+principals before revocation. The final revocation assertion therefore proves
+a connected member transitions to disconnected rather than accepting the
+restart state.
 
 The MCP unit covers two-user registration isolation, discovery, immutable
 review, intent/approval/invocation, replay and argument mismatch, revocation,

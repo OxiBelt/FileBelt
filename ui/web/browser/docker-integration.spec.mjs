@@ -17,6 +17,7 @@ const MemberId = process.env.FILEBELT_COLLABORATION_MEMBER_ID;
 const Project = process.env.FILEBELT_ACCEPTANCE_PROJECT;
 const ComposeFiles = (process.env.FILEBELT_ACCEPTANCE_COMPOSE_FILES ?? "").split(":").filter(Boolean);
 const Profiles = (process.env.FILEBELT_ACCEPTANCE_PROFILES ?? "").split(":").filter(Boolean);
+const LoginUrl = "/api/v1/auth/login?return_path=%2F";
 
 if (Object.keys(NodeIds).length !== 4 || !DriveId || !MemberId || !Project || ComposeFiles.length === 0 || Profiles.length === 0) {
   throw new Error("collaboration acceptance environment is incomplete");
@@ -29,13 +30,56 @@ function Compose(...Arguments) {
   execFileSync("docker", [...Prefix, ...Arguments], { stdio: "ignore" });
 }
 
+function WaitForCollaborationReady() {
+  const Prefix = ["compose", "--project-name", Project];
+  for (const File of ComposeFiles) Prefix.push("--file", File);
+  for (const Profile of Profiles) Prefix.push("--profile", Profile);
+  const Probe = String.raw`
+    (async () => {
+    const Net = require("node:net");
+    const Delay = (Milliseconds) => new Promise((Resolve) => setTimeout(Resolve, Milliseconds));
+    const ListenerReady = () => new Promise((Resolve, Reject) => {
+      const Socket = Net.createConnection({ host: "filebelt-collaboration", port: 8085 });
+      const Timer = setTimeout(() => Socket.destroy(new Error("listener readiness timed out")), 1_000);
+      Socket.once("connect", () => { clearTimeout(Timer); Socket.destroy(); Resolve(); });
+      Socket.once("error", (ErrorValue) => { clearTimeout(Timer); Reject(ErrorValue); });
+    });
+    const Deadline = Date.now() + 60_000;
+    while (Date.now() < Deadline) {
+      try {
+        const Response = await fetch("http://filebelt-collaboration:9090/health/ready", {
+          signal: AbortSignal.timeout(1_000),
+        });
+        if (Response.ok) {
+          await ListenerReady();
+          process.exit(0);
+        }
+      } catch {}
+      await Delay(250);
+    }
+    throw new Error("collaboration readiness timed out");
+    })().catch((ErrorValue) => {
+      console.error(ErrorValue.message);
+      process.exit(1);
+    });
+  `;
+  execFileSync("docker", [...Prefix, "exec", "-T", "filebelt-oidc", "node", "-e", Probe], {
+    stdio: "ignore",
+    timeout: 65_000,
+  });
+}
+
 async function Login(Context, User) {
   const Page = await Context.newPage();
-  await GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F");
-  const WorkspaceDisposition = await CompleteLoginWithNetworkChangeRetry(Page, User === "admin" ? "Administrator" : "Member");
+  await GotoWithNetworkChangeRetry(Page, LoginUrl);
+  const WorkspaceDisposition = await CompleteLoginWithNetworkChangeRetry(
+    Page,
+    User === "admin" ? "Administrator" : "Member",
+    LoginUrl,
+  );
   await expect(
     Page.getByRole("heading", { name: "My Drive" }),
-    `workspace bootstrap failed (exact-network-change-observed=${WorkspaceDisposition.ExactNetworkChangeObserved}, refresh-clicked=${WorkspaceDisposition.RefreshClicked})`,
+    `workspace bootstrap failed (exact-network-change-observed=${WorkspaceDisposition.ExactNetworkChangeObserved}, login-replayed=${WorkspaceDisposition.LoginReplayed}, refresh-clicked=${WorkspaceDisposition.RefreshClicked})`,
   ).toBeVisible();
   return Page;
 }
@@ -226,10 +270,23 @@ test("converges, checkpoints, reconnects, and revokes a two-user room", async ({
   await Admin.getByRole("button", { name: "Save" }).click();
   await expect(Admin.getByRole("button", { name: "Save" })).toBeDisabled();
 
-  Compose("restart", "filebelt-collaboration");
+  Compose("stop", "filebelt-collaboration");
   await expect(Admin.getByText("Live collaboration disconnected.")).toBeVisible({ timeout: 30_000 });
-  await Admin.getByRole("button", { name: "Reconnect" }).click();
-  await expect(Admin.getByText("Live collaboration connected.")).toBeVisible({ timeout: 60_000 });
+  await expect(Member.getByText("Live collaboration disconnected.")).toBeVisible({ timeout: 30_000 });
+  Compose("start", "filebelt-collaboration");
+  WaitForCollaborationReady();
+  await Promise.all([
+    Admin.getByRole("button", { name: "Reconnect" }).click(),
+    Member.getByRole("button", { name: "Reconnect" }).click(),
+  ]);
+  await Promise.all([
+    expect(Admin.getByText("Live collaboration connected.")).toBeVisible({ timeout: 60_000 }),
+    expect(Member.getByText("Live collaboration connected.")).toBeVisible({ timeout: 60_000 }),
+  ]);
+  // The server's reauthorization interval starts when it admits the connection.
+  // Consume browser-observation margin before revocation instead of extending the
+  // contract's 60-second post-revocation deadline.
+  await Member.waitForTimeout(1_000);
 
   const Revoked = await Admin.evaluate(async ({ Drive, Node, Principal, Csrf }) => {
     const Response = await fetch(`/api/v1/drives/${Drive}/nodes/${Node}/shares/${Principal}`, {

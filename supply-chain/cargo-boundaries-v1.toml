@@ -957,7 +957,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-onlyoffice-adapter"
 crate_root = "adapters/onlyoffice/src/lib.rs"
-public_modules = ["config", "routes", "runtime", "tls"]
+public_modules = ["config", "release_metadata", "routes", "runtime", "tls"]
 wildcard_reexports = []
 
 [[public_surfaces]]

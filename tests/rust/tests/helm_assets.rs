@@ -179,7 +179,7 @@ fn onlyoffice_chart_is_an_isolated_agpl_adapter_delivery_contract() {
     );
     assert_eq!(
         schema["definitions"]["adapterImage"]["properties"]["correspondingSource"]["const"],
-        "https://github.com/OxiBelt/FileBelt/tree/0.1.0"
+        "https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-onlyoffice-adapter-source-0.1.0.tar.gz"
     );
     assert_eq!(
         schema["definitions"]["workload"]["properties"]["replicas"]["const"],

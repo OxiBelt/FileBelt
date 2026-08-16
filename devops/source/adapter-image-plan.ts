@@ -133,19 +133,23 @@ export interface CreateAdapterImagePlanInput {
 /* eslint-enable @typescript-eslint/naming-convention */
 
 interface AdapterCatalogRow {
-  readonly role: AdapterImageRole;
-  readonly path: "smb" | "ftp-ftps" | "onlyoffice" | "git" | "nfs" | "transcode";
-  readonly firstPartyLicense: string;
-  readonly imageLicense: string;
-  readonly platforms: readonly ImagePlatform[];
-  readonly riscv64Policy: AdapterImageEvidence["riscv64Policy"];
-  readonly executablePaths: readonly string[];
-  readonly entrypoint: string;
-  readonly components: readonly AdapterComponent[];
-  readonly defaultQualification: AdapterQualification;
-  readonly defaultReasons: readonly string[];
-  readonly requiredBuildArguments: readonly string[] | null;
+  readonly Role: AdapterImageRole;
+  readonly Path: "smb" | "ftp-ftps" | "onlyoffice" | "git" | "nfs" | "transcode";
+  readonly FirstPartyLicense: string;
+  readonly ImageLicense: string;
+  readonly Platforms: readonly ImagePlatform[];
+  readonly Riscv64Policy: AdapterImageEvidence["riscv64Policy"];
+  readonly ExecutablePaths: readonly string[];
+  readonly Entrypoint: string;
+  readonly Components: readonly AdapterComponent[];
+  readonly DefaultQualification: AdapterQualification;
+  readonly DefaultReasons: readonly string[];
+  readonly RequiredBuildArguments: readonly string[] | null;
 }
+
+type MutableAdapterRoleQualificationInput = {
+  -readonly [Property in keyof AdapterRoleQualificationInput]: AdapterRoleQualificationInput[Property];
+};
 
 const Pending: AdapterQualificationState = "pending";
 const Blocked: AdapterQualificationState = "blocked";
@@ -161,118 +165,118 @@ const BlockedPreImage: AdapterPreImageQualification = {
 
 const AdapterCatalog: readonly AdapterCatalogRow[] = [
   {
-    role: "filebelt-smb-gateway",
-    path: "smb",
-    firstPartyLicense: "GPL-3.0-or-later",
-    imageLicense: "GPL-3.0-or-later",
-    platforms: ["linux/amd64", "linux/arm64"],
-    riscv64Policy: "not-supported",
-    executablePaths: ["/usr/sbin/smbd", "/usr/lib/FILEBELT_VFS.so", "/usr/local/bin/filebelt-smb-bridge"],
-    entrypoint: "/usr/sbin/smbd",
-    components: [
+    Role: "filebelt-smb-gateway",
+    Path: "smb",
+    FirstPartyLicense: "GPL-3.0-or-later",
+    ImageLicense: "GPL-3.0-or-later",
+    Platforms: ["linux/amd64", "linux/arm64"],
+    Riscv64Policy: "not-supported",
+    ExecutablePaths: ["/usr/sbin/smbd", "/usr/lib/FILEBELT_VFS.so", "/usr/local/bin/filebelt-smb-bridge"],
+    Entrypoint: "/usr/sbin/smbd",
+    Components: [
       { id: "filebelt-smb-bridge", version: "0.1.0", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/local/bin/filebelt-smb-bridge", sourceRequired: true },
       { id: "filebelt-vfs-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-smb-bridge", sourceRequired: true },
       { id: "samba-4.24.4", version: "4.24.4", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/lib/FILEBELT_VFS.so", sourceRequired: true },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
-    defaultReasons: ["Samba source closure and bridge functional qualification are incomplete"],
-    requiredBuildArguments: null,
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
+    DefaultReasons: ["Samba source closure and bridge functional qualification are incomplete"],
+    RequiredBuildArguments: null,
   },
   {
-    role: "filebelt-ftp-ftps-gateway",
-    path: "ftp-ftps",
-    firstPartyLicense: "GPL-3.0-or-later",
-    imageLicense: "GPL-3.0-or-later",
-    platforms: ["linux/amd64", "linux/arm64"],
-    riscv64Policy: "not-supported",
-    executablePaths: ["/filebelt-ftp-ftps-gateway"],
-    entrypoint: "/filebelt-ftp-ftps-gateway",
-    components: [
+    Role: "filebelt-ftp-ftps-gateway",
+    Path: "ftp-ftps",
+    FirstPartyLicense: "GPL-3.0-or-later",
+    ImageLicense: "GPL-3.0-or-later",
+    Platforms: ["linux/amd64", "linux/arm64"],
+    Riscv64Policy: "not-supported",
+    ExecutablePaths: ["/filebelt-ftp-ftps-gateway"],
+    Entrypoint: "/filebelt-ftp-ftps-gateway",
+    Components: [
       { id: "filebelt-ftp-ftps-gateway", version: "0.1.0", license: "GPL-3.0-or-later", relationship: "linked", path: "/filebelt-ftp-ftps-gateway", sourceRequired: true },
       { id: "filebelt-vfs-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/filebelt-ftp-ftps-gateway", sourceRequired: true },
       { id: "libunftp", version: "0.23.0", license: "Apache-2.0 OR MIT", relationship: "linked", path: "/filebelt-ftp-ftps-gateway", sourceRequired: true },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
-    defaultReasons: ["FTPS certificate and end-to-end functional qualification are incomplete"],
-    requiredBuildArguments: null,
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
+    DefaultReasons: ["FTPS certificate and end-to-end functional qualification are incomplete"],
+    RequiredBuildArguments: null,
   },
   {
-    role: "filebelt-onlyoffice-adapter",
-    path: "onlyoffice",
-    firstPartyLicense: "AGPL-3.0-only",
-    imageLicense: "AGPL-3.0-only",
-    platforms: ["linux/amd64", "linux/arm64"],
-    riscv64Policy: "compile-and-probe-only",
-    executablePaths: ["/filebelt-onlyoffice-adapter"],
-    entrypoint: "/filebelt-onlyoffice-adapter",
-    components: [
+    Role: "filebelt-onlyoffice-adapter",
+    Path: "onlyoffice",
+    FirstPartyLicense: "AGPL-3.0-only",
+    ImageLicense: "AGPL-3.0-only",
+    Platforms: ["linux/amd64", "linux/arm64"],
+    Riscv64Policy: "compile-and-probe-only",
+    ExecutablePaths: ["/filebelt-onlyoffice-adapter"],
+    Entrypoint: "/filebelt-onlyoffice-adapter",
+    Components: [
       { id: "filebelt-onlyoffice-adapter", version: "0.1.0", license: "AGPL-3.0-only", relationship: "linked", path: "/filebelt-onlyoffice-adapter", sourceRequired: true },
       { id: "filebelt-document-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/filebelt-onlyoffice-adapter", sourceRequired: true },
       { id: "filebelt-onlyoffice-launcher", version: "0.1.0", license: "AGPL-3.0-only", relationship: "copied", path: "/filebelt-onlyoffice-adapter", sourceRequired: true },
       { id: "onlyoffice-docs-community-9.4.0", version: "9.4.0", license: "AGPL-3.0-only", relationship: "external", path: "external://operator-supplied/onlyoffice-docs", sourceRequired: false },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Pending, platform: Pending },
-    defaultReasons: ["browser, source-offer, security, and native platform evidence are incomplete"],
-    requiredBuildArguments: ["FILEBELT_ONLYOFFICE_BUILDER_IMAGE", "RUST_TARGET"],
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Pending, platform: Pending },
+    DefaultReasons: ["browser, source-offer, security, and native platform evidence are incomplete"],
+    RequiredBuildArguments: ["FILEBELT_ONLYOFFICE_BUILDER_IMAGE", "RUST_TARGET"],
   },
   {
-    role: "filebelt-git-adapter",
-    path: "git",
-    firstPartyLicense: "Apache-2.0",
-    imageLicense: "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib",
-    platforms: ["linux/amd64", "linux/arm64"],
-    riscv64Policy: "not-supported",
-    executablePaths: ["/usr/local/bin/filebelt-git-adapter", "/opt/filebelt-git/bin/git"],
-    entrypoint: "/usr/local/bin/filebelt-git-adapter",
-    components: [
+    Role: "filebelt-git-adapter",
+    Path: "git",
+    FirstPartyLicense: "Apache-2.0",
+    ImageLicense: "Apache-2.0 AND GPL-2.0-only AND MIT AND Zlib",
+    Platforms: ["linux/amd64", "linux/arm64"],
+    Riscv64Policy: "not-supported",
+    ExecutablePaths: ["/usr/local/bin/filebelt-git-adapter", "/opt/filebelt-git/bin/git"],
+    Entrypoint: "/usr/local/bin/filebelt-git-adapter",
+    Components: [
       { id: "filebelt-git-adapter", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
       { id: "filebelt-revision-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
       { id: "git-2.55.0", version: "2.55.0", license: "GPL-2.0-only", relationship: "separate-executable", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
       { id: "zlib-1.3.1", version: "1.3.1", license: "Zlib", relationship: "linked", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
-    defaultReasons: ["Git restore, fsck, security, and native platform qualification are incomplete"],
-    requiredBuildArguments: ["FILEBELT_GIT_BUILDER_IMAGE", "RUST_TARGET", "ZLIB_TARBALL_SHA256"],
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
+    DefaultReasons: ["Git restore, fsck, security, and native platform qualification are incomplete"],
+    RequiredBuildArguments: ["FILEBELT_GIT_BUILDER_IMAGE", "RUST_TARGET", "ZLIB_TARBALL_SHA256"],
   },
   {
-    role: "filebelt-nfs-gateway",
-    path: "nfs",
-    firstPartyLicense: "LGPL-3.0-or-later",
-    imageLicense: "LGPL-3.0-or-later",
-    platforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
-    riscv64Policy: "publish-native",
-    executablePaths: ["/usr/bin/ganesha.nfsd", "/usr/lib/FILEBELT.so", "/usr/local/bin/filebelt-nfs-bridge"],
-    entrypoint: "/usr/bin/ganesha.nfsd",
-    components: [
+    Role: "filebelt-nfs-gateway",
+    Path: "nfs",
+    FirstPartyLicense: "LGPL-3.0-or-later",
+    ImageLicense: "LGPL-3.0-or-later",
+    Platforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
+    Riscv64Policy: "publish-native",
+    ExecutablePaths: ["/usr/bin/ganesha.nfsd", "/usr/lib/FILEBELT.so", "/usr/local/bin/filebelt-nfs-bridge"],
+    Entrypoint: "/usr/bin/ganesha.nfsd",
+    Components: [
       { id: "filebelt-nfs-bridge", version: "0.1.0", license: "LGPL-3.0-or-later", relationship: "linked", path: "/usr/local/bin/filebelt-nfs-bridge", sourceRequired: true },
       { id: "filebelt-vfs-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-nfs-bridge", sourceRequired: true },
       { id: "filebelt-nfs-fsal", version: "0.1.0", license: "LGPL-3.0-or-later", relationship: "linked", path: "/usr/lib/FILEBELT.so", sourceRequired: true },
       { id: "nfs-ganesha-6.5-8", version: "6.5-8", license: "LGPL-3.0-or-later", relationship: "separate-executable", path: "/usr/bin/ganesha.nfsd", sourceRequired: true },
       { id: "ntirpc", version: "6.3-4", license: "BSD-3-Clause", relationship: "linked", path: "/usr/bin/ganesha.nfsd", sourceRequired: true },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Blocked },
-    defaultReasons: ["NFS ABI, Kerberos, functional, and native platform qualification are incomplete"],
-    requiredBuildArguments: null,
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Blocked },
+    DefaultReasons: ["NFS ABI, Kerberos, functional, and native platform qualification are incomplete"],
+    RequiredBuildArguments: null,
   },
   {
-    role: "filebelt-transcoder",
-    path: "transcode",
-    firstPartyLicense: "GPL-3.0-or-later",
-    imageLicense: "GPL-3.0-or-later",
-    platforms: ["linux/amd64", "linux/arm64"],
-    riscv64Policy: "compile-and-probe-only",
-    executablePaths: ["/usr/local/bin/filebelt-transcoder", "/usr/local/bin/ffmpeg"],
-    entrypoint: "/usr/local/bin/filebelt-transcoder",
-    components: [
+    Role: "filebelt-transcoder",
+    Path: "transcode",
+    FirstPartyLicense: "GPL-3.0-or-later",
+    ImageLicense: "GPL-3.0-or-later",
+    Platforms: ["linux/amd64", "linux/arm64"],
+    Riscv64Policy: "compile-and-probe-only",
+    ExecutablePaths: ["/usr/local/bin/filebelt-transcoder", "/usr/local/bin/ffmpeg"],
+    Entrypoint: "/usr/local/bin/filebelt-transcoder",
+    Components: [
       { id: "filebelt-transcoder", version: "0.1.0", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/local/bin/filebelt-transcoder", sourceRequired: true },
       { id: "libaom", version: "3.14.1", license: "BSD-2-Clause", relationship: "linked", path: "/usr/local/bin/ffmpeg", sourceRequired: true },
       { id: "libvpx", version: "1.16.0", license: "BSD-3-Clause", relationship: "linked", path: "/usr/local/bin/ffmpeg", sourceRequired: true },
       { id: "opus", version: "1.5.2", license: "BSD-3-Clause", relationship: "linked", path: "/usr/local/bin/ffmpeg", sourceRequired: true },
       { id: "ffmpeg-8.1.2", version: "8.1.2", license: "GPL-3.0-or-later", relationship: "separate-executable", path: "/usr/local/bin/ffmpeg", sourceRequired: true },
     ],
-    defaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
-    defaultReasons: ["codec inventory, malicious-input, performance, and native platform qualification are incomplete"],
-    requiredBuildArguments: null,
+    DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
+    DefaultReasons: ["codec inventory, malicious-input, performance, and native platform qualification are incomplete"],
+    RequiredBuildArguments: null,
   },
 ] as const;
 
@@ -283,23 +287,23 @@ export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): Adap
   ValidateSource(Input.Version, Input.Source);
   ValidateEvidenceInput(Input.Evidence);
   const Roles = AdapterCatalog.map((Catalog): AdapterImageEvidence => {
-    const Supplied = Input.Evidence?.[Catalog.role];
+    const Supplied = Input.Evidence?.[Catalog.Role];
     const PlatformArguments = NormalizePlatformBuildArguments(Catalog, Supplied?.platformBuildArguments);
     const PreImage = { ...BlockedPreImage, ...Supplied?.preImage };
-    const AssetName = `${Catalog.role}-source-${Input.Version}.tar.gz`;
+    const AssetName = `${Catalog.Role}-source-${Input.Version}.tar.gz`;
     const SourceBundleSha256 = Supplied?.sourceBundleSha256 ?? null;
     if (SourceBundleSha256 !== null && !Sha256Pattern.test(SourceBundleSha256)) {
-      throw new Error(`${Catalog.role} source-bundle SHA-256 must be 64 lowercase hexadecimal characters`);
+      throw new Error(`${Catalog.Role} source-bundle SHA-256 must be 64 lowercase hexadecimal characters`);
     }
     if (PreImage.sourceBundle === "qualified" && SourceBundleSha256 === null) {
-      throw new Error(`${Catalog.role} cannot qualify a source bundle without its SHA-256`);
+      throw new Error(`${Catalog.Role} cannot qualify a source bundle without its SHA-256`);
     }
     const LicenseQualified = [PreImage.dependencyCompatibility, PreImage.componentPolicy, PreImage.licenseNotices]
       .every((State) => State === "qualified");
     const SourceQualified = [PreImage.sourceBundle, PreImage.buildInputs, PreImage.immutableSource, PreImage.buildContext]
       .every((State) => State === "qualified") && SourceBundleSha256 !== null;
     const Qualification: AdapterQualification = {
-      ...Catalog.defaultQualification,
+      ...Catalog.DefaultQualification,
       ...Supplied?.qualification,
       license: LicenseQualified ? "qualified" : "blocked",
       source: SourceQualified ? "qualified" : "blocked",
@@ -307,37 +311,37 @@ export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): Adap
     const ImageBuildReasons = ImageBuildBlockingReasons(
       PreImage,
       SourceBundleSha256,
-      Catalog.requiredBuildArguments !== null,
+      Catalog.RequiredBuildArguments !== null,
       PlatformArguments,
-      Catalog.platforms,
+      Catalog.Platforms,
     );
     const PublicationReasons = PublicationBlockingReasons(Qualification, SourceBundleSha256);
-    const EvidencePrefix = `${Catalog.role}-${Input.Version}`;
+    const EvidencePrefix = `${Catalog.Role}-${Input.Version}`;
     return {
-      role: Catalog.role,
-      repository: `ghcr.io/oxibelt/${Catalog.role}`,
+      role: Catalog.Role,
+      repository: `ghcr.io/oxibelt/${Catalog.Role}`,
       version: Input.Version,
       source: { url: SourceUrl, ref: Input.Source.ref, revision: Input.Source.revision },
-      firstPartyLicense: Catalog.firstPartyLicense,
-      imageLicense: Catalog.imageLicense,
-      platforms: Catalog.platforms,
-      riscv64Policy: Catalog.riscv64Policy,
+      firstPartyLicense: Catalog.FirstPartyLicense,
+      imageLicense: Catalog.ImageLicense,
+      platforms: Catalog.Platforms,
+      riscv64Policy: Catalog.Riscv64Policy,
       build: {
-        dockerfile: `adapters/${Catalog.path}/Dockerfile`,
+        dockerfile: `adapters/${Catalog.Path}/Dockerfile`,
         context: ".",
-        stagedInputs: `adapter-inputs/${Catalog.path}`,
+        stagedInputs: `adapter-inputs/${Catalog.Path}`,
         platformArguments: PlatformArguments,
       },
-      executablePaths: Catalog.executablePaths,
-      entrypoint: Catalog.entrypoint,
-      components: Catalog.components,
+      executablePaths: Catalog.ExecutablePaths,
+      entrypoint: Catalog.Entrypoint,
+      components: Catalog.Components,
       sourceBundle: {
         assetName: AssetName,
         publicUrl: `https://github.com/OxiBelt/FileBelt/releases/download/${Input.Version}/${AssetName}`,
         sha256: SourceBundleSha256,
       },
-      licenseTexts: [`adapters/${Catalog.path}/LICENSE`],
-      notices: [`adapters/${Catalog.path}/THIRD_PARTY_NOTICES.md`],
+      licenseTexts: [`adapters/${Catalog.Path}/LICENSE`],
+      notices: [`adapters/${Catalog.Path}/THIRD_PARTY_NOTICES.md`],
       evidence: {
         imageValidation: `${EvidencePrefix}-image-validation.json`,
         runtimeSbom: `${EvidencePrefix}-runtime.cdx.json`,
@@ -357,7 +361,7 @@ export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): Adap
         state: PublicationReasons.length === 0 ? "eligible" : "blocked",
         blockingReasons: PublicationReasons.length === 0
           ? []
-          : [...Catalog.defaultReasons, ...(Supplied?.blockingReasons ?? []), ...PublicationReasons],
+          : [...Catalog.DefaultReasons, ...(Supplied?.blockingReasons ?? []), ...PublicationReasons],
       },
     };
   });
@@ -391,7 +395,7 @@ function ValidateEvidenceInput(
       throw new Error(`${Role} sourceBundleSha256 must be lowercase SHA-256`);
     }
     if (Value.blockingReasons !== undefined &&
-        (!Array.isArray(Value.blockingReasons) || !customStrings(Value.blockingReasons))) {
+        (!Array.isArray(Value.blockingReasons) || !CustomStrings(Value.blockingReasons))) {
       throw new Error(`${Role} blockingReasons must be non-empty strings`);
     }
     if (Value.platformBuildArguments !== undefined && !IsRecord(Value.platformBuildArguments)) {
@@ -452,7 +456,7 @@ export function ValidateAdapterImagePlan(Value: unknown): asserts Value is Adapt
       Evidence: {
         [Role]: ExtractEvidence(RoleValue, Role),
       },
-    }).roles.find(({ role }) => role === Role);
+    }).roles.find(({ role: CandidateRole }) => CandidateRole === Role);
     if (JSON.stringify(RoleValue) !== JSON.stringify(Expected)) {
       throw new Error(`${Role} does not match the canonical adapter catalog and derived decisions`);
     }
@@ -489,7 +493,7 @@ function ExtractEvidence(Value: Record<string, unknown>, Role: AdapterImageRole)
   const PreImage = Value.preImage;
   const Qualification = Value.qualification;
   if (!IsRecord(Bundle) || !IsRecord(PreImage) || !IsRecord(Qualification)) throw new Error(`${Role} evidence objects are required`);
-  const Result: AdapterRoleQualificationInput = {
+  const Result: MutableAdapterRoleQualificationInput = {
     preImage: PreImage as unknown as AdapterPreImageQualification,
     platformBuildArguments: IsRecord(Value.build) && IsRecord(Value.build.platformArguments)
       ? Value.build.platformArguments as Readonly<Partial<Record<ImagePlatform, Readonly<Record<string, string>>>>>
@@ -502,22 +506,22 @@ function ExtractEvidence(Value: Record<string, unknown>, Role: AdapterImageRole)
   };
   if (Bundle.sha256 !== null) {
     if (typeof Bundle.sha256 !== "string") throw new Error(`${Role} source-bundle SHA-256 is invalid`);
-    (Result as { sourceBundleSha256?: string }).sourceBundleSha256 = Bundle.sha256;
+    Result.sourceBundleSha256 = Bundle.sha256;
   }
   const Publication = Value.publication;
   if (!IsRecord(Publication) || !Array.isArray(Publication.blockingReasons)) throw new Error(`${Role} publication decision is invalid`);
   const Derived = PublicationBlockingReasons(Result.qualification as AdapterQualification, Result.sourceBundleSha256 ?? null);
   const Default = Derived.length === 0
     ? []
-    : (AdapterCatalog.find(({ role }) => role === Role)?.defaultReasons ?? []);
+    : (AdapterCatalog.find(({ Role: CandidateRole }) => CandidateRole === Role)?.DefaultReasons ?? []);
   const Reported = Publication.blockingReasons;
   const PrefixLength = Default.length;
   const SuffixLength = Derived.length;
   const CustomEnd = Reported.length - SuffixLength;
   if (CustomEnd < PrefixLength) throw new Error(`${Role} publication reasons are incomplete`);
   const Custom = Reported.slice(PrefixLength, CustomEnd);
-  if (!customStrings(Custom)) throw new Error(`${Role} publication reasons must be strings`);
-  (Result as { blockingReasons?: readonly string[] }).blockingReasons = Custom as string[];
+  if (!CustomStrings(Custom)) throw new Error(`${Role} publication reasons must be strings`);
+  Result.blockingReasons = Custom as string[];
   return Result;
 }
 
@@ -554,43 +558,43 @@ function NormalizePlatformBuildArguments(
   Value: AdapterRoleQualificationInput["platformBuildArguments"],
 ): Readonly<Partial<Record<ImagePlatform, Readonly<Record<string, string>>>>> {
   if (Value === undefined) return {};
-  if (!IsRecord(Value)) throw new Error(`${Catalog.role} platformBuildArguments must be an object`);
+  if (!IsRecord(Value)) throw new Error(`${Catalog.Role} platformBuildArguments must be an object`);
   if (Object.keys(Value).length === 0) return {};
-  if (Catalog.requiredBuildArguments === null) {
-    throw new Error(`${Catalog.role} has no qualified bundle-image build contract`);
+  if (Catalog.RequiredBuildArguments === null) {
+    throw new Error(`${Catalog.Role} has no qualified bundle-image build contract`);
   }
   const Result: Partial<Record<ImagePlatform, Readonly<Record<string, string>>>> = {};
   for (const Platform of Object.keys(Value).sort()) {
-    if (!Catalog.platforms.includes(Platform as ImagePlatform)) {
-      throw new Error(`${Catalog.role} has build arguments for undeclared platform ${Platform}`);
+    if (!Catalog.Platforms.includes(Platform as ImagePlatform)) {
+      throw new Error(`${Catalog.Role} has build arguments for undeclared platform ${Platform}`);
     }
     const Arguments = Value[Platform as ImagePlatform];
-    if (!IsRecord(Arguments) || !ExactKeys(Arguments, Catalog.requiredBuildArguments)) {
-      throw new Error(`${Catalog.role} ${Platform} build arguments differ from the reviewed contract`);
+    if (!IsRecord(Arguments) || !ExactKeys(Arguments, Catalog.RequiredBuildArguments)) {
+      throw new Error(`${Catalog.Role} ${Platform} build arguments differ from the reviewed contract`);
     }
     const Normalized = Object.fromEntries(
       Object.entries(Arguments).sort(([Left], [Right]) => Left.localeCompare(Right)),
     );
     for (const [Name, Argument] of Object.entries(Normalized)) {
       if (typeof Argument !== "string" || Argument.length === 0) {
-        throw new Error(`${Catalog.role} ${Platform} ${Name} must be a non-empty string`);
+        throw new Error(`${Catalog.Role} ${Platform} ${Name} must be a non-empty string`);
       }
     }
     const Builder = Object.entries(Normalized).find(([Name]) => Name.endsWith("_BUILDER_IMAGE"))?.[1];
     if (typeof Builder !== "string" || !/^\S+@sha256:[0-9a-f]{64}$/u.test(Builder)) {
-      throw new Error(`${Catalog.role} ${Platform} builder image must be digest-pinned`);
+      throw new Error(`${Catalog.Role} ${Platform} builder image must be digest-pinned`);
     }
     const ExpectedTarget = Platform === "linux/amd64"
       ? "x86_64-unknown-linux-musl"
       : Platform === "linux/arm64" ? "aarch64-unknown-linux-musl" : undefined;
     if (ExpectedTarget === undefined || Normalized.RUST_TARGET !== ExpectedTarget) {
-      throw new Error(`${Catalog.role} ${Platform} RUST_TARGET is not the reviewed native target`);
+      throw new Error(`${Catalog.Role} ${Platform} RUST_TARGET is not the reviewed native target`);
     }
     if (
       "ZLIB_TARBALL_SHA256" in Normalized
       && !Sha256Pattern.test(Normalized.ZLIB_TARBALL_SHA256 ?? "")
     ) {
-      throw new Error(`${Catalog.role} ${Platform} zlib checksum must be lowercase SHA-256`);
+      throw new Error(`${Catalog.Role} ${Platform} zlib checksum must be lowercase SHA-256`);
     }
     Result[Platform as ImagePlatform] = Normalized as Readonly<Record<string, string>>;
   }
@@ -623,6 +627,6 @@ function ExactKeys(Value: Record<string, unknown>, Names: readonly string[]): bo
   return Object.keys(Value).sort().join("\0") === [...Names].sort().join("\0");
 }
 
-function customStrings(Value: readonly unknown[]): Value is readonly string[] {
+function CustomStrings(Value: readonly unknown[]): Value is readonly string[] {
   return Value.every((Item) => typeof Item === "string" && Item.length > 0);
 }

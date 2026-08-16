@@ -85,6 +85,62 @@ class CatalogTest(unittest.TestCase):
 
 
 class LifecycleTest(unittest.TestCase):
+    def test_source_build_cpu_mapping_is_exact_and_fail_closed(self) -> None:
+        self.assertEqual(
+            RUN_UNIT.target_cpu_for_docker_architecture("amd64"), "x86-64-v3"
+        )
+        for architecture in ("arm64", "riscv64"):
+            with self.subTest(architecture=architecture):
+                self.assertEqual(
+                    RUN_UNIT.target_cpu_for_docker_architecture(architecture),
+                    "architecture-default",
+                )
+        for architecture in ("", "x86_64", "aarch64", "ppc64le", "amd64\narm64"):
+            with self.subTest(architecture=architecture), self.assertRaisesRegex(
+                ValueError, "unsupported Docker server architecture"
+            ):
+                RUN_UNIT.target_cpu_for_docker_architecture(architecture)
+
+    def test_source_build_cpu_is_detected_only_for_source_builds(self) -> None:
+        inherited = {"FILEBELT_TARGET_CPU": "caller-controlled"}
+        with mock.patch.object(
+            RUN_UNIT, "docker_server_architecture", return_value="amd64"
+        ) as architecture:
+            RUN_UNIT.configure_source_build_cpu(inherited, source_build=False)
+            architecture.assert_not_called()
+            self.assertEqual(inherited["FILEBELT_TARGET_CPU"], "caller-controlled")
+
+            RUN_UNIT.configure_source_build_cpu(inherited, source_build=True)
+            architecture.assert_called_once_with()
+            self.assertEqual(inherited["FILEBELT_TARGET_CPU"], "x86-64-v3")
+
+    def test_source_build_cpu_uses_docker_server_architecture(self) -> None:
+        with mock.patch.object(
+            RUN_UNIT.subprocess,
+            "run",
+            return_value=mock.Mock(stdout="arm64\n"),
+        ) as run:
+            self.assertEqual(RUN_UNIT.docker_server_architecture(), "arm64")
+        run.assert_called_once_with(
+            ["docker", "version", "--format", "{{.Server.Arch}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_compose_propagates_source_build_cpu_to_native_images(self) -> None:
+        compose = (ROOT / "deploy/compose/compose.yaml").read_text(encoding="utf-8")
+        target_cpu_argument = (
+            "FILEBELT_TARGET_CPU: "
+            "${FILEBELT_TARGET_CPU:-architecture-default}"
+        )
+        self.assertEqual(compose.count(target_cpu_argument), 2)
+        self.assertIn(target_cpu_argument, compose.split("x-filebelt-build:", 1)[0])
+        web_start = compose.index("  filebelt-web:")
+        web_end = compose.index("\n  filebelt-acceptance-relay:", web_start)
+        web = compose[web_start:web_end]
+        self.assertIn(target_cpu_argument, web)
+
     def test_cleanup_names_are_runner_owned_and_bounded(self) -> None:
         project = validate_project("filebelt-core-a1b2c3")
         self.assertEqual(fixture_tag("oidc", project), "filebelt-oidc-fixture:filebelt-core-a1b2c3")

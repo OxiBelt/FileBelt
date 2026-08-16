@@ -40,6 +40,42 @@ OUTSIDE_EDGE_PORT_START = 49152
 OUTSIDE_EDGE_PORT_END = 65535
 OUTSIDE_EDGE_PORT_RANGE = f"{OUTSIDE_EDGE_PORT_START}-{OUTSIDE_EDGE_PORT_END}"
 MAXIMUM_PROXY_ERROR_DETAIL = 240
+SOURCE_BUILD_TARGET_CPUS = {
+    "amd64": "x86-64-v3",
+    "arm64": "architecture-default",
+    "riscv64": "architecture-default",
+}
+
+
+def target_cpu_for_docker_architecture(architecture: str) -> str:
+    """Map an exact supported Docker server architecture to its CPU contract."""
+    try:
+        return SOURCE_BUILD_TARGET_CPUS[architecture]
+    except KeyError as error:
+        observed = architecture or "<empty>"
+        raise ValueError(
+            f"unsupported Docker server architecture for source builds: {observed}"
+        ) from error
+
+
+def docker_server_architecture() -> str:
+    """Return Docker's canonical server-side architecture identifier."""
+    return subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Arch}}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def configure_source_build_cpu(
+    environment: dict[str, str], source_build: bool
+) -> None:
+    """Own the CPU build argument only when Compose will build from source."""
+    if source_build:
+        environment["FILEBELT_TARGET_CPU"] = target_cpu_for_docker_architecture(
+            docker_server_architecture()
+        )
 
 
 def docker_host_root(root: Path) -> Path:
@@ -268,6 +304,12 @@ def main() -> int:
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
+    environment = os.environ.copy()
+    try:
+        configure_source_build_cpu(environment, arguments.build)
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        raise SystemExit(f"source-build target CPU selection failed: {error}") from error
+
     host_root = docker_host_root(ROOT)
     topology = select_topology(arguments.docker_topology, ROOT, host_root)
     outside = topology == "outside"
@@ -284,7 +326,6 @@ def main() -> int:
     unit_temp = Path(tempfile.mkdtemp(prefix=f"filebelt-{unit.name}-"))
     diagnostics = arguments.diagnostics_dir.resolve() if arguments.diagnostics_dir else unit_temp / "diagnostics"
     host_state = host_root / local_state.relative_to(ROOT)
-    environment = os.environ.copy()
     environment.update({
         "FILEBELT_STATE_DIR": str(host_state),
         "FILEBELT_CONFIG_FILE": str(host_root / "deploy/compose/filebelt.toml"),

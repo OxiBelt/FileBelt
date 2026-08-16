@@ -212,6 +212,12 @@ no v2 fallback. FileBelt-built Rust uses
 ELF must carry the GNU `x86-64-v3` ISA-needed property; a toolchain may also
 include its redundant baseline bit.
 ARM64 and RISC-V retain their architecture-default compiler settings.
+The Docker integration runner derives the local `--build` input from the
+Docker server architecture before it creates Compose resources: `amd64` maps
+to `x86-64-v3`, while supported `arm64` and `riscv64` servers map to
+`architecture-default`. Empty or unsupported server architecture values stop
+the source build. Exact-artifact runs do not perform this selection and remain
+no-build validation of their archived image metadata.
 
 Core image-plan schema v2 and adapter image-plan schema v3 carry the exact
 `amd64IsaBaseline`. Build metadata, validation receipts, OCI label

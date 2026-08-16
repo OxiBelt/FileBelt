@@ -9,6 +9,7 @@ x-filebelt-build-args: &filebelt-build-args
   FILEBELT_BUILD_DIRTY: ${FILEBELT_BUILD_DIRTY:-true}
   FILEBELT_BUILD_KIND: ${FILEBELT_BUILD_KIND:-local}
   FILEBELT_CREATED: ${FILEBELT_CREATED:-1970-01-01T00:00:00Z}
+  FILEBELT_TARGET_CPU: ${FILEBELT_TARGET_CPU:-architecture-default}
 
 x-filebelt-build: &filebelt-build
   context: ../..
@@ -396,6 +397,7 @@ services:
         FILEBELT_BUILD_DIRTY: ${FILEBELT_BUILD_DIRTY:-true}
         FILEBELT_BUILD_KIND: ${FILEBELT_BUILD_KIND:-local}
         FILEBELT_CREATED: ${FILEBELT_CREATED:-1970-01-01T00:00:00Z}
+        FILEBELT_TARGET_CPU: ${FILEBELT_TARGET_CPU:-architecture-default}
     image: filebelt-web:phase2
     profiles: *filebelt-profiles
     secrets:

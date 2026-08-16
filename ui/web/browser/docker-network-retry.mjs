@@ -16,9 +16,10 @@ export async function GotoWithNetworkChangeRetry(Page, Url) {
 }
 
 export async function CompleteLoginWithNetworkChangeRetry(Page, IdentityName) {
-  let NetworkChangeObserved = false;
+  let ExactNetworkChangeObserved = false;
+  let RefreshClicked = false;
   const ObserveFailedRequest = (Request) => {
-    if (Request.failure()?.errorText === NetworkChangeError) NetworkChangeObserved = true;
+    if (Request.failure()?.errorText === NetworkChangeError) ExactNetworkChangeObserved = true;
   };
   Page.on("requestfailed", ObserveFailedRequest);
   try {
@@ -29,9 +30,17 @@ export async function CompleteLoginWithNetworkChangeRetry(Page, IdentityName) {
       state: "visible",
       timeout: WorkspaceOutcomeTimeoutMilliseconds,
     });
-    if (await WorkspaceHeading.isVisible()) return;
-    if (!NetworkChangeObserved || !(await WorkspaceFailure.isVisible())) return;
+    if (!(await WorkspaceFailure.isVisible())) {
+      return { ExactNetworkChangeObserved, RefreshClicked };
+    }
+    await Page.waitForTimeout(RetryDelayMilliseconds);
+    if (await WorkspaceHeading.isVisible() || !(await WorkspaceFailure.isVisible())) {
+      return { ExactNetworkChangeObserved, RefreshClicked };
+    }
+    if (!ExactNetworkChangeObserved) return { ExactNetworkChangeObserved, RefreshClicked };
     await WorkspaceFailure.getByRole("button", { name: "Refresh" }).click();
+    RefreshClicked = true;
+    return { ExactNetworkChangeObserved, RefreshClicked };
   } finally {
     Page.off("requestfailed", ObserveFailedRequest);
   }

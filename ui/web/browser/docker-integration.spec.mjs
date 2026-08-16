@@ -32,8 +32,11 @@ function Compose(...Arguments) {
 async function Login(Context, User) {
   const Page = await Context.newPage();
   await GotoWithNetworkChangeRetry(Page, "/api/v1/auth/login?return_path=%2F");
-  await CompleteLoginWithNetworkChangeRetry(Page, User === "admin" ? "Administrator" : "Member");
-  await expect(Page.getByRole("heading", { name: "My Drive" })).toBeVisible();
+  const WorkspaceDisposition = await CompleteLoginWithNetworkChangeRetry(Page, User === "admin" ? "Administrator" : "Member");
+  await expect(
+    Page.getByRole("heading", { name: "My Drive" }),
+    `workspace bootstrap failed (exact-network-change-observed=${WorkspaceDisposition.ExactNetworkChangeObserved}, refresh-clicked=${WorkspaceDisposition.RefreshClicked})`,
+  ).toBeVisible();
   return Page;
 }
 

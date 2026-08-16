@@ -65,11 +65,15 @@ one-use grants, restart/reconnect, revocation within 60 seconds, and dirty-room
 freeze/conflict after an external head change. Docker interface changes during
 the exercised restart can make Chromium report an exact
 `net::ERR_NETWORK_CHANGED`. The acceptance driver retries the initial login
-navigation once and, when Playwright observes that exact failure during the
-signed-in workspace bootstrap, invokes the existing `Refresh` action once.
-Every other failure and any failed retry remain visible. The driver retains
-only whether the exact error occurred; it does not retain the failed request's
-URL, headers, or body.
+navigation once. When the signed-in workspace bootstrap shows `Failed to
+fetch`, it keeps its failed-request listener active for one 250 ms settle
+window before rechecking the workspace. It invokes the existing `Refresh`
+action once only if that alert remains visible and Playwright observed the
+exact failure. Every other failure and any failed retry remain visible. The
+failure-only workspace-heading assertion receives a scrubbed disposition with
+only the exact-network-change-observed and refresh-clicked booleans; the driver
+does not retain the failed request's URL, headers, body, method, or resource
+type.
 
 The MCP unit covers two-user registration isolation, discovery, immutable
 review, intent/approval/invocation, replay and argument mismatch, revocation,

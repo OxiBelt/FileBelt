@@ -2,15 +2,35 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as DelayTask } from "node:timers/promises";
 
 import {
   CompleteLoginWithNetworkChangeRetry,
   GotoWithNetworkChangeRetry,
 } from "./docker-network-retry.mjs";
 
-function WorkspacePage({ Failure, InitialState, RefreshState = "ready" }) {
+function WorkspacePage({
+  Failure,
+  FailureDuringDelay,
+  InitialState,
+  LinkFailure,
+  RefreshFailure,
+  RefreshState = "ready",
+  WaitForFailure,
+}) {
   const Listeners = new Set();
-  const State = { Refreshes: 0, Value: "identity" };
+  const State = { Delays: [], Refreshes: 0, Value: "identity" };
+  const EmitFailedRequest = (ErrorText) => {
+    const Request = new Proxy({
+      failure: () => ({ errorText: ErrorText }),
+    }, {
+      get(Target, Property, Receiver) {
+        if (Property === "failure") return Reflect.get(Target, Property, Receiver);
+        throw new Error(`request ${String(Property)} must not be inspected`);
+      },
+    });
+    for (const Listener of Listeners) Listener(Request);
+  };
   const Locator = (Kind) => ({
     filter() {
       return this;
@@ -22,6 +42,7 @@ function WorkspacePage({ Failure, InitialState, RefreshState = "ready" }) {
       return {
         async click() {
           State.Refreshes += 1;
+          if (RefreshFailure !== undefined) throw RefreshFailure;
           State.Value = RefreshState;
         },
       };
@@ -33,6 +54,7 @@ function WorkspacePage({ Failure, InitialState, RefreshState = "ready" }) {
       return {
         async waitFor(Options) {
           assert.deepEqual(Options, { state: "visible", timeout: 15_000 });
+          if (WaitForFailure !== undefined) throw WaitForFailure;
           assert.equal(await Locator(Kind).isVisible() || await Other.isVisible(), true);
         },
       };
@@ -52,13 +74,8 @@ function WorkspacePage({ Failure, InitialState, RefreshState = "ready" }) {
       assert.deepEqual(Options, { name: "Administrator" });
       return {
         async click() {
-          if (Failure !== undefined) {
-            const Request = {
-              failure: () => ({ errorText: Failure }),
-              url: () => { throw new Error("request URLs must not be inspected"); },
-            };
-            for (const Listener of Listeners) Listener(Request);
-          }
+          if (LinkFailure !== undefined) throw LinkFailure;
+          if (Failure !== undefined) EmitFailedRequest(Failure);
           State.Value = InitialState;
         },
       };
@@ -70,6 +87,13 @@ function WorkspacePage({ Failure, InitialState, RefreshState = "ready" }) {
     on(Event, Listener) {
       assert.equal(Event, "requestfailed");
       Listeners.add(Listener);
+    },
+    async waitForTimeout(Delay) {
+      State.Delays.push(Delay);
+      if (FailureDuringDelay !== undefined) {
+        await DelayTask(0);
+        EmitFailedRequest(FailureDuringDelay);
+      }
     },
   };
   return { ListenerCount: () => Listeners.size, Page, State };
@@ -137,49 +161,117 @@ test("propagates the single retry failure", async () => {
 test("keeps a successful workspace bootstrap unchanged", async () => {
   const Fixture = WorkspacePage({ InitialState: "ready" });
 
-  await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
 
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Fixture.State.Delays, []);
   assert.equal(Fixture.State.Value, "ready");
   assert.equal(Fixture.State.Refreshes, 0);
   assert.equal(Fixture.ListenerCount(), 0);
 });
 
-test("refreshes one workspace bootstrap after the exact network-change failure", async () => {
+test("refreshes once when a later task reports the exact failure during the settle window", async () => {
   const Fixture = WorkspacePage({
-    Failure: "net::ERR_NETWORK_CHANGED",
+    FailureDuringDelay: "net::ERR_NETWORK_CHANGED",
     InitialState: "failure",
   });
 
-  await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
 
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "ready");
   assert.equal(Fixture.State.Refreshes, 1);
   assert.equal(Fixture.ListenerCount(), 0);
 });
 
-test("does not refresh a generic workspace failure", async () => {
+test("uses only the immediate exact request failure metadata after the settle window", async () => {
   const Fixture = WorkspacePage({
-    Failure: "net::ERR_CONNECTION_RESET",
+    Failure: "net::ERR_NETWORK_CHANGED",
     InitialState: "failure",
   });
 
-  await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
 
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Fixture.State.Delays, [250]);
+  assert.equal(Fixture.State.Refreshes, 1);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("does not refresh a delayed generic workspace failure", async () => {
+  const Fixture = WorkspacePage({
+    FailureDuringDelay: "net::ERR_CONNECTION_RESET",
+    InitialState: "failure",
+  });
+
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "failure");
   assert.equal(Fixture.State.Refreshes, 0);
   assert.equal(Fixture.ListenerCount(), 0);
 });
 
-test("does not repeat a failed workspace refresh", async () => {
+test("does not refresh a workspace failure without a request failure signal", async () => {
+  const Fixture = WorkspacePage({ InitialState: "failure" });
+
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: false, RefreshClicked: false });
+  assert.deepEqual(Fixture.State.Delays, [250]);
+  assert.equal(Fixture.State.Refreshes, 0);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("does not repeat an exhausted workspace refresh", async () => {
   const Fixture = WorkspacePage({
     Failure: "net::ERR_NETWORK_CHANGED",
     InitialState: "failure",
     RefreshState: "failure",
   });
 
-  await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
+  const Disposition = await CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator");
 
+  assert.deepEqual(Disposition, { ExactNetworkChangeObserved: true, RefreshClicked: true });
+  assert.deepEqual(Fixture.State.Delays, [250]);
   assert.equal(Fixture.State.Value, "failure");
+  assert.equal(Fixture.State.Refreshes, 1);
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("removes the failed-request listener when workspace bootstrap throws", async () => {
+  const LinkFailure = new Error("identity click failed");
+  const Fixture = WorkspacePage({ InitialState: "identity", LinkFailure });
+
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), LinkFailure);
+
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("removes the failed-request listener when the workspace outcome wait throws", async () => {
+  const WaitForFailure = new Error("workspace outcome wait failed");
+  const Fixture = WorkspacePage({
+    InitialState: "failure",
+    WaitForFailure,
+  });
+
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), WaitForFailure);
+
+  assert.equal(Fixture.ListenerCount(), 0);
+});
+
+test("removes the failed-request listener when the single refresh throws", async () => {
+  const RefreshFailure = new Error("refresh failed");
+  const Fixture = WorkspacePage({
+    Failure: "net::ERR_NETWORK_CHANGED",
+    InitialState: "failure",
+    RefreshFailure,
+  });
+
+  await assert.rejects(CompleteLoginWithNetworkChangeRetry(Fixture.Page, "Administrator"), RefreshFailure);
+
   assert.equal(Fixture.State.Refreshes, 1);
   assert.equal(Fixture.ListenerCount(), 0);
 });

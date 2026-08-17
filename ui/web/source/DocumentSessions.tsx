@@ -13,7 +13,7 @@ import {
 } from "@fluentui/react-components";
 import { FileWarning, MonitorCog, UserRoundCheck } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 
 import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
 
@@ -41,19 +41,24 @@ interface PreparedDocumentLaunch {
   readonly SessionId: string;
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and lifecycle callbacks are receiver-free parent functions.
 export function DocumentLaunchDialog({
   Client,
   Entry,
   OnClose,
   OnCreated,
 }: DocumentLaunchDialogProps): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Mode, SetMode] = useState<DocumentSessionMode>("view");
   const [Busy, SetBusy] = useState(false);
   const [ErrorMessage, SetErrorMessage] = useState<string | null>(null);
   const [PreparedLaunch, SetPreparedLaunch] = useState<PreparedDocumentLaunch | null>(null);
 
-  useEffect(() => SetPreparedLaunch(null), [Entry]);
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  useEffect(() => {
+    SetPreparedLaunch(null);
+  }, [Entry]);
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     SetBusy(true);
     SetErrorMessage(null);
@@ -66,8 +71,7 @@ export function DocumentLaunchDialog({
         return;
       }
       if (
-        Entry === null ||
-        Entry.DriveId === undefined ||
+        Entry?.DriveId === undefined ||
         !IsOfficeDocumentCandidate(Entry) ||
         Entry.HeadVersionId === null
       )
@@ -137,7 +141,16 @@ export function DocumentLaunchDialog({
                 {En.documentMode}
                 <Select
                   disabled={Busy || PreparedLaunch !== null}
-                  onChange={(Event) => SetMode(Event.target.value as DocumentSessionMode)}
+                  onChange={(Event) => {
+                    const Value = Event.target.value;
+                    if (
+                      Value === "comment" ||
+                      Value === "edit" ||
+                      Value === "review" ||
+                      Value === "view"
+                    )
+                      SetMode(Value);
+                  }}
                   value={Mode}
                 >
                   <option value="view">{En.documentModeView}</option>
@@ -215,10 +228,12 @@ interface OwnDocumentSessionsProps {
   OnWorkspaceChanged?(): Promise<void> | void;
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and the optional lifecycle callback is receiver-free.
 export function OwnDocumentSessions({
   Client,
   OnWorkspaceChanged,
 }: OwnDocumentSessionsProps): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Page, SetPage] = useState<components["schemas"]["DocumentSessionPage"] | null>(null);
   const [Detail, SetDetail] = useState<DocumentSessionDetail | null>(null);
   const [Busy, SetBusy] = useState(false);
@@ -230,7 +245,7 @@ export function OwnDocumentSessions({
   }, []);
 
   const Refresh = useCallback(
-    async (Signal?: AbortSignal): Promise<void> => {
+    async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         SetPage(await Client.listOwnSessions({ ...(Signal === undefined ? {} : { Signal }) }));
         SetErrorMessage(null);
@@ -244,7 +259,9 @@ export function OwnDocumentSessions({
   useEffect(() => {
     const Controller = new AbortController();
     void Refresh(Controller.signal);
-    return () => Controller.abort();
+    return () => {
+      Controller.abort();
+    };
   }, [Refresh]);
 
   const Mutate = async (
@@ -328,7 +345,12 @@ export function OwnDocumentSessions({
         </Button>
       )}
       {Detail === null ? null : (
-        <SessionDetail DialogDetail={Detail} OnClose={() => SetDetail(null)} />
+        <SessionDetail
+          DialogDetail={Detail}
+          OnClose={() => {
+            SetDetail(null);
+          }}
+        />
       )}
       <div aria-atomic="true" aria-live="polite" className="fb-sr-only">
         {Announcement}
@@ -337,6 +359,7 @@ export function OwnDocumentSessions({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and card callbacks are receiver-free parent functions.
 function SessionCard({
   Busy,
   Client,
@@ -356,6 +379,7 @@ function SessionCard({
   ): Promise<void>;
   Session: components["schemas"]["DocumentSessionSummary"];
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const LoadDetail = async (): Promise<void> => {
     try {
       OnDetail(await Client.getOwnSession(Session.id));
@@ -386,7 +410,7 @@ function SessionCard({
           disabled={Busy}
           onClick={() =>
             void OnMutate(
-              () =>
+              async () =>
                 Client.createConflictCopy(
                   Session.id,
                   En.documentConflictCopyName(En.documentDefaultName),
@@ -403,7 +427,10 @@ function SessionCard({
           appearance="secondary"
           disabled={Busy || Session.state !== "active"}
           onClick={() =>
-            void OnMutate(() => Client.revokeOwnSession(Session.id), En.documentSessionRevoked)
+            void OnMutate(
+              async () => Client.revokeOwnSession(Session.id),
+              En.documentSessionRevoked,
+            )
           }
         >
           {En.revoke}
@@ -413,6 +440,7 @@ function SessionCard({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns the generated detail prop and the close callback is receiver-free.
 function SessionDetail({
   DialogDetail,
   OnClose,
@@ -420,6 +448,7 @@ function SessionDetail({
   DialogDetail: DocumentSessionDetail;
   OnClose(): void;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const TitleId = useId();
   return (
     <Dialog
@@ -458,6 +487,7 @@ function SessionDetail({
 }
 
 /** Shown only when a future capability projection confirms file-session authority; server authorization remains decisive. */
+// oxlint-disable typescript/prefer-readonly-parameter-types -- React owns this nested props object and the component only observes it.
 export function FileDocumentSessionManagement({
   CanManage,
   Client,
@@ -469,6 +499,7 @@ export function FileDocumentSessionManagement({
   DriveId: string;
   NodeId: string;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types
   const [Page, SetPage] = useState<components["schemas"]["DocumentSessionPage"] | null>(null);
   const [ErrorMessage, SetErrorMessage] = useState<string | null>(null);
   if (!CanManage) return null;

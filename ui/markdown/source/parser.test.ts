@@ -31,9 +31,10 @@ describe("filebelt-gfm-v1 normalization", () => {
   });
 
   it("fails closed before recursively normalizing an excessive AST", () => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- mdast fixtures retain external node keys.
+    // oxlint-disable-next-line filebelt/pascal-case -- mdast fixtures retain external node keys.
     let Root: { children?: unknown[]; type: string } = { type: "paragraph" };
     for (let Index = 0; Index < 66; Index += 1) Root = { children: [Root], type: "blockquote" };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This deliberate malformed mdast test fixture exercises the depth fail-closed boundary.
     const Result = NormalizeMdast(Root as never, {
       HasByteOrderMark: false,
       LineEnding: "none",

@@ -35,10 +35,10 @@ export function TakePublicShareFragment(): string {
 export function PublicShareApp({
   Client,
   FragmentToken,
-}: {
-  Client: PublicShareClient;
+}: Readonly<{
+  Client: Readonly<PublicShareClient>;
   FragmentToken: string;
-}): ReactNode {
+}>): ReactNode {
   const [Grant, SetGrant] = useState<PublicShareGrant | null>(null);
   const [Error, SetError] = useState<string | null>(null);
   const [Busy, SetBusy] = useState(true);
@@ -54,8 +54,12 @@ export function PublicShareApp({
     }
     void Client.exchangePublicShare(FragmentToken)
       .then(SetGrant)
-      .catch(() => SetError(En.publicExpired))
-      .finally(() => SetBusy(false));
+      .catch(() => {
+        SetError(En.publicExpired);
+      })
+      .finally(() => {
+        SetBusy(false);
+      });
   }, [Client, FragmentToken]);
 
   const Download = async (): Promise<void> => {

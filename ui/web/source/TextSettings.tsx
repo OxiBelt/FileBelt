@@ -11,11 +11,14 @@ import type {
 } from "./client.js";
 
 const MiB = 1024 * 1024;
-const EditOptions = [1, 2, 4, 8, 16].map((Value) => Value * MiB) as readonly EditTextLimitBytes[];
-const InlineOptions = [8, 16, 32, 64, 100].map(
-  (Value) => Value * MiB,
-) as readonly InlineTextLimitBytes[];
+const EditOptions: readonly EditTextLimitBytes[] = [
+  1_048_576, 2_097_152, 4_194_304, 8_388_608, 16_777_216,
+];
+const InlineOptions: readonly InlineTextLimitBytes[] = [
+  8_388_608, 16_777_216, 33_554_432, 67_108_864, 104_857_600,
+];
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the client prop and this component only invokes its receiver-free methods.
 export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode {
   const [Etag, SetEtag] = useState<string | null>(null);
   const [Value, SetValue] = useState<TextPreferences | null>(null);
@@ -77,20 +80,23 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
             Editable source limit
             <Select
               id="text-edit-limit"
-              onChange={(Event) =>
+              onChange={(Event) => {
+                const EditLimitBytes = Number(Event.currentTarget.value);
+                if (!IsEditLimit(EditLimitBytes)) return;
                 SetValue((Current) =>
                   Current === null
                     ? Current
                     : {
                         ...Current,
-                        EditLimitBytes: Number(Event.currentTarget.value) as EditTextLimitBytes,
-                        InlineLimitBytes: Math.max(
-                          Current.InlineLimitBytes,
-                          Number(Event.currentTarget.value),
-                        ) as InlineTextLimitBytes,
+                        EditLimitBytes,
+                        InlineLimitBytes:
+                          InlineOptions.find(
+                            (Candidate) =>
+                              Candidate >= Current.InlineLimitBytes && Candidate >= EditLimitBytes,
+                          ) ?? 104_857_600,
                       },
-                )
-              }
+                );
+              }}
               value={String(Value.EditLimitBytes)}
             >
               {EditOptions.map((Bytes) => (
@@ -104,16 +110,18 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
             Inline source limit
             <Select
               id="text-inline-limit"
-              onChange={(Event) =>
+              onChange={(Event) => {
+                const InlineLimitBytes = Number(Event.currentTarget.value);
+                if (!IsInlineLimit(InlineLimitBytes)) return;
                 SetValue((Current) =>
                   Current === null
                     ? Current
                     : {
                         ...Current,
-                        InlineLimitBytes: Number(Event.currentTarget.value) as InlineTextLimitBytes,
+                        InlineLimitBytes,
                       },
-                )
-              }
+                );
+              }}
               value={String(Value.InlineLimitBytes)}
             >
               {InlineOptions.filter((Bytes) => Bytes >= Value.EditLimitBytes).map((Bytes) => (
@@ -130,4 +138,12 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
       )}
     </section>
   );
+}
+
+function IsEditLimit(Value: number): Value is EditTextLimitBytes {
+  return EditOptions.some((Candidate) => Candidate === Value);
+}
+
+function IsInlineLimit(Value: number): Value is InlineTextLimitBytes {
+  return InlineOptions.some((Candidate) => Candidate === Value);
 }

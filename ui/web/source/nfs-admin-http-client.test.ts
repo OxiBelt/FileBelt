@@ -124,6 +124,7 @@ class ContractServer {
   ReauthenticationRequired = false;
   OverviewResponse: components["schemas"]["NfsAdminOverview"] = Overview;
 
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/require-await -- Fetch's platform spelling and Promise contract are required by the injected transport fake.
   readonly fetch: typeof fetch = async (Input, Init) => {
     const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
     this.Requests.push(RequestValue);
@@ -352,8 +353,9 @@ describe("HttpNfsAdminClient", () => {
       ),
     ).toBe(true);
     const JsonBodies = await Promise.all(
-      Mutations.filter((RequestValue) => RequestValue.method !== "DELETE").map((RequestValue) =>
-        RequestValue.clone().json(),
+      Mutations.filter((RequestValue) => RequestValue.method !== "DELETE").map(
+        // oxlint-disable-next-line typescript/no-unsafe-return -- Response.json is typed as any at this hostile-payload test boundary.
+        async (RequestValue) => RequestValue.clone().json(),
       ),
     );
     expect(
@@ -375,7 +377,7 @@ describe("HttpNfsAdminClient", () => {
 });
 
 function ExternalValue(Value: unknown, Key: string): unknown {
-  return typeof Value === "object" && Value !== null
-    ? (Value as Record<string, unknown>)[Key]
-    : undefined;
+  if (typeof Value !== "object" || Value === null) return undefined;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This helper deliberately inspects an untrusted JSON object in a transport-boundary test.
+  return (Value as Record<string, unknown>)[Key];
 }

@@ -2,7 +2,6 @@
 
 import { expect, test } from "@playwright/test";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 
 const Sandbox = "allow-scripts allow-same-origin allow-forms allow-downloads allow-popups";
 let PublicOrigin = "";
@@ -120,7 +119,7 @@ test("provider JavaScript cannot read a FileBelt session or send a credentialed 
 
   await Page.goto(`${EditorOrigin}/onlyoffice/launch`);
   await expect
-    .poll(() => Page.evaluate(() => globalThis.ProviderEvidence?.Complete ?? false))
+    .poll(async () => Page.evaluate(() => globalThis.ProviderEvidence?.Complete ?? false))
     .toBe(true);
   const Evidence = await Page.evaluate(() => globalThis.ProviderEvidence);
   expect(Evidence).toEqual({
@@ -135,19 +134,28 @@ test("provider JavaScript cannot read a FileBelt session or send a credentialed 
   expect(Mutations).toBe(0);
 });
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Node's HTTP server is a mutable lifecycle object owned by this Playwright fixture.
 async function Listen(Server: typeof PublicServer, Host: string): Promise<string> {
   await new Promise<void>((Resolve, Reject) => {
     Server.once("error", Reject);
-    Server.listen(0, Host, () => Resolve());
+    Server.listen(0, Host, () => {
+      Resolve();
+    });
   });
-  const Address = Server.address() as AddressInfo;
+  const Address = Server.address();
+  if (Address === null || typeof Address === "string")
+    throw new Error("The browser fixture did not bind a TCP address.");
   return `http://${Host}:${Address.port}`;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Node's HTTP server is a mutable lifecycle object owned by this Playwright fixture.
 async function Close(Server: typeof PublicServer): Promise<void> {
   if (!Server.listening) return;
   await new Promise<void>((Resolve, Reject) => {
-    Server.close((Error) => (Error === undefined ? Resolve() : Reject(Error)));
+    Server.close((Error) => {
+      if (Error === undefined) Resolve();
+      else Reject(Error);
+    });
   });
 }
 

@@ -2,6 +2,12 @@
 
 import { expect, test } from "@playwright/test";
 
+declare global {
+  interface Window {
+    FileBeltClosedSockets?: number;
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 const DriveId = "00000000-0000-4000-8000-000000000001";
@@ -106,13 +112,13 @@ test("reconnects after an initial collaboration failure and closes a live sessio
     let Connections = 0;
     (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets = 0;
     class MockWebSocket extends EventTarget {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket platform property used by the collaboration client.
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket platform property used by the collaboration client.
       binaryType = "arraybuffer";
       readonly CONNECTING = 0;
       readonly OPEN = 1;
       readonly CLOSING = 2;
       readonly CLOSED = 3;
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket platform property used by the collaboration client.
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket platform property used by the collaboration client.
       readyState = 0;
 
       constructor(IgnoredUrl: string) {
@@ -242,7 +248,7 @@ test("reconnects after an initial collaboration failure and closes a live sessio
   await Page.getByRole("button", { name: "Discard changes" }).click();
   await expect(Page.getByRole("heading", { name: "My Drive" })).toBeVisible();
   await expect
-    .poll(() =>
+    .poll(async () =>
       Page.evaluate(
         () => (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets ?? 0,
       ),
@@ -257,13 +263,13 @@ test("retains the latest head when reconnect falls back after a frozen room", as
   let GrantRequests = 0;
   await Page.addInitScript(() => {
     class MockWebSocket extends EventTarget {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket platform property used by the collaboration client.
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket platform property used by the collaboration client.
       binaryType = "arraybuffer";
       readonly CONNECTING = 0;
       readonly OPEN = 1;
       readonly CLOSING = 2;
       readonly CLOSED = 3;
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket platform property used by the collaboration client.
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket platform property used by the collaboration client.
       readyState = 0;
 
       constructor(IgnoredUrl: string) {
@@ -358,10 +364,11 @@ test("retains the latest head when reconnect falls back after a frozen room", as
     if (Path === "/api/v1/shared") return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path === "/api/v1/sessions") return Route.fulfill({ json: [] });
     if (Path.endsWith("/download-grants")) {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Playwright exposes decoded hostile request JSON as any at this route boundary.
       const GrantInput = Request.postDataJSON() as Record<string, unknown>;
       const RequestedVersion =
-        typeof GrantInput["version_id"] === "string"
-          ? GrantInput["version_id"]
+        typeof GrantInput.version_id === "string"
+          ? GrantInput.version_id
           : LatestHead
             ? NewVersionId
             : VersionId;

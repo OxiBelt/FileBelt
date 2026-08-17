@@ -10,18 +10,22 @@ export interface GeneratedMarkupSanitizer {
 }
 
 export interface DomPurifyLike {
-  sanitize(DirtyMarkup: string, Options: Record<string, unknown>): string;
+  sanitize(DirtyMarkup: string, Options: Readonly<Record<string, unknown>>): string;
 }
 
-export function CreateGeneratedMarkupSanitizer(Purify: DomPurifyLike): GeneratedMarkupSanitizer {
+export function CreateGeneratedMarkupSanitizer(
+  Purify: Readonly<DomPurifyLike>,
+): GeneratedMarkupSanitizer {
   return {
     SanitizeHtml(GeneratedMarkup: string): SanitizedGeneratedMarkup {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This branded value is created only after the fixed HTML sanitizer profile completes.
       return Purify.sanitize(GeneratedMarkup, {
         FORBID_TAGS: ["audio", "form", "iframe", "img", "object", "script", "style", "video"],
         USE_PROFILES: { html: true },
       }) as SanitizedGeneratedMarkup;
     },
     SanitizeSvg(GeneratedMarkup: string): SanitizedGeneratedMarkup {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This branded value is created only after the fixed SVG sanitizer profile completes.
       return Purify.sanitize(GeneratedMarkup, {
         FORBID_ATTR: ["href", "xlink:href"],
         FORBID_TAGS: ["a", "foreignObject", "script"],

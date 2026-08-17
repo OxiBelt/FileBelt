@@ -10,7 +10,7 @@ import {
   Users as UsersIcon,
 } from "lucide-react";
 import { useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { AdminEn as strings } from "./strings.js";
 import { NfsAdminSurface } from "./nfs.js";
@@ -33,6 +33,7 @@ export type {
   NfsExportView,
   NfsFeatureState,
   NfsFeatureView,
+  // oxlint-disable-next-line typescript/no-deprecated -- Retained as the public proposal-shape compatibility export.
   NfsMappingUpsert,
   NfsMappingView,
   NfsPosixGroupRegistration,
@@ -82,17 +83,20 @@ function FormatBytes(Value: number): string {
   }).format(Value);
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function Bidi({
   children: Children,
 }: {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
+  // oxlint-disable-next-line filebelt/pascal-case -- React reserves `children` for nested JSX content.
   children: string;
 }): ReactNode {
   return <bdi dir="auto">{Children}</bdi>;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function CreationForm({
   Label,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   onCreate: OnCreate,
 }: {
   Label: string;
@@ -101,7 +105,8 @@ function CreationForm({
   const [Name, SetName] = useState("");
   const [Busy, SetBusy] = useState(false);
 
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React submit events must remain mutable for preventDefault.
+  const Submit = async (Event: HtmlFormSubmitEvent): Promise<void> => {
     Event.preventDefault();
     const Trimmed = Name.trim();
     if (Trimmed.length === 0) return;
@@ -119,7 +124,9 @@ function CreationForm({
       <Input
         aria-label={Label}
         disabled={Busy}
-        onChange={(Ignored, Data) => SetName(Data.value)}
+        onChange={(Ignored, Data) => {
+          SetName(Data.value);
+        }}
         placeholder={Label}
         value={Name}
       />
@@ -135,11 +142,15 @@ function CreationForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export default function AdminPanel({
   Drives,
   Groups,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   onCreateGroup: OnCreateGroup,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   onCreateSharedDrive: OnCreateSharedDrive,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   onToggleUserSuspension: OnToggleUserSuspension,
   NfsClient,
   Users,
@@ -170,7 +181,9 @@ export default function AdminPanel({
 
       <TabList
         aria-label={strings.heading}
-        onTabSelect={(Ignored, Data) => SetTab(Data.value as AdminTab)}
+        onTabSelect={(Ignored, Data) => {
+          if (IsAdminTab(Data.value)) SetTab(Data.value);
+        }}
         selectedValue={Tab}
       >
         <FluentTab
@@ -285,4 +298,10 @@ export default function AdminPanel({
       {Tab === "nfs" && NfsClient !== undefined ? <NfsAdminSurface Client={NfsClient} /> : null}
     </section>
   );
+}
+
+type HtmlFormSubmitEvent = Parameters<NonNullable<ComponentProps<"form">["onSubmit"]>>[0];
+
+function IsAdminTab(Value: unknown): Value is AdminTab {
+  return Value === "drives" || Value === "groups" || Value === "nfs" || Value === "users";
 }

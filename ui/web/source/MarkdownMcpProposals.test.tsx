@@ -7,6 +7,7 @@ import { MarkdownMcpProposals } from "./MarkdownMcpProposals.js";
 describe("Markdown MCP proposals", () => {
   it("renders proposal-only controls without a save action", () => {
     const Client = {
+      // oxlint-disable typescript/require-await -- This object is a synchronous fake for an asynchronous MCP client contract.
       approveAndInvoke: async () => undefined,
       createInvocationIntent: async () => {
         throw new Error("not reached");
@@ -19,10 +20,12 @@ describe("Markdown MCP proposals", () => {
         ServiceIdentities: [],
         Templates: [],
       }),
+      // oxlint-enable typescript/require-await
     };
     const Markup = renderToStaticMarkup(
       <MarkdownMcpProposals
         BaseVersionId="00000000-0000-4000-8000-000000000002"
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This deliberately partial fake exercises only the server-rendered proposal shell.
         Client={Client as never}
         NodeId="00000000-0000-4000-8000-000000000001"
         OnApply={() => true}

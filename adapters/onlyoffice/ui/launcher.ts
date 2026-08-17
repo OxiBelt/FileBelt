@@ -3,8 +3,10 @@
 export type LauncherState = "idle" | "loading-api" | "launching" | "ready" | "error";
 
 export interface LaunchResponse {
+  /* oxlint-disable filebelt/pascal-case -- ONLYOFFICE launch responses retain provider field names. */
   apiJsUrl: string;
   editorConfig: Record<string, unknown>;
+  /* oxlint-enable filebelt/pascal-case */
 }
 
 export interface LauncherView {
@@ -51,15 +53,19 @@ export class OnlyOfficeLauncher {
     }
   }
 
-  private loadProviderApi(ApiJsUrl: string): Promise<void> {
+  private async loadProviderApi(ApiJsUrl: string): Promise<void> {
     if (this.#ProviderApi !== undefined) return this.#ProviderApi;
     this.#ProviderApi = new Promise((Resolve, Reject) => {
       const Script = document.createElement("script");
       Script.src = ApiJsUrl;
       Script.async = true;
       Script.referrerPolicy = "no-referrer";
-      Script.onload = () => Resolve();
-      Script.onerror = () => Reject(new Error("provider API failed to load"));
+      Script.onload = () => {
+        Resolve();
+      };
+      Script.onerror = () => {
+        Reject(new Error("provider API failed to load"));
+      };
       document.head.append(Script);
     });
     return this.#ProviderApi;
@@ -69,7 +75,7 @@ export class OnlyOfficeLauncher {
 declare global {
   interface Window {
     DocsAPI?: {
-      DocEditor(ElementId: string, Config: Record<string, unknown>): unknown;
+      DocEditor(ElementId: string, Config: Readonly<Record<string, unknown>>): unknown;
     };
   }
 }

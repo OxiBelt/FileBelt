@@ -113,17 +113,17 @@ export interface FileBeltClient {
     ClientId: string,
   ): Promise<MarkdownCollaborationGrant | null>;
   createGroup(Name: string): Promise<void>;
-  createShare(Input: CreateShareInput): Promise<void>;
+  createShare(Input: Readonly<CreateShareInput>): Promise<void>;
   createSharedDrive(Name: string): Promise<void>;
   download(EntryId: string): Promise<Blob>;
-  importMarkdown(Input: MarkdownImportInput): Promise<string>;
+  importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string>;
   readMarkdown(EntryId: string, VersionId: string): Promise<Blob>;
   readMarkdownHead(EntryId: string): Promise<MarkdownHead>;
-  saveMarkdown(Input: MarkdownSaveInput): Promise<string>;
+  saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string>;
   saveMarkdownCopy(
-    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+    Input: Readonly<Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">>,
   ): Promise<string>;
-  getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot>;
+  getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot>;
   markPrivacyRead(): Promise<void>;
   restoreEntries(EntryIds: readonly string[]): Promise<void>;
   restoreVersion(VersionId: string): Promise<void>;
@@ -131,7 +131,7 @@ export interface FileBeltClient {
   revokeShare(ShareId: string): Promise<void>;
   suspendUser(UserId: string): Promise<void>;
   trashEntries(EntryIds: readonly string[]): Promise<void>;
-  upload(Files: readonly UploadCandidate[]): Promise<void>;
+  upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void>;
   compareTextVersions(
     EntryId: string,
     BaseVersionId: string,
@@ -141,7 +141,7 @@ export interface FileBeltClient {
   listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage>;
   setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void>;
   updateTextPreferences(
-    Patch: TextPreferences,
+    Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }>;
 }
@@ -363,7 +363,8 @@ const InitialSnapshot: WorkspaceSnapshot = {
   },
 };
 
-function CloneSnapshot(Snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- structuredClone observes the mutable model graph without mutating its input.
+function CloneSnapshot(Snapshot: Readonly<WorkspaceSnapshot>): WorkspaceSnapshot {
   return structuredClone(Snapshot);
 }
 
@@ -373,12 +374,13 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   #TextPreferences: TextPreferences = { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 };
   #TextPreferencesEtag = '"text-preferences-1"';
 
+  // oxlint-disable typescript/require-await -- This in-memory adapter preserves the asynchronous production client contract without I/O.
   async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
     return { Etag: this.#TextPreferencesEtag, Value: { ...this.#TextPreferences } };
   }
 
   async updateTextPreferences(
-    Patch: TextPreferences,
+    Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }> {
     if (ExpectedEtag !== this.#TextPreferencesEtag)
@@ -436,14 +438,14 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType);
   }
 
-  async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
+  async getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot> {
     if (Signal?.aborted === true) {
       throw new DOMException("Request was aborted", "AbortError");
     }
     return CloneSnapshot(this.#Snapshot);
   }
 
-  async upload(Files: readonly UploadCandidate[]): Promise<void> {
+  async upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void> {
     for (const File of Files) {
       const Id = Uuid(String(++this.#Sequence));
       this.#Snapshot.Entries.unshift({
@@ -473,7 +475,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async download(EntryId: string): Promise<Blob> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
-    if (Entry === undefined || Entry.Kind !== "file") throw new Error("The file is unavailable.");
+    if (Entry?.Kind !== "file") throw new Error("The file is unavailable.");
     return new Blob([`FileBelt mock download for ${Entry.Name}\n`], { type: "text/plain" });
   }
 
@@ -484,7 +486,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return new Blob([`# ${Entry.Name}\n\nFileBelt Markdown content.\n`], { type: "text/markdown" });
   }
 
-  async importMarkdown(Input: MarkdownImportInput): Promise<string> {
+  async importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
     if (Original?.HeadVersionId !== Input.SourceVersionId)
       throw new Error("The Office source version is unavailable.");
@@ -521,7 +523,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     };
   }
 
-  async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
+  async saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
     if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId)
       throw new VersionConflictError();
@@ -534,7 +536,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async saveMarkdownCopy(
-    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+    Input: Readonly<Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">>,
   ): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
     if (Original === undefined) throw new Error("The source Markdown file is unavailable.");
@@ -577,7 +579,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#updateEntries(EntryIds, (Entry) => ({ ...Entry, Trashed: false }));
   }
 
-  async createShare(Input: CreateShareInput): Promise<void> {
+  async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.FileId);
     if (Entry === undefined) {
       throw new Error("The selected resource is unavailable.");
@@ -656,12 +658,16 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#Snapshot.Admin.Drives.push(Drive);
   }
 
-  #updateEntries(EntryIds: readonly string[], Update: (Entry: FileEntry) => FileEntry): void {
+  #updateEntries(
+    EntryIds: readonly string[],
+    Update: (Entry: Readonly<FileEntry>) => FileEntry,
+  ): void {
     const Wanted = new Set(EntryIds);
     this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) =>
       Wanted.has(Entry.Id) ? Update(Entry) : Entry,
     );
   }
+  // oxlint-enable typescript/require-await
 }
 
 function TextEligibility(

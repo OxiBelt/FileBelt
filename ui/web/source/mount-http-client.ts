@@ -13,19 +13,17 @@ export type CreateMountCredential = components["schemas"]["CreateMountCredential
 export type CreatedMountCredential = components["schemas"]["CreatedMountCredential"];
 
 interface ApiResult<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly data?: T;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly error?: unknown;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly response: Response;
 }
 
 interface MutationHeaders {
   Origin: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP requires this exact Fetch Metadata header name.
   "Sec-Fetch-Site": "same-origin";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact CSRF header name.
   "X-FileBelt-Csrf": string;
 }
 
@@ -40,7 +38,7 @@ export class MountReauthenticationRequiredError extends Error {
 
 export interface MountSettingsClient {
   createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential>;
-  getOverview(Signal?: AbortSignal): Promise<MountOverview>;
+  getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview>;
   putPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void>;
   revokeCredential(CredentialId: string): Promise<void>;
 }
@@ -58,11 +56,11 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
       credentials: "same-origin",
-      fetch: (Request) => FetchImplementation(Request),
+      fetch: async (Request) => FetchImplementation(Request),
     });
   }
 
-  async getOverview(Signal?: AbortSignal): Promise<MountOverview> {
+  async getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview> {
     const Result = await this.#Api.GET(
       "/api/v1/mounts",
       Signal === undefined ? {} : { signal: Signal },
@@ -116,11 +114,14 @@ function DefaultBaseUrl(): string {
   return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
   if (Result.response.ok && Result.data !== undefined) return Result.data as T;
   throw RequestError(Result);
 }
 
+// oxlint-disable-next-line typescript/require-await -- This helper preserves the Promise contract used by mutation call sites while performing no I/O itself.
 async function RequireSuccess(Result: ApiResult<unknown>): Promise<void> {
   if (!Result.response.ok) throw RequestError(Result);
 }

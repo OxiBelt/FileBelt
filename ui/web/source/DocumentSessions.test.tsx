@@ -47,7 +47,7 @@ describe("document session controls", () => {
   });
 
   it("prepares consent before issuing a one-use handoff and keeps it out of state", async () => {
-    const Source = await import("node:fs/promises").then((Fs) =>
+    const Source = await import("node:fs/promises").then(async (Fs) =>
       Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"),
     );
     expect(Source).toContain("En.documentConsent");
@@ -127,7 +127,7 @@ describe("document session controls", () => {
   });
 
   it("surfaces detail failures, follows pagination, and refreshes conflict copies", async () => {
-    const Source = await import("node:fs/promises").then((Fs) =>
+    const Source = await import("node:fs/promises").then(async (Fs) =>
       Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"),
     );
     expect(Source).toContain("Client.listOwnSessions({ Cursor })");

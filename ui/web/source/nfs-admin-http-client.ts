@@ -31,27 +31,24 @@ export class NfsReauthenticationRequiredError extends Error {
 }
 
 interface ApiResult<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly data?: T;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly error?: unknown;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly response: Response;
 }
 
 interface MutationHeaders {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact idempotency header name.
   "Idempotency-Key": string;
   Origin: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP requires this exact Fetch Metadata header name.
   "Sec-Fetch-Site": "same-origin";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact CSRF header name.
   "X-FileBelt-Csrf": string;
 }
 
 type SignalInitShape = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Fetch `RequestInit` exposes this exact abort-signal key.
-  signal?: AbortSignal;
+  // oxlint-disable-next-line filebelt/pascal-case -- Fetch `RequestInit` exposes this exact abort-signal key.
+  signal?: Readonly<AbortSignal>;
 };
 
 /** Same-origin adapter for generation-fenced tenant NFS administration. */
@@ -68,11 +65,11 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
       credentials: "same-origin",
-      fetch: (Request) => FetchImplementation(Request),
+      fetch: async (Request) => FetchImplementation(Request),
     });
   }
 
-  async getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot> {
+  async getOverview(Signal?: Readonly<AbortSignal>): Promise<NfsAdminSnapshot> {
     const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all(
       [
         this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
@@ -106,7 +103,10 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     );
   }
 
-  async registerExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void> {
+  async registerExport(
+    Input: Readonly<NfsExportRegistration>,
+    ConfirmTenant: string,
+  ): Promise<void> {
     RequireData(
       await this.#Api.POST("/api/v1/admin/mounts/nfs/exports", {
         body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
@@ -136,7 +136,10 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     );
   }
 
-  async registerPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void> {
+  async registerPosixGroup(
+    Input: Readonly<NfsPosixGroupRegistration>,
+    ConfirmTenant: string,
+  ): Promise<void> {
     RequireData(
       await this.#Api.POST("/api/v1/admin/mounts/nfs/posix-groups", {
         body: {
@@ -150,7 +153,8 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     );
   }
 
-  async proposeMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void> {
+  // oxlint-disable-next-line typescript/no-deprecated -- The admin interface intentionally retains this compatibility shape for proposal creation.
+  async proposeMapping(Input: Readonly<NfsMappingUpsert>, ConfirmTenant: string): Promise<void> {
     RequireData(
       await this.#Api.POST("/api/v1/admin/mounts/nfs/mapping-proposals", {
         body: {
@@ -221,7 +225,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
 
   async copyConflict(
     ConflictId: string,
-    Input: NfsConflictCopyInput,
+    Input: Readonly<NfsConflictCopyInput>,
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
@@ -268,10 +272,10 @@ export class HttpNfsAdminClient implements NfsAdminClient {
 }
 
 function Snapshot(
-  Response: NfsOverviewResponse,
-  Conflicts: NfsConflictResponse[],
-  Proposals: NfsMappingProposalResponse[],
-  QuarantinedMappings: NfsQuarantinedMappingResponse[],
+  Response: Readonly<NfsOverviewResponse>,
+  Conflicts: readonly Readonly<NfsConflictResponse>[],
+  Proposals: readonly Readonly<NfsMappingProposalResponse>[],
+  QuarantinedMappings: readonly Readonly<NfsQuarantinedMappingResponse>[],
 ): NfsAdminSnapshot {
   return {
     Conflicts: Conflicts.map((Conflict) => ({
@@ -342,6 +346,7 @@ function Snapshot(
       ProjectedGid: Group.projected_gid,
     })),
     QuarantinedMappings: QuarantinedMappings.map((Mapping) => ({
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Older compatible payloads may omit the optional scope despite the current generated schema.
       ...(Mapping.allowed_drive_ids === undefined
         ? {}
         : { AllowedDriveIds: Mapping.allowed_drive_ids }),
@@ -363,11 +368,13 @@ function DefaultBaseUrl(): string {
   return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
 }
 
-function SignalInit(Signal?: AbortSignal): SignalInitShape {
+function SignalInit(Signal?: Readonly<AbortSignal>): SignalInitShape {
   return Signal === undefined ? {} : { signal: Signal };
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
   if (Result.response.ok && Result.data !== undefined) return Result.data as T;
   throw RequestError(Result);
 }

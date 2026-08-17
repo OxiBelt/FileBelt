@@ -8,22 +8,42 @@ import {
   RenderKaTeX,
   RenderMermaid,
 } from "./lazy.js";
+import type { OfficeImportModule } from "./lazy.js";
 
 // officeparser reports these documented lower-camel result keys.
 type OfficeParserMessage = Record<"code", string> &
   Record<"message", string> &
   Record<"type", string>;
 
+function Load<Value>(Value: Value): () => Promise<Value> {
+  // oxlint-disable-next-line typescript/promise-function-async -- Test module loaders must retain the production promise contract.
+  return () => Promise.resolve(Value);
+}
+
+function CaptureOfficeImport(
+  Capture: (Options: unknown) => void,
+): () => Promise<OfficeImportModule> {
+  return Load({
+    // oxlint-disable-next-line typescript/promise-function-async -- This test double must observe conversion options while retaining the production promise contract.
+    convert: (IgnoredContents, IgnoredDestination, Options) => {
+      void IgnoredContents;
+      void IgnoredDestination;
+      Capture(Options);
+      return Promise.resolve({ messages: [], value: "# Imported\n" });
+    },
+  });
+}
+
 describe("lazy rich render adapters", () => {
   it("applies strict Mermaid and KaTeX options before generated markup crosses the sanitizer boundary", async () => {
     let MermaidOptions: unknown;
     const Svg = await RenderMermaid(
-      async () => ({
+      Load({
         default: {
           initialize: (Options) => {
             MermaidOptions = Options;
           },
-          render: async () => ({ svg: "<svg />" }),
+          render: Load({ svg: "<svg />" }),
         },
       }),
       { DiagramId: "diagram-1", Source: "flowchart TD\nA-->B" },
@@ -36,7 +56,7 @@ describe("lazy rich render adapters", () => {
     });
     await expect(
       RenderKaTeX(
-        async () => ({
+        Load({
           default: {
             renderToString: (Expression: string, Options: unknown) => {
               void Expression;
@@ -51,40 +71,32 @@ describe("lazy rich render adapters", () => {
 
   it("rejects diagrams beyond the resource ceilings", async () => {
     await expect(
-      RenderMermaid(
-        async () => ({
-          default: { initialize: () => undefined, render: async () => ({ svg: "" }) },
-        }),
-        { DiagramId: "oversize", Source: "a".repeat(64 * 1024 + 1) },
-      ),
+      RenderMermaid(Load({ default: { initialize: () => undefined, render: Load({ svg: "" }) } }), {
+        DiagramId: "oversize",
+        Source: "a".repeat(64 * 1024 + 1),
+      }),
     ).rejects.toThrow(RangeError);
     await expect(
-      RenderMermaid(
-        async () => ({
-          default: { initialize: () => undefined, render: async () => ({ svg: "" }) },
-        }),
-        { DiagramId: "edges", Source: Array.from({ length: 501 }, () => "A-->B").join("\n") },
-      ),
+      RenderMermaid(Load({ default: { initialize: () => undefined, render: Load({ svg: "" }) } }), {
+        DiagramId: "edges",
+        Source: Array.from({ length: 501 }, () => "A-->B").join("\n"),
+      }),
     ).rejects.toThrow(RangeError);
     await expect(
-      RenderMermaid(
-        async () => ({
-          default: { initialize: () => undefined, render: async () => ({ svg: "" }) },
-        }),
-        { DiagramId: "click", Source: "click A href" },
-      ),
+      RenderMermaid(Load({ default: { initialize: () => undefined, render: Load({ svg: "" }) } }), {
+        DiagramId: "click",
+        Source: "click A href",
+      }),
     ).rejects.toThrow(RangeError);
     const Budget = CreateMermaidRenderBudget(1);
     await RenderMermaid(
-      async () => ({ default: { initialize: () => undefined, render: async () => ({ svg: "" }) } }),
+      Load({ default: { initialize: () => undefined, render: Load({ svg: "" }) } }),
       { DiagramId: "first", Source: "A-->B" },
       Budget,
     );
     await expect(
       RenderMermaid(
-        async () => ({
-          default: { initialize: () => undefined, render: async () => ({ svg: "" }) },
-        }),
+        Load({ default: { initialize: () => undefined, render: Load({ svg: "" }) } }),
         { DiagramId: "second", Source: "A-->B" },
         Budget,
       ),
@@ -95,13 +107,8 @@ describe("lazy rich render adapters", () => {
     let ConversionOptions: unknown;
     const Markdown = await ImportOfficeMarkdown(
       { Contents: new Uint8Array([1, 2, 3]), SourceType: "docx" },
-      async () => ({
-        convert: async (IgnoredContents, IgnoredDestination, Options) => {
-          void IgnoredContents;
-          void IgnoredDestination;
-          ConversionOptions = Options;
-          return { messages: [], value: "# Imported\n" };
-        },
+      CaptureOfficeImport((Options) => {
+        ConversionOptions = Options;
       }),
     );
     expect(Markdown).toBe("# Imported\n");
@@ -120,28 +127,30 @@ describe("lazy rich render adapters", () => {
   });
 
   it("rejects unsafe, lossy, or oversized Office conversion results", async () => {
-    const Load =
-      (Value: string, Messages: readonly OfficeParserMessage[] = []) =>
-      async () => ({ convert: async () => ({ messages: Messages, value: Value }) });
+    const CreateOfficeLoad = (Value: string, Messages: readonly OfficeParserMessage[] = []) =>
+      Load({ convert: Load({ messages: Messages, value: Value }) });
     await expect(
       ImportOfficeMarkdown(
         { Contents: new Uint8Array(9), MaximumInputBytes: 8, SourceType: "xlsx" },
-        Load("ok"),
+        CreateOfficeLoad("ok"),
       ),
     ).rejects.toThrow(RangeError);
     await expect(
       ImportOfficeMarkdown(
         { Contents: new Uint8Array(), MaximumOutputBytes: 4, SourceType: "xlsx" },
-        Load("12345"),
+        CreateOfficeLoad("12345"),
       ),
     ).rejects.toThrow(RangeError);
     await expect(
-      ImportOfficeMarkdown({ Contents: new Uint8Array(), SourceType: "xlsx" }, Load("bad\0value")),
+      ImportOfficeMarkdown(
+        { Contents: new Uint8Array(), SourceType: "xlsx" },
+        CreateOfficeLoad("bad\0value"),
+      ),
     ).rejects.toThrow("NUL");
     await expect(
       ImportOfficeMarkdown(
         { Contents: new Uint8Array(), SourceType: "xlsx" },
-        Load("partial", [
+        CreateOfficeLoad("partial", [
           { code: "TABLE_CELL_LIMIT_EXCEEDED", message: "truncated", type: "warning" },
         ]),
       ),

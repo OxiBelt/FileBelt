@@ -25,7 +25,7 @@ export type AdapterComponentRelationship =
   | "linked"
   | "separate-executable";
 
-/* eslint-disable @typescript-eslint/naming-convention -- Stable adapter plan schema v3 JSON keys. */
+/* oxlint-disable filebelt/pascal-case -- Stable adapter plan schema v3 JSON keys. */
 export interface AdapterComponent {
   readonly id: string;
   readonly version: string;
@@ -138,7 +138,7 @@ export interface CreateAdapterImagePlanInput {
   readonly Source: ImagePlanSource;
   readonly Evidence?: Partial<Record<AdapterImageRole, AdapterRoleQualificationInput>>;
 }
-/* eslint-enable @typescript-eslint/naming-convention */
+/* oxlint-enable filebelt/pascal-case */
 
 interface AdapterCatalogRow {
   readonly Role: AdapterImageRole;
@@ -626,6 +626,7 @@ export function CreateAdapterImagePlan(Input: CreateAdapterImagePlanInput): Adap
 function ValidateEvidenceInput(
   Evidence: Partial<Record<AdapterImageRole, AdapterRoleQualificationInput>> | undefined,
 ): void {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- Runtime validation rejects unknown adapter roles before catalog lookup. */
   if (Evidence === undefined) return;
   if (!IsRecord(Evidence)) throw new Error("adapter qualification evidence must be an object");
   for (const [Role, Value] of Object.entries(Evidence)) {
@@ -682,9 +683,11 @@ function ValidateEvidenceInput(
       }
     }
   }
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 export function ValidateAdapterImagePlan(Value: unknown): asserts Value is AdapterImagePlanV3 {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- Exact-key and runtime checks establish the closed adapter image-plan representation. */
   if (!IsRecord(Value) || Value.schemaVersion !== AdapterImagePlanSchemaVersion) {
     throw new Error("adapter image plan schemaVersion must be 3");
   }
@@ -726,6 +729,7 @@ export function ValidateAdapterImagePlan(Value: unknown): asserts Value is Adapt
       throw new Error(`${Role} does not match the canonical adapter catalog and derived decisions`);
     }
   }
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 export function SerializeAdapterImagePlan(Plan: AdapterImagePlanV3): string {
@@ -734,6 +738,7 @@ export function SerializeAdapterImagePlan(Plan: AdapterImagePlanV3): string {
 }
 
 function ValidateSource(Version: string, Source: ImagePlanSource): void {
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- This runtime source URL check protects untyped serialized input despite the narrowed internal type.
   if (Source.url !== SourceUrl)
     throw new Error("adapter source URL must be the canonical repository");
   if (!RevisionPattern.test(Source.revision))
@@ -764,21 +769,20 @@ function ValidateSource(Version: string, Source: ImagePlanSource): void {
 }
 
 function ExtractEvidence(
-  Value: Record<string, unknown>,
+  Value: Readonly<Record<string, unknown>>,
   Role: AdapterImageRole,
 ): AdapterRoleQualificationInput {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- Runtime evidence validation establishes the reviewed adapter qualification representation. */
   const Bundle = Value.sourceBundle;
   const PreImage = Value.preImage;
   const Qualification = Value.qualification;
   if (!IsRecord(Bundle) || !IsRecord(PreImage) || !IsRecord(Qualification))
     throw new Error(`${Role} evidence objects are required`);
   const Result: MutableAdapterRoleQualificationInput = {
-    preImage: PreImage as unknown as AdapterPreImageQualification,
+    preImage: PreImage,
     platformBuildArguments:
       IsRecord(Value.build) && IsRecord(Value.build.platformArguments)
-        ? (Value.build.platformArguments as Readonly<
-            Partial<Record<ImagePlatform, Readonly<Record<string, string>>>>
-          >)
+        ? Value.build.platformArguments
         : {},
     qualification: {
       security: ReadQualification(Qualification.security, Role, "security"),
@@ -812,6 +816,7 @@ function ExtractEvidence(
   if (!CustomStrings(Custom)) throw new Error(`${Role} publication reasons must be strings`);
   Result.blockingReasons = Custom as string[];
   return Result;
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ImageBuildBlockingReasons(
@@ -821,6 +826,7 @@ function ImageBuildBlockingReasons(
   PlatformArguments: Readonly<Partial<Record<ImagePlatform, Readonly<Record<string, string>>>>>,
   Platforms: readonly ImagePlatform[],
 ): string[] {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- The qualification object is constructed from the closed adapter catalog. */
   const Reasons: string[] = [];
   const Labels: Readonly<Record<keyof AdapterPreImageQualification, string>> = {
     sourceBundle: "source bundle",
@@ -846,12 +852,14 @@ function ImageBuildBlockingReasons(
     Reasons.push("digest-bound platform build arguments are incomplete");
   }
   return Reasons;
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function NormalizePlatformBuildArguments(
   Catalog: AdapterCatalogRow,
   Value: AdapterRoleQualificationInput["platformBuildArguments"],
 ): Readonly<Partial<Record<ImagePlatform, Readonly<Record<string, string>>>>> {
+  /* oxlint-disable typescript/no-unsafe-type-assertion, typescript/no-unnecessary-condition -- Runtime checks preserve validation of untyped platform-build evidence. */
   if (Value === undefined) return {};
   if (!IsRecord(Value)) throw new Error(`${Catalog.Role} platformBuildArguments must be an object`);
   if (Object.keys(Value).length === 0) return {};
@@ -898,9 +906,10 @@ function NormalizePlatformBuildArguments(
     ) {
       throw new Error(`${Catalog.Role} ${Platform} zlib checksum must be lowercase SHA-256`);
     }
-    Result[Platform as ImagePlatform] = Normalized as Readonly<Record<string, string>>;
+    Result[Platform as ImagePlatform] = Normalized;
   }
   return Result;
+  /* oxlint-enable typescript/no-unsafe-type-assertion, typescript/no-unnecessary-condition */
 }
 
 function PublicationBlockingReasons(
@@ -934,7 +943,7 @@ function IsRecord(Value: unknown): Value is Record<string, unknown> {
   return typeof Value === "object" && Value !== null && !Array.isArray(Value);
 }
 
-function ExactKeys(Value: Record<string, unknown>, Names: readonly string[]): boolean {
+function ExactKeys(Value: Readonly<Record<string, unknown>>, Names: readonly string[]): boolean {
   return Object.keys(Value).sort().join("\0") === [...Names].sort().join("\0");
 }
 

@@ -133,7 +133,8 @@ describe("MockFileBeltClient", () => {
       "Text preferences changed elsewhere",
     );
     const Entry = (await Client.getWorkspace()).Entries.find(({ Kind }) => Kind === "file");
-    if (Entry === undefined || Entry.HeadVersionId === null) return;
+    if (Entry === undefined) return;
+    if (Entry.HeadVersionId === null) return;
     const Page = await Client.listTextVersions(Entry.Id, null);
     expect(Page.NextCursor).toBeNull();
   });

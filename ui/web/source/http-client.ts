@@ -69,43 +69,40 @@ interface WorkspaceRoutingState {
 }
 
 interface Page<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI page responses expose this exact key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI page responses expose this exact key.
   readonly items: readonly T[];
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI page responses expose this exact key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI page responses expose this exact key.
   readonly next_cursor: string | null;
 }
 
 interface ApiResult<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly data?: T;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly error?: unknown;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly response: Response;
 }
 
 interface MutationHeaders {
   Origin: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP requires this exact Fetch Metadata header name.
   "Sec-Fetch-Site": "same-origin";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact CSRF header name.
   "X-FileBelt-Csrf": string;
 }
 
 interface IdempotencyHeaders {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact idempotency header name.
   "Idempotency-Key": string;
 }
 
 interface PageQueryShape {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI query parameters expose this exact key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI query parameters expose this exact key.
   cursor?: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI query parameters expose this exact key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI query parameters expose this exact key.
   limit: number;
 }
 
 type SignalInitShape = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Fetch `RequestInit` exposes this exact abort-signal key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Fetch `RequestInit` exposes this exact abort-signal key.
   signal?: AbortSignal;
 };
 
@@ -144,11 +141,11 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
       credentials: "same-origin",
-      fetch: (Request) => this.#Fetch(Request),
+      fetch: async (Request) => this.#Fetch(Request),
     });
   }
 
-  async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
+  async getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot> {
     const RefreshGeneration = ++this.#WorkspaceRefreshGeneration;
     const Session = RequireData<SessionResponse>(
       await this.#Api.GET("/api/v1/session", SignalInit(Signal)),
@@ -310,7 +307,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Snapshot;
   }
 
-  async upload(Files: readonly UploadCandidate[]): Promise<void> {
+  async upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void> {
     const Target = this.#Routing.UploadTarget;
     if (Target === null) throw new Error("No writable private drive is available.");
     await this.#ensureSession();
@@ -366,6 +363,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
         Finalize = Grants.finalize;
         Cursor = Grants.next_cursor;
       } while (Cursor !== null);
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- The pagination callback assigns this required final grant across awaited iterations.
       if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
       await this.#ioRequest(
         Finalize.path,
@@ -428,7 +426,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async updateTextPreferences(
-    Patch: TextPreferences,
+    Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }> {
     await this.#ensureSession();
@@ -514,7 +512,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     );
   }
 
-  async importMarkdown(Input: MarkdownImportInput): Promise<string> {
+  async importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string> {
     const Location = this.#fileLocation(Input.EntryId);
     await this.#ensureSession();
     const Intent = RequireData<MarkdownImportIntent>(
@@ -588,7 +586,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     };
   }
 
-  async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
+  async saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string> {
     const Location = this.#fileLocation(Input.EntryId);
     if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
     await this.#ensureSession();
@@ -675,7 +673,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     }
   }
 
-  async createShare(Input: CreateShareInput): Promise<void> {
+  async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
     if (Input.Kind !== "direct") {
       throw new Error("This FileBelt version supports direct verified-email shares only.");
     }
@@ -751,6 +749,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     );
   }
 
+  // oxlint-disable typescript/require-await -- Unsupported operations must retain the asynchronous client interface while rejecting immediately.
   async markPrivacyRead(): Promise<void> {
     throw new Error("Privacy notification updates are not available in this release.");
   }
@@ -774,6 +773,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   async downloadPublic(): Promise<Blob> {
     throw new Error("Anonymous share links are not available in this release.");
   }
+  // oxlint-enable typescript/require-await
 
   #location(EntryId: string): NodeLocation {
     const Location = this.#Routing.Locations.get(EntryId);
@@ -815,6 +815,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Finalize = Grants.finalize;
       Cursor = Grants.next_cursor;
     } while (Cursor !== null);
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- The pagination callback assigns this required final grant across awaited iterations.
     if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
     await this.#ioRequest(
       Finalize.path,
@@ -844,7 +845,11 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Items;
   }
 
-  async #getNode(DriveId: string, NodeId: string, Signal?: AbortSignal): Promise<NodeResponse> {
+  async #getNode(
+    DriveId: string,
+    NodeId: string,
+    Signal?: Readonly<AbortSignal>,
+  ): Promise<NodeResponse> {
     return RequireData<NodeResponse>(
       await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
         params: { path: { drive_id: DriveId, node_id: NodeId } },
@@ -856,7 +861,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   async #listChildren(
     DriveId: string,
     NodeId: string,
-    Signal?: AbortSignal,
+    Signal?: Readonly<AbortSignal>,
   ): Promise<NodeResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<NodePage>(
@@ -871,7 +876,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     );
   }
 
-  async #listTrash(DriveId: string, Signal?: AbortSignal): Promise<NodeResponse[]> {
+  async #listTrash(DriveId: string, Signal?: Readonly<AbortSignal>): Promise<NodeResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<NodePage>(
         await this.#Api.GET("/api/v1/drives/{drive_id}/trash", {
@@ -888,7 +893,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   async #listVersions(
     DriveId: string,
     NodeId: string,
-    Signal?: AbortSignal,
+    Signal?: Readonly<AbortSignal>,
   ): Promise<VersionResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<VersionPage>(
@@ -906,7 +911,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   async #optionalShares(
     DriveId: string,
     NodeId: string,
-    Signal?: AbortSignal,
+    Signal?: Readonly<AbortSignal>,
   ): Promise<readonly ShareResponse[]> {
     const Result = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
       params: { path: { drive_id: DriveId, node_id: NodeId } },
@@ -938,7 +943,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async #ioRequest(
     Path: string,
-    Init: RequestInit,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- RequestInit is a mutable platform union that is copied into a new Request.
+    Init: Readonly<RequestInit>,
     Credentials: RequestCredentials,
   ): Promise<Response> {
     const HttpRequest = new Request(new URL(Path, this.#BaseUrl), {
@@ -1009,7 +1015,9 @@ function PageQuery(Cursor: string | null): PageQueryShape {
   return Cursor === null ? { limit: PageLimit } : { cursor: Cursor, limit: PageLimit };
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
   if (Result.response.ok && Result.data !== undefined) return Result.data as T;
   throw RequestError(Result.response, Result.error);
 }
@@ -1045,10 +1053,11 @@ function UploadPartNumber(Path: string): number | null {
   return Number.isSafeInteger(Value) ? Value : null;
 }
 
-function SignalInit(Signal: AbortSignal | undefined): SignalInitShape {
+function SignalInit(Signal: Readonly<AbortSignal> | undefined): SignalInitShape {
   return Signal === undefined ? {} : { signal: Signal };
 }
 
+// oxlint-disable-next-line typescript/consistent-return -- The generated preset union is exhaustive and has no fallback wire value.
 function SharePermission(Preset: ShareResponse["preset"]): ShareRecord["Permission"] {
   switch (Preset) {
     case "contributor":
@@ -1060,6 +1069,7 @@ function SharePermission(Preset: ShareResponse["preset"]): ShareRecord["Permissi
   }
 }
 
+// oxlint-disable-next-line typescript/consistent-return -- The local permission union is exhaustive and has no fallback wire value.
 function SharePreset(Permission: ShareRecord["Permission"]): ShareResponse["preset"] {
   switch (Permission) {
     case "Contributor":

@@ -51,9 +51,13 @@ function useSystemTheme(): boolean {
 
   useEffect(() => {
     const Query = window.matchMedia("(prefers-color-scheme: dark)");
-    const Update = (): void => SetPrefersDark(Query.matches);
+    const Update = (): void => {
+      SetPrefersDark(Query.matches);
+    };
     Query.addEventListener("change", Update);
-    return () => Query.removeEventListener("change", Update);
+    return () => {
+      Query.removeEventListener("change", Update);
+    };
   }, []);
 
   return PrefersDark;
@@ -64,6 +68,7 @@ export interface FileBeltProviderProps extends PropsWithChildren {
   ThemeChoice: ThemeChoice;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone provider props.
 export function FileBeltProvider({
   children: Children,
   Density,
@@ -91,6 +96,7 @@ export interface FileBeltIconProps extends Omit<LucideProps, "ref"> {
   Label?: string;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function FileBeltIcon({
   Icon,
   Label,
@@ -111,14 +117,15 @@ export function FileBeltIcon({
 }
 
 export interface BidiTextProps {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
+  // oxlint-disable-next-line filebelt/pascal-case -- React reserves `children` for nested JSX content.
   children: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `className` contract.
+  // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `className` contract.
   className?: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `title` contract.
+  // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `title` contract.
   title?: string;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function BidiText({
   children: Children,
   className: ClassName,
@@ -132,11 +139,12 @@ export function BidiText({
 }
 
 export interface StatusPillProps {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
+  // oxlint-disable-next-line filebelt/pascal-case -- React reserves `children` for nested JSX content.
   children: ReactNode;
   Kind?: "brand" | "danger" | "informative" | "subtle" | "success" | "warning";
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function StatusPill({ children: Children, Kind = "subtle" }: StatusPillProps): ReactNode {
   return (
     <Badge appearance="tint" color={Kind} size="small">
@@ -146,12 +154,13 @@ export function StatusPill({ children: Children, Kind = "subtle" }: StatusPillPr
 }
 
 export interface BrandMarkProps {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- This component forwards the DOM `className` contract.
+  // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `className` contract.
   className?: string;
   Label?: string;
 }
 
 /** Original FileBelt mark: a secured file folded through a belt-like horizon. */
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function BrandMark({ className: ClassName, Label }: BrandMarkProps): ReactNode {
   return (
     <svg
@@ -184,6 +193,7 @@ export function BrandMark({ className: ClassName, Label }: BrandMarkProps): Reac
 
 export const VisuallyHiddenStyle: CSSProperties = {
   border: 0,
+  // oxlint-disable-next-line typescript/no-deprecated -- Retained visual-hidden fallback for legacy assistive-technology stacks.
   clip: "rect(0 0 0 0)",
   clipPath: "inset(50%)",
   height: "1px",

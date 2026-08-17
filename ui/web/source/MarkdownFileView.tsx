@@ -40,11 +40,13 @@ interface MarkdownFileViewProps {
   Entry: FileEntry;
   McpClient?: McpSettingsClient;
   OnClose(): void;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The markdown package owns this reference value and the callback only forwards it.
   OnFileBeltLink(Target: FileBeltReference): boolean;
   OnNavigationGuardChange(Guard: NavigationGuard | undefined): void;
   OnSaved(): void;
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and lifecycle callbacks are receiver-free parent functions.
 export function MarkdownFileView({
   Client,
   Entry,
@@ -54,6 +56,7 @@ export function MarkdownFileView({
   OnNavigationGuardChange,
   OnSaved,
 }: MarkdownFileViewProps): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Source, SetSource] = useState<MarkdownSource | null>(null);
   const [Mode, SetMode] = useState<MarkdownMode>("split");
   const [ExpectedHeadVersionId, SetExpectedHeadVersionId] = useState(Entry.HeadVersionId);
@@ -97,7 +100,7 @@ export function MarkdownFileView({
     };
   }, [Client]);
   useEffect(() => {
-    if (Entry.HeadVersionId === null) return;
+    if (Entry.HeadVersionId === null) return undefined;
     let Active = true;
     let Session: MarkdownRealtimeSession | undefined;
     SetCollaboration(null);
@@ -114,6 +117,7 @@ export function MarkdownFileView({
         if (!CanEdit) return;
         const ClientId = crypto.randomUUID();
         const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId);
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- The effect cleanup can run while the awaited collaboration grant is pending.
         if (!Active) return;
         if (Grant === null) {
           SetCollaborationState("fallback");
@@ -123,6 +127,7 @@ export function MarkdownFileView({
           Grant,
           OnStateChange: SetCollaborationState,
         });
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- The effect cleanup can run while the awaited collaboration connection is pending.
         if (!Active) {
           Session.Destroy();
           return;
@@ -194,7 +199,7 @@ export function MarkdownFileView({
 
   const ApplyFallbackMerge = (
     LocalText: string,
-    Remote: MarkdownSource,
+    Remote: Readonly<MarkdownSource>,
     VersionId: string,
     RemoteIsHead = true,
   ): void => {
@@ -219,6 +224,7 @@ export function MarkdownFileView({
       const CheckpointId =
         Collaboration === null ? undefined : await Collaboration.RequestCheckpoint();
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- EncodeText returns an owned byte buffer; Blob rejects only the broader SharedArrayBuffer type possibility.
       const Contents = new Blob([Encoded.buffer as ArrayBuffer], {
         type: Entry.MediaType ?? "text/plain",
       });
@@ -270,6 +276,7 @@ export function MarkdownFileView({
         Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit);
       await Client.saveMarkdownCopy({
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- EncodeText returns an owned byte buffer; Blob rejects only the broader SharedArrayBuffer type possibility.
         Contents: new Blob([Encoded.buffer as ArrayBuffer], {
           type: Entry.MediaType ?? "text/plain",
         }),
@@ -303,6 +310,7 @@ export function MarkdownFileView({
     const CurrentSource =
       Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
     const Url = URL.createObjectURL(
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- EncodeText returns an owned byte buffer; Blob rejects only the broader SharedArrayBuffer type possibility.
       new Blob([EncodeText(CurrentSource, MaximumEditableBytes).buffer as ArrayBuffer], {
         type: "text/plain",
       }),
@@ -341,7 +349,9 @@ export function MarkdownFileView({
 
   useEffect(() => {
     OnNavigationGuardChange(RequestLeave);
-    return () => OnNavigationGuardChange(undefined);
+    return () => {
+      OnNavigationGuardChange(undefined);
+    };
   }, [OnNavigationGuardChange, RequestLeave]);
 
   useEffect(() => {
@@ -349,13 +359,17 @@ export function MarkdownFileView({
   }, [Collaboration]);
 
   useEffect(() => {
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The browser owns and supplies this mutable lifecycle event object.
     const OnBeforeUnload = (Event: BeforeUnloadEvent): void => {
       if (!Dirty) return;
       Event.preventDefault();
+      // oxlint-disable-next-line typescript/no-deprecated -- Browser beforeunload compatibility still requires returnValue alongside preventDefault.
       Event.returnValue = "";
     };
     window.addEventListener("beforeunload", OnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", OnBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", OnBeforeUnload);
+    };
   }, [Dirty]);
 
   if (

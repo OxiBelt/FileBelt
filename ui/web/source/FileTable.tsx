@@ -13,7 +13,9 @@ import type { Strings } from "./strings.js";
 export interface FileTableProps {
   dispatchSelection(Action: SelectionAction): void;
   Entries: readonly FileEntry[];
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React and DOM own these callback values; the table only forwards them.
   onOpenActions(Entry: FileEntry, Anchor: HTMLElement): void;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- File entries are parent-owned values observed by the callback.
   onOpenEntry(Entry: FileEntry): void;
   Selection: SelectionState;
   Strings: Strings;
@@ -36,6 +38,7 @@ function FormatDate(Value: string): string {
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and callback props are receiver-free parent functions.
 export function FileTable({
   dispatchSelection: DispatchSelection,
   Entries,
@@ -44,6 +47,7 @@ export function FileTable({
   Selection,
   Strings,
 }: FileTableProps): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const OrderedIds = Entries.map(({ Id }) => Id);
 
   const FocusRow = (Id: string): void => {
@@ -51,11 +55,13 @@ export function FileTable({
     requestAnimationFrame(() => document.getElementById(`file-row-${Id}`)?.focus());
   };
 
+  // oxlint-disable typescript/prefer-readonly-parameter-types -- React owns the keyboard event and the row entry is observed without mutation.
   const OnRowKeyDown = (
     Event: KeyboardEvent<HTMLTableRowElement>,
     Entry: FileEntry,
     Index: number,
   ): void => {
+    // oxlint-enable typescript/prefer-readonly-parameter-types
     if (
       Event.key === "Enter" &&
       Entry.TextEligibility !== "ineligible" &&
@@ -72,11 +78,8 @@ export function FileTable({
     }
     if (Event.key === " " || Event.key === "Spacebar") {
       Event.preventDefault();
-      DispatchSelection({
-        Id: Entry.Id,
-        Type: Event.shiftKey ? "range" : "toggle",
-        ...(Event.shiftKey ? { OrderedIds } : {}),
-      } as SelectionAction);
+      if (Event.shiftKey) DispatchSelection({ Id: Entry.Id, OrderedIds, Type: "range" });
+      else DispatchSelection({ Id: Entry.Id, Type: "toggle" });
       return;
     }
     if (Event.key === "ArrowDown" || Event.key === "ArrowUp") {
@@ -95,6 +98,7 @@ export function FileTable({
     }
   };
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the mouse event and the row entry is observed without mutation.
   const OnRowClick = (Event: MouseEvent<HTMLTableRowElement>, Entry: FileEntry): void => {
     if (Event.shiftKey) DispatchSelection({ Id: Entry.Id, OrderedIds, Type: "range" });
     else if (Event.ctrlKey || Event.metaKey) DispatchSelection({ Id: Entry.Id, Type: "toggle" });
@@ -141,7 +145,9 @@ export function FileTable({
                 className={Selected ? "fb-file-row is-selected" : "fb-file-row"}
                 id={`file-row-${Entry.Id}`}
                 key={Entry.Id}
-                onClick={(Event) => OnRowClick(Event, Entry)}
+                onClick={(Event) => {
+                  OnRowClick(Event, Entry);
+                }}
                 onDoubleClick={() => {
                   if (
                     Entry.TextEligibility !== "ineligible" &&
@@ -154,8 +160,12 @@ export function FileTable({
                   if (!Selected) DispatchSelection({ Id: Entry.Id, Type: "replace" });
                   OnOpenActions(Entry, Event.currentTarget);
                 }}
-                onFocus={() => DispatchSelection({ Id: Entry.Id, Type: "focus" })}
-                onKeyDown={(Event) => OnRowKeyDown(Event, Entry, Index)}
+                onFocus={() => {
+                  DispatchSelection({ Id: Entry.Id, Type: "focus" });
+                }}
+                onKeyDown={(Event) => {
+                  OnRowKeyDown(Event, Entry, Index);
+                }}
                 role="row"
                 tabIndex={Focused ? 0 : -1}
               >
@@ -165,8 +175,12 @@ export function FileTable({
                       Selected ? Strings.deselectItem(Entry.Name) : Strings.selectItem(Entry.Name)
                     }
                     checked={Selected}
-                    onChange={() => DispatchSelection({ Id: Entry.Id, Type: "toggle" })}
-                    onClick={(Event) => Event.stopPropagation()}
+                    onChange={() => {
+                      DispatchSelection({ Id: Entry.Id, Type: "toggle" });
+                    }}
+                    onClick={(Event) => {
+                      Event.stopPropagation();
+                    }}
                   />
                 </td>
                 <td role="gridcell">

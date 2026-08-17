@@ -29,6 +29,7 @@ describe("TextHistory", () => {
       <TextHistory
         Client={new MockFileBeltClient()}
         Entry={Entry}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
         OnRestore={async () => undefined}
       />,
     );

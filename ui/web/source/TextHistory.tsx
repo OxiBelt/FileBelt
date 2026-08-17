@@ -13,6 +13,7 @@ function ShortOid(Value: string): string {
   return Value.slice(0, 12);
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and the restore callback is a receiver-free parent function.
 export function TextHistory({
   Client,
   Entry,
@@ -22,6 +23,7 @@ export function TextHistory({
   Entry: FileEntry;
   OnRestore(VersionId: string): Promise<void>;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Versions, SetVersions] = useState<readonly VersionRecord[]>([]);
   const [Cursor, SetCursor] = useState<string | null | undefined>(undefined);
   const [BaseVersionId, SetBaseVersionId] = useState("");
@@ -32,11 +34,15 @@ export function TextHistory({
   const Load = async (): Promise<void> => {
     if (Cursor === null) return;
     try {
-      const Page = await Client.listTextVersions(Entry.Id, Cursor === undefined ? null : Cursor);
+      const Page = await Client.listTextVersions(Entry.Id, Cursor ?? null);
       SetVersions((Current) => [...Current, ...Page.Items]);
       SetCursor(Page.NextCursor);
-      SetBaseVersionId((Current) => Current || Page.Items.at(-1)?.Id || "");
-      SetTargetVersionId((Current) => Current || Page.Items.at(0)?.Id || "");
+      SetBaseVersionId((Current) =>
+        Current.length === 0 ? (Page.Items.at(-1)?.Id ?? "") : Current,
+      );
+      SetTargetVersionId((Current) =>
+        Current.length === 0 ? (Page.Items.at(0)?.Id ?? "") : Current,
+      );
     } catch (Cause) {
       SetError(Cause instanceof Error ? Cause.message : "History is unavailable.");
     }
@@ -96,7 +102,11 @@ export function TextHistory({
               <Button
                 aria-label={`Copy full commit identifier ${Version.GitCommitOid}`}
                 icon={<Copy aria-hidden="true" />}
-                onClick={() => void navigator.clipboard?.writeText(Version.GitCommitOid as string)}
+                onClick={() => {
+                  const GitCommitOid = Version.GitCommitOid;
+                  if (GitCommitOid !== null && GitCommitOid !== undefined)
+                    void navigator.clipboard.writeText(GitCommitOid);
+                }}
                 title={Version.GitCommitOid}
               >
                 {ShortOid(Version.GitCommitOid)}
@@ -124,7 +134,9 @@ export function TextHistory({
             Base version
             <Select
               id="history-base"
-              onChange={(Event) => SetBaseVersionId(Event.currentTarget.value)}
+              onChange={(Event) => {
+                SetBaseVersionId(Event.currentTarget.value);
+              }}
               value={BaseVersionId}
             >
               {Versions.map((Version) => (
@@ -138,7 +150,9 @@ export function TextHistory({
             Target version
             <Select
               id="history-target"
-              onChange={(Event) => SetTargetVersionId(Event.currentTarget.value)}
+              onChange={(Event) => {
+                SetTargetVersionId(Event.currentTarget.value);
+              }}
               value={TargetVersionId}
             >
               {Versions.map((Version) => (

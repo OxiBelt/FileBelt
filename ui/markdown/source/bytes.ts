@@ -13,7 +13,7 @@ export class MarkdownInputError extends Error {
   }
 }
 
-export function DecodeMarkdown(Bytes: Uint8Array, MaximumBytes: number): MarkdownSource {
+export function DecodeMarkdown(Bytes: Readonly<Uint8Array>, MaximumBytes: number): MarkdownSource {
   if (Bytes.byteLength > MaximumBytes) throw new MarkdownInputError("size");
   let Text: string;
   try {
@@ -33,7 +33,7 @@ export function DecodeMarkdown(Bytes: Uint8Array, MaximumBytes: number): Markdow
   };
 }
 
-export function EncodeMarkdown(Source: MarkdownSource, MaximumBytes: number): Uint8Array {
+export function EncodeMarkdown(Source: Readonly<MarkdownSource>, MaximumBytes: number): Uint8Array {
   if (Source.Text.includes("\0")) throw new MarkdownInputError("nul");
   if (Source.Text.includes("\r")) throw new MarkdownInputError("line-ending");
   const Content = Source.LineEnding === "crlf" ? Source.Text.replaceAll("\n", "\r\n") : Source.Text;
@@ -42,26 +42,26 @@ export function EncodeMarkdown(Source: MarkdownSource, MaximumBytes: number): Ui
   return Bytes;
 }
 
-export function DecodeEditableMarkdown(Bytes: Uint8Array): MarkdownSource {
+export function DecodeEditableMarkdown(Bytes: Readonly<Uint8Array>): MarkdownSource {
   return DecodeEditableText(Bytes);
 }
 
-export function DecodeViewableMarkdown(Bytes: Uint8Array): MarkdownSource {
+export function DecodeViewableMarkdown(Bytes: Readonly<Uint8Array>): MarkdownSource {
   return DecodeViewableText(Bytes);
 }
 
 /** Decode a server-validated text source for an editable CodeMirror surface. */
-export function DecodeEditableText(Bytes: Uint8Array): MarkdownSource {
+export function DecodeEditableText(Bytes: Readonly<Uint8Array>): MarkdownSource {
   return DecodeMarkdown(Bytes, MaximumEditableBytes);
 }
 
 /** Decode a server-validated text source for a source-only viewer. */
-export function DecodeViewableText(Bytes: Uint8Array): MarkdownSource {
+export function DecodeViewableText(Bytes: Readonly<Uint8Array>): MarkdownSource {
   return DecodeMarkdown(Bytes, MaximumViewableBytes);
 }
 
 /** Encode a language-neutral source while preserving its reviewed byte format. */
-export function EncodeText(Source: MarkdownSource, MaximumBytes: number): Uint8Array {
+export function EncodeText(Source: Readonly<MarkdownSource>, MaximumBytes: number): Uint8Array {
   return EncodeMarkdown(Source, MaximumBytes);
 }
 

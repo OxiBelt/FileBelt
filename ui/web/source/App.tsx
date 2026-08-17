@@ -82,8 +82,8 @@ import type { NfsTargetClient } from "./nfs-target-http-client.js";
 import { EmptySelection, SelectionReducer } from "./selection.js";
 import { En } from "./strings.js";
 
-const AdminPanel = lazy(() => import("@filebelt/admin"));
-const McpSettings = lazy(() => import("@filebelt/mcp-settings"));
+const AdminPanel = lazy(async () => import("@filebelt/admin"));
+const McpSettings = lazy(async () => import("@filebelt/mcp-settings"));
 const MountSettings = lazy(async () => ({
   default: (await import("./MountSettings.js")).MountSettings,
 }));
@@ -94,7 +94,7 @@ const TextSettings = lazy(async () => ({
   default: (await import("./TextSettings.js")).TextSettings,
 }));
 const TextHistory = lazy(async () => ({ default: (await import("./TextHistory.js")).TextHistory }));
-const LoadDocumentSessions = () => import("./DocumentSessions.js");
+const LoadDocumentSessions = async () => import("./DocumentSessions.js");
 const DocumentSessions = lazy(async () => ({
   default: (await LoadDocumentSessions()).OwnDocumentSessions,
 }));
@@ -104,9 +104,9 @@ const DocumentLaunchDialog = lazy(async () => ({
 const PreferencesKey = "filebelt.appearance.v1";
 
 interface Preferences {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Existing `filebelt.appearance.v1` records persist this JSON key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Existing `filebelt.appearance.v1` records persist this JSON key.
   density: Density;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Existing `filebelt.appearance.v1` records persist this JSON key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Existing `filebelt.appearance.v1` records persist this JSON key.
   theme: ThemeChoice;
 }
 
@@ -114,6 +114,7 @@ const DefaultPreferences: Preferences = { density: "comfortable", theme: "system
 
 function LoadPreferences(): Preferences {
   try {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This persisted browser record is validated field-by-field before use.
     const Value = JSON.parse(
       localStorage.getItem(PreferencesKey) ?? "null",
     ) as Partial<Preferences> | null;
@@ -157,6 +158,7 @@ function RouteFromPath(Pathname: string): RouteId | "admin" {
   if (Pathname === "/settings/text") return "text";
   if (/^\/markdown\/[0-9a-f-]+$/i.test(Pathname)) return "markdown";
   return (
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Object.entries loses the exact keys of this closed RouteId mapping.
     (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as
       | RouteId
       | undefined) ?? "drive"
@@ -196,7 +198,9 @@ function useRoute(): [
       });
     };
     window.addEventListener("popstate", OnPopState);
-    return () => window.removeEventListener("popstate", OnPopState);
+    return () => {
+      window.removeEventListener("popstate", OnPopState);
+    };
   }, [Route]);
   const Guarded = (Continue: () => void): void => {
     const Guard = GuardReference.current;
@@ -285,6 +289,7 @@ export function SignInPrompt(): ReactNode {
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the nested client props and this component only invokes their APIs.
 export function App({
   Client,
   DocumentClient,
@@ -318,7 +323,7 @@ export function App({
   }, []);
 
   const Refresh = useCallback(
-    async (Signal?: AbortSignal): Promise<void> => {
+    async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         SetError(null);
         SetSnapshot(await Client.getWorkspace(Signal));
@@ -333,7 +338,9 @@ export function App({
   useEffect(() => {
     const Controller = new AbortController();
     void Refresh(Controller.signal);
-    return () => Controller.abort();
+    return () => {
+      Controller.abort();
+    };
   }, [Refresh]);
 
   useEffect(() => {
@@ -383,6 +390,7 @@ export function App({
     ActionEntry?.Kind === "symlink" ? "symlink-actions-unavailable" : undefined;
   const MarkdownEntryId = Route === "markdown" ? window.location.pathname.split("/")[2] : undefined;
   const MarkdownEntry = Snapshot?.Entries.find(({ Id }) => Id === MarkdownEntryId);
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The markdown package owns this reference value and the callback only observes it.
   const OpenFileBeltReference = (Target: FileBeltReference): boolean => {
     // Snapshot membership is a UX hint only; the destination read still obtains
     // a new server-authorized grant before rendering any content.
@@ -397,6 +405,7 @@ export function App({
     return true;
   };
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies this mutable file-input event object.
   const OnFiles = (Event: ChangeEvent<HTMLInputElement>): void => {
     const Candidates = [...(Event.currentTarget.files ?? [])].map((File) => ({
       Data: File,
@@ -406,10 +415,10 @@ export function App({
     }));
     Event.currentTarget.value = "";
     if (Candidates.length > 0)
-      void Mutate(() => Client.upload(Candidates), En.uploadCompleted(Candidates.length));
+      void Mutate(async () => Client.upload(Candidates), En.uploadCompleted(Candidates.length));
   };
 
-  const DownloadEntry = async (Entry: FileEntry): Promise<void> => {
+  const DownloadEntry = async (Entry: Readonly<FileEntry>): Promise<void> => {
     if (Entry.Kind !== "file") return;
     SetBusy(true);
     try {
@@ -422,28 +431,30 @@ export function App({
     }
   };
 
-  const ImportOfficeEntry = async (Entry: FileEntry): Promise<void> => {
+  const ImportOfficeEntry = async (Entry: Readonly<FileEntry>): Promise<void> => {
     if (Entry.Kind !== "file" || Entry.HeadVersionId === null || !IsOfficeImportCandidate(Entry))
       return;
     const TargetName = MarkdownImportName(Entry.Name);
+    const HeadVersionId = Entry.HeadVersionId;
     await Mutate(async () => {
       const Markdown = await import("@filebelt/markdown");
       const SourceType = Markdown.OfficeImportType(Entry.Name);
       if (SourceType === null) throw new Error(En.markdownImportUnavailable);
-      const Source = await Client.readMarkdown(Entry.Id, Entry.HeadVersionId as string);
+      const Source = await Client.readMarkdown(Entry.Id, HeadVersionId);
       const Contents = new Uint8Array(await Source.arrayBuffer());
       const Converted = await Markdown.ImportOfficeMarkdown({ Contents, SourceType });
       await Client.importMarkdown({
         Contents: new Blob([Converted], { type: "text/markdown" }),
         EntryId: Entry.Id,
-        SourceVersionId: Entry.HeadVersionId as string,
+        SourceVersionId: HeadVersionId,
         TargetName,
       });
     }, En.markdownImportCompleted(TargetName));
   };
 
-  const ChangePreference = (Patch: Partial<Preferences>): void =>
+  const ChangePreference = (Patch: Partial<Preferences>): void => {
     SetPreferences((Current) => ({ ...Current, ...Patch }));
+  };
   const PreloadDocuments = (): void => {
     void LoadDocumentSessions();
   };
@@ -482,16 +493,26 @@ export function App({
             appearance="subtle"
             className="fb-mobile-menu"
             icon={<MenuIcon />}
-            onClick={() => SetNavigationOpen((Open) => !Open)}
+            onClick={() => {
+              SetNavigationOpen((Open) => !Open);
+            }}
           />
-          <button className="fb-brand" onClick={() => Navigate("drive")} type="button">
+          <button
+            className="fb-brand"
+            onClick={() => {
+              Navigate("drive");
+            }}
+            type="button"
+          >
             <BrandMark />
             <span>{En.appName}</span>
           </button>
           <Input
             className="fb-search"
             contentBefore={<SearchIcon aria-hidden="true" size={18} strokeWidth={1.75} />}
-            onChange={(Ignored, Data) => SetSearch(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetSearch(Data.value);
+            }}
             placeholder={En.search}
             type="search"
             value={Search}
@@ -512,21 +533,41 @@ export function App({
                 <MenuItem disabled>{En.theme}</MenuItem>
                 <MenuItem
                   icon={<Settings2 />}
-                  onClick={() => ChangePreference({ theme: "system" })}
+                  onClick={() => {
+                    ChangePreference({ theme: "system" });
+                  }}
                 >
                   {En.system}
                 </MenuItem>
-                <MenuItem icon={<Sun />} onClick={() => ChangePreference({ theme: "light" })}>
+                <MenuItem
+                  icon={<Sun />}
+                  onClick={() => {
+                    ChangePreference({ theme: "light" });
+                  }}
+                >
                   {En.light}
                 </MenuItem>
-                <MenuItem icon={<Moon />} onClick={() => ChangePreference({ theme: "dark" })}>
+                <MenuItem
+                  icon={<Moon />}
+                  onClick={() => {
+                    ChangePreference({ theme: "dark" });
+                  }}
+                >
                   {En.dark}
                 </MenuItem>
                 <MenuItem disabled>{En.viewSettings}</MenuItem>
-                <MenuItem onClick={() => ChangePreference({ density: "comfortable" })}>
+                <MenuItem
+                  onClick={() => {
+                    ChangePreference({ density: "comfortable" });
+                  }}
+                >
                   {En.comfortable}
                 </MenuItem>
-                <MenuItem onClick={() => ChangePreference({ density: "compact" })}>
+                <MenuItem
+                  onClick={() => {
+                    ChangePreference({ density: "compact" });
+                  }}
+                >
                   {En.compact}
                 </MenuItem>
               </MenuList>
@@ -577,14 +618,17 @@ export function App({
                   <AdminPanel
                     Drives={Snapshot.Admin.Drives}
                     Groups={Snapshot.Admin.Groups}
-                    onCreateGroup={(Name) =>
-                      Mutate(() => Client.createGroup(Name), En.createdGroup(Name))
+                    onCreateGroup={async (Name) =>
+                      Mutate(async () => Client.createGroup(Name), En.createdGroup(Name))
                     }
-                    onCreateSharedDrive={(Name) =>
-                      Mutate(() => Client.createSharedDrive(Name), En.createdSharedDrive(Name))
+                    onCreateSharedDrive={async (Name) =>
+                      Mutate(
+                        async () => Client.createSharedDrive(Name),
+                        En.createdSharedDrive(Name),
+                      )
                     }
-                    onToggleUserSuspension={(Id) =>
-                      Mutate(() => Client.suspendUser(Id), En.userStatusUpdated)
+                    onToggleUserSuspension={async (Id) =>
+                      Mutate(async () => Client.suspendUser(Id), En.userStatusUpdated)
                     }
                     {...(NfsClient === undefined ? {} : { NfsClient })}
                     Users={Snapshot.Admin.Users}
@@ -602,14 +646,18 @@ export function App({
                   <TextHistory
                     Client={Client}
                     Entry={PrimarySelection}
-                    OnRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)}
+                    OnRestore={async (Id) =>
+                      Mutate(async () => Client.restoreVersion(Id), En.versionRestored)
+                    }
                   />
                 </Suspense>
               ) : null}
               {Route === "versions" && PrimarySelection?.Kind !== "file" ? (
                 <VersionsView
                   File={undefined}
-                  onRestore={(Id) => Mutate(() => Client.restoreVersion(Id), En.versionRestored)}
+                  onRestore={async (Id) =>
+                    Mutate(async () => Client.restoreVersion(Id), En.versionRestored)
+                  }
                   Strings={En}
                   Versions={Snapshot.Versions}
                 />
@@ -617,15 +665,21 @@ export function App({
               {Route === "shares" ? (
                 <SharesView
                   File={PrimarySelection}
-                  onCreate={(Input) => Mutate(() => Client.createShare(Input), En.shareCreated)}
-                  onRevoke={(Id) => Mutate(() => Client.revokeShare(Id), En.shareRevoked)}
+                  onCreate={async (Input) =>
+                    Mutate(async () => Client.createShare(Input), En.shareCreated)
+                  }
+                  onRevoke={async (Id) =>
+                    Mutate(async () => Client.revokeShare(Id), En.shareRevoked)
+                  }
                   Shares={Snapshot.Shares}
                   Strings={En}
                 />
               ) : null}
               {Route === "sessions" ? (
                 <SessionsView
-                  onRevoke={(Id) => Mutate(() => Client.revokeSession(Id), En.sessionRevoked)}
+                  onRevoke={async (Id) =>
+                    Mutate(async () => Client.revokeSession(Id), En.sessionRevoked)
+                  }
                   Sessions={Snapshot.Sessions}
                   Strings={En}
                 />
@@ -643,7 +697,9 @@ export function App({
               {Route === "privacy" ? (
                 <PrivacyView
                   Events={Snapshot.Privacy}
-                  onMarkRead={() => Mutate(() => Client.markPrivacyRead(), En.privacyRead)}
+                  onMarkRead={async () =>
+                    Mutate(async () => Client.markPrivacyRead(), En.privacyRead)
+                  }
                   Strings={En}
                 />
               ) : null}
@@ -684,7 +740,9 @@ export function App({
                     Client={Client}
                     Entry={MarkdownEntry}
                     {...(McpClient === undefined ? {} : { McpClient })}
-                    OnClose={() => Navigate("drive")}
+                    OnClose={() => {
+                      Navigate("drive");
+                    }}
                     OnFileBeltLink={OpenFileBeltReference}
                     OnNavigationGuardChange={SetNavigationGuard}
                     OnSaved={() => void Refresh()}
@@ -752,7 +810,7 @@ export function App({
                       icon={Route === "trash" ? <FolderInput /> : <Trash2 />}
                       onClick={() =>
                         void Mutate(
-                          () =>
+                          async () =>
                             Route === "trash"
                               ? Client.restoreEntries(SelectedEntries.map(({ Id }) => Id))
                               : Client.trashEntries(SelectedEntries.map(({ Id }) => Id)),
@@ -766,14 +824,18 @@ export function App({
                       aria-describedby={PrimaryFileActionDescription}
                       disabled={PrimarySelection?.Kind !== "file"}
                       icon={<History />}
-                      onClick={() => Navigate("versions")}
+                      onClick={() => {
+                        Navigate("versions");
+                      }}
                     >
                       {En.versions}
                     </Button>
                     <Button
                       disabled={PrimarySelection === undefined}
                       icon={<Link2 />}
-                      onClick={() => Navigate("shares")}
+                      onClick={() => {
+                        Navigate("shares");
+                      }}
                     >
                       {En.shares}
                     </Button>
@@ -785,11 +847,9 @@ export function App({
                         PrimarySelection.TextEligibility === "history-only"
                       }
                       icon={<FilePenLine />}
-                      onClick={() =>
-                        PrimarySelection === undefined
-                          ? undefined
-                          : OpenMarkdown(PrimarySelection.Id)
-                      }
+                      onClick={() => {
+                        if (PrimarySelection !== undefined) OpenMarkdown(PrimarySelection.Id);
+                      }}
                     >
                       {En.openMarkdown}
                     </Button>
@@ -820,11 +880,9 @@ export function App({
                         icon={<FilePenLine />}
                         onFocus={PreloadDocuments}
                         onMouseEnter={PreloadDocuments}
-                        onClick={() =>
-                          PrimarySelection === undefined
-                            ? undefined
-                            : SetDocumentEntry(PrimarySelection)
-                        }
+                        onClick={() => {
+                          if (PrimarySelection !== undefined) SetDocumentEntry(PrimarySelection);
+                        }}
                       >
                         {En.documentEditor}
                       </Button>
@@ -838,7 +896,9 @@ export function App({
                         DispatchSelection({ Id: Entry.Id, Type: "replace" });
                         SetActionEntryId(Entry.Id);
                       }}
-                      onOpenEntry={(Entry) => OpenMarkdown(Entry.Id)}
+                      onOpenEntry={(Entry) => {
+                        OpenMarkdown(Entry.Id);
+                      }}
                       Selection={Selection}
                       Strings={En}
                     />
@@ -893,7 +953,9 @@ export function App({
                           <Button
                             appearance="secondary"
                             icon={<MoreHorizontal />}
-                            onClick={() => SetActionEntryId(PrimarySelection.Id)}
+                            onClick={() => {
+                              SetActionEntryId(PrimarySelection.Id);
+                            }}
                           >
                             {En.openMenu}
                           </Button>
@@ -918,13 +980,17 @@ export function App({
         {ActionEntry === undefined ? null : (
           <div
             className="fb-action-backdrop"
-            onClick={() => SetActionEntryId(null)}
+            onClick={() => {
+              SetActionEntryId(null);
+            }}
             role="presentation"
           >
             <div
               aria-label={En.selectionActions}
               className="fb-action-menu"
-              onClick={(Event) => Event.stopPropagation()}
+              onClick={(Event) => {
+                Event.stopPropagation();
+              }}
               onKeyDown={(Event) => {
                 if (Event.key === "Escape") SetActionEntryId(null);
               }}
@@ -1009,7 +1075,7 @@ export function App({
                 onClick={() => {
                   SetActionEntryId(null);
                   void Mutate(
-                    () =>
+                    async () =>
                       ActionEntry.Trashed
                         ? Client.restoreEntries([ActionEntry.Id])
                         : Client.trashEntries([ActionEntry.Id]),
@@ -1020,7 +1086,13 @@ export function App({
               >
                 {ActionEntry.Trashed ? En.restore : En.moveToTrash}
               </Button>
-              <Button appearance="secondary" onClick={() => SetActionEntryId(null)} role="menuitem">
+              <Button
+                appearance="secondary"
+                onClick={() => {
+                  SetActionEntryId(null);
+                }}
+                role="menuitem"
+              >
                 {En.close}
               </Button>
             </div>
@@ -1031,8 +1103,12 @@ export function App({
             <DocumentLaunchDialog
               Client={DocumentClient}
               Entry={DocumentEntry}
-              OnClose={() => SetDocumentEntry(null)}
-              OnCreated={() => SetAnnouncement(En.documentSessionCreated)}
+              OnClose={() => {
+                SetDocumentEntry(null);
+              }}
+              OnCreated={() => {
+                SetAnnouncement(En.documentSessionCreated);
+              }}
             />
           </Suspense>
         )}
@@ -1041,7 +1117,7 @@ export function App({
   );
 }
 
-function IsOfficeImportCandidate(Entry: FileEntry): boolean {
+function IsOfficeImportCandidate(Entry: Readonly<FileEntry>): boolean {
   return (
     Entry.Kind === "file" &&
     Entry.HeadVersionId !== null &&

@@ -35,26 +35,22 @@ type InvocationEvent = components["schemas"]["McpInvocationEvent"];
 type SessionResponse = components["schemas"]["Session"];
 
 interface ApiResult<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly data?: T;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly error?: unknown;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly response: Response;
 }
 
 type MutationHeaders = Record<string, string> & {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP uses this exact header name.
   "Idempotency-Key": string;
   Origin: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Fetch Metadata uses this exact header name.
   "Sec-Fetch-Site": "same-origin";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt uses this exact CSRF header name.
   "X-FileBelt-Csrf": string;
 };
 
 type VersionedMutationHeaders = MutationHeaders & {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP uses this exact precondition header name.
   "If-Match": string;
 };
 
@@ -77,11 +73,14 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
       credentials: "same-origin",
-      fetch: (Request) => this.#Fetch(Request),
+      fetch: async (Request) => this.#Fetch(Request),
     });
   }
 
-  async getSnapshot(IsTenantAdmin: boolean, Signal?: AbortSignal): Promise<McpSettingsSnapshot> {
+  async getSnapshot(
+    IsTenantAdmin: boolean,
+    Signal?: Readonly<AbortSignal>,
+  ): Promise<McpSettingsSnapshot> {
     await this.#ensureSession(Signal);
     const SignalInit = Signal === undefined ? {} : { signal: Signal };
     const [Registrations, Activity, Templates, Services, BlockRules] = await Promise.all([
@@ -115,7 +114,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     };
   }
 
-  async createRegistration(Input: CreateMcpRegistrationInput): Promise<void> {
+  async createRegistration(Input: Readonly<CreateMcpRegistrationInput>): Promise<void> {
     RequireSuccess(
       await this.#Api.POST("/api/v1/mcp/registrations", {
         body: {
@@ -160,7 +159,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return `${JSON.stringify(Value, null, 2)}\n`;
   }
 
-  async deleteRegistration(Registration: McpRegistrationView): Promise<void> {
+  async deleteRegistration(Registration: Readonly<McpRegistrationView>): Promise<void> {
     RequireSuccess(
       await this.#Api.DELETE("/api/v1/mcp/registrations/{registration_id}", {
         params: {
@@ -172,7 +171,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async changeRegistrationState(
-    Registration: McpRegistrationView,
+    Registration: Readonly<McpRegistrationView>,
     Action: "disable" | "enable" | "revoke",
   ): Promise<void> {
     RequireSuccess(
@@ -186,7 +185,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     );
   }
 
-  async testRegistration(Registration: McpRegistrationView): Promise<boolean> {
+  async testRegistration(Registration: Readonly<McpRegistrationView>): Promise<boolean> {
     const Result = RequireData<components["schemas"]["McpTestResult"]>(
       await this.#Api.POST("/api/v1/mcp/registrations/{registration_id}/test", {
         params: {
@@ -199,7 +198,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async putCredential(
-    Registration: McpRegistrationView,
+    Registration: Readonly<McpRegistrationView>,
     Kind: "api_key" | "bearer",
     Secret: string,
   ): Promise<void> {
@@ -214,7 +213,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     );
   }
 
-  async startOauth(Registration: McpRegistrationView): Promise<string> {
+  async startOauth(Registration: Readonly<McpRegistrationView>): Promise<string> {
     const Result = RequireData<components["schemas"]["McpOauthStart"]>(
       await this.#Api.POST("/api/v1/mcp/registrations/{registration_id}/oauth/start", {
         body: { return_path: `/settings/mcp/${Registration.Id}` },
@@ -238,7 +237,9 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return CapabilityReviewView(RequireData<CapabilityReviewResponse>(Result));
   }
 
-  async discoverCapabilities(Registration: McpRegistrationView): Promise<McpCapabilityReviewView> {
+  async discoverCapabilities(
+    Registration: Readonly<McpRegistrationView>,
+  ): Promise<McpCapabilityReviewView> {
     const Snapshot = RequireData<CapabilitySnapshotResponse>(
       await this.#Api.POST("/api/v1/mcp/registrations/{registration_id}/discover", {
         params: {
@@ -251,8 +252,9 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async putCapabilityReview(
-    Registration: McpRegistrationView,
-    Review: McpCapabilityReviewView,
+    Registration: Readonly<McpRegistrationView>,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Capability entries are caller-owned review values and are not mutated by the adapter.
+    Review: Readonly<McpCapabilityReviewView>,
   ): Promise<void> {
     RequireSuccess(
       await this.#Api.PUT("/api/v1/mcp/registrations/{registration_id}/capability-review", {
@@ -272,7 +274,10 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     );
   }
 
-  async createInvocationIntent(Input: McpInvocationInput): Promise<McpPreparedInvocation> {
+  async createInvocationIntent(
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+    Input: Readonly<McpInvocationInput>,
+  ): Promise<McpPreparedInvocation> {
     const Body = InvocationRequest(Input);
     const Intent = RequireData<InvocationIntent>(
       await this.#Api.POST("/api/v1/mcp/invocation-intents", {
@@ -287,9 +292,11 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async approveAndInvoke(
-    Prepared: McpPreparedInvocation,
-    OnEvent: (Event: McpInvocationEventView) => void,
-    Signal?: AbortSignal,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+    Prepared: Readonly<McpPreparedInvocation>,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Union event payloads are observer values even though the mapped type is not deeply readonly.
+    OnEvent: (Event: Readonly<McpInvocationEventView>) => void,
+    Signal?: Readonly<AbortSignal>,
   ): Promise<void> {
     const Body = InvocationRequest(Prepared.Input);
     RequireSuccess(
@@ -326,12 +333,15 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
       while (Newline >= 0) {
         const Line = Pending.slice(0, Newline).trim();
         Pending = Pending.slice(Newline + 1);
-        if (Line.length > 0) OnEvent(InvocationEventView(JSON.parse(Line) as InvocationEvent));
+        if (Line.length > 0)
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each untrusted SSE value is normalized by InvocationEventView before exposure.
+          OnEvent(InvocationEventView(JSON.parse(Line) as InvocationEvent));
         Newline = Pending.indexOf("\n");
       }
       if (Chunk.done) break;
     }
     if (Pending.trim().length > 0)
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each untrusted SSE value is normalized by InvocationEventView before exposure.
       OnEvent(InvocationEventView(JSON.parse(Pending) as InvocationEvent));
   }
 
@@ -362,7 +372,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async assignTemplate(
-    Template: AdminMcpTemplateView,
+    Template: Readonly<AdminMcpTemplateView>,
     PrincipalId: string,
     PrincipalKind: "group" | "service" | "user",
   ): Promise<void> {
@@ -387,7 +397,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
   }
 
   async createServiceInvocationGrant(
-    Service: AdminMcpServiceIdentityView,
+    Service: Readonly<AdminMcpServiceIdentityView>,
     RegistrationId: string,
     CapabilityKind: "prompt" | "resource" | "tool",
     CapabilityName: string,
@@ -431,7 +441,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     );
   }
 
-  async #ensureSession(Signal?: AbortSignal): Promise<void> {
+  async #ensureSession(Signal?: Readonly<AbortSignal>): Promise<void> {
     if (this.#CsrfToken !== null) return;
     const Session = RequireData<SessionResponse>(
       await this.#Api.GET("/api/v1/session", Signal === undefined ? {} : { signal: Signal }),
@@ -546,7 +556,8 @@ function BlockRuleView(Value: AdminBlockRuleResponse): AdminMcpBlockRuleView {
   return { Id: Value.id, Kind: Value.kind, Reason: Value.reason, Value: Value.value };
 }
 
-function InvocationRequest(Input: McpInvocationInput): InvocationRequest {
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+function InvocationRequest(Input: Readonly<McpInvocationInput>): InvocationRequest {
   return {
     application_id: Input.ApplicationId,
     arguments: Input.Arguments,
@@ -579,6 +590,7 @@ function RegistrationExport(Value: unknown): components["schemas"]["McpRegistrat
   ) {
     throw new Error("The MCP registration JSON is invalid.");
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The version discriminator is the compatibility gate for this imported registration document.
   return Value as components["schemas"]["McpRegistrationExport"];
 }
 
@@ -618,7 +630,9 @@ function DefaultBaseUrl(): string {
   return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
   if (Result.response.ok && Result.data !== undefined) return Result.data as T;
   throw new Error(`FileBelt MCP request failed (${Result.response.status}).`);
 }

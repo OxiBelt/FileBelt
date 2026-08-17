@@ -3,7 +3,7 @@
 import { Button, Checkbox, Input, Spinner } from "@fluentui/react-components";
 import { Copy, HardDrive, KeyRound, Laptop, Network, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 
 import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
 
@@ -32,6 +32,7 @@ interface PolicyDraft {
 
 const Protocols = ["smb", "ftps"] as const;
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the nested client props and this component only observes them.
 export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactNode {
   const [Snapshot, SetSnapshot] = useState<MountOverview | null>(null);
   const [Drafts, SetDrafts] = useState<Record<MountProtocol, PolicyDraft> | null>(null);
@@ -42,7 +43,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
   const [ReauthenticationRequired, SetReauthenticationRequired] = useState(false);
 
   const Refresh = useCallback(
-    async (Signal?: AbortSignal): Promise<void> => {
+    async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         const Next = await Client.getOverview(Signal);
         SetSnapshot(Next);
@@ -62,7 +63,9 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
   useEffect(() => {
     const Controller = new AbortController();
     void Refresh(Controller.signal);
-    return () => Controller.abort();
+    return () => {
+      Controller.abort();
+    };
   }, [Refresh]);
 
   const Mutate = async (Operation: () => Promise<void>, Message: string): Promise<void> => {
@@ -140,7 +143,9 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
       {NfsClient === undefined ? null : (
         <NfsConsentSettings
           Client={NfsClient}
-          OnReauthenticationRequired={() => SetReauthenticationRequired(true)}
+          OnReauthenticationRequired={() => {
+            SetReauthenticationRequired(true);
+          }}
         />
       )}
 
@@ -151,14 +156,14 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
             Draft={Drafts[Protocol]}
             Drives={Snapshot.drives}
             key={Protocol}
-            OnChange={(Draft) =>
+            OnChange={(Draft) => {
               SetDrafts((Current) =>
                 Current === null ? Current : { ...Current, [Protocol]: Draft },
-              )
-            }
-            OnSave={() =>
+              );
+            }}
+            OnSave={async () =>
               Mutate(
-                () =>
+                async () =>
                   Client.putPolicy(Protocol, {
                     allowed_drive_ids: [...Drafts[Protocol].AllowedDriveIds],
                     enabled: Drafts[Protocol].Enabled,
@@ -196,7 +201,12 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
       />
 
       {Created === null ? null : (
-        <OneTimeCredential Created={Created} OnClose={() => SetCreated(null)} />
+        <OneTimeCredential
+          Created={Created}
+          OnClose={() => {
+            SetCreated(null);
+          }}
+        />
       )}
 
       <section aria-labelledby="mount-credentials-heading" className="fb-mount-section">
@@ -228,7 +238,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
                   disabled={Busy}
                   onClick={() =>
                     void Mutate(
-                      () => Client.revokeCredential(Credential.id),
+                      async () => Client.revokeCredential(Credential.id),
                       "Mount credential revoked.",
                     )
                   }
@@ -279,6 +289,7 @@ export function FormatMountSessionDetail(Session: MountOverview["sessions"][numb
   return `${Session.protocol.toUpperCase()} · transport/relay peer ${Session.source_address} · ${FormatDate(Session.last_activity_at)}`;
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and the lifecycle callback is receiver-free.
 function NfsConsentSettings({
   Client,
   OnReauthenticationRequired,
@@ -286,6 +297,7 @@ function NfsConsentSettings({
   Client: NfsTargetClient;
   OnReauthenticationRequired(): void;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Mappings, SetMappings] = useState<readonly NfsPrincipalMapping[]>([]);
   const [Proposals, SetProposals] = useState<readonly NfsMappingProposal[]>([]);
   const [Busy, SetBusy] = useState(false);
@@ -294,7 +306,7 @@ function NfsConsentSettings({
   const [Announcement, SetAnnouncement] = useState("");
 
   const Refresh = useCallback(
-    async (Signal?: AbortSignal): Promise<void> => {
+    async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         const Overview = await Client.getOverview(Signal);
         SetMappings(Overview.mappings);
@@ -368,15 +380,15 @@ function NfsConsentSettings({
                 <NfsProposalConsentCard
                   Busy={Busy}
                   key={Proposal.id}
-                  OnApprove={() =>
+                  OnApprove={async () =>
                     Mutate(
-                      () => Client.approveProposal(Proposal.id, Proposal.generation),
+                      async () => Client.approveProposal(Proposal.id, Proposal.generation),
                       "NFS identity mapping approved.",
                     )
                   }
-                  OnDecline={() =>
+                  OnDecline={async () =>
                     Mutate(
-                      () => Client.declineProposal(Proposal.id, Proposal.generation),
+                      async () => Client.declineProposal(Proposal.id, Proposal.generation),
                       "NFS identity mapping declined.",
                     )
                   }
@@ -394,9 +406,9 @@ function NfsConsentSettings({
                   Busy={Busy}
                   key={Mapping.credential_id}
                   Mapping={Mapping}
-                  OnRevoke={() =>
+                  OnRevoke={async () =>
                     Mutate(
-                      () => Client.revokeMapping(Mapping.credential_id, Mapping.generation),
+                      async () => Client.revokeMapping(Mapping.credential_id, Mapping.generation),
                       "NFS identity mapping revoked.",
                     )
                   }
@@ -414,6 +426,7 @@ function NfsConsentSettings({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns the generated proposal prop and action callbacks are receiver-free.
 export function NfsProposalConsentCard({
   Busy,
   OnApprove,
@@ -425,6 +438,7 @@ export function NfsProposalConsentCard({
   OnDecline(): Promise<void>;
   Proposal: NfsMappingProposal;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Confirmed, SetConfirmed] = useState(false);
   const HelpId = `nfs-proposal-${Proposal.id}-help`;
   return (
@@ -511,7 +525,9 @@ export function NfsProposalConsentCard({
           checked={Confirmed}
           disabled={Busy}
           label="I reviewed and approve these exact NFS identity fields"
-          onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+          onChange={(Ignored, Data) => {
+            SetConfirmed(Data.checked === true);
+          }}
         />
         <div className="fb-nfs-actions">
           <Button
@@ -539,6 +555,7 @@ export function NfsProposalConsentCard({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns the generated mapping prop and the action callback is receiver-free.
 export function NfsActiveMappingCard({
   Busy,
   Mapping,
@@ -548,6 +565,7 @@ export function NfsActiveMappingCard({
   Mapping: NfsPrincipalMapping;
   OnRevoke(): Promise<void>;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Confirmed, SetConfirmed] = useState(false);
   const HelpId = `nfs-target-revoke-${Mapping.credential_id}-help`;
   return (
@@ -576,7 +594,9 @@ export function NfsActiveMappingCard({
           checked={Confirmed}
           disabled={Busy}
           label="I confirm this NFS identity should be revoked"
-          onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+          onChange={(Ignored, Data) => {
+            SetConfirmed(Data.checked === true);
+          }}
         />
         <Button
           appearance="secondary"
@@ -594,6 +614,7 @@ export function NfsActiveMappingCard({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested policy props and callbacks are receiver-free parent functions.
 function PolicyCard({
   Busy,
   Draft,
@@ -609,6 +630,7 @@ function PolicyCard({
   OnSave(): Promise<void>;
   Protocol: MountProtocol;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const HeadingId = `mount-policy-${Protocol}`;
   const Label = Protocol === "smb" ? "SMB 3.1.1" : "Explicit FTPS";
   const ToggleDrive = (DriveId: string, Checked: boolean): void => {
@@ -640,7 +662,9 @@ function PolicyCard({
       <Checkbox
         checked={Draft.Enabled}
         label="Enable this protocol"
-        onChange={(Ignored, Data) => OnChange({ ...Draft, Enabled: Data.checked === true })}
+        onChange={(Ignored, Data) => {
+          OnChange({ ...Draft, Enabled: Data.checked === true });
+        }}
       />
       <Checkbox checked disabled label="This release supports read-only access only" />
       <fieldset className="fb-mount-drives">
@@ -650,7 +674,9 @@ function PolicyCard({
             checked={Draft.AllowedDriveIds.has(Drive.id)}
             key={Drive.id}
             label={Drive.display_name}
-            onChange={(Ignored, Data) => ToggleDrive(Drive.id, Data.checked === true)}
+            onChange={(Ignored, Data) => {
+              ToggleDrive(Drive.id, Data.checked === true);
+            }}
           />
         ))}
       </fieldset>
@@ -665,6 +691,7 @@ function PolicyCard({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns generated client props and callbacks are receiver-free parent functions.
 function CredentialCreator({
   Busy,
   Client,
@@ -682,6 +709,7 @@ function CredentialCreator({
   OnError(Cause: unknown): void;
   SetBusy(Value: boolean): void;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Protocol, SetProtocol] = useState<MountProtocol>("smb");
   const [DeviceId, SetDeviceId] = useState("");
   const Policy = useMemo(
@@ -689,7 +717,8 @@ function CredentialCreator({
     [Policies, Protocol],
   );
   const Allowed = useMemo(() => Policy?.allowed_drive_ids ?? [], [Policy]);
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     SetBusy(true);
     try {
@@ -724,7 +753,10 @@ function CredentialCreator({
         <label>
           Protocol
           <select
-            onChange={(Event) => SetProtocol(Event.currentTarget.value as MountProtocol)}
+            onChange={(Event) => {
+              const Value = Event.currentTarget.value;
+              if (Value === "ftps" || Value === "smb") SetProtocol(Value);
+            }}
             value={Protocol}
           >
             <option value="smb">SMB 3.1.1</option>
@@ -733,7 +765,12 @@ function CredentialCreator({
         </label>
         <label>
           Device binding
-          <select onChange={(Event) => SetDeviceId(Event.currentTarget.value)} value={DeviceId}>
+          <select
+            onChange={(Event) => {
+              SetDeviceId(Event.currentTarget.value);
+            }}
+            value={DeviceId}
+          >
             <option value="">Any current tailnet device</option>
             {Devices.map((Device) => (
               <option key={Device.id} value={Device.id}>
@@ -759,6 +796,7 @@ function CredentialCreator({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns the generated credential prop and close callback is receiver-free.
 function OneTimeCredential({
   Created,
   OnClose,
@@ -766,6 +804,7 @@ function OneTimeCredential({
   Created: CreatedMountCredential;
   OnClose(): void;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const CopyValue = async (Value: string, Label: string): Promise<void> => {
     await navigator.clipboard.writeText(Value);
     const Status = document.querySelector<HTMLElement>("#mount-copy-status");
@@ -815,6 +854,7 @@ function OneTimeCredential({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns this nested presentational props object and the component only observes it.
 function SummaryList({
   Heading,
   Icon,

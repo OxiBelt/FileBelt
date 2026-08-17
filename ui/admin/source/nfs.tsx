@@ -3,7 +3,7 @@
 import { Badge, Button, Checkbox, Input, Spinner } from "@fluentui/react-components";
 import { Network, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { AdminEn as Strings } from "./strings.js";
 
@@ -129,38 +129,61 @@ export interface NfsConflictCopy {
 
 export interface NfsAdminClient {
   attenuateMappingScope(
+    this: void,
     CredentialId: string,
     AllowedDriveIds: readonly string[],
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>;
   cancelProposal(
+    this: void,
     ProposalId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>;
-  getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot>;
-  copyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
-  discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
-  registerExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void>;
-  registerPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- AbortSignal is supplied by the browser cancellation API.
+  getOverview(this: void, Signal?: AbortSignal): Promise<NfsAdminSnapshot>;
+  copyConflict(
+    this: void,
+    ConflictId: string,
+    Input: Readonly<NfsConflictCopy>,
+    ConfirmTenant: string,
+  ): Promise<void>;
+  discardConflict(this: void, ConflictId: string, ConfirmTenant: string): Promise<void>;
+  registerExport(
+    this: void,
+    Input: Readonly<NfsExportRegistration>,
+    ConfirmTenant: string,
+  ): Promise<void>;
+  registerPosixGroup(
+    this: void,
+    Input: Readonly<NfsPosixGroupRegistration>,
+    ConfirmTenant: string,
+  ): Promise<void>;
   revokeMapping(
+    this: void,
     CredentialId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>;
   transitionExport(
+    this: void,
     DriveId: string,
     ExpectedGeneration: number,
     TargetState: NfsExportState,
     ConfirmTenant: string,
   ): Promise<void>;
   transitionFeature(
+    this: void,
     ExpectedGeneration: number,
     TargetState: NfsFeatureState,
     ConfirmTenant: string,
   ): Promise<void>;
-  proposeMapping(Input: NfsMappingProposalCreate, ConfirmTenant: string): Promise<void>;
+  proposeMapping(
+    this: void,
+    Input: Readonly<NfsMappingProposalCreate>,
+    ConfirmTenant: string,
+  ): Promise<void>;
 }
 
 export class NfsReauthenticationRequiredError extends Error {
@@ -188,10 +211,11 @@ export function FeatureTransitions(State: NfsFeatureState): readonly NfsFeatureS
     case "draining":
       return ["disabled"];
   }
+  return [];
 }
 
 export function ExportTransitions(
-  Export: NfsExportView,
+  Export: Readonly<NfsExportView>,
   FeatureState: NfsFeatureState,
 ): readonly NfsExportState[] {
   if (FeatureState !== "preflight" && FeatureState !== "draining") return [];
@@ -206,8 +230,10 @@ export function ExportTransitions(
         ? ["active", "disabled"]
         : ["active"];
   }
+  return [];
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNode {
   const [Snapshot, SetSnapshot] = useState<NfsAdminSnapshot | null>(null);
   const [Busy, SetBusy] = useState(false);
@@ -216,6 +242,7 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
   const [Announcement, SetAnnouncement] = useState("");
 
   const Refresh = useCallback(
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- AbortSignal is supplied by the browser cancellation API.
     async (Signal?: AbortSignal): Promise<void> => {
       try {
         SetSnapshot(await Client.getOverview(Signal));
@@ -233,7 +260,9 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
   useEffect(() => {
     const Controller = new AbortController();
     void Refresh(Controller.signal);
-    return () => Controller.abort();
+    return () => {
+      Controller.abort();
+    };
   }, [Refresh]);
 
   const Mutate = async (Operation: () => Promise<void>, Message: string): Promise<void> => {
@@ -291,54 +320,64 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
       {ReauthenticationRequired ? <ReauthenticationNotice /> : null}
       <NfsAdminOverviewView
         Busy={Busy}
-        OnCopyConflict={(ConflictId, Input, ConfirmTenant) =>
+        OnCopyConflict={async (ConflictId, Input, ConfirmTenant) =>
           Mutate(
-            () => Client.copyConflict(ConflictId, Input, ConfirmTenant),
+            async () => Client.copyConflict(ConflictId, Input, ConfirmTenant),
             Strings.nfsConflictCopied,
           )
         }
-        OnDiscardConflict={(ConflictId, ConfirmTenant) =>
+        OnDiscardConflict={async (ConflictId, ConfirmTenant) =>
           Mutate(
-            () => Client.discardConflict(ConflictId, ConfirmTenant),
+            async () => Client.discardConflict(ConflictId, ConfirmTenant),
             Strings.nfsConflictDiscarded,
           )
         }
-        OnRegisterExport={(Input, ConfirmTenant) =>
-          Mutate(() => Client.registerExport(Input, ConfirmTenant), Strings.nfsExportRegistered)
-        }
-        OnRegisterPosixGroup={(Input, ConfirmTenant) =>
-          Mutate(() => Client.registerPosixGroup(Input, ConfirmTenant), Strings.nfsGroupRegistered)
-        }
-        OnAttenuateMapping={(CredentialId, DriveIds, Generation, ConfirmTenant) =>
+        OnRegisterExport={async (Input, ConfirmTenant) =>
           Mutate(
-            () => Client.attenuateMappingScope(CredentialId, DriveIds, Generation, ConfirmTenant),
+            async () => Client.registerExport(Input, ConfirmTenant),
+            Strings.nfsExportRegistered,
+          )
+        }
+        OnRegisterPosixGroup={async (Input, ConfirmTenant) =>
+          Mutate(
+            async () => Client.registerPosixGroup(Input, ConfirmTenant),
+            Strings.nfsGroupRegistered,
+          )
+        }
+        OnAttenuateMapping={async (CredentialId, DriveIds, Generation, ConfirmTenant) =>
+          Mutate(
+            async () =>
+              Client.attenuateMappingScope(CredentialId, DriveIds, Generation, ConfirmTenant),
             Strings.nfsMappingAttenuated,
           )
         }
-        OnCancelProposal={(ProposalId, Generation, ConfirmTenant) =>
+        OnCancelProposal={async (ProposalId, Generation, ConfirmTenant) =>
           Mutate(
-            () => Client.cancelProposal(ProposalId, Generation, ConfirmTenant),
+            async () => Client.cancelProposal(ProposalId, Generation, ConfirmTenant),
             Strings.nfsProposalCancelled,
           )
         }
-        OnProposeMapping={(Input, ConfirmTenant) =>
-          Mutate(() => Client.proposeMapping(Input, ConfirmTenant), Strings.nfsProposalCreated)
-        }
-        OnRevokeMapping={(CredentialId, Generation, ConfirmTenant) =>
+        OnProposeMapping={async (Input, ConfirmTenant) =>
           Mutate(
-            () => Client.revokeMapping(CredentialId, Generation, ConfirmTenant),
+            async () => Client.proposeMapping(Input, ConfirmTenant),
+            Strings.nfsProposalCreated,
+          )
+        }
+        OnRevokeMapping={async (CredentialId, Generation, ConfirmTenant) =>
+          Mutate(
+            async () => Client.revokeMapping(CredentialId, Generation, ConfirmTenant),
             Strings.nfsMappingRevoked,
           )
         }
-        OnTransitionExport={(DriveId, Generation, State, ConfirmTenant) =>
+        OnTransitionExport={async (DriveId, Generation, State, ConfirmTenant) =>
           Mutate(
-            () => Client.transitionExport(DriveId, Generation, State, ConfirmTenant),
+            async () => Client.transitionExport(DriveId, Generation, State, ConfirmTenant),
             Strings.nfsExportTransitioned,
           )
         }
-        OnTransitionFeature={(Generation, State, ConfirmTenant) =>
+        OnTransitionFeature={async (Generation, State, ConfirmTenant) =>
           Mutate(
-            () => Client.transitionFeature(Generation, State, ConfirmTenant),
+            async () => Client.transitionFeature(Generation, State, ConfirmTenant),
             Strings.nfsFeatureTransitioned,
           )
         }
@@ -364,9 +403,12 @@ interface OverviewProps {
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This public callback shape preserves mutable client payload compatibility.
   OnCopyConflict(ConflictId: string, Input: NfsConflictCopy, ConfirmTenant: string): Promise<void>;
   OnDiscardConflict(ConflictId: string, ConfirmTenant: string): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This public callback shape preserves mutable client payload compatibility.
   OnRegisterExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This public callback shape preserves mutable client payload compatibility.
   OnRegisterPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void>;
   OnRevokeMapping(
     CredentialId: string,
@@ -384,21 +426,33 @@ interface OverviewProps {
     TargetState: NfsFeatureState,
     ConfirmTenant: string,
   ): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This public callback shape preserves mutable client payload compatibility.
   OnProposeMapping(Input: NfsMappingProposalCreate, ConfirmTenant: string): Promise<void>;
   Snapshot: NfsAdminSnapshot;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function NfsAdminOverviewView({
   Busy,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnAttenuateMapping,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnCancelProposal,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnCopyConflict,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnDiscardConflict,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRegisterExport,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRegisterPosixGroup,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRevokeMapping,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnTransitionExport,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnTransitionFeature,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnProposeMapping,
   Snapshot,
 }: OverviewProps): ReactNode {
@@ -438,7 +492,9 @@ export function NfsAdminOverviewView({
           autoComplete="off"
           disabled={Busy}
           id="nfs-tenant-confirmation"
-          onChange={(Ignored, Data) => SetTenantConfirmation(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetTenantConfirmation(Data.value);
+          }}
           spellCheck={false}
           value={TenantConfirmation}
         />
@@ -480,8 +536,8 @@ export function NfsAdminOverviewView({
           Busy={Busy}
           Feature={Feature}
           MutationEnabled={TenantConfirmed}
-          OnTransition={(Generation, State) =>
-            ConfirmedMutation((Confirmation) =>
+          OnTransition={async (Generation, State) =>
+            ConfirmedMutation(async (Confirmation) =>
               OnTransitionFeature(Generation, State, Confirmation),
             )
           }
@@ -492,15 +548,15 @@ export function NfsAdminOverviewView({
         <ExportRegistrationForm
           Busy={Busy}
           MutationEnabled={TenantConfirmed}
-          OnRegister={(Input) =>
-            ConfirmedMutation((Confirmation) => OnRegisterExport(Input, Confirmation))
+          OnRegister={async (Input) =>
+            ConfirmedMutation(async (Confirmation) => OnRegisterExport(Input, Confirmation))
           }
         />
         <PosixGroupRegistrationForm
           Busy={Busy}
           MutationEnabled={TenantConfirmed}
-          OnRegister={(Input) =>
-            ConfirmedMutation((Confirmation) => OnRegisterPosixGroup(Input, Confirmation))
+          OnRegister={async (Input) =>
+            ConfirmedMutation(async (Confirmation) => OnRegisterPosixGroup(Input, Confirmation))
           }
         />
       </div>
@@ -544,8 +600,8 @@ export function NfsAdminOverviewView({
                 Export={Export}
                 FeatureState={Feature.State}
                 MutationEnabled={TenantConfirmed}
-                OnTransition={(DriveId, Generation, State) =>
-                  ConfirmedMutation((Confirmation) =>
+                OnTransition={async (DriveId, Generation, State) =>
+                  ConfirmedMutation(async (Confirmation) =>
                     OnTransitionExport(DriveId, Generation, State, Confirmation),
                   )
                 }
@@ -583,8 +639,8 @@ export function NfsAdminOverviewView({
         Busy={Busy}
         Exports={Snapshot.Exports}
         MutationEnabled={TenantConfirmed}
-        OnPropose={(Input) =>
-          ConfirmedMutation((Confirmation) => OnProposeMapping(Input, Confirmation))
+        OnPropose={async (Input) =>
+          ConfirmedMutation(async (Confirmation) => OnProposeMapping(Input, Confirmation))
         }
         Realm={Snapshot.Realm}
       />
@@ -600,8 +656,8 @@ export function NfsAdminOverviewView({
               Busy={Busy}
               key={Proposal.Id}
               MutationEnabled={TenantConfirmed}
-              OnCancel={(ProposalId, Generation) =>
-                ConfirmedMutation((Confirmation) =>
+              OnCancel={async (ProposalId, Generation) =>
+                ConfirmedMutation(async (Confirmation) =>
                   OnCancelProposal(ProposalId, Generation, Confirmation),
                 )
               }
@@ -640,13 +696,13 @@ export function NfsAdminOverviewView({
               key={Mapping.CredentialId}
               Mapping={Mapping}
               MutationEnabled={TenantConfirmed}
-              OnAttenuate={(CredentialId, DriveIds, Generation) =>
-                ConfirmedMutation((Confirmation) =>
+              OnAttenuate={async (CredentialId, DriveIds, Generation) =>
+                ConfirmedMutation(async (Confirmation) =>
                   OnAttenuateMapping(CredentialId, DriveIds, Generation, Confirmation),
                 )
               }
-              OnRevoke={(CredentialId, Generation) =>
-                ConfirmedMutation((Confirmation) =>
+              OnRevoke={async (CredentialId, Generation) =>
+                ConfirmedMutation(async (Confirmation) =>
                   OnRevokeMapping(CredentialId, Generation, Confirmation),
                 )
               }
@@ -668,13 +724,15 @@ export function NfsAdminOverviewView({
               Conflict={Conflict}
               key={Conflict.Id}
               MutationEnabled={TenantConfirmed}
-              OnCopy={(Input) =>
-                ConfirmedMutation((Confirmation) =>
+              OnCopy={async (Input) =>
+                ConfirmedMutation(async (Confirmation) =>
                   OnCopyConflict(Conflict.Id, Input, Confirmation),
                 )
               }
-              OnDiscard={() =>
-                ConfirmedMutation((Confirmation) => OnDiscardConflict(Conflict.Id, Confirmation))
+              OnDiscard={async () =>
+                ConfirmedMutation(async (Confirmation) =>
+                  OnDiscardConflict(Conflict.Id, Confirmation),
+                )
               }
             />
           ))}
@@ -696,6 +754,7 @@ function ReauthenticationNotice(): ReactNode {
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function Generation({ Label, Value }: { Label: string; Value: number }): ReactNode {
   return (
     <div>
@@ -705,10 +764,12 @@ function Generation({ Label, Value }: { Label: string; Value: number }): ReactNo
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function FeatureTransitionControls({
   Busy,
   Feature,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnTransition,
 }: {
   Busy: boolean;
@@ -726,7 +787,9 @@ function FeatureTransitionControls({
           checked={Confirmed}
           disabled={Busy}
           label={Strings.nfsConfirmFeatureTransition}
-          onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+          onChange={(Ignored, Data) => {
+            SetConfirmed(Data.checked === true);
+          }}
         />
       ) : null}
       <div className="fb-nfs-actions">
@@ -751,11 +814,13 @@ function FeatureTransitionControls({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function ExportTransitionControls({
   Busy,
   Export,
   FeatureState,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnTransition,
 }: {
   Busy: boolean;
@@ -782,7 +847,9 @@ function ExportTransitionControls({
           checked={Confirmed}
           disabled={Busy}
           label={Strings.nfsConfirmExportTransition}
-          onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+          onChange={(Ignored, Data) => {
+            SetConfirmed(Data.checked === true);
+          }}
         />
       ) : null}
       <div className="fb-nfs-actions">
@@ -807,18 +874,22 @@ function ExportTransitionControls({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function ExportRegistrationForm({
   Busy,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRegister,
 }: {
   Busy: boolean;
   MutationEnabled: boolean;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This React callback preserves the public mutation payload shape.
   OnRegister(Input: NfsExportRegistration): Promise<void>;
 }): ReactNode {
   const [DriveId, SetDriveId] = useState("");
   const [ExportId, SetExportId] = useState("");
-  const Submit = (Event: FormEvent): void => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React submit events must remain mutable for preventDefault.
+  const Submit = (Event: HtmlFormSubmitEvent): void => {
     Event.preventDefault();
     if (!MutationEnabled) return;
     const ParsedExportId = PositiveInteger(ExportId);
@@ -839,7 +910,9 @@ function ExportRegistrationForm({
         {Strings.nfsDriveId}
         <Input
           disabled={Busy}
-          onChange={(Ignored, Data) => SetDriveId(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetDriveId(Data.value);
+          }}
           required
           value={DriveId}
         />
@@ -849,7 +922,9 @@ function ExportRegistrationForm({
         <Input
           disabled={Busy}
           inputMode="numeric"
-          onChange={(Ignored, Data) => SetExportId(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetExportId(Data.value);
+          }}
           required
           type="number"
           value={ExportId}
@@ -872,19 +947,23 @@ function ExportRegistrationForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function PosixGroupRegistrationForm({
   Busy,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRegister,
 }: {
   Busy: boolean;
   MutationEnabled: boolean;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This React callback preserves the public mutation payload shape.
   OnRegister(Input: NfsPosixGroupRegistration): Promise<void>;
 }): ReactNode {
   const [GroupId, SetGroupId] = useState("");
   const [PosixName, SetPosixName] = useState("");
   const [ProjectedGid, SetProjectedGid] = useState("");
-  const Submit = (Event: FormEvent): void => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React submit events must remain mutable for preventDefault.
+  const Submit = (Event: HtmlFormSubmitEvent): void => {
     Event.preventDefault();
     if (!MutationEnabled) return;
     const ParsedGid = ProjectedId(ProjectedGid);
@@ -909,7 +988,9 @@ function PosixGroupRegistrationForm({
         {Strings.nfsGroupId}
         <Input
           disabled={Busy}
-          onChange={(Ignored, Data) => SetGroupId(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetGroupId(Data.value);
+          }}
           required
           value={GroupId}
         />
@@ -919,7 +1000,9 @@ function PosixGroupRegistrationForm({
         <Input
           disabled={Busy}
           maxLength={255}
-          onChange={(Ignored, Data) => SetPosixName(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetPosixName(Data.value);
+          }}
           pattern="[a-z_][a-z0-9_.-]{0,254}"
           required
           value={PosixName}
@@ -930,7 +1013,9 @@ function PosixGroupRegistrationForm({
         <Input
           disabled={Busy}
           inputMode="numeric"
-          onChange={(Ignored, Data) => SetProjectedGid(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetProjectedGid(Data.value);
+          }}
           required
           type="number"
           value={ProjectedGid}
@@ -954,16 +1039,19 @@ function PosixGroupRegistrationForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function MappingProposalForm({
   Busy,
   Exports,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnPropose,
   Realm,
 }: {
   Busy: boolean;
   Exports: readonly NfsExportView[];
   MutationEnabled: boolean;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This React callback preserves the public mutation payload shape.
   OnPropose(Input: NfsMappingProposalCreate): Promise<void>;
   Realm: string;
 }): ReactNode {
@@ -981,7 +1069,8 @@ function MappingProposalForm({
       return Next;
     });
   };
-  const Submit = (Event: FormEvent): void => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React submit events must remain mutable for preventDefault.
+  const Submit = (Event: HtmlFormSubmitEvent): void => {
     Event.preventDefault();
     if (!MutationEnabled) return;
     const Uid = ProjectedId(ProjectedUid);
@@ -1010,7 +1099,9 @@ function MappingProposalForm({
           {Strings.nfsPrincipalId}
           <Input
             disabled={Busy}
-            onChange={(Ignored, Data) => SetPrincipalId(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetPrincipalId(Data.value);
+            }}
             required
             value={PrincipalId}
           />
@@ -1020,7 +1111,9 @@ function MappingProposalForm({
           <Input
             aria-describedby="nfs-exact-realm-help"
             disabled={Busy}
-            onChange={(Ignored, Data) => SetKerberosPrincipal(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetKerberosPrincipal(Data.value);
+            }}
             placeholder={`user@${Realm}`}
             required
             value={KerberosPrincipal}
@@ -1035,7 +1128,9 @@ function MappingProposalForm({
             <Input
               disabled={Busy}
               inputMode="numeric"
-              onChange={(Ignored, Data) => SetProjectedUid(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetProjectedUid(Data.value);
+              }}
               required
               type="number"
               value={ProjectedUid}
@@ -1046,7 +1141,9 @@ function MappingProposalForm({
             <Input
               disabled={Busy}
               inputMode="numeric"
-              onChange={(Ignored, Data) => SetProjectedGid(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetProjectedGid(Data.value);
+              }}
               required
               type="number"
               value={ProjectedGid}
@@ -1061,7 +1158,9 @@ function MappingProposalForm({
               disabled={Busy}
               key={Export.DriveId}
               label={`${Export.ExportPath} (${Export.DriveId})`}
-              onChange={(Ignored, Data) => ToggleDrive(Export.DriveId, Data.checked === true)}
+              onChange={(Ignored, Data) => {
+                ToggleDrive(Export.DriveId, Data.checked === true);
+              }}
             />
           ))}
           {Exports.length === 0 ? <p>{Strings.nfsNoExportsForMapping}</p> : null}
@@ -1074,7 +1173,9 @@ function MappingProposalForm({
           checked={Confirmed}
           disabled={Busy}
           label={Strings.nfsConfirmProposal}
-          onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+          onChange={(Ignored, Data) => {
+            SetConfirmed(Data.checked === true);
+          }}
         />
         <Button
           aria-describedby="nfs-mapping-authority-help"
@@ -1098,12 +1199,15 @@ function MappingProposalForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function MappingCard({
   Busy,
   Exports,
   Mapping,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnAttenuate,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnRevoke,
 }: {
   Busy: boolean;
@@ -1127,13 +1231,14 @@ function MappingCard({
     AllowedDriveIds.size > 0 &&
     AllowedDriveIds.size < CurrentDriveIds.length &&
     [...AllowedDriveIds].every((DriveId) => CurrentDriveIds.includes(DriveId));
-  const ToggleDrive = (DriveId: string, Checked: boolean): void =>
+  const ToggleDrive = (DriveId: string, Checked: boolean): void => {
     SetAllowedDriveIds((Current) => {
       const Next = new Set(Current);
       if (Checked) Next.add(DriveId);
       else Next.delete(DriveId);
       return Next;
     });
+  };
   return (
     <article className="fb-nfs-card" role="listitem">
       <div className="fb-nfs-card-heading">
@@ -1172,7 +1277,9 @@ function MappingCard({
               disabled={Busy}
               key={Export.DriveId}
               label={`${Export.ExportPath} (${Export.DriveId})`}
-              onChange={(Ignored, Data) => ToggleDrive(Export.DriveId, Data.checked === true)}
+              onChange={(Ignored, Data) => {
+                ToggleDrive(Export.DriveId, Data.checked === true);
+              }}
             />
           ))}
           <Button
@@ -1194,7 +1301,9 @@ function MappingCard({
         checked={Confirmed}
         disabled={Busy}
         label={Strings.nfsConfirmMappingRevoke}
-        onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+        onChange={(Ignored, Data) => {
+          SetConfirmed(Data.checked === true);
+        }}
       />
       <Button
         aria-describedby={HelpId}
@@ -1211,9 +1320,11 @@ function MappingCard({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function ProposalCard({
   Busy,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnCancel,
   Proposal,
 }: {
@@ -1269,7 +1380,9 @@ function ProposalCard({
         checked={Confirmed}
         disabled={Busy}
         label={Strings.nfsConfirmProposalCancel}
-        onChange={(Ignored, Data) => SetConfirmed(Data.checked === true)}
+        onChange={(Ignored, Data) => {
+          SetConfirmed(Data.checked === true);
+        }}
       />
       <Button
         appearance="secondary"
@@ -1286,6 +1399,7 @@ function ProposalCard({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function QuarantinedMappingCard({ Mapping }: { Mapping: NfsQuarantinedMappingView }): ReactNode {
   return (
     <article className="fb-nfs-card" role="listitem">
@@ -1325,16 +1439,20 @@ function QuarantinedMappingCard({ Mapping }: { Mapping: NfsQuarantinedMappingVie
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function ConflictCard({
   Busy,
   Conflict,
   MutationEnabled,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnCopy,
+  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
   OnDiscard,
 }: {
   Busy: boolean;
   Conflict: NfsConflictView;
   MutationEnabled: boolean;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This React callback preserves the public mutation payload shape.
   OnCopy(Input: NfsConflictCopy): Promise<void>;
   OnDiscard(): Promise<void>;
 }): ReactNode {
@@ -1343,7 +1461,8 @@ function ConflictCard({
   const [ParentId, SetParentId] = useState("");
   const [DiscardConfirmed, SetDiscardConfirmed] = useState(false);
   const HelpId = `nfs-conflict-${Conflict.Id}-help`;
-  const Submit = (Event: FormEvent): void => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React submit events must remain mutable for preventDefault.
+  const Submit = (Event: HtmlFormSubmitEvent): void => {
     Event.preventDefault();
     if (!MutationEnabled) return;
     const Generation = PositiveInteger(ExpectedParentGeneration);
@@ -1401,7 +1520,9 @@ function ConflictCard({
           {Strings.nfsParentId}
           <Input
             disabled={Busy}
-            onChange={(Ignored, Data) => SetParentId(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetParentId(Data.value);
+            }}
             required
             value={ParentId}
           />
@@ -1411,7 +1532,9 @@ function ConflictCard({
           <Input
             disabled={Busy}
             maxLength={255}
-            onChange={(Ignored, Data) => SetDisplayName(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetDisplayName(Data.value);
+            }}
             required
             value={DisplayName}
           />
@@ -1421,7 +1544,9 @@ function ConflictCard({
           <Input
             disabled={Busy}
             inputMode="numeric"
-            onChange={(Ignored, Data) => SetExpectedParentGeneration(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetExpectedParentGeneration(Data.value);
+            }}
             required
             type="number"
             value={ExpectedParentGeneration}
@@ -1446,7 +1571,9 @@ function ConflictCard({
         checked={DiscardConfirmed}
         disabled={Busy}
         label={Strings.nfsConfirmConflictDiscard}
-        onChange={(Ignored, Data) => SetDiscardConfirmed(Data.checked === true)}
+        onChange={(Ignored, Data) => {
+          SetDiscardConfirmed(Data.checked === true);
+        }}
       />
       <Button
         appearance="secondary"
@@ -1461,6 +1588,8 @@ function ConflictCard({
     </article>
   );
 }
+
+type HtmlFormSubmitEvent = Parameters<NonNullable<ComponentProps<"form">["onSubmit"]>>[0];
 
 function PositiveInteger(Value: string): number | null {
   const Parsed = Number(Value);

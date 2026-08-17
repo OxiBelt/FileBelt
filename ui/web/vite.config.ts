@@ -38,7 +38,12 @@ const ParentCsp = ParentContentSecurityPolicy();
 const MarkdownPreviewContentSecurityPolicy =
   "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'self'; form-action 'none'; frame-src 'none'; frame-ancestors 'self'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types filebelt-markdown-generated";
 
-function SetBrowserSecurityHeaders(Request: IncomingMessage, Response: ServerResponse): void {
+function SetBrowserSecurityHeaders(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Vite supplies Node request objects whose public contract is mutable.
+  Request: IncomingMessage,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This middleware must mutate the Vite-provided response headers.
+  Response: ServerResponse,
+): void {
   const IsMarkdownPreview = Request.url?.startsWith("/markdown-preview/") ?? false;
   Response.setHeader(
     "Content-Security-Policy",
@@ -95,7 +100,9 @@ export default defineConfig({
     assetsDir: "assets",
     emptyOutDir: true,
     manifest: true,
+    // oxlint-disable-next-line typescript/no-deprecated -- Vite 8 retains Rollup options while FileBelt validates Rolldown migration separately.
     rollupOptions: {
+      // oxlint-disable-next-line typescript/no-deprecated -- The warning filter remains on Rollup's onwarn contract until Rolldown parity is validated.
       onwarn(Warning, Warn) {
         if (Warning.code === "MODULE_LEVEL_DIRECTIVE" && Warning.message.includes('"use client"'))
           return;

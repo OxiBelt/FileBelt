@@ -12,9 +12,12 @@ import type { FileBeltOfficeAstV1, OfficeBlock, OfficeInline } from "./types.js"
 
 export interface MarkdownPreviewProps {
   Ast: FileBeltOfficeAstV1;
-  OnFileBeltLink?: (Target: Extract<OfficeInline, { Kind: "filebeltLink" }>["Target"]) => void;
+  OnFileBeltLink?: (
+    Target: Readonly<Extract<OfficeInline, { Kind: "filebeltLink" }>["Target"]>,
+  ) => void;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function MarkdownPreview({ Ast, OnFileBeltLink }: MarkdownPreviewProps): ReactNode {
   const Frame = useRef<HTMLIFrameElement>(null);
   const AstValue = useRef(Ast);
@@ -29,12 +32,13 @@ export function MarkdownPreview({ Ast, OnFileBeltLink }: MarkdownPreviewProps): 
   }, [OnFileBeltLink]);
   useEffect(() => {
     const Current = Frame.current;
-    if (Current === null) return;
+    if (Current === null) return undefined;
     const Connect = (): void => {
       Port.current?.close();
       const Channel = new MessageChannel();
       Port.current = Channel.port1;
-      Channel.port1.addEventListener("message", (Event: MessageEvent<unknown>) => {
+      // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- DOM dispatch owns the mutable event object.
+      Channel.port1.addEventListener("message", (Event: Readonly<MessageEvent<unknown>>) => {
         if (IsLinkMessage(Event.data)) LinkHandler.current?.(Event.data.Target);
       });
       Channel.port1.start();
@@ -61,6 +65,7 @@ export function MarkdownPreview({ Ast, OnFileBeltLink }: MarkdownPreviewProps): 
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function MarkdownPreviewDocument({ Ast, OnFileBeltLink }: MarkdownPreviewProps): ReactNode {
   const Budget = useMemo(() => CreateMermaidRenderBudget(), [Ast]);
   return (
@@ -104,6 +109,7 @@ function IsUuid(Value: unknown): Value is string {
 }
 
 function RenderBlock(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The public AST contains mutable nested fields for schema compatibility.
   Block: OfficeBlock,
   OnFileBeltLink: MarkdownPreviewProps["OnFileBeltLink"],
   Budget: MermaidRenderBudget,
@@ -201,8 +207,10 @@ function RenderBlock(
         </section>
       );
   }
+  return null;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function GeneratedMarkup({
   Budget,
   Kind,
@@ -224,12 +232,13 @@ function GeneratedMarkup({
         Kind === "mermaid"
           ? Sanitizer.SanitizeSvg(
               await RenderMermaid(
-                () => import("mermaid"),
+                async () => import("mermaid"),
                 { DiagramId: `filebelt-${GeneratedId}`, Source },
                 Budget,
               ),
             )
-          : Sanitizer.SanitizeHtml(await RenderKaTeX(() => import("katex"), Source));
+          : Sanitizer.SanitizeHtml(await RenderKaTeX(async () => import("katex"), Source));
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- The cleanup changes this effect's captured lifecycle flag.
       if (Active && Element.current !== null) SetTrustedMarkup(Element.current, Markup);
     })().catch((Cause: unknown) => {
       if (Active)
@@ -261,7 +270,11 @@ interface TrustedTypesFactoryLike {
 
 let GeneratedMarkupPolicy: { createHTML(Value: string): unknown } | undefined;
 
-function SetTrustedMarkup(Element: HTMLDivElement, Markup: SanitizedGeneratedMarkup): void {
+function SetTrustedMarkup(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This is the reviewed DOM mutation sink for sanitized markup.
+  Element: HTMLDivElement,
+  Markup: SanitizedGeneratedMarkup,
+): void {
   const Factory = (
     globalThis as typeof globalThis & Partial<Record<"trustedTypes", TrustedTypesFactoryLike>>
   ).trustedTypes;
@@ -269,13 +282,16 @@ function SetTrustedMarkup(Element: HTMLDivElement, Markup: SanitizedGeneratedMar
     createHTML: (Value) => Value,
   });
   const TrustedMarkup: unknown = GeneratedMarkupPolicy?.createHTML(Markup) ?? Markup;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The sole markup sink receives only sanitizer output or its Trusted Types wrapper.
   Element.innerHTML = TrustedMarkup as string;
 }
 
 function RenderInlines(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The public AST contains mutable nested fields for schema compatibility.
   Nodes: readonly OfficeInline[],
   OnFileBeltLink: MarkdownPreviewProps["OnFileBeltLink"],
 ): ReactNode {
+  // oxlint-disable-next-line typescript/promise-function-async -- React node mapping deliberately remains a synchronous render operation.
   return Nodes.map((Node, Index) => {
     const Key = `${Node.Range.Start}-${Index}`;
     switch (Node.Kind) {
@@ -289,18 +305,24 @@ function RenderInlines(
         return <strong key={Key}>{RenderInlines(Node.Children, OnFileBeltLink)}</strong>;
       case "footnoteReference":
         return <sup key={Key}>[{Node.Identifier}]</sup>;
-      case "filebeltLink":
+      case "filebeltLink": {
+        const OpenFileBeltLink = (): void => {
+          OnFileBeltLink?.(Node.Target);
+        };
         return (
-          <button key={Key} onClick={() => OnFileBeltLink?.(Node.Target)} type="button">
+          <button key={Key} onClick={OpenFileBeltLink} type="button">
             Open FileBelt item
           </button>
         );
+      }
       case "link":
         return SafeLink(Node.Destination, Key, RenderInlines(Node.Children, OnFileBeltLink));
     }
+    return null;
   });
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function Heading({
   Children,
   Depth,
@@ -316,7 +338,12 @@ function Heading({
   return <h6>{Children}</h6>;
 }
 
-function SafeLink(Destination: string, Key: string, Children: ReactNode): ReactNode {
+function SafeLink(
+  Destination: string,
+  Key: string,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- ReactNode is framework-owned and may contain mutable elements.
+  Children: Readonly<ReactNode>,
+): ReactNode {
   try {
     const Url = new URL(Destination, "https://filebelt.invalid");
     if (Url.protocol === "https:" || Url.protocol === "mailto:")

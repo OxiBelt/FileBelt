@@ -17,6 +17,7 @@ const EmptySnapshot: McpSettingsSnapshot = {
 };
 
 const Client: McpSettingsClient = {
+  // oxlint-disable typescript/require-await -- The fake implements an asynchronous client contract without real I/O.
   async approveAndInvoke() {},
   async cancelInvocation() {},
   async assignTemplate() {},
@@ -51,6 +52,7 @@ const Client: McpSettingsClient = {
   async testRegistration() {
     return true;
   },
+  // oxlint-enable typescript/require-await
 };
 
 describe("McpSettings", () => {

@@ -144,18 +144,20 @@ export interface McpSettingsSnapshot {
 
 export interface McpSettingsClient {
   approveAndInvoke(
-    Prepared: McpPreparedInvocation,
-    OnEvent: (Event: McpInvocationEventView) => void,
-    Signal?: AbortSignal,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+    Prepared: Readonly<McpPreparedInvocation>,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Union event payloads are observer values even though the mapped type is not deeply readonly.
+    OnEvent: (Event: Readonly<McpInvocationEventView>) => void,
+    Signal?: Readonly<AbortSignal>,
   ): Promise<void>;
   assignTemplate(
-    Template: AdminMcpTemplateView,
+    Template: Readonly<AdminMcpTemplateView>,
     PrincipalId: string,
     PrincipalKind: "group" | "service" | "user",
   ): Promise<void>;
   cancelInvocation(InvocationId: string): Promise<void>;
   changeRegistrationState(
-    Registration: McpRegistrationView,
+    Registration: Readonly<McpRegistrationView>,
     Action: "disable" | "enable" | "revoke",
   ): Promise<void>;
   createBlockRule(
@@ -163,11 +165,12 @@ export interface McpSettingsClient {
     Value: string,
     Reason: string,
   ): Promise<void>;
-  createInvocationIntent(Input: McpInvocationInput): Promise<McpPreparedInvocation>;
-  createRegistration(Input: CreateMcpRegistrationInput): Promise<void>;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+  createInvocationIntent(Input: Readonly<McpInvocationInput>): Promise<McpPreparedInvocation>;
+  createRegistration(Input: Readonly<CreateMcpRegistrationInput>): Promise<void>;
   createServiceIdentity(DisplayName: string, SpiffeUri: string): Promise<void>;
   createServiceInvocationGrant(
-    Service: AdminMcpServiceIdentityView,
+    Service: Readonly<AdminMcpServiceIdentityView>,
     RegistrationId: string,
     CapabilityKind: McpCapabilityKind,
     CapabilityName: string,
@@ -176,21 +179,24 @@ export interface McpSettingsClient {
     ExpiresAt: string,
   ): Promise<void>;
   createTemplate(DisplayName: string, EndpointUri: string, TrustProfile: string): Promise<void>;
-  deleteRegistration(Registration: McpRegistrationView): Promise<void>;
-  discoverCapabilities(Registration: McpRegistrationView): Promise<McpCapabilityReviewView>;
+  deleteRegistration(Registration: Readonly<McpRegistrationView>): Promise<void>;
+  discoverCapabilities(
+    Registration: Readonly<McpRegistrationView>,
+  ): Promise<McpCapabilityReviewView>;
   exportRegistration(RegistrationId: string): Promise<string>;
   getCapabilityReview(RegistrationId: string): Promise<McpCapabilityReviewView | null>;
-  getSnapshot(IsTenantAdmin: boolean, Signal?: AbortSignal): Promise<McpSettingsSnapshot>;
+  getSnapshot(IsTenantAdmin: boolean, Signal?: Readonly<AbortSignal>): Promise<McpSettingsSnapshot>;
   importRegistration(Document: string): Promise<void>;
   putCapabilityReview(
-    Registration: McpRegistrationView,
-    Review: McpCapabilityReviewView,
+    Registration: Readonly<McpRegistrationView>,
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Capability entries are caller-owned review values and are not mutated by clients.
+    Review: Readonly<McpCapabilityReviewView>,
   ): Promise<void>;
   putCredential(
-    Registration: McpRegistrationView,
+    Registration: Readonly<McpRegistrationView>,
     Kind: "api_key" | "bearer",
     Secret: string,
   ): Promise<void>;
-  startOauth(Registration: McpRegistrationView): Promise<string>;
-  testRegistration(Registration: McpRegistrationView): Promise<boolean>;
+  startOauth(Registration: Readonly<McpRegistrationView>): Promise<string>;
+  testRegistration(Registration: Readonly<McpRegistrationView>): Promise<boolean>;
 }

@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 import { ExportTransitions, NfsAdminOverviewView } from "./nfs.js";
 import type { NfsAdminSnapshot } from "./nfs.js";
 
+// oxlint-disable-next-line typescript/promise-function-async -- These static UI test doubles intentionally fulfill asynchronous mutation contracts.
+const Resolve = (): Promise<void> => Promise.resolve();
+
 const Snapshot: NfsAdminSnapshot = {
   Conflicts: [
     {
@@ -102,16 +105,16 @@ describe("NfsAdminOverviewView", () => {
     const Markup = renderToStaticMarkup(
       <NfsAdminOverviewView
         Busy={false}
-        OnAttenuateMapping={async () => undefined}
-        OnCancelProposal={async () => undefined}
-        OnCopyConflict={async () => undefined}
-        OnDiscardConflict={async () => undefined}
-        OnRegisterExport={async () => undefined}
-        OnRegisterPosixGroup={async () => undefined}
-        OnRevokeMapping={async () => undefined}
-        OnTransitionExport={async () => undefined}
-        OnTransitionFeature={async () => undefined}
-        OnProposeMapping={async () => undefined}
+        OnAttenuateMapping={Resolve}
+        OnCancelProposal={Resolve}
+        OnCopyConflict={Resolve}
+        OnDiscardConflict={Resolve}
+        OnRegisterExport={Resolve}
+        OnRegisterPosixGroup={Resolve}
+        OnRevokeMapping={Resolve}
+        OnTransitionExport={Resolve}
+        OnTransitionFeature={Resolve}
+        OnProposeMapping={Resolve}
         Snapshot={Snapshot}
       />,
     );
@@ -140,11 +143,11 @@ describe("NfsAdminOverviewView", () => {
   });
 
   it("does not allow disable before the draining generation is applied", () => {
-    expect(ExportTransitions(Snapshot.Exports[0]!, "draining")).toEqual(["active"]);
+    expect(ExportTransitions(Snapshot.Exports[0], "draining")).toEqual(["active"]);
     expect(
       ExportTransitions(
         {
-          ...Snapshot.Exports[0]!,
+          ...Snapshot.Exports[0],
           AppliedGeneration: 3,
           AppliedState: "draining",
         },
@@ -170,16 +173,16 @@ describe("NfsAdminOverviewView", () => {
     const Markup = renderToStaticMarkup(
       <NfsAdminOverviewView
         Busy={false}
-        OnAttenuateMapping={async () => undefined}
-        OnCancelProposal={async () => undefined}
-        OnCopyConflict={async () => undefined}
-        OnDiscardConflict={async () => undefined}
-        OnRegisterExport={async () => undefined}
-        OnRegisterPosixGroup={async () => undefined}
-        OnRevokeMapping={async () => undefined}
-        OnTransitionExport={async () => undefined}
-        OnTransitionFeature={async () => undefined}
-        OnProposeMapping={async () => undefined}
+        OnAttenuateMapping={Resolve}
+        OnCancelProposal={Resolve}
+        OnCopyConflict={Resolve}
+        OnDiscardConflict={Resolve}
+        OnRegisterExport={Resolve}
+        OnRegisterPosixGroup={Resolve}
+        OnRevokeMapping={Resolve}
+        OnTransitionExport={Resolve}
+        OnTransitionFeature={Resolve}
+        OnProposeMapping={Resolve}
         Snapshot={LegacySnapshot}
       />,
     );

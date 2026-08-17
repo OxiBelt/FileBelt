@@ -20,11 +20,12 @@ export interface TextSourceEditorProps {
   Disabled?: boolean;
   Identity?: CollaborationIdentity;
   OnTextChange?: (Text: string) => void;
-  OnSelectionChange?: (Selection: { End: number; Start: number }) => void;
+  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void;
   Source: TextSource;
   SourceEditorLabel: string;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function TextSourceEditor({
   Collaboration,
   Disabled = false,
@@ -46,7 +47,7 @@ export function TextSourceEditor({
   OnSelectionChangeReference.current = OnSelectionChange;
 
   useEffect(() => {
-    if (Host.current === null) return;
+    if (Host.current === null) return undefined;
     const LocalDocument = new Y.Doc();
     const ActiveCollaboration = Collaboration ?? {
       Awareness: new Awareness(LocalDocument),
@@ -60,6 +61,7 @@ export function TextSourceEditor({
     const View = new EditorView({
       parent: Host.current,
       state: EditorState.create({
+        // oxlint-disable-next-line typescript/no-base-to-string -- Y.Text's documented content projection is its toString method.
         doc: SharedText.toString(),
         extensions: [
           keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),

@@ -56,6 +56,7 @@ const Registration = {
 class ContractServer {
   readonly Requests: Request[] = [];
 
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/require-await -- Fetch's platform spelling and Promise contract are required by the injected transport fake.
   readonly fetch: typeof fetch = async (Input, Init) => {
     const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
     this.Requests.push(RequestValue);
@@ -152,7 +153,9 @@ describe("HttpMcpSettingsClient", () => {
       SemanticInput: { BaseVersionId, Markdown: "# Current source", NodeId },
     });
     expect(Server.Requests.some(({ url: Url }) => Url.endsWith("/stream"))).toBe(false);
-    await Client.approveAndInvoke(Prepared, (Event) => Events.push(Event.Kind));
+    await Client.approveAndInvoke(Prepared, (Event) => {
+      Events.push(Event.Kind);
+    });
 
     expect(Events).toEqual(["started", "text", "completed"]);
     const Requests = Server.Requests.filter(({ url: Url }) => Url.includes("invocation"));

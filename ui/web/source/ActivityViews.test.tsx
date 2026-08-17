@@ -46,7 +46,9 @@ describe("SharesView", () => {
     const Markup = renderToStaticMarkup(
       <SharesView
         File={Selected}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
         onCreate={async () => undefined}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
         onRevoke={async () => undefined}
         Shares={Shares}
         Strings={En}

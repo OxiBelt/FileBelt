@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/* eslint-disable @typescript-eslint/naming-convention -- mdast positions use exact lowercase external field names. */
+/* oxlint-disable filebelt/pascal-case -- mdast positions use exact lowercase external field names. */
 
 import type { SourceRange } from "./types.js";
 
@@ -15,6 +15,11 @@ export interface MarkdownPosition {
   start: MarkdownPoint;
 }
 
+type ReadonlyMarkdownPosition = Readonly<{
+  end: Readonly<MarkdownPoint>;
+  start: Readonly<MarkdownPoint>;
+}>;
+
 export function CreateLineStarts(Source: string): readonly number[] {
   const Starts = [0];
   for (let Index = 0; Index < Source.length; Index += 1) {
@@ -25,7 +30,10 @@ export function CreateLineStarts(Source: string): readonly number[] {
   return Starts;
 }
 
-export function OffsetFromPoint(Point: MarkdownPoint, LineStarts: readonly number[]): number {
+export function OffsetFromPoint(
+  Point: Readonly<MarkdownPoint>,
+  LineStarts: readonly number[],
+): number {
   if (Point.offset !== undefined) {
     return Point.offset;
   }
@@ -37,7 +45,7 @@ export function OffsetFromPoint(Point: MarkdownPoint, LineStarts: readonly numbe
 }
 
 export function RangeFromPosition(
-  Position: MarkdownPosition | undefined,
+  Position: ReadonlyMarkdownPosition | undefined,
   LineStarts: readonly number[],
 ): SourceRange {
   if (Position === undefined) {

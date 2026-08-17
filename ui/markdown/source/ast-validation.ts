@@ -25,7 +25,11 @@ export function IsFileBeltOfficeAstV1(Value: unknown): Value is FileBeltOfficeAs
   return Value.Children.every((Block) => IsBlock(Block, Budget));
 }
 
-function IsBlock(Value: unknown, Budget: Budget): Value is OfficeBlock {
+function IsBlock(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+): Value is OfficeBlock {
   if (!Enter(Value, Budget) || !IsRange(Value.Range) || typeof Value.Kind !== "string")
     return false;
   const Nested = { ...Budget, Depth: Budget.Depth + 1 };
@@ -100,7 +104,11 @@ function IsBlock(Value: unknown, Budget: Budget): Value is OfficeBlock {
   return Valid;
 }
 
-function IsInline(Value: unknown, Budget: Budget): Value is OfficeInline {
+function IsInline(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+): Value is OfficeInline {
   if (!Enter(Value, Budget) || !IsRange(Value.Range) || typeof Value.Kind !== "string")
     return false;
   const Nested = { ...Budget, Depth: Budget.Depth + 1 };
@@ -139,7 +147,11 @@ function IsInline(Value: unknown, Budget: Budget): Value is OfficeInline {
   return Valid;
 }
 
-function IsListItem(Value: unknown, Budget: Budget): boolean {
+function IsListItem(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+): boolean {
   if (
     !Enter(Value, Budget) ||
     !HasOnly(Value, ["Checked", "Children", "Range"]) ||
@@ -153,7 +165,11 @@ function IsListItem(Value: unknown, Budget: Budget): boolean {
   return Valid;
 }
 
-function IsTableRow(Value: unknown, Budget: Budget): boolean {
+function IsTableRow(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+): boolean {
   if (
     !Enter(Value, Budget) ||
     !HasOnly(Value, ["Cells", "Range"]) ||
@@ -193,19 +209,32 @@ function IsRange(Value: unknown): Value is SourceRange {
   );
 }
 
-function Enter(Value: unknown, Budget: Budget): Value is Record<string, unknown> {
+function Enter(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+): Value is Record<string, unknown> {
   if (!IsRecord(Value) || Budget.Depth >= MaximumDepth || Budget.Nodes >= MaximumNodes)
     return false;
   Budget.Nodes += 1;
   return true;
 }
 
-function Leave(Budget: Budget, Nested: Budget): void {
+function Leave(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This merges parser-local mutable budget state.
+  Budget: Budget,
+  Nested: Readonly<Budget>,
+): void {
   Budget.Nodes = Nested.Nodes;
   Budget.StringUnits = Nested.StringUnits;
 }
 
-function TakeString(Value: unknown, Budget: Budget, Maximum = MaximumStringUnits): Value is string {
+function TakeString(
+  Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Validation updates this parser-local complexity budget.
+  Budget: Budget,
+  Maximum = MaximumStringUnits,
+): Value is string {
   if (typeof Value !== "string" || Value.length > Maximum || Value.includes("\0")) return false;
   Budget.StringUnits += Value.length;
   return Budget.StringUnits <= MaximumStringUnits;
@@ -219,7 +248,7 @@ function IsRecord(Value: unknown): Value is Record<string, unknown> {
   return typeof Value === "object" && Value !== null && !Array.isArray(Value);
 }
 
-function HasOnly(Value: Record<string, unknown>, Keys: readonly string[]): boolean {
+function HasOnly(Value: Readonly<Record<string, unknown>>, Keys: readonly string[]): boolean {
   const Actual = Object.keys(Value);
   return Actual.length === Keys.length && Actual.every((Key) => Keys.includes(Key));
 }

@@ -21,22 +21,22 @@ import {
 } from "./index.js";
 
 interface RuntimeProcessContract {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js exposes this exact process property.
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
   readonly argv: readonly string[];
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js exposes this exact process property.
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
   readonly stderr: { write(Value: string): void };
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js exposes this exact process property.
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
   exitCode: number | undefined;
   getBuiltinModule(Name: "node:fs"): unknown;
 }
 
 interface ReadFileOptions {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js requires this exact file-system option.
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js requires this exact file-system option.
   readonly encoding: "utf8";
 }
 
 interface WriteFileOptions extends ReadFileOptions {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js requires this exact file-system option.
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js requires this exact file-system option.
   readonly flag: "w";
 }
 
@@ -46,10 +46,11 @@ interface FileSystem {
 }
 
 interface RuntimeGlobals {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- The JavaScript global exposes this exact property.
+  // oxlint-disable-next-line filebelt/pascal-case -- The JavaScript global exposes this exact property.
   readonly process: RuntimeProcessContract;
 }
 
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The intentionally minimal Node global contract isolates CLI runtime access.
 const RuntimeProcess = (globalThis as unknown as RuntimeGlobals).process;
 
 try {
@@ -88,6 +89,7 @@ function Run(InputArguments: readonly string[]): void {
 }
 
 function CreateAdapterImagePlanFile(InputArguments: readonly string[]): void {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- The image-plan validator checks evidence before any serialized plan is accepted. */
   const Options = ParseOptions(InputArguments, [
     "version",
     "revision",
@@ -124,6 +126,7 @@ function CreateAdapterImagePlanFile(InputArguments: readonly string[]): void {
     encoding: "utf8",
     flag: "w",
   });
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ValidateAdapterImagePlanFile(InputArguments: readonly string[]): void {
@@ -132,6 +135,7 @@ function ValidateAdapterImagePlanFile(InputArguments: readonly string[]): void {
 }
 
 function CreateImagePlanFile(InputArguments: readonly string[]): void {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates CLI output. */
   const Options = ParseOptions(InputArguments, [
     "channel",
     "version",
@@ -165,6 +169,7 @@ function CreateImagePlanFile(InputArguments: readonly string[]): void {
   });
   const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
   FileSystemModule.writeFileSync(Output, SerializeImagePlan(Plan), { encoding: "utf8", flag: "w" });
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ValidateImagePlanFile(InputArguments: readonly string[]): void {
@@ -174,6 +179,7 @@ function ValidateImagePlanFile(InputArguments: readonly string[]): void {
 }
 
 function EvaluateVulnerabilities(InputArguments: readonly string[]): void {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates CLI output. */
   const Options = ParseOptions(InputArguments, [
     "trivy",
     "policy",
@@ -196,6 +202,7 @@ function EvaluateVulnerabilities(InputArguments: readonly string[]): void {
   if (!Decision.allowed) {
     RuntimeProcess.exitCode = 1;
   }
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ParseOptions(
@@ -228,6 +235,7 @@ function ParseOptions(
 }
 
 function ReadJson(Path: string): unknown {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates JSON input. */
   const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
   let Contents: string;
   try {
@@ -250,8 +258,10 @@ function ReadJson(Path: string): unknown {
       },
     );
   }
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
+/* oxlint-disable typescript/no-unsafe-type-assertion -- Membership checks establish the closed image role and platform sets. */
 function ReadRole(Options: ReadonlyMap<string, string>): ImageRole {
   const Value = ReadOption(Options, "role");
   if (!ImageRoles.includes(Value as ImageRole)) {
@@ -267,12 +277,14 @@ function ReadPlatform(Options: ReadonlyMap<string, string>): ImagePlatform {
   }
   return Value as ImagePlatform;
 }
+/* oxlint-enable typescript/no-unsafe-type-assertion */
 
 function NormalizeTrivy(
   Value: unknown,
   Role: ImageRole,
   Platform: ImagePlatform,
 ): readonly VulnerabilityFinding[] {
+  /* oxlint-disable typescript/no-unsafe-type-assertion -- Trivy fields are checked for exact runtime type before construction of the internal finding. */
   const Report = AssertRecord(Value, "Trivy report");
   if (Report.SchemaVersion !== 2) {
     throw new Error("Trivy report SchemaVersion must be 2");
@@ -328,9 +340,14 @@ function NormalizeTrivy(
     throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`);
   }
   return Findings;
+  /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
-function ReadTrivyString(Value: Record<string, unknown>, Key: string, Description: string): string {
+function ReadTrivyString(
+  Value: Readonly<Record<string, unknown>>,
+  Key: string,
+  Description: string,
+): string {
   const Field = Value[Key];
   if (typeof Field !== "string" || Field.length === 0) {
     throw new Error(`${Description} ${Key} must be a non-empty string`);
@@ -342,6 +359,7 @@ function AssertRecord(Value: unknown, Description: string): Record<string, unkno
   if (typeof Value !== "object" || Value === null || Array.isArray(Value)) {
     throw new Error(`${Description} must be an object`);
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The preceding object/array guard establishes the record shape.
   return Value as Record<string, unknown>;
 }
 

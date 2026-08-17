@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/* eslint-disable @typescript-eslint/naming-convention -- mdast is an external AST contract with exact lowercase field names. */
+/* oxlint-disable filebelt/pascal-case -- mdast is an external AST contract with exact lowercase field names. */
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
@@ -41,7 +41,10 @@ interface NormalizationContext {
   LineStarts: readonly number[];
 }
 
-export function ParseFileBeltGfmV1(Source: MarkdownSource): ParseResult {
+type AlertSeverity = "caution" | "important" | "note" | "tip" | "warning";
+
+export function ParseFileBeltGfmV1(Source: Readonly<MarkdownSource>): ParseResult {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The composed micromark extension profile lacks a public mdast overload.
   const Root = fromMarkdown(Source.Text, {
     extensions: [gfm(), math()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()],
@@ -49,7 +52,11 @@ export function ParseFileBeltGfmV1(Source: MarkdownSource): ParseResult {
   return NormalizeMdast(Root, Source);
 }
 
-export function NormalizeMdast(Root: MdastNode, Source: MarkdownSource): ParseResult {
+export function NormalizeMdast(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This exported normalizer accepts the mutable mdast convention for compatibility.
+  Root: Readonly<MdastNode>,
+  Source: Readonly<MarkdownSource>,
+): ParseResult {
   const Context: NormalizationContext = {
     Diagnostics: [],
     LineStarts: CreateLineStarts(Source.Text),
@@ -79,8 +86,9 @@ export function NormalizeMdast(Root: MdastNode, Source: MarkdownSource): ParseRe
   return { Ast, Diagnostics: Context.Diagnostics };
 }
 
-function MdastWithinBudget(Root: MdastNode): boolean {
-  const Pending: Array<{ Depth: number; Node: MdastNode }> = [{ Depth: 0, Node: Root }];
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects are intentionally accepted without changing its external shape.
+function MdastWithinBudget(Root: Readonly<MdastNode>): boolean {
+  const Pending: Array<{ Depth: number; Node: Readonly<MdastNode> }> = [{ Depth: 0, Node: Root }];
   let Nodes = 0;
   while (Pending.length > 0) {
     const Current = Pending.pop();
@@ -93,7 +101,12 @@ function MdastWithinBudget(Root: MdastNode): boolean {
   return true;
 }
 
-function NormalizeBlock(Node: MdastNode, Context: NormalizationContext): readonly OfficeBlock[] {
+function NormalizeBlock(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
+  Node: Readonly<MdastNode>,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Normalization accumulates diagnostics in this parser-local context.
+  Context: NormalizationContext,
+): readonly OfficeBlock[] {
   const Range = NodeRange(Node, Context);
   switch (Node.type) {
     case "heading":
@@ -175,9 +188,11 @@ function NormalizeBlock(Node: MdastNode, Context: NormalizationContext): readonl
 }
 
 function NormalizeQuote(
-  Node: MdastNode,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
+  Node: Readonly<MdastNode>,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Normalization accumulates diagnostics in this parser-local context.
   Context: NormalizationContext,
-  Range: SourceRange,
+  Range: Readonly<SourceRange>,
 ): OfficeBlock {
   const First = Node.children?.[0];
   const FirstText = First?.children?.[0];
@@ -191,12 +206,8 @@ function NormalizeQuote(
       Kind: "quote",
       Range,
     };
-  const Severity = (Alert[1] ?? "note").toLowerCase() as
-    | "caution"
-    | "important"
-    | "note"
-    | "tip"
-    | "warning";
+  const CandidateSeverity = (Alert[1] ?? "note").toLowerCase();
+  const Severity: AlertSeverity = IsAlertSeverity(CandidateSeverity) ? CandidateSeverity : "note";
   const AlertChildren = (Node.children ?? []).map((Child, Index) => {
     if (Index !== 0 || Child !== First) return Child;
     return {
@@ -216,14 +227,20 @@ function NormalizeQuote(
   };
 }
 
-function NormalizeCode(Node: MdastNode, Range: SourceRange): readonly OfficeBlock[] {
+function NormalizeCode(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
+  Node: Readonly<MdastNode>,
+  Range: Readonly<SourceRange>,
+): readonly OfficeBlock[] {
   if (Node.lang === "mermaid") return [{ Kind: "mermaid", Range, Source: Node.value ?? "" }];
   if (Node.lang === "math") return [{ Expression: Node.value ?? "", Kind: "math", Range }];
   return [{ Code: Node.value ?? "", Kind: "code", Language: Node.lang ?? null, Range }];
 }
 
 function NormalizeInlines(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
   Nodes: readonly MdastNode[],
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Normalization accumulates diagnostics in this parser-local context.
   Context: NormalizationContext,
 ): readonly OfficeInline[] {
   return Nodes.flatMap((Node) => {
@@ -268,9 +285,11 @@ function NormalizeInlines(
 }
 
 function NormalizeLink(
-  Node: MdastNode,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
+  Node: Readonly<MdastNode>,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Normalization accumulates diagnostics in this parser-local context.
   Context: NormalizationContext,
-  Range: SourceRange,
+  Range: Readonly<SourceRange>,
 ): readonly OfficeInline[] {
   const Target = ParseFileBeltReference(Node.url ?? "");
   if (Target !== undefined)
@@ -294,11 +313,26 @@ function NormalizeLink(
   ];
 }
 
-function NodeRange(Node: MdastNode, Context: NormalizationContext): SourceRange {
+function NodeRange(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects retain the external parser shape.
+  Node: Readonly<MdastNode>,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Context exposes mutable diagnostic storage to normalizers.
+  Context: Readonly<NormalizationContext>,
+): SourceRange {
   return RangeFromPosition(Node.position, Context.LineStarts);
 }
 
 function ClampHeadingDepth(Depth: number | undefined): 1 | 2 | 3 | 4 | 5 | 6 {
   if (Depth === 2 || Depth === 3 || Depth === 4 || Depth === 5 || Depth === 6) return Depth;
   return 1;
+}
+
+function IsAlertSeverity(Value: string): Value is AlertSeverity {
+  return (
+    Value === "caution" ||
+    Value === "important" ||
+    Value === "note" ||
+    Value === "tip" ||
+    Value === "warning"
+  );
 }

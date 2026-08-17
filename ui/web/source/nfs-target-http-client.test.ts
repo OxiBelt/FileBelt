@@ -59,6 +59,7 @@ class ContractServer {
   readonly Requests: Request[] = [];
   ReauthenticationRequired = false;
 
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/require-await -- Fetch's platform spelling and Promise contract are required by the injected transport fake.
   readonly fetch: typeof fetch = async (Input, Init) => {
     const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
     this.Requests.push(RequestValue);

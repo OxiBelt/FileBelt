@@ -21,49 +21,46 @@ export interface CreateDocumentSessionInput {
 
 export interface ListDocumentSessionsOptions {
   Cursor?: string;
-  Signal?: AbortSignal;
+  Signal?: Readonly<AbortSignal>;
 }
 
 /** Provider-neutral browser boundary for document-session controls. */
 export interface DocumentSessionClient {
-  createSession(Input: CreateDocumentSessionInput): Promise<DocumentSessionDetail>;
+  createSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail>;
   createConflictCopy(SessionId: string, TargetName: string): Promise<DocumentSessionConflictCopy>;
-  forceClose(Session: components["schemas"]["DocumentSessionSummary"]): Promise<void>;
+  forceClose(Session: Readonly<components["schemas"]["DocumentSessionSummary"]>): Promise<void>;
   getOwnSession(SessionId: string): Promise<DocumentSessionDetail>;
   listNodeSessions(
     DriveId: string,
     NodeId: string,
-    Options?: ListDocumentSessionsOptions,
+    Options?: Readonly<ListDocumentSessionsOptions>,
   ): Promise<DocumentSessionPage>;
-  listOwnSessions(Options?: ListDocumentSessionsOptions): Promise<DocumentSessionPage>;
+  listOwnSessions(Options?: Readonly<ListDocumentSessionsOptions>): Promise<DocumentSessionPage>;
   redeemLaunch(SessionId: string): Promise<DocumentSessionLaunchHandoff>;
   revokeOwnSession(SessionId: string): Promise<void>;
 }
 
 interface SessionResponse {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Generated OpenAPI response uses this exact key.
+  // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI response uses this exact key.
   readonly csrf_token: string;
 }
 
 interface CsrfHeaders {
   Origin: string;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP requires this exact Fetch Metadata header name.
   "Sec-Fetch-Site": "same-origin";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requests require this exact CSRF header name.
   "X-FileBelt-Csrf": string;
 }
 
 interface MutationHeaders extends CsrfHeaders {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- FileBelt HTTP requires this exact idempotency header name.
   "Idempotency-Key": string;
 }
 
 interface ApiResult<T> {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly data?: T;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly error?: unknown;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- `openapi-fetch` returns this exact result key.
+  // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
   readonly response: Response;
 }
 
@@ -83,11 +80,11 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
       credentials: "same-origin",
-      fetch: (Request) => FetchImplementation(Request),
+      fetch: async (Request) => FetchImplementation(Request),
     });
   }
 
-  async createSession(Input: CreateDocumentSessionInput): Promise<DocumentSessionDetail> {
+  async createSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail> {
     await this.#ensureSession();
     return RequireData<DocumentSessionDetail>(
       await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions", {
@@ -100,7 +97,9 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     );
   }
 
-  async listOwnSessions(Options: ListDocumentSessionsOptions = {}): Promise<DocumentSessionPage> {
+  async listOwnSessions(
+    Options: Readonly<ListDocumentSessionsOptions> = {},
+  ): Promise<DocumentSessionPage> {
     return RequireData<DocumentSessionPage>(
       await this.#Api.GET("/api/v1/document-sessions", {
         params: {
@@ -143,7 +142,7 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
   async listNodeSessions(
     DriveId: string,
     NodeId: string,
-    Options: ListDocumentSessionsOptions = {},
+    Options: Readonly<ListDocumentSessionsOptions> = {},
   ): Promise<DocumentSessionPage> {
     return RequireData<DocumentSessionPage>(
       await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions", {
@@ -159,7 +158,9 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     );
   }
 
-  async forceClose(Session: components["schemas"]["DocumentSessionSummary"]): Promise<void> {
+  async forceClose(
+    Session: Readonly<components["schemas"]["DocumentSessionSummary"]>,
+  ): Promise<void> {
     await this.#ensureSession();
     RequireSuccess(
       await this.#Api.DELETE(
@@ -231,7 +232,9 @@ function DefaultBaseUrl(): string {
   return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
   if (Result.response.ok && Result.data !== undefined) return Result.data as T;
   throw RequestError(Result.response, Result.error);
 }

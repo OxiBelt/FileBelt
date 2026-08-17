@@ -85,8 +85,8 @@ required `useX` spelling through a filtered exception.
 Names fixed by platform APIs, wire formats, persisted browser formats, or
 third-party contracts retain their external spelling only at the relevant
 boundary. Alias their local bindings to PascalCase and use a narrowly scoped,
-rationale-bearing naming-rule disable only when the declaration itself must
-keep the external name. Run `pnpm format:check` and `pnpm lint`; warnings fail
+rationale-bearing `filebelt/pascal-case` disable only when the declaration
+itself must keep the external name. Run `pnpm format:check` and `pnpm lint`; warnings fail
 the lint check. Use `pnpm format` to apply the repository formatter. Files
 registered as generated outputs retain semantic lint, typecheck, build, and
 generation-drift coverage but are exempt from hand-authored naming and layout

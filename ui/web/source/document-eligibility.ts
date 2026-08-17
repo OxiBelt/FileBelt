@@ -14,7 +14,7 @@ const OfficeMediaTypes: Readonly<Record<string, string>> = {
 };
 
 /** An exact Office type is eligible for an external document session, not Markdown conversion. */
-export function IsOfficeDocumentCandidate(Entry: FileEntry): boolean {
+export function IsOfficeDocumentCandidate(Entry: Readonly<FileEntry>): boolean {
   if (
     Entry.Kind !== "file" ||
     Entry.HeadVersionId === null ||

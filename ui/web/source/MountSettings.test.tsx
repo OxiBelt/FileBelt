@@ -63,7 +63,9 @@ describe("NFS target approval controls", () => {
     const Markup = renderToStaticMarkup(
       <NfsProposalConsentCard
         Busy={false}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
         OnApprove={async () => undefined}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
         OnDecline={async () => undefined}
         Proposal={Proposal}
       />,
@@ -86,7 +88,12 @@ describe("NFS target approval controls", () => {
 
   it("shows the active alias ceiling and confirmation-gates direct revocation", () => {
     const Markup = renderToStaticMarkup(
-      <NfsActiveMappingCard Busy={false} Mapping={Mapping} OnRevoke={async () => undefined} />,
+      <NfsActiveMappingCard
+        Busy={false}
+        Mapping={Mapping}
+        // oxlint-disable-next-line typescript/require-await -- Static rendering requires the asynchronous prop shape but performs no mutation.
+        OnRevoke={async () => undefined}
+      />,
     );
 
     expect(Markup).toContain(Mapping.kerberos_principal);

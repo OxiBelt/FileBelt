@@ -14,6 +14,7 @@ let ParentOrigin: string | undefined;
 let ParentPort: MessagePort | undefined;
 const Root = createRoot(Host);
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- DOM dispatch owns the mutable event object.
 window.addEventListener("message", (Event: MessageEvent<unknown>) => {
   if (
     ParentPort !== undefined ||
@@ -28,6 +29,7 @@ window.addEventListener("message", (Event: MessageEvent<unknown>) => {
   const Port = Event.ports[0];
   if (Port === undefined) return;
   ParentPort = Port;
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- DOM dispatch owns the mutable event object.
   Port.addEventListener("message", (PortEvent: MessageEvent<unknown>) => {
     if (IsPreviewMessage(PortEvent.data))
       Root.render(
@@ -39,7 +41,7 @@ window.addEventListener("message", (Event: MessageEvent<unknown>) => {
   Port.start();
 });
 
-function OpenFileBeltLink(Target: FileBeltReference): void {
+function OpenFileBeltLink(Target: Readonly<FileBeltReference>): void {
   ParentPort?.postMessage({ Target, Type: "filebelt-markdown-link-v1" });
 }
 

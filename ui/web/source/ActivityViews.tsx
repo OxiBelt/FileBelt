@@ -3,7 +3,7 @@
 import { Button, Input, ProgressBar } from "@fluentui/react-components";
 import { BellRing, Clock3, Link2, RotateCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 
 import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
 
@@ -34,6 +34,7 @@ function FormatDate(Value: string): string {
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types -- React owns this nested props object and the component only observes it.
 export function UploadsView({
   Strings,
   Uploads,
@@ -41,6 +42,7 @@ export function UploadsView({
   Strings: Strings;
   Uploads: readonly UploadRecord[];
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types
   return (
     <section aria-labelledby="uploads-heading" className="fb-activity-view">
       <header className="fb-page-heading">
@@ -82,6 +84,7 @@ export function UploadsView({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
 export function VersionsView({
   File,
   onRestore: OnRestore,
@@ -93,6 +96,7 @@ export function VersionsView({
   Strings: Strings;
   Versions: readonly VersionRecord[];
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const Matching = File === undefined ? [] : Versions.filter(({ FileId }) => FileId === File.Id);
   return (
     <section aria-labelledby="versions-heading" className="fb-activity-view">
@@ -136,6 +140,7 @@ export function VersionsView({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
 export function SharesView({
   File,
   onCreate: OnCreate,
@@ -149,13 +154,15 @@ export function SharesView({
   Shares: readonly ShareRecord[];
   Strings: Strings;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Permission, SetPermission] = useState<ShareRecord["Permission"]>("Viewer");
   const [Target, SetTarget] = useState("");
   const [Busy, SetBusy] = useState(false);
   const Matching =
     File === undefined ? Shares : Shares.filter(({ ResourceId }) => ResourceId === File.Id);
 
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     if (File === undefined || Target.trim().length === 0) return;
     SetBusy(true);
@@ -181,14 +188,21 @@ export function SharesView({
         <form className="fb-share-form" onSubmit={(Event) => void Submit(Event)}>
           <label>
             {Strings.shareTarget}
-            <Input onChange={(Ignored, Data) => SetTarget(Data.value)} value={Target} />
+            <Input
+              onChange={(Ignored, Data) => {
+                SetTarget(Data.value);
+              }}
+              value={Target}
+            />
           </label>
           <label>
             {Strings.sharePermission}
             <select
-              onChange={(Event) =>
-                SetPermission(Event.currentTarget.value as ShareRecord["Permission"])
-              }
+              onChange={(Event) => {
+                const Value = Event.currentTarget.value;
+                if (Value === "Contributor" || Value === "Manager" || Value === "Viewer")
+                  SetPermission(Value);
+              }}
               value={Permission}
             >
               <option value="Viewer">{Strings.viewer}</option>
@@ -225,6 +239,7 @@ export function SharesView({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
 export function SessionsView({
   onRevoke: OnRevoke,
   Sessions,
@@ -234,6 +249,7 @@ export function SessionsView({
   Sessions: readonly SessionRecord[];
   Strings: Strings;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   return (
     <section aria-labelledby="sessions-heading" className="fb-activity-view">
       <header className="fb-page-heading">
@@ -269,6 +285,7 @@ export function SessionsView({
   );
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
 export function PrivacyView({
   Events,
   onMarkRead: OnMarkRead,
@@ -278,6 +295,7 @@ export function PrivacyView({
   onMarkRead(): Promise<void>;
   Strings: Strings;
 }): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   return (
     <section aria-labelledby="privacy-heading" className="fb-activity-view">
       <header className="fb-page-heading">

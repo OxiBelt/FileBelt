@@ -35,14 +35,24 @@ lock are likewise discovered by a fail-closed coverage check. The ONLYOFFICE
 launcher lock must remain dependency-free; adding a package requires a
 separate adapter-local admission review before its frozen install may run.
 
-Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.1,
-`@eslint/js` 10.0.1, `typescript-eslint` 8.67.0, and TypeScript 6.0.3.
-Formatting uses exact
-`oxfmt` 0.63.0 with its registry-integrity-pinned optional native bindings.
-Oxfmt and its bindings are MIT-licensed, declare no install-time lifecycle
-scripts, run only while developing or validating source, and are not copied
-into published browser or OxiBelt images. Every resolved license must remain admitted by
-`supply-chain/node-policy.toml`. Rust production-package closures
+Repository JavaScript and TypeScript tooling is also lockfile-pinned. The root
+uses exact `oxfmt` 0.63.0, `oxlint` 1.78.0, `oxlint-tsgolint` 7.0.2001, and
+TypeScript 6.0.3. Oxlint enables every one of tsgolint v7's 59 implemented
+type-aware rules as an error while compiler diagnostics remain in the separate
+`pnpm typecheck` lane. The local diagnostic-only `filebelt/pascal-case` rule
+preserves the naming selectors that tsgolint does not implement; its structure
+is adapted under Apache-2.0 from OxiBelt commit
+`9daacf938a7d79fd618c18904435510eecb2f4c3` and its behavior is independently
+covered by FileBelt fixtures.
+
+Oxfmt, Oxlint, tsgolint, and their registry-integrity-pinned optional native
+bindings are MIT-licensed, declare no install-time lifecycle scripts, run only
+while developing or validating source, and are not copied into published
+browser or OxiBelt images. The tsgolint package publishes lint-host binaries
+for x86-64 and ARM64 Linux, macOS, and Windows; FileBelt's Node CI exercises the
+Linux x86-64 host while release cross-builds continue to run linting on their
+supported host rather than inside the target image. Every resolved license
+must remain admitted by `supply-chain/node-policy.toml`. Rust production-package closures
 and first-party features are independently reviewed in
 `supply-chain/cargo-boundaries-v1.toml`; registered package and manifest pairs
 are resolved against metadata and the locked tree without duplicating versions
@@ -56,7 +66,13 @@ Peer checks remain strict except for one exact compatibility admission:
 TypeScript 6.0.3. `pnpm-workspace.yaml` therefore permits only that package and
 peer-version pair after deterministic OpenAPI regeneration was verified with
 TypeScript 6.0.3. Changing either exact version requires revalidating and
-updating or removing the exception.
+updating or removing the exception. The tsgolint v7 process uses its embedded
+TypeScript 7 engine for lint analysis without changing the direct compiler.
+The direct compiler remains on TypeScript 6 until an official
+`openapi-typescript` release resolves the tracked
+[TypeScript 7 incompatibility](https://github.com/openapi-ts/openapi-typescript/issues/2841);
+FileBelt does not hide this gate behind a TypeScript 6 alias or broader peer
+exception.
 
 The browser packages use Vite `8.2.1` with TypeScript remaining at `6.0.3` and
 Fluent UI React Components `9.74.6`. Vite reaches Rolldown `1.2.4` and its

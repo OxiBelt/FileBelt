@@ -35,6 +35,7 @@ describe("Markdown collaboration transport", () => {
         PresenceLabel: "Editor 1",
         RoomId: "00000000-0000-4000-8000-000000000020",
       },
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The EventTarget-based test transport deliberately implements only the WebSocket members this harness exercises.
       WebSocketFactory: () => Socket as unknown as WebSocket,
     });
     Socket.Open();
@@ -55,6 +56,7 @@ describe("Markdown collaboration transport", () => {
         PresenceLabel: "Editor 1",
         RoomId: "00000000-0000-4000-8000-000000000020",
       },
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The EventTarget-based test transport deliberately implements only the WebSocket members this harness exercises.
       WebSocketFactory: () => Socket as unknown as WebSocket,
     });
     Socket.Open();
@@ -65,13 +67,15 @@ describe("Markdown collaboration transport", () => {
 });
 
 class FakeWebSocket extends EventTarget {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test transport preserves its mutable byte-buffer harness contract.
   readonly #OnSend: (Payload: Uint8Array) => void;
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket exposes this platform-defined member spelling.
+  // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this platform-defined member spelling.
   binaryType = "arraybuffer";
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- WebSocket exposes this platform-defined member spelling.
+  // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this platform-defined member spelling.
   readyState = 0;
   readonly CloseCodes: (number | undefined)[] = [];
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test transport preserves its mutable byte-buffer harness contract.
   constructor(OnSend: (Payload: Uint8Array) => void) {
     super();
     this.#OnSend = OnSend;
@@ -82,10 +86,11 @@ class FakeWebSocket extends EventTarget {
     this.dispatchEvent(new Event("open"));
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test transport preserves its mutable byte-buffer harness contract.
   Receive(Payload: Uint8Array): void {
-    queueMicrotask(() =>
-      this.dispatchEvent(new MessageEvent("message", { data: Uint8Array.from(Payload).buffer })),
-    );
+    queueMicrotask(() => {
+      this.dispatchEvent(new MessageEvent("message", { data: Uint8Array.from(Payload).buffer }));
+    });
   }
 
   send(Payload: ArrayBuffer): void {
@@ -101,10 +106,12 @@ class FakeWebSocket extends EventTarget {
 
 const Encoder = new TextEncoder();
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test wire helper preserves its mutable byte-buffer harness contract.
 function Frame(NumberValue: number, Payload: Uint8Array): Uint8Array {
   return Bytes(NumberValue, Payload);
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test wire helper preserves its mutable byte-buffer harness contract.
 function Message(Parts: Uint8Array[]): Uint8Array {
   const Result = new Uint8Array(Parts.reduce((Total, Part) => Total + Part.byteLength, 0));
   let Offset = 0;
@@ -119,6 +126,7 @@ function Text(NumberValue: number, Value: string): Uint8Array {
   return Bytes(NumberValue, Encoder.encode(Value));
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The test wire helper preserves its mutable byte-buffer harness contract.
 function Bytes(NumberValue: number, Value: Uint8Array): Uint8Array {
   return Message([Varint(NumberValue * 8 + 2), Varint(Value.byteLength), Value]);
 }

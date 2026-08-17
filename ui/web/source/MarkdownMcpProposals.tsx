@@ -26,6 +26,7 @@ interface Proposal {
   Text: string;
 }
 
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and the apply callback is a receiver-free parent function.
 export function MarkdownMcpProposals({
   BaseVersionId,
   Client,
@@ -34,6 +35,7 @@ export function MarkdownMcpProposals({
   Selection,
   Source,
 }: MarkdownMcpProposalsProps): ReactNode {
+  // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Registrations, SetRegistrations] = useState<readonly McpRegistrationView[]>([]);
   const [RegistrationId, SetRegistrationId] = useState("");
   const [Review, SetReview] = useState<McpCapabilityReviewView | null>(null);
@@ -73,7 +75,7 @@ export function MarkdownMcpProposals({
   useEffect(() => {
     if (RegistrationId.length === 0) {
       SetReview(null);
-      return;
+      return undefined;
     }
     let Active = true;
     void Client.getCapabilityReview(RegistrationId)
@@ -88,7 +90,9 @@ export function MarkdownMcpProposals({
     };
   }, [Client, RegistrationId]);
 
-  useEffect(() => SetFingerprint(Capabilities[0]?.Fingerprint ?? ""), [Capabilities]);
+  useEffect(() => {
+    SetFingerprint(Capabilities[0]?.Fingerprint ?? "");
+  }, [Capabilities]);
 
   const Prepare = async (): Promise<void> => {
     const Capability = Capabilities.find((Value) => Value.Fingerprint === Fingerprint);
@@ -129,10 +133,14 @@ export function MarkdownMcpProposals({
       return;
     }
     try {
-      await Client.approveAndInvoke(Prepared, (Event: McpInvocationEventView) => {
-        if (Event.Kind === "semanticMarkdown")
-          SetProposal({ BaseText, InvocationId: Event.InvocationId, Text: Event.Value.Markdown });
-      });
+      await Client.approveAndInvoke(
+        Prepared,
+        // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The MCP client owns this discriminated event union and the callback only observes it.
+        (Event: McpInvocationEventView) => {
+          if (Event.Kind === "semanticMarkdown")
+            SetProposal({ BaseText, InvocationId: Event.InvocationId, Text: Event.Value.Markdown });
+        },
+      );
     } catch (Cause) {
       SetError(Cause instanceof Error ? Cause.message : En.markdownMcpUnavailable);
     } finally {
@@ -154,7 +162,9 @@ export function MarkdownMcpProposals({
       <Field label={En.markdownMcpServer}>
         <Select
           disabled={Busy}
-          onChange={(Event) => SetRegistrationId(Event.target.value)}
+          onChange={(Event) => {
+            SetRegistrationId(Event.target.value);
+          }}
           value={RegistrationId}
         >
           <option value="">{En.markdownMcpSelect}</option>
@@ -168,7 +178,9 @@ export function MarkdownMcpProposals({
       <Field label={En.markdownMcpCapability}>
         <Select
           disabled={Busy || RegistrationId.length === 0}
-          onChange={(Event) => SetFingerprint(Event.target.value)}
+          onChange={(Event) => {
+            SetFingerprint(Event.target.value);
+          }}
           value={Fingerprint}
         >
           <option value="">{En.markdownMcpSelect}</option>
@@ -193,7 +205,12 @@ export function MarkdownMcpProposals({
           <Button appearance="primary" disabled={Busy} onClick={() => void Confirm()}>
             {En.markdownMcpConfirmButton}
           </Button>
-          <Button disabled={Busy} onClick={() => SetPrepared(null)}>
+          <Button
+            disabled={Busy}
+            onClick={() => {
+              SetPrepared(null);
+            }}
+          >
             {En.close}
           </Button>
         </div>
@@ -211,7 +228,13 @@ export function MarkdownMcpProposals({
           <Button appearance="primary" onClick={Apply}>
             {En.markdownProposalApply}
           </Button>
-          <Button onClick={() => SetProposal(null)}>{En.close}</Button>
+          <Button
+            onClick={() => {
+              SetProposal(null);
+            }}
+          >
+            {En.close}
+          </Button>
         </section>
       )}
     </section>

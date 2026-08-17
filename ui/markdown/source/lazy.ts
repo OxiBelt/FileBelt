@@ -21,6 +21,7 @@ export type MermaidSecurityOptions = Record<"flowchart", Record<"htmlLabels", fa
   Record<"startOnLoad", false>;
 
 interface KaTeXRenderer {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This preserves KaTeX's public dynamic-module contract.
   renderToString(Expression: string, Options: KaTeXRenderOptions): string;
 }
 
@@ -72,8 +73,10 @@ type OfficeParserOptions = Record<"generatorConfig", OfficeGeneratorConfig> &
 
 export interface OfficeImportModule {
   convert(
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This preserves officeparser's public dynamic-module contract.
     Contents: Uint8Array,
     Destination: "md",
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This preserves officeparser's public dynamic-module contract.
     Options: OfficeParserOptions,
   ): Promise<OfficeParserResult>;
 }
@@ -91,6 +94,7 @@ export function CreateMermaidRenderBudget(MaximumDiagrams = 50): MermaidRenderBu
 
 export async function RenderMermaid(
   LoadMermaid: () => Promise<MermaidModule>,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The dynamic Mermaid API accepts its mutable public options shape.
   Options: MermaidRenderOptions,
   Budget = CreateMermaidRenderBudget(),
 ): Promise<string> {
@@ -126,8 +130,9 @@ export function OfficeImportType(Name: string): OfficeImportSourceType | null {
 }
 
 export async function ImportOfficeMarkdown(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The exported import API preserves its public mutable byte-buffer shape.
   Options: OfficeImportOptions,
-  LoadOfficeImporter: () => Promise<OfficeImportModule> = () => import("officeparser/slim"),
+  LoadOfficeImporter: () => Promise<OfficeImportModule> = async () => import("officeparser/slim"),
 ): Promise<string> {
   const MaximumInputBytes = Options.MaximumInputBytes ?? 8 * 1024 * 1024;
   const MaximumOutputBytes = Options.MaximumOutputBytes ?? 2 * 1024 * 1024;

@@ -47,7 +47,7 @@ export type ImageLicense =
   | typeof WebImageLicense;
 export type ComponentRelationship = "runtime" | "build-tool";
 
-/* eslint-disable @typescript-eslint/naming-convention -- These properties are stable image-plan schema v1 JSON keys. */
+/* oxlint-disable filebelt/pascal-case -- These properties are stable image-plan schema v1 JSON keys. */
 export interface ImageComponent {
   readonly type: "application" | "library";
   readonly name: string;
@@ -112,7 +112,7 @@ export interface ImagePlanV2 {
   readonly runtime: typeof RuntimeIdentity;
   readonly images: readonly ImageRow[];
 }
-/* eslint-enable @typescript-eslint/naming-convention */
+/* oxlint-enable filebelt/pascal-case */
 
 export interface CreateImagePlanInput {
   readonly Channel: ImagePlanChannel;
@@ -378,6 +378,7 @@ function RustComponents(
   PackageName: string,
   ExtraRuntimeComponents: readonly ImageComponent[],
 ): PlatformComponentInventory {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The closed ImagePlatforms map constructs every PlatformComponentInventory entry.
   return Object.fromEntries(
     ImagePlatforms.map((Platform) => [
       Platform,
@@ -599,7 +600,7 @@ export function ValidateImagePlan(Value: unknown): ImagePlanV2 {
   return CreateImagePlan({ Channel: Plan.channel, Version: Plan.version, Source });
 }
 
-export function SerializeImagePlan(Value: ImagePlanV2 | unknown): string {
+export function SerializeImagePlan(Value: unknown): string {
   return `${JSON.stringify(ValidateImagePlan(Value), null, 2)}\n`;
 }
 
@@ -635,6 +636,7 @@ function CreateImageRow(Definition: RoleDefinition): ImageRow {
 function CloneComponentInventory(
   Inventory: PlatformComponentInventory,
 ): PlatformComponentInventory {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The closed ImagePlatforms map constructs every PlatformComponentInventory entry.
   return Object.fromEntries(
     ImagePlatforms.map((Platform) => [
       Platform,
@@ -793,11 +795,12 @@ function AssertRecord(Value: unknown, Description: string): Record<string, unkno
   if (typeof Value !== "object" || Value === null || Array.isArray(Value)) {
     throw new Error(`${Description} must be an object`);
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The preceding object/array guard establishes the record shape.
   return Value as Record<string, unknown>;
 }
 
 function AssertExactKeys(
-  Value: Record<string, unknown>,
+  Value: Readonly<Record<string, unknown>>,
   ExpectedKeys: readonly string[],
   Description: string,
 ): void {

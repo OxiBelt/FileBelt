@@ -83,6 +83,7 @@ function Node(
 describe("HttpDocumentSessionClient", () => {
   it("uses generated session routes with in-memory CSRF and idempotency headers", async () => {
     const Requests: Request[] = [];
+    // oxlint-disable-next-line typescript/require-await -- Fetch's Promise contract is required by this synchronous in-memory transport fake.
     const Fetch: typeof fetch = async (Input, Init) => {
       const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
       Requests.push(HttpRequest);
@@ -186,7 +187,8 @@ describe("HttpDocumentSessionClient", () => {
   });
 });
 
-function Find(Requests: readonly Request[], Method: string, Path: string): Request {
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Request is a mutable platform type, but this lookup helper only observes it.
+function Find(Requests: readonly Readonly<Request>[], Method: string, Path: string): Request {
   const Request = Requests.find(
     (Candidate) => Candidate.method === Method && new URL(Candidate.url).pathname === Path,
   );

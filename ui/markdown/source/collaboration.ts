@@ -61,12 +61,13 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   #Heartbeat: ReturnType<typeof setInterval> | undefined;
   #InitialSync: ChunkAccumulator | undefined;
   #InFlight: { Id: string; McpInvocationId?: string; Update: Uint8Array } | undefined;
-  #PendingUpdates: { McpInvocationId?: string; Update: Uint8Array }[] = [];
+  readonly #PendingUpdates: { McpInvocationId?: string; Update: Uint8Array }[] = [];
   #PendingCheckpoint:
     | { Reject: (Reason?: unknown) => void; Resolve: (Id: string) => void }
     | undefined;
   #Ready = false;
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Session construction preserves the mutable browser WebSocket contract.
   private constructor(Options: ConnectMarkdownCollaborationOptions, Socket: WebSocket) {
     this.#Grant = Options.Grant;
     this.#OnStateChange = Options.OnStateChange;
@@ -76,6 +77,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   }
 
   static async Connect(
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This exported connection API preserves its public grant shape.
     Options: ConnectMarkdownCollaborationOptions,
   ): Promise<MarkdownRealtimeSession> {
     const Socket = (Options.WebSocketFactory ?? ((Url: string) => new WebSocket(Url)))(
@@ -94,6 +96,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   }
 
   CurrentText(): string {
+    // oxlint-disable-next-line typescript/no-base-to-string -- Y.Text's documented content projection is its toString method.
     return this.Document.getText(this.TextName).toString();
   }
 
@@ -157,6 +160,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
       const Fail = (Reason: unknown): void => {
         if (!Settled) {
           Settled = true;
+          // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Preserve the transport's original rejection reason for callers.
           Reject(Reason);
         }
       };
@@ -197,7 +201,9 @@ export class MarkdownRealtimeSession implements TextCollaboration {
       });
       this.#Socket.addEventListener(
         "error",
-        () => Fail(new Error("The collaboration transport failed.")),
+        () => {
+          Fail(new Error("The collaboration transport failed."));
+        },
         { once: true },
       );
       this.#Socket.addEventListener("close", () => {
@@ -226,6 +232,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.#OnStateChange?.("connected");
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Yjs supplies mutable update buffers through its public event contract.
   readonly #DocumentUpdate = (Update: Uint8Array, Origin: unknown): void => {
     if (Origin === RemoteDocumentOrigin || !this.#Ready || this.#Destroyed) return;
     if (Update.byteLength === 0 || Update.byteLength > 2 * 1024 * 1024) {
@@ -241,6 +248,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   };
 
   readonly #AwarenessUpdate = (
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Yjs supplies mutable awareness arrays through its public event contract.
     { added: Added, removed: Removed, updated: Updated }: AwarenessChange,
     Origin: unknown,
   ): void => {
@@ -281,6 +289,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     );
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- WebSocket frames retain the mutable typed-array codec contract.
   #Receive(BytesValue: Uint8Array): void {
     if (BytesValue.byteLength === 0 || BytesValue.byteLength > MaximumFrameBytes)
       throw new Error("Invalid collaboration frame.");
@@ -318,6 +327,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     }
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The protobuf codec retains mutable typed-array field values.
   #ReceiveSync(Values: WireField[]): void {
     const Sequence = NumberField(Values, 1);
     const Index = NumberField(Values, 2);
@@ -330,15 +340,15 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     if (Current !== undefined && (Current.Sequence !== Sequence || Current.Snapshot !== Snapshot))
       throw new Error("Interleaved collaboration sync groups are not permitted.");
     const Accumulator =
-      Current !== undefined && Current.Sequence === Sequence && Current.Snapshot === Snapshot
+      Current?.Sequence === Sequence && Current.Snapshot === Snapshot
         ? Current
         : { Chunks: new Array<Uint8Array | undefined>(Count), Sequence, Snapshot };
     if (Accumulator.Chunks.length !== Count || Accumulator.Chunks[Index] !== undefined)
       throw new Error("Invalid collaboration sync ordering.");
     Accumulator.Chunks[Index] = Update;
     this.#InitialSync = Accumulator;
-    if (Accumulator.Chunks.some((Chunk) => Chunk === undefined)) return;
-    const Complete = Concatenate(Accumulator.Chunks as Uint8Array[]);
+    if (!HasAllChunks(Accumulator.Chunks)) return;
+    const Complete = Concatenate(Accumulator.Chunks);
     this.#InitialSync = undefined;
     if (Complete.byteLength > 2 * 1024 * 1024)
       throw new Error("Collaboration sync group exceeds the supported limit.");
@@ -357,6 +367,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.#AcknowledgedSequence = Sequence;
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The protobuf codec retains mutable typed-array field values.
   #ReceiveAcknowledgement(Values: WireField[]): void {
     const Id = StringField(Values, 1);
     const Sequence = NumberField(Values, 2);
@@ -371,6 +382,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.#Pump();
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The protobuf codec retains mutable typed-array field values.
   #ReceiveCheckpoint(Values: WireField[]): void {
     const Id = StringField(Values, 1);
     const Sequence = NumberField(Values, 2);
@@ -388,6 +400,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     Pending.Resolve(Id);
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The protobuf codec retains mutable typed-array field values.
   #ReceiveAwareness(Values: WireField[]): void {
     const ClientId = StringField(Values, 1);
     if (ClientId === this.#Grant.ClientId) return;
@@ -459,6 +472,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     );
   }
 
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- WebSocket frames retain the mutable typed-array codec contract.
   #Send(BytesValue: Uint8Array): void {
     if (BytesValue.byteLength > MaximumFrameBytes || this.#Socket.readyState !== OpenWebSocketState)
       throw new Error("The collaboration transport is unavailable.");
@@ -507,10 +521,12 @@ interface WireField {
   Wire: number;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The wire encoder keeps a mutable typed-array payload contract.
 function Frame(NumberValue: number, Payload: Uint8Array): Uint8Array {
   return Message([Bytes(NumberValue, Payload)]);
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The wire encoder keeps mutable typed-array part contracts.
 function Message(Parts: Uint8Array[]): Uint8Array {
   return Concatenate(Parts);
 }
@@ -519,6 +535,7 @@ function Text(NumberValue: number, Value: string): Uint8Array {
   return Bytes(NumberValue, Encoder.encode(Value));
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The wire encoder keeps a mutable typed-array payload contract.
 function Bytes(NumberValue: number, Value: Uint8Array): Uint8Array {
   return Concatenate([Varint(NumberValue * 8 + 2), Varint(Value.byteLength), Value]);
 }
@@ -539,6 +556,7 @@ function Varint(Value: number): Uint8Array {
   return Uint8Array.from(Result);
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder keeps a mutable typed-array payload contract.
 function Fields(Value: Uint8Array): WireField[] {
   const Result: WireField[] = [];
   let Offset = 0;
@@ -566,6 +584,7 @@ function Fields(Value: Uint8Array): WireField[] {
   return Result;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder keeps a mutable typed-array payload contract.
 function ReadVarint(Value: Uint8Array, Start: number): { Offset: number; Value: number } {
   let Result = 0;
   let Multiplier = 1;
@@ -582,6 +601,7 @@ function ReadVarint(Value: Uint8Array, Start: number): { Offset: number; Value: 
   throw new Error("Invalid protobuf integer.");
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder preserves mutable typed-array field values.
 function NumberField(Values: WireField[], NumberValue: number): number {
   return (
     Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 0)
@@ -589,19 +609,23 @@ function NumberField(Values: WireField[], NumberValue: number): number {
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder preserves mutable typed-array field values.
 function BytesField(Values: WireField[], NumberValue: number): Uint8Array {
   return OptionalBytesField(Values, NumberValue) ?? new Uint8Array();
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder preserves mutable typed-array field values.
 function OptionalBytesField(Values: WireField[], NumberValue: number): Uint8Array | undefined {
   return Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 2)
     ?.Bytes;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The decoder preserves mutable typed-array field values.
 function StringField(Values: WireField[], NumberValue: number): string {
   return Decoder.decode(BytesField(Values, NumberValue));
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Concatenation fills a mutable output typed array from codec inputs.
 function Concatenate(Values: Uint8Array[]): Uint8Array {
   const Length = Values.reduce((Total, Value) => Total + Value.byteLength, 0);
   const Result = new Uint8Array(Length);
@@ -611,6 +635,11 @@ function Concatenate(Values: Uint8Array[]): Uint8Array {
     Offset += Value.byteLength;
   }
   return Result;
+}
+
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The type guard narrows codec chunks for the mutable concatenation output path.
+function HasAllChunks(Chunks: readonly (Uint8Array | undefined)[]): Chunks is Uint8Array[] {
+  return Chunks.every((Chunk) => Chunk !== undefined);
 }
 
 function HashUuid(Value: string): number {

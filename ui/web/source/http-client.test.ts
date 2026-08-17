@@ -106,6 +106,7 @@ class ContractServer {
     this.#Nodes = Nodes;
   }
 
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/require-await -- Fetch's platform spelling and Promise contract are required by the injected transport fake.
   readonly fetch: typeof fetch = async (Input, Init) => {
     const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
     this.Requests.push(HttpRequest);
@@ -198,13 +199,15 @@ class ContractServer {
       Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents` &&
       HttpRequest.method === "POST"
     ) {
+      const SourceVersionId = Node(FirstNodeId, "Source.docx").head_version_id;
+      if (SourceVersionId === null) throw new Error("The source fixture requires a head version.");
       return Json(
         {
           expires_at: "2026-08-06T12:15:00Z",
           id: ImportIntentId,
           source_drive_id: DriveId,
           source_node_id: FirstNodeId,
-          source_version_id: Node(FirstNodeId, "Source.docx").head_version_id as string,
+          source_version_id: SourceVersionId,
           target_media_type: "text/markdown",
           target_name: "Source.md",
           target_parent_id: RootId,
@@ -349,6 +352,7 @@ describe("HttpFileBeltClient", () => {
   });
 
   it("converts a session 401 into an explicit authentication-required signal", async () => {
+    // oxlint-disable-next-line typescript/require-await -- Fetch's Promise contract is required by this synchronous in-memory response fake.
     const FetchImplementation: typeof fetch = async () =>
       Json(
         {
@@ -444,8 +448,9 @@ describe("HttpFileBeltClient", () => {
         MarkAbortRequestReached();
         return new Promise<Response>((IgnoredResolve, Reject) => {
           void IgnoredResolve;
-          const RejectAbort = (): void =>
+          const RejectAbort = (): void => {
             Reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
           if (HttpRequest.signal.aborted) RejectAbort();
           else HttpRequest.signal.addEventListener("abort", RejectAbort, { once: true });
         });
@@ -699,14 +704,26 @@ function ByteGrant(
   };
 }
 
-function Json(Value: unknown, Status = 200, Headers: HeadersInit = {}): Response {
+function Json(
+  Value: unknown,
+  Status = 200,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- HeadersInit is the platform input contract and is copied before use.
+  HeaderValues: HeadersInit = {},
+): Response {
+  const ResponseHeaders = new Headers(HeaderValues);
+  ResponseHeaders.set("Content-Type", "application/json");
   return new Response(JSON.stringify(Value), {
-    headers: { "Content-Type": "application/json", ...Headers },
+    headers: ResponseHeaders,
     status: Status,
   });
 }
 
-function FindRequest(Requests: readonly Request[], Method: string, Path: string): Request {
+function FindRequest(
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Request is a mutable platform type, but this lookup helper only observes it.
+  Requests: readonly Readonly<Request>[],
+  Method: string,
+  Path: string,
+): Request {
   const Request = Requests.find(
     (Candidate) => Candidate.method === Method && new URL(Candidate.url).pathname === Path,
   );
@@ -715,7 +732,8 @@ function FindRequest(Requests: readonly Request[], Method: string, Path: string)
   return Request;
 }
 
-function RequestPaths(Requests: readonly Request[], Method: string): string[] {
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Request is a mutable platform type, but this projection helper only observes it.
+function RequestPaths(Requests: readonly Readonly<Request>[], Method: string): string[] {
   return Requests.filter((Request) => Request.method === Method).map(
     (Request) => new URL(Request.url).pathname,
   );

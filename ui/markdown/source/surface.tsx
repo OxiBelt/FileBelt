@@ -17,13 +17,14 @@ export interface TextSurfaceProps {
   Collaboration?: TextCollaboration;
   Disabled?: boolean;
   Identity?: CollaborationIdentity;
-  OnSelectionChange?: (Selection: { End: number; Start: number }) => void;
+  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void;
   OnTextChange?: (Text: string) => void;
   Source: TextSource;
   Strings: TextStrings;
 }
 
 /** Accessible language-neutral source editor/viewer for validated text. */
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function TextSurface({
   Collaboration,
   Disabled,
@@ -57,12 +58,13 @@ export interface MarkdownSurfaceProps {
   Mode: MarkdownMode;
   OnFileBeltLink?: Parameters<typeof MarkdownPreview>[0]["OnFileBeltLink"];
   OnModeChange: (Mode: MarkdownMode) => void;
-  OnSelectionChange?: (Selection: { End: number; Start: number }) => void;
+  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void;
   OnTextChange?: (Text: string) => void;
   Source: MarkdownSource;
   Strings: MarkdownStrings;
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 export function MarkdownSurface({
   Collaboration,
   Disabled,
@@ -129,6 +131,7 @@ export function MarkdownSurface({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function ModeButton({
   Active,
   Controls,
@@ -142,6 +145,7 @@ function ModeButton({
   Mode: MarkdownMode;
   OnModeChange: (Mode: MarkdownMode) => void;
 }): JSX.Element {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Keyboard handling calls preventDefault and focuses DOM elements.
   const OnKeyDown = (Event: KeyboardEvent<HTMLButtonElement>): void => {
     if (!MatchesTabNavigationKey(Event.key)) return;
     const Tabs = [
@@ -163,7 +167,9 @@ function ModeButton({
     <button
       aria-controls={Controls}
       aria-selected={Active}
-      onClick={() => OnModeChange(Mode)}
+      onClick={() => {
+        OnModeChange(Mode);
+      }}
       onKeyDown={OnKeyDown}
       role="tab"
       tabIndex={Active ? 0 : -1}

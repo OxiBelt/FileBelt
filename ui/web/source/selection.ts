@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface SelectionState {
-  AnchorId: string | null;
-  FocusedId: string | null;
-  SelectedIds: ReadonlySet<string>;
+  readonly AnchorId: string | null;
+  readonly FocusedId: string | null;
+  readonly SelectedIds: ReadonlySet<string>;
 }
 
 export type SelectionAction =
-  | { Id: string; Type: "focus" }
-  | { Id: string; OrderedIds: readonly string[]; Type: "range" }
-  | { Id: string; Type: "replace" }
-  | { Id: string; Type: "toggle" }
-  | { OrderedIds: readonly string[]; Type: "all" }
-  | { Type: "clear" };
+  | { readonly Id: string; readonly Type: "focus" }
+  | { readonly Id: string; readonly OrderedIds: readonly string[]; readonly Type: "range" }
+  | { readonly Id: string; readonly Type: "replace" }
+  | { readonly Id: string; readonly Type: "toggle" }
+  | { readonly OrderedIds: readonly string[]; readonly Type: "all" }
+  | { readonly Type: "clear" };
 
 export const EmptySelection: SelectionState = {
   AnchorId: null,
@@ -20,7 +20,10 @@ export const EmptySelection: SelectionState = {
   SelectedIds: new Set<string>(),
 };
 
-export function SelectionReducer(State: SelectionState, Action: SelectionAction): SelectionState {
+export function SelectionReducer(
+  State: Readonly<SelectionState>,
+  Action: SelectionAction,
+): SelectionState {
   switch (Action.Type) {
     case "all":
       return {
@@ -52,4 +55,5 @@ export function SelectionReducer(State: SelectionState, Action: SelectionAction)
       return { AnchorId: Action.Id, FocusedId: Action.Id, SelectedIds };
     }
   }
+  return State;
 }

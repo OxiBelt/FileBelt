@@ -40,11 +40,11 @@ function DecodeBase64(Value: string): Uint8Array | null {
   }
 }
 
-function HasPrefix(Bytes: Uint8Array, Prefix: readonly number[], Offset = 0): boolean {
+function HasPrefix(Bytes: Readonly<Uint8Array>, Prefix: readonly number[], Offset = 0): boolean {
   return Prefix.every((Value, Index) => Bytes[Offset + Index] === Value);
 }
 
-function MatchesMagic(Bytes: Uint8Array, MimeType: string): boolean {
+function MatchesMagic(Bytes: Readonly<Uint8Array>, MimeType: string): boolean {
   if (MimeType === "image/png")
     return HasPrefix(Bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (MimeType === "image/jpeg") return HasPrefix(Bytes, [0xff, 0xd8, 0xff]);
@@ -73,6 +73,7 @@ interface JsonRenderBudget {
 function JsonChildren(
   Depth: number,
   Entries: readonly (readonly [string, unknown])[],
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Rendering intentionally consumes one shared mutable traversal budget.
   Budget: JsonRenderBudget,
 ): ReactNode[] {
   const Children: ReactNode[] = [];
@@ -97,6 +98,7 @@ function JsonNode(
   Depth: number,
   Name: string | undefined,
   Value: unknown,
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Rendering intentionally consumes one shared mutable traversal budget.
   Budget: JsonRenderBudget,
 ): ReactNode {
   Budget.Remaining -= 1;
@@ -166,7 +168,7 @@ function JsonNode(
   );
 }
 
-export function SafeJsonResult({ Value }: { Value: unknown }): ReactNode {
+export function SafeJsonResult({ Value }: Readonly<{ Value: unknown }>): ReactNode {
   const Budget: JsonRenderBudget = { Remaining: MaximumJsonRenderNodes, TruncationRendered: false };
   return (
     <div aria-label={McpEn.jsonResult} className="fb-mcp-json" role="tree">
@@ -175,7 +177,7 @@ export function SafeJsonResult({ Value }: { Value: unknown }): ReactNode {
   );
 }
 
-export function SafeTextResult({ Value }: { Value: string }): ReactNode {
+export function SafeTextResult({ Value }: Readonly<{ Value: string }>): ReactNode {
   return (
     <pre className="fb-mcp-text" dir="auto">
       <bdi>{Value}</bdi>
@@ -183,7 +185,9 @@ export function SafeTextResult({ Value }: { Value: string }): ReactNode {
   );
 }
 
-export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode {
+export function SafeMediaResult({
+  Value,
+}: Readonly<{ Value: Readonly<SafeMediaValue> }>): ReactNode {
   const [ObjectUrl, SetObjectUrl] = useState<string | null>(null);
   const [Rejected, SetRejected] = useState(false);
 
@@ -197,13 +201,15 @@ export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode
       !MatchesMagic(Bytes, Value.MimeType)
     ) {
       SetRejected(true);
-      return;
+      return undefined;
     }
     const Buffer = new ArrayBuffer(Bytes.byteLength);
     new Uint8Array(Buffer).set(Bytes);
     const Url = URL.createObjectURL(new Blob([Buffer], { type: Value.MimeType }));
     SetObjectUrl(Url);
-    return () => URL.revokeObjectURL(Url);
+    return () => {
+      URL.revokeObjectURL(Url);
+    };
   }, [Value.Base64, Value.MimeType, Value.SizeBytes]);
 
   const Reject = (): void => {

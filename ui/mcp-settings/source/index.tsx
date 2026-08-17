@@ -21,7 +21,7 @@ import {
   TestTube2,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 
 import type {
   AdminMcpBlockRuleView,
@@ -55,8 +55,8 @@ export type {
 export { SafeJsonResult, SafeMediaResult, SafeTextResult } from "./result-renderers.js";
 
 interface McpSettingsProps {
-  Client: McpSettingsClient;
-  IsTenantAdmin: boolean;
+  readonly Client: Readonly<McpSettingsClient>;
+  readonly IsTenantAdmin: boolean;
 }
 
 type SettingsTab = "activity" | "admin" | "servers";
@@ -69,11 +69,13 @@ const EmptySnapshot: McpSettingsSnapshot = {
   Templates: [],
 };
 
-function Bidi({ Value }: { Value: string }): ReactNode {
+function Bidi({ Value }: Readonly<{ Value: string }>): ReactNode {
   return <bdi dir="auto">{Value}</bdi>;
 }
 
-function RegistrationStatus({ Registration }: { Registration: McpRegistrationView }): ReactNode {
+function RegistrationStatus({
+  Registration,
+}: Readonly<{ Registration: Readonly<McpRegistrationView> }>): ReactNode {
   const Unsafe =
     Registration.QuarantineState !== "clear" || Registration.ValidationState === "invalid";
   const Color = Unsafe
@@ -88,7 +90,10 @@ function RegistrationStatus({ Registration }: { Registration: McpRegistrationVie
   );
 }
 
-function DownloadConfiguration(Document: string, Registration: McpRegistrationView): void {
+function DownloadConfiguration(
+  Document: string,
+  Registration: Readonly<McpRegistrationView>,
+): void {
   const Url = URL.createObjectURL(new Blob([Document], { type: "application/json" }));
   const Anchor = document.createElement("a");
   Anchor.download = `${Registration.DisplayName.replaceAll(/[^A-Za-z0-9._-]+/g, "-") || "mcp-registration"}.json`;
@@ -97,7 +102,10 @@ function DownloadConfiguration(Document: string, Registration: McpRegistrationVi
   URL.revokeObjectURL(Url);
 }
 
-function InvocationResult({ Event }: { Event: McpInvocationEventView }): ReactNode {
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React passes a discriminated union value that this renderer only observes.
+function InvocationResult({
+  Event,
+}: Readonly<{ Event: Readonly<McpInvocationEventView> }>): ReactNode {
   if (Event.Kind === "text") return <SafeTextResult Value={Event.Value} />;
   if (Event.Kind === "json") return <SafeJsonResult Value={Event.Value} />;
   if (Event.Kind === "media") return <SafeMediaResult Value={Event.Value} />;
@@ -122,16 +130,19 @@ function AddRegistrationForm({
   Busy,
   onCreate: OnCreate,
   onImport: OnImport,
-}: {
+}: Readonly<{
   Busy: boolean;
-  onCreate(DisplayName: string, EndpointUri: string, TrustProfile: string): Promise<void>;
-  onImport(Document: string): Promise<void>;
-}): ReactNode {
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onCreate: (DisplayName: string, EndpointUri: string, TrustProfile: string) => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onImport: (Document: string) => Promise<void>;
+}>): ReactNode {
   const [DisplayName, SetDisplayName] = useState("");
   const [EndpointUri, SetEndpointUri] = useState("");
   const [TrustProfile, SetTrustProfile] = useState("public-webpki");
   const [ImportDocument, SetImportDocument] = useState("");
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     if (DisplayName.trim().length === 0 || EndpointUri.trim().length === 0) return;
     await OnCreate(DisplayName.trim(), EndpointUri.trim(), TrustProfile.trim());
@@ -149,7 +160,9 @@ function AddRegistrationForm({
         <Input
           disabled={Busy}
           maxLength={120}
-          onChange={(Ignored, Data) => SetDisplayName(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetDisplayName(Data.value);
+          }}
           value={DisplayName}
         />
       </Field>
@@ -157,7 +170,9 @@ function AddRegistrationForm({
         <Input
           disabled={Busy}
           maxLength={2048}
-          onChange={(Ignored, Data) => SetEndpointUri(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetEndpointUri(Data.value);
+          }}
           type="url"
           value={EndpointUri}
         />
@@ -166,7 +181,9 @@ function AddRegistrationForm({
         <Input
           disabled={Busy}
           maxLength={64}
-          onChange={(Ignored, Data) => SetTrustProfile(Data.value)}
+          onChange={(Ignored, Data) => {
+            SetTrustProfile(Data.value);
+          }}
           value={TrustProfile}
         />
       </Field>
@@ -183,7 +200,9 @@ function AddRegistrationForm({
         <Field label={McpEn.importDocument}>
           <Textarea
             disabled={Busy}
-            onChange={(Ignored, Data) => SetImportDocument(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetImportDocument(Data.value);
+            }}
             resize="vertical"
             value={ImportDocument}
           />
@@ -205,15 +224,18 @@ function CredentialForm({
   Registration,
   onOauth: OnOauth,
   onSave: OnSave,
-}: {
+}: Readonly<{
   Busy: boolean;
-  Registration: McpRegistrationView;
-  onOauth(): Promise<void>;
-  onSave(Kind: "api_key" | "bearer", Secret: string): Promise<void>;
-}): ReactNode {
+  Registration: Readonly<McpRegistrationView>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onOauth: () => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onSave: (Kind: "api_key" | "bearer", Secret: string) => Promise<void>;
+}>): ReactNode {
   const [Kind, SetKind] = useState<"api_key" | "bearer">("bearer");
   const [Secret, SetSecret] = useState("");
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     if (Secret.length === 0) return;
     await OnSave(Kind, Secret);
@@ -229,7 +251,10 @@ function CredentialForm({
         <Field label={McpEn.credentialType}>
           <select
             disabled={Busy}
-            onChange={(Event) => SetKind(Event.currentTarget.value as "api_key" | "bearer")}
+            onChange={(Event) => {
+              const Value = Event.currentTarget.value;
+              if (Value === "api_key" || Value === "bearer") SetKind(Value);
+            }}
             value={Kind}
           >
             <option value="bearer">{McpEn.bearer}</option>
@@ -241,7 +266,9 @@ function CredentialForm({
             autoComplete="new-password"
             disabled={Busy}
             maxLength={8192}
-            onChange={(Ignored, Data) => SetSecret(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetSecret(Data.value);
+            }}
             type="password"
             value={Secret}
           />
@@ -261,21 +288,26 @@ function CredentialForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React supplies a nested capability-review prop graph that is observed without mutation.
 function CapabilityReview({
   Busy,
   Registration,
   Review,
   onDiscover: OnDiscover,
   onSave: OnSave,
-}: {
+}: Readonly<{
   Busy: boolean;
-  Registration: McpRegistrationView;
-  Review: McpCapabilityReviewView | null;
-  onDiscover(): Promise<void>;
-  onSave(Review: McpCapabilityReviewView): Promise<void>;
-}): ReactNode {
+  Registration: Readonly<McpRegistrationView>;
+  Review: Readonly<McpCapabilityReviewView> | null;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onDiscover: () => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/prefer-readonly-parameter-types -- React callback props use onX spelling and receive an observed nested review value.
+  onSave: (Review: Readonly<McpCapabilityReviewView>) => Promise<void>;
+}>): ReactNode {
   const [Decisions, SetDecisions] = useState<Readonly<Record<string, "approved" | "blocked">>>({});
-  useEffect(() => SetDecisions(Review?.Decisions ?? {}), [Review]);
+  useEffect(() => {
+    SetDecisions(Review?.Decisions ?? {});
+  }, [Review]);
   const UpdatedReview = Review === null ? null : { ...Review, Decisions };
   return (
     <section aria-labelledby="mcp-capabilities-heading" className="fb-mcp-section">
@@ -323,18 +355,18 @@ function CapabilityReview({
                   <Button
                     appearance={Decision === "approved" ? "primary" : "secondary"}
                     disabled={!CanApprove || Busy}
-                    onClick={() =>
-                      SetDecisions({ ...Decisions, [Capability.Fingerprint]: "approved" })
-                    }
+                    onClick={() => {
+                      SetDecisions({ ...Decisions, [Capability.Fingerprint]: "approved" });
+                    }}
                   >
                     {McpEn.approve}
                   </Button>
                   <Button
                     appearance={Decision === "blocked" ? "primary" : "secondary"}
                     disabled={Busy}
-                    onClick={() =>
-                      SetDecisions({ ...Decisions, [Capability.Fingerprint]: "blocked" })
-                    }
+                    onClick={() => {
+                      SetDecisions({ ...Decisions, [Capability.Fingerprint]: "blocked" });
+                    }}
                   >
                     {McpEn.block}
                   </Button>
@@ -358,17 +390,19 @@ function CapabilityReview({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React supplies a nested capability-review prop graph that is observed without mutation.
 function InvocationForm({
   Busy,
   Registration,
   Review,
   onPrepare: OnPrepare,
-}: {
+}: Readonly<{
   Busy: boolean;
-  Registration: McpRegistrationView;
-  Review: McpCapabilityReviewView | null;
-  onPrepare(Fingerprint: string, Arguments: unknown): Promise<void>;
-}): ReactNode {
+  Registration: Readonly<McpRegistrationView>;
+  Review: Readonly<McpCapabilityReviewView> | null;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onPrepare: (Fingerprint: string, Arguments: unknown) => Promise<void>;
+}>): ReactNode {
   const Approved =
     Review?.Capabilities.filter(
       ({ Fingerprint }) => Review.Decisions[Fingerprint] === "approved",
@@ -376,11 +410,11 @@ function InvocationForm({
   const [Fingerprint, SetFingerprint] = useState("");
   const [ArgumentsText, SetArgumentsText] = useState("{}");
   const [ParseError, SetParseError] = useState<string | null>(null);
-  useEffect(
-    () => SetFingerprint(Approved[0]?.Fingerprint ?? ""),
-    [Registration.Id, Review?.SnapshotId],
-  );
-  const Submit = async (Event: FormEvent): Promise<void> => {
+  useEffect(() => {
+    SetFingerprint(Approved[0]?.Fingerprint ?? "");
+  }, [Registration.Id, Review?.SnapshotId]);
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     try {
       const Arguments = JSON.parse(ArgumentsText) as unknown;
@@ -399,7 +433,9 @@ function InvocationForm({
         <Field label={McpEn.approvedCapability}>
           <select
             disabled={Busy || Approved.length === 0}
-            onChange={(Event) => SetFingerprint(Event.currentTarget.value)}
+            onChange={(Event) => {
+              SetFingerprint(Event.currentTarget.value);
+            }}
             value={Fingerprint}
           >
             {Approved.map((Capability) => (
@@ -421,7 +457,9 @@ function InvocationForm({
         >
           <Textarea
             disabled={Busy}
-            onChange={(Ignored, Data) => SetArgumentsText(Data.value)}
+            onChange={(Ignored, Data) => {
+              SetArgumentsText(Data.value);
+            }}
             resize="vertical"
             value={ArgumentsText}
           />
@@ -438,6 +476,7 @@ function InvocationForm({
   );
 }
 
+// oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React supplies the nested settings snapshot prop graph, which is observed without mutation.
 function AdminSurface({
   Busy,
   Snapshot,
@@ -446,17 +485,21 @@ function AdminSurface({
   onService: OnService,
   onServiceGrant: OnServiceGrant,
   onTemplate: OnTemplate,
-}: {
+}: Readonly<{
   Busy: boolean;
-  Snapshot: McpSettingsSnapshot;
-  onAssign(
+  Snapshot: Readonly<McpSettingsSnapshot>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onAssign: (
     TemplateId: string,
     PrincipalId: string,
     PrincipalKind: "group" | "service" | "user",
-  ): Promise<void>;
-  onBlock(Kind: AdminMcpBlockRuleView["Kind"], Value: string, Reason: string): Promise<void>;
-  onService(Name: string, SpiffeUri: string): Promise<void>;
-  onServiceGrant(
+  ) => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onBlock: (Kind: AdminMcpBlockRuleView["Kind"], Value: string, Reason: string) => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onService: (Name: string, SpiffeUri: string) => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onServiceGrant: (
     ServiceId: string,
     RegistrationId: string,
     CapabilityKind: "prompt" | "resource" | "tool",
@@ -464,9 +507,10 @@ function AdminSurface({
     CapabilityFingerprint: string,
     ApplicationId: string,
     ExpiresAt: string,
-  ): Promise<void>;
-  onTemplate(Name: string, Endpoint: string, Profile: string): Promise<void>;
-}): ReactNode {
+  ) => Promise<void>;
+  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
+  onTemplate: (Name: string, Endpoint: string, Profile: string) => Promise<void>;
+}>): ReactNode {
   const [TemplateName, SetTemplateName] = useState("");
   const [TemplateEndpoint, SetTemplateEndpoint] = useState("");
   const [ServiceName, SetServiceName] = useState("");
@@ -485,29 +529,38 @@ function AdminSurface({
   const [GrantCapabilityName, SetGrantCapabilityName] = useState("");
   const [GrantFingerprint, SetGrantFingerprint] = useState("");
   const [GrantApplicationId, SetGrantApplicationId] = useState("");
-  const SubmitTemplate = async (Event: FormEvent): Promise<void> => {
+  const SubmitTemplate = async (
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+    Event: Readonly<SyntheticEvent<HTMLFormElement>>,
+  ): Promise<void> => {
     Event.preventDefault();
     await OnTemplate(TemplateName, TemplateEndpoint, "public-webpki");
     SetTemplateName("");
     SetTemplateEndpoint("");
   };
-  const SubmitService = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const SubmitService = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     await OnService(ServiceName, SpiffeUri);
     SetServiceName("");
     SetSpiffeUri("");
   };
-  const SubmitBlock = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const SubmitBlock = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     await OnBlock("origin", BlockValue, "Blocked by tenant administrator");
     SetBlockValue("");
   };
-  const SubmitAssignment = async (Event: FormEvent): Promise<void> => {
+  const SubmitAssignment = async (
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+    Event: Readonly<SyntheticEvent<HTMLFormElement>>,
+  ): Promise<void> => {
     Event.preventDefault();
     await OnAssign(AssignmentTemplateId, AssignmentPrincipalId, AssignmentPrincipalKind);
     SetAssignmentPrincipalId("");
   };
-  const SubmitGrant = async (Event: FormEvent): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
+  const SubmitGrant = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
     const ExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     await OnServiceGrant(
@@ -533,14 +586,18 @@ function AdminSurface({
           <Field label={McpEn.name}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetTemplateName(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetTemplateName(Data.value);
+              }}
               value={TemplateName}
             />
           </Field>
           <Field label={McpEn.endpoint}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetTemplateEndpoint(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetTemplateEndpoint(Data.value);
+              }}
               type="url"
               value={TemplateEndpoint}
             />
@@ -565,7 +622,9 @@ function AdminSurface({
           <Field label={McpEn.managedTemplate}>
             <select
               disabled={Busy}
-              onChange={(Event) => SetAssignmentTemplateId(Event.currentTarget.value)}
+              onChange={(Event) => {
+                SetAssignmentTemplateId(Event.currentTarget.value);
+              }}
               value={AssignmentTemplateId}
             >
               <option value="">{McpEn.selectTemplate}</option>
@@ -579,11 +638,11 @@ function AdminSurface({
           <Field label={McpEn.principalKind}>
             <select
               disabled={Busy}
-              onChange={(Event) =>
-                SetAssignmentPrincipalKind(
-                  Event.currentTarget.value as "group" | "service" | "user",
-                )
-              }
+              onChange={(Event) => {
+                const Value = Event.currentTarget.value;
+                if (Value === "group" || Value === "service" || Value === "user")
+                  SetAssignmentPrincipalKind(Value);
+              }}
               value={AssignmentPrincipalKind}
             >
               <option value="user">{McpEn.user}</option>
@@ -594,7 +653,9 @@ function AdminSurface({
           <Field label={McpEn.exactPrincipalId}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetAssignmentPrincipalId(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetAssignmentPrincipalId(Data.value);
+              }}
               value={AssignmentPrincipalId}
             />
           </Field>
@@ -612,14 +673,18 @@ function AdminSurface({
           <Field label={McpEn.displayName}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetServiceName(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetServiceName(Data.value);
+              }}
               value={ServiceName}
             />
           </Field>
           <Field label={McpEn.exactSpiffeUri}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetSpiffeUri(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetSpiffeUri(Data.value);
+              }}
               type="url"
               value={SpiffeUri}
             />
@@ -644,7 +709,9 @@ function AdminSurface({
           <Field label={McpEn.service}>
             <select
               disabled={Busy}
-              onChange={(Event) => SetGrantServiceId(Event.currentTarget.value)}
+              onChange={(Event) => {
+                SetGrantServiceId(Event.currentTarget.value);
+              }}
               value={GrantServiceId}
             >
               <option value="">{McpEn.selectService}</option>
@@ -658,7 +725,9 @@ function AdminSurface({
           <Field label={McpEn.registration}>
             <select
               disabled={Busy}
-              onChange={(Event) => SetGrantRegistrationId(Event.currentTarget.value)}
+              onChange={(Event) => {
+                SetGrantRegistrationId(Event.currentTarget.value);
+              }}
               value={GrantRegistrationId}
             >
               <option value="">{McpEn.selectRegistration}</option>
@@ -672,9 +741,11 @@ function AdminSurface({
           <Field label={McpEn.capabilityKind}>
             <select
               disabled={Busy}
-              onChange={(Event) =>
-                SetGrantCapabilityKind(Event.currentTarget.value as "prompt" | "resource" | "tool")
-              }
+              onChange={(Event) => {
+                const Value = Event.currentTarget.value;
+                if (Value === "prompt" || Value === "resource" || Value === "tool")
+                  SetGrantCapabilityKind(Value);
+              }}
               value={GrantCapabilityKind}
             >
               <option value="resource">{McpEn.resource}</option>
@@ -686,7 +757,9 @@ function AdminSurface({
             <Input
               disabled={Busy}
               maxLength={256}
-              onChange={(Ignored, Data) => SetGrantCapabilityName(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetGrantCapabilityName(Data.value);
+              }}
               value={GrantCapabilityName}
             />
           </Field>
@@ -694,7 +767,9 @@ function AdminSurface({
             <Input
               disabled={Busy}
               maxLength={64}
-              onChange={(Ignored, Data) => SetGrantFingerprint(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetGrantFingerprint(Data.value);
+              }}
               value={GrantFingerprint}
             />
           </Field>
@@ -702,7 +777,9 @@ function AdminSurface({
             <Input
               disabled={Busy}
               maxLength={128}
-              onChange={(Ignored, Data) => SetGrantApplicationId(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetGrantApplicationId(Data.value);
+              }}
               value={GrantApplicationId}
             />
           </Field>
@@ -727,7 +804,9 @@ function AdminSurface({
           <Field label={McpEn.exactOrigin}>
             <Input
               disabled={Busy}
-              onChange={(Ignored, Data) => SetBlockValue(Data.value)}
+              onChange={(Ignored, Data) => {
+                SetBlockValue(Data.value);
+              }}
               type="url"
               value={BlockValue}
             />
@@ -748,7 +827,10 @@ function AdminSurface({
   );
 }
 
-export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps): ReactNode {
+export default function McpSettings({
+  Client,
+  IsTenantAdmin,
+}: Readonly<McpSettingsProps>): ReactNode {
   const [Tab, SetTab] = useState<SettingsTab>("servers");
   const [Snapshot, SetSnapshot] = useState<McpSettingsSnapshot>(EmptySnapshot);
   const [SelectedId, SetSelectedId] = useState<string | null>(null);
@@ -763,7 +845,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
     Snapshot.Registrations.find(({ Id }) => Id === SelectedId) ?? Snapshot.Registrations[0] ?? null;
 
   const Refresh = useCallback(
-    async (Signal?: AbortSignal): Promise<void> => {
+    async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         const Next = await Client.getSnapshot(IsTenantAdmin, Signal);
         SetSnapshot(Next);
@@ -782,12 +864,14 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
   useEffect(() => {
     const Controller = new AbortController();
     void Refresh(Controller.signal);
-    return () => Controller.abort();
+    return () => {
+      Controller.abort();
+    };
   }, [Refresh]);
   useEffect(() => {
     if (Selected === null) {
       SetReview(null);
-      return;
+      return undefined;
     }
     let Active = true;
     void Client.getCapabilityReview(Selected.Id)
@@ -839,15 +923,16 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
       SetBusy(false);
     }
   };
-  const Invoke = async (Prepared: McpPreparedInvocation): Promise<void> => {
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
+  const Invoke = async (Prepared: Readonly<McpPreparedInvocation>): Promise<void> => {
     SetPendingInvocation(null);
     SetActiveInvocationId(Prepared.Intent.Id);
     SetBusy(true);
     SetError(null);
     try {
-      await Client.approveAndInvoke(Prepared, (Event) =>
-        SetEvents((Current) => [...Current, Event]),
-      );
+      await Client.approveAndInvoke(Prepared, (Event) => {
+        SetEvents((Current) => [...Current, Event]);
+      });
       await Refresh();
     } catch (Cause) {
       SetError(Cause instanceof Error ? Cause.message : McpEn.error);
@@ -882,7 +967,10 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
       )}
       <TabList
         aria-label={McpEn.registrationHeading}
-        onTabSelect={(Ignored, Data) => SetTab(Data.value as SettingsTab)}
+        onTabSelect={(Ignored, Data) => {
+          const Value = Data.value;
+          if (Value === "activity" || Value === "admin" || Value === "servers") SetTab(Value);
+        }}
         selectedValue={Tab}
       >
         <FluentTab icon={<ServerCog aria-hidden="true" />} value="servers">
@@ -907,10 +995,12 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
           <aside aria-label={McpEn.registrationList} className="fb-mcp-sidebar">
             <AddRegistrationForm
               Busy={Busy}
-              onCreate={(DisplayName, EndpointUri, TrustProfile) =>
-                Mutate(() => Client.createRegistration({ DisplayName, EndpointUri, TrustProfile }))
+              onCreate={async (DisplayName, EndpointUri, TrustProfile) =>
+                Mutate(async () =>
+                  Client.createRegistration({ DisplayName, EndpointUri, TrustProfile }),
+                )
               }
-              onImport={(Document) => Mutate(() => Client.importRegistration(Document))}
+              onImport={async (Document) => Mutate(async () => Client.importRegistration(Document))}
             />
             <div role="list">
               {Snapshot.Registrations.length === 0 ? (
@@ -925,7 +1015,9 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                         : "fb-mcp-registration"
                     }
                     key={Registration.Id}
-                    onClick={() => SetSelectedId(Registration.Id)}
+                    onClick={() => {
+                      SetSelectedId(Registration.Id);
+                    }}
                     role="listitem"
                     type="button"
                   >
@@ -980,7 +1072,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                     Selected.CapabilityState !== "reviewed"
                   }
                   onClick={() =>
-                    void Mutate(() =>
+                    void Mutate(async () =>
                       Client.changeRegistrationState(
                         Selected,
                         Selected.LifecycleState === "enabled" ? "disable" : "enable",
@@ -994,7 +1086,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   appearance="secondary"
                   disabled={Busy}
                   onClick={() =>
-                    void Mutate(() => Client.changeRegistrationState(Selected, "revoke"))
+                    void Mutate(async () => Client.changeRegistrationState(Selected, "revoke"))
                   }
                 >
                   {McpEn.revoke}
@@ -1004,10 +1096,12 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   disabled={Busy}
                   onClick={() =>
                     void Client.exportRegistration(Selected.Id)
-                      .then((Document) => DownloadConfiguration(Document, Selected))
-                      .catch((Cause: unknown) =>
-                        SetError(Cause instanceof Error ? Cause.message : McpEn.error),
-                      )
+                      .then((Document) => {
+                        DownloadConfiguration(Document, Selected);
+                      })
+                      .catch((Cause: unknown) => {
+                        SetError(Cause instanceof Error ? Cause.message : McpEn.error);
+                      })
                   }
                 >
                   {McpEn.export}
@@ -1015,7 +1109,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                 <Button
                   appearance="secondary"
                   disabled={Busy || Selected.ManagedLocked}
-                  onClick={() => void Mutate(() => Client.deleteRegistration(Selected))}
+                  onClick={() => void Mutate(async () => Client.deleteRegistration(Selected))}
                 >
                   {McpEn.delete}
                 </Button>
@@ -1027,8 +1121,8 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   const Url = await Client.startOauth(Selected);
                   window.location.assign(Url);
                 }}
-                onSave={(Kind, Secret) =>
-                  Mutate(() => Client.putCredential(Selected, Kind, Secret))
+                onSave={async (Kind, Secret) =>
+                  Mutate(async () => Client.putCredential(Selected, Kind, Secret))
                 }
                 Registration={Selected}
               />
@@ -1039,7 +1133,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   SetReview(Value);
                   await Refresh();
                 }}
-                onSave={(Value) =>
+                onSave={async (Value) =>
                   Mutate(async () => {
                     await Client.putCapabilityReview(Selected, Value);
                     SetReview(Value);
@@ -1116,7 +1210,12 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                     >
                       {McpEn.approveOnce}
                     </Button>
-                    <Button disabled={Busy} onClick={() => SetPendingInvocation(null)}>
+                    <Button
+                      disabled={Busy}
+                      onClick={() => {
+                        SetPendingInvocation(null);
+                      }}
+                    >
                       {McpEn.cancel}
                     </Button>
                   </div>
@@ -1128,9 +1227,9 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   <Button
                     appearance="secondary"
                     onClick={() =>
-                      void Client.cancelInvocation(ActiveInvocationId).catch((Cause: unknown) =>
-                        SetError(Cause instanceof Error ? Cause.message : McpEn.error),
-                      )
+                      void Client.cancelInvocation(ActiveInvocationId).catch((Cause: unknown) => {
+                        SetError(Cause instanceof Error ? Cause.message : McpEn.error);
+                      })
                     }
                   >
                     {McpEn.cancelInvocation}
@@ -1185,19 +1284,19 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
       {!Loading && Tab === "admin" && IsTenantAdmin ? (
         <AdminSurface
           Busy={Busy}
-          onAssign={(TemplateId, PrincipalId, PrincipalKind) => {
+          onAssign={async (TemplateId, PrincipalId, PrincipalKind) => {
             const Template = Snapshot.Templates.find(({ Id }) => Id === TemplateId);
             return Template === undefined
               ? Promise.reject(new Error(McpEn.managedTemplateUnavailable))
-              : Mutate(() => Client.assignTemplate(Template, PrincipalId, PrincipalKind));
+              : Mutate(async () => Client.assignTemplate(Template, PrincipalId, PrincipalKind));
           }}
-          onBlock={(Kind, Value, Reason) =>
-            Mutate(() => Client.createBlockRule(Kind, Value, Reason))
+          onBlock={async (Kind, Value, Reason) =>
+            Mutate(async () => Client.createBlockRule(Kind, Value, Reason))
           }
-          onService={(Name, SpiffeUri) =>
-            Mutate(() => Client.createServiceIdentity(Name, SpiffeUri))
+          onService={async (Name, SpiffeUri) =>
+            Mutate(async () => Client.createServiceIdentity(Name, SpiffeUri))
           }
-          onServiceGrant={(
+          onServiceGrant={async (
             ServiceId,
             RegistrationId,
             CapabilityKind,
@@ -1209,7 +1308,7 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
             const Service = Snapshot.ServiceIdentities.find(({ Id }) => Id === ServiceId);
             return Service === undefined
               ? Promise.reject(new Error(McpEn.serviceUnavailable))
-              : Mutate(() =>
+              : Mutate(async () =>
                   Client.createServiceInvocationGrant(
                     Service,
                     RegistrationId,
@@ -1221,8 +1320,8 @@ export default function McpSettings({ Client, IsTenantAdmin }: McpSettingsProps)
                   ),
                 );
           }}
-          onTemplate={(Name, Endpoint, Profile) =>
-            Mutate(() => Client.createTemplate(Name, Endpoint, Profile))
+          onTemplate={async (Name, Endpoint, Profile) =>
+            Mutate(async () => Client.createTemplate(Name, Endpoint, Profile))
           }
           Snapshot={Snapshot}
         />

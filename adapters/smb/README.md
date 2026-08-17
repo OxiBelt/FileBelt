@@ -2,7 +2,7 @@
 
 # FileBelt Samba gateway
 
-This is the optional GPL-3.0-or-later Samba 4.24.4 adapter region. It is not
+This is the optional GPL-3.0-or-later Samba 4.24.6 adapter region. It is not
 part of the Apache root workspace and does not contain Samba source. The VFS
 module is loaded by `smbd`; its local bridge framing is GPL. The future FileBelt
 VFS RPC remains protocol-neutral and Apache-2.0.
@@ -30,7 +30,7 @@ remain core-contract decisions.
 
 ## Build and source offer
 
-Do not build or publish from this scaffold yet. The manifest pins Samba 4.24.4
+Do not build or publish from this scaffold yet. The manifest pins Samba 4.24.6
 to the verified official archive SHA-256; a release must still include Samba
 source, FileBelt adapter source, patches, build/config scripts, notices, base
 image digest, SBOM, and exact public source URL, and label the image GPL-3.0-or-later plus

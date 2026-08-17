@@ -187,8 +187,8 @@ path = "/usr/local/bin/filebelt-smb-bridge"
 source_required = true
 
 [[artifacts.components]]
-id = "samba-4.24.4"
-version = "4.24.4"
+id = "samba-4.24.6"
+version = "4.24.6"
 relationship = "linked"
 license = "GPL-3.0-or-later"
 path = "/usr/lib/FILEBELT_VFS.so"

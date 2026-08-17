@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "samba": {
-    "version": "4.24.4",
-    "archive": "vendor/samba-4.24.4.tar.gz",
-    "sha256": "df2c51ab4361ec626ab9988e5946efcca8465bc7afae834291d5558468265ff8",
+    "version": "4.24.6",
+    "archive": "vendor/samba-4.24.6.tar.gz",
+    "sha256": "810cc955acb367e9bde556dccfb50db177a02b7c553aa1629a0b905fa7616267",
     "patches": []
   },
-  "correspondingSource": "https://download.samba.org/pub/samba/stable/samba-4.24.4.tar.gz"
+  "correspondingSource": "https://download.samba.org/pub/samba/stable/samba-4.24.6.tar.gz"
 }

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * Samba 4.24.4 VFS entry point.  It deliberately keeps FileBelt policy out of
+ * Samba 4.24.6 VFS entry point.  It deliberately keeps FileBelt policy out of
  * smbd: Samba owns wire/session semantics; the bridge owns bounded IPC; the
  * future FileBelt VFS service owns authorization, namespace, payload and locks.
  */
@@ -26,7 +26,7 @@ static void filebelt_disconnect(struct vfs_handle_struct *handle)
 }
 
 /*
- * These signatures are taken from Samba 4.24.4 source3/include/vfs.h.  The
+ * These signatures are taken from Samba 4.24.6 source3/include/vfs.h.  The
  * bridge IPC implementation is intentionally not faked: until the C module can
  * exchange an authenticated, framed request with filebelt-smb-bridge, every
  * data-plane call fails closed and never reaches Samba's local backing store.

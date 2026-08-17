@@ -178,7 +178,7 @@ const AdapterCatalog: readonly AdapterCatalogRow[] = [
     Components: [
       { id: "filebelt-smb-bridge", version: "0.1.0", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/local/bin/filebelt-smb-bridge", sourceRequired: true },
       { id: "filebelt-vfs-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-smb-bridge", sourceRequired: true },
-      { id: "samba-4.24.4", version: "4.24.4", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/lib/FILEBELT_VFS.so", sourceRequired: true },
+      { id: "samba-4.24.6", version: "4.24.6", license: "GPL-3.0-or-later", relationship: "linked", path: "/usr/lib/FILEBELT_VFS.so", sourceRequired: true },
     ],
     DefaultQualification: { license: Pending, source: Pending, security: Pending, functional: Blocked, platform: Pending },
     DefaultReasons: ["Samba source closure and bridge functional qualification are incomplete"],

@@ -6,13 +6,16 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import importlib.util
+import io
 import json
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -594,12 +597,225 @@ class LifecycleTest(unittest.TestCase):
 
 
 class ImageEvidenceTest(unittest.TestCase):
+    REVISION = "a" * 40
+    ROLE = "filebelt-api"
+    REPOSITORY = f"ghcr.io/oxibelt/{ROLE}"
+    TAG = "0.1.0-build.aaaaaaaaaaaa"
+
+    def write_json(self, path: Path, value: object) -> None:
+        path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+
+    def write_v2_fixture(self, root: Path) -> dict[str, Path]:
+        plan = root / "image-plan.json"
+        plan_value = {
+            "schemaVersion": 2,
+            "amd64IsaBaseline": "x86-64-v3",
+            "channel": "build",
+            "version": "0.1.0",
+            "tag": self.TAG,
+            "source": {
+                "url": "https://github.com/OxiBelt/FileBelt",
+                "ref": "refs/heads/main",
+                "revision": self.REVISION,
+                "created": "2026-08-17T00:00:00Z",
+                "dirty": False,
+                "kind": "ci",
+            },
+            "runtime": {"uid": 10001, "gid": 10001},
+            "images": [
+                {
+                    "role": self.ROLE,
+                    "repository": self.REPOSITORY,
+                    "platforms": ["linux/amd64", "linux/arm64", "linux/riscv64"],
+                    "build": {
+                        "dockerfile": "source/ops/Dockerfile.roles",
+                        "target": self.ROLE,
+                    },
+                    "artifact": {
+                        "kind": "rust-binary",
+                        "targetCpu": {
+                            "linux/amd64": "x86-64-v3",
+                            "linux/arm64": None,
+                            "linux/riscv64": None,
+                        },
+                    },
+                }
+            ],
+        }
+        self.write_json(plan, plan_value)
+
+        archive = root / f"{self.ROLE}-amd64.docker.tar"
+        reference = f"{self.REPOSITORY}:{self.TAG}-amd64"
+        manifest = json.dumps([{"RepoTags": [reference]}]).encode()
+        with tarfile.open(archive, "w") as output:
+            member = tarfile.TarInfo("manifest.json")
+            member.size = len(manifest)
+            output.addfile(member, io.BytesIO(manifest))
+        archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+        checksum = root / f"{archive.name}.sha256"
+        checksum.write_text(f"{archive_sha}  {archive.name}\n", encoding="ascii")
+
+        plan_sha = hashlib.sha256(plan.read_bytes()).hexdigest()
+        metadata = root / f"{self.ROLE}-amd64.build.json"
+        metadata_value = {
+            "schemaVersion": 2,
+            "planSha256": plan_sha,
+            "role": self.ROLE,
+            "platform": "linux/amd64",
+            "repository": self.REPOSITORY,
+            "version": "0.1.0",
+            "tag": self.TAG,
+            "localRef": reference,
+            "sourceRevision": self.REVISION,
+            "sourceRef": "refs/heads/main",
+            "sourceCreated": "2026-08-17T00:00:00Z",
+            "sourceDirty": False,
+            "sourceKind": "ci",
+            "targetCpu": "x86-64-v3",
+            "dockerfile": "source/ops/Dockerfile.roles",
+            "buildTarget": self.ROLE,
+            "archive": archive.name,
+            "archiveSha256": archive_sha,
+        }
+        self.write_json(metadata, metadata_value)
+        metadata_sha = hashlib.sha256(metadata.read_bytes()).hexdigest()
+
+        evidence = root / f"{self.ROLE}-amd64.evidence.json"
+        self.write_json(
+            evidence,
+            {
+                "schemaVersion": 2,
+                "planSha256": plan_sha,
+                "role": self.ROLE,
+                "platform": "linux/amd64",
+                "repository": self.REPOSITORY,
+                "tag": self.TAG,
+                "localRef": reference,
+                "sourceRevision": self.REVISION,
+                "targetCpu": "x86-64-v3",
+                "archive": archive.name,
+                "archiveSha256": archive_sha,
+                "metadataSha256": metadata_sha,
+            },
+        )
+        validation = root / f"{self.ROLE}-amd64.validation.json"
+        self.write_json(
+            validation,
+            {
+                "schemaVersion": 2,
+                "role": self.ROLE,
+                "platform": "linux/amd64",
+                "sourceRevision": self.REVISION,
+                "targetCpu": "x86-64-v3",
+                "repositoryTag": reference,
+            },
+        )
+        smoke = root / f"{self.ROLE}-amd64.smoke.json"
+        self.write_json(
+            smoke,
+            {
+                "schemaVersion": 1,
+                "role": self.ROLE,
+                "platform": "linux/amd64",
+                "sourceRevision": self.REVISION,
+                "passed": True,
+            },
+        )
+        decision = root / f"{self.ROLE}-amd64.vulnerability-decision.json"
+        self.write_json(
+            decision,
+            {"schemaVersion": 1, "allowed": True, "blockedFindings": []},
+        )
+        for suffix in ("cdx.json", "runtime.cdx.json"):
+            self.write_json(root / f"{self.ROLE}-amd64.{suffix}", {})
+        return {
+            "plan": plan,
+            "archive": archive,
+            "metadata": metadata,
+            "evidence": evidence,
+            "validation": validation,
+        }
+
+    def assert_rejected(self, root: Path, message: str) -> None:
+        with self.assertRaisesRegex(ValueError, message):
+            validate_role(
+                ROOT,
+                root,
+                root / "image-plan.json",
+                self.ROLE,
+                "build",
+                self.REVISION,
+            )
+
+    def test_v2_artifact_evidence_contract_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self.write_v2_fixture(root)
+            with mock.patch("images.subprocess.run") as run:
+                self.assertEqual(
+                    validate_role(
+                        ROOT,
+                        root,
+                        fixture["plan"],
+                        self.ROLE,
+                        "build",
+                        self.REVISION,
+                    ),
+                    (fixture["archive"], f"{self.REPOSITORY}:{self.TAG}-amd64"),
+                )
+            run.assert_called_once_with(
+                [
+                    "python3",
+                    str(ROOT / "tests/scripts/validate-image.py"),
+                    "--plan",
+                    str(fixture["plan"]),
+                    "--role",
+                    self.ROLE,
+                    "--platform",
+                    "linux/amd64",
+                    "--archive",
+                    str(fixture["archive"]),
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+
+    def test_v2_artifact_evidence_rejects_target_cpu_drift(self) -> None:
+        mutations = {
+            "metadata": "build metadata",
+            "evidence": "image evidence",
+            "validation": "validation evidence",
+        }
+        for name, message in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture = self.write_v2_fixture(root)
+                value = json.loads(fixture[name].read_text(encoding="utf-8"))
+                value["targetCpu"] = "x86-64-v2"
+                self.write_json(fixture[name], value)
+                self.assert_rejected(root, message)
+
+    def test_legacy_or_altered_plan_contract_fails_before_archive_loading(self) -> None:
+        mutations = {
+            "legacy schema": ("schemaVersion", 1),
+            "altered baseline": ("amd64IsaBaseline", "x86-64-v2"),
+        }
+        for name, (key, value) in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture = self.write_v2_fixture(root)
+                plan_value = json.loads(fixture["plan"].read_text(encoding="utf-8"))
+                plan_value[key] = value
+                self.write_json(fixture["plan"], plan_value)
+                self.assert_rejected(root, "schema or AMD64 ISA contract")
+
     def test_wrong_channel_fails_before_archive_loading(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = root / "image-plan.json"
             plan.write_text(json.dumps({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
+                "amd64IsaBaseline": "x86-64-v3",
                 "channel": "release",
                 "source": {"kind": "release", "dirty": False, "revision": "a" * 40},
                 "images": [],

@@ -15,6 +15,9 @@ from typing import Any
 
 
 REVISION = re.compile(r"^[0-9a-f]{40}$")
+CORE_IMAGE_PLAN_SCHEMA_VERSION = 2
+AMD64_PLATFORM = "linux/amd64"
+AMD64_ISA_BASELINE = "x86-64-v3"
 
 
 def _one(root: Path, name: str) -> Path:
@@ -53,19 +56,49 @@ def _archive_reference(archive: Path) -> str:
 
 def validate_role(root: Path, image_dir: Path, plan_path: Path, role: str, expected_channel: str, expected_revision: str) -> tuple[Path, str]:
     plan = _json(plan_path)
-    revision = plan.get("source", {}).get("revision")
-    channel = plan.get("channel")
-    kind = plan.get("source", {}).get("kind")
-    dirty = plan.get("source", {}).get("dirty")
-    coherent_source = (channel == expected_channel) and ((channel == "build" and kind == "ci") or (channel == "release" and kind == "release"))
-    if plan.get("schemaVersion") != 1 or not coherent_source or dirty is not False or revision != expected_revision or REVISION.fullmatch(revision) is None:
+    if not isinstance(plan, dict):
+        raise ValueError("image plan must be a JSON object")
+    source = plan.get("source")
+    if not isinstance(source, dict):
         raise ValueError("image plan source contract is invalid")
-    rows = [row for row in plan.get("images", []) if row.get("role") == role]
-    if len(rows) != 1 or "linux/amd64" not in rows[0].get("platforms", []):
+    if (
+        plan.get("schemaVersion") != CORE_IMAGE_PLAN_SCHEMA_VERSION
+        or plan.get("amd64IsaBaseline") != AMD64_ISA_BASELINE
+    ):
+        raise ValueError("image plan schema or AMD64 ISA contract is invalid")
+    revision = source.get("revision")
+    channel = plan.get("channel")
+    kind = source.get("kind")
+    dirty = source.get("dirty")
+    coherent_source = (channel == expected_channel) and ((channel == "build" and kind == "ci") or (channel == "release" and kind == "release"))
+    if not coherent_source or dirty is not False or not isinstance(revision, str) or revision != expected_revision or REVISION.fullmatch(revision) is None:
+        raise ValueError("image plan source contract is invalid")
+    images = plan.get("images")
+    if not isinstance(images, list):
+        raise ValueError("image plan images contract is invalid")
+    rows = [row for row in images if isinstance(row, dict) and row.get("role") == role]
+    if len(rows) != 1 or AMD64_PLATFORM not in rows[0].get("platforms", []):
         raise ValueError(f"image plan does not contain one AMD64 row for {role}")
+    row = rows[0]
     repository = f"ghcr.io/oxibelt/{role}"
-    if rows[0].get("repository") != repository:
+    if row.get("repository") != repository:
         raise ValueError(f"image plan repository is invalid for {role}")
+    build_contract = row.get("build")
+    artifact = row.get("artifact")
+    if not isinstance(build_contract, dict) or not isinstance(artifact, dict):
+        raise ValueError(f"image plan build contract is invalid for {role}")
+    target_cpus = artifact.get("targetCpu")
+    if not isinstance(target_cpus, dict) or target_cpus.get(AMD64_PLATFORM) != AMD64_ISA_BASELINE:
+        raise ValueError(f"image plan AMD64 target CPU is invalid for {role}")
+    source_ref = source.get("ref")
+    source_created = source.get("created")
+    dockerfile = build_contract.get("dockerfile")
+    build_target = build_contract.get("target")
+    if not all(
+        isinstance(value, str) and value
+        for value in (source_ref, source_created, dockerfile, build_target)
+    ):
+        raise ValueError(f"image plan build identity is invalid for {role}")
     expected_reference = f"{repository}:{plan.get('tag')}-amd64"
 
     archive = _one(image_dir, f"{role}-amd64.docker.tar")
@@ -89,31 +122,37 @@ def validate_role(root: Path, image_dir: Path, plan_path: Path, role: str, expec
     if reference != expected_reference:
         raise ValueError(f"archive tag does not match the image plan for {role}/amd64")
     expected_build = {
-        "schemaVersion": 1,
+        "schemaVersion": CORE_IMAGE_PLAN_SCHEMA_VERSION,
         "planSha256": plan_sha,
         "role": role,
-        "platform": "linux/amd64",
+        "platform": AMD64_PLATFORM,
         "repository": repository,
         "version": plan.get("version"),
         "tag": plan.get("tag"),
         "localRef": reference,
         "sourceRevision": revision,
-        "sourceKind": kind,
+        "sourceRef": source_ref,
+        "sourceCreated": source_created,
         "sourceDirty": dirty,
+        "sourceKind": kind,
+        "targetCpu": AMD64_ISA_BASELINE,
+        "dockerfile": dockerfile,
+        "buildTarget": build_target,
         "archive": archive.name,
         "archiveSha256": actual_sha,
     }
-    if any(build.get(key) != value for key, value in expected_build.items()):
+    if build != expected_build:
         raise ValueError(f"build metadata does not bind the expected {role}/amd64 archive")
     expected_evidence = {
-        "schemaVersion": 1,
+        "schemaVersion": CORE_IMAGE_PLAN_SCHEMA_VERSION,
         "planSha256": plan_sha,
         "role": role,
-        "platform": "linux/amd64",
+        "platform": AMD64_PLATFORM,
         "repository": repository,
         "tag": plan.get("tag"),
         "localRef": reference,
         "sourceRevision": revision,
+        "targetCpu": AMD64_ISA_BASELINE,
         "archive": archive.name,
         "archiveSha256": actual_sha,
         "metadataSha256": metadata_sha,
@@ -123,14 +162,14 @@ def validate_role(root: Path, image_dir: Path, plan_path: Path, role: str, expec
     validated = _json(validation)
     smoked = _json(smoke)
     decided = _json(decision)
-    if any(validated.get(key) != value for key, value in {"schemaVersion": 1, "role": role, "platform": "linux/amd64", "sourceRevision": revision, "repositoryTag": reference}.items()):
+    if any(validated.get(key) != value for key, value in {"schemaVersion": CORE_IMAGE_PLAN_SCHEMA_VERSION, "role": role, "platform": AMD64_PLATFORM, "sourceRevision": revision, "targetCpu": AMD64_ISA_BASELINE, "repositoryTag": reference}.items()):
         raise ValueError(f"validation evidence is invalid for {role}/amd64")
-    if any(smoked.get(key) != value for key, value in {"schemaVersion": 1, "role": role, "platform": "linux/amd64", "sourceRevision": revision, "passed": True}.items()):
+    if any(smoked.get(key) != value for key, value in {"schemaVersion": 1, "role": role, "platform": AMD64_PLATFORM, "sourceRevision": revision, "passed": True}.items()):
         raise ValueError(f"smoke evidence is invalid for {role}/amd64")
     if decided.get("schemaVersion") != 1 or decided.get("allowed") is not True or decided.get("blockedFindings") != []:
         raise ValueError(f"vulnerability decision does not allow {role}/amd64")
     subprocess.run(
-        ["python3", str(root / "tests/scripts/validate-image.py"), "--plan", str(plan_path), "--role", role, "--platform", "linux/amd64", "--archive", str(archive)],
+        ["python3", str(root / "tests/scripts/validate-image.py"), "--plan", str(plan_path), "--role", role, "--platform", AMD64_PLATFORM, "--archive", str(archive)],
         cwd=root,
         check=True,
     )

@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.22.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -96,7 +96,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.22.0 --activate
       - name: Build image-plan tooling
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -193,7 +193,7 @@ jobs:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
         if: matrix.requires_playwright
-        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.22.0 --activate
       - name: Install browser workspace without lifecycle scripts
         if: matrix.requires_playwright
         run: pnpm install --frozen-lockfile --ignore-scripts

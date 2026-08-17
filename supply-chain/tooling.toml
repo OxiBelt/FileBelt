@@ -5,7 +5,7 @@ version = 1
 [language]
 rust = "1.97.1"
 node = "24.19.0"
-pnpm = "11.21.0"
+pnpm = "11.22.0"
 
 # CI installers must update these exact versions and their checksums together.
 # Buf becomes a required download when the first .proto file is accepted.

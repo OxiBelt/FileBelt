@@ -23,7 +23,7 @@ RUN if [ "${TARGETARCH}" = amd64 ]; then \
       test "${FILEBELT_TARGET_CPU}" = architecture-default; \
     fi && \
     corepack enable && \
-    corepack prepare pnpm@11.21.0 --activate && \
+    corepack prepare pnpm@11.22.0 --activate && \
     pnpm install --frozen-lockfile --ignore-scripts
 
 COPY ui/admin ui/admin

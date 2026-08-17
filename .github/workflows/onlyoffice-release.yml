@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
-        run: corepack enable && corepack prepare pnpm@11.21.0 --activate
+        run: corepack enable && corepack prepare pnpm@11.22.0 --activate
       - name: Check dependency-free launcher lockfile
         run: python3 tests/scripts/check-onlyoffice-pnpm-lock.py --repo-root .
       - name: Check adapter launcher

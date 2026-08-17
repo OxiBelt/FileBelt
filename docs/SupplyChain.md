@@ -235,7 +235,7 @@ deterministic public-client generator; Phase 4 regeneration covers all MCP
 personal, administrative, intent/approval, OAuth, and data-grant schemas.
 Generated output is committed and drift checked.
 
-Phase 5 admits `officeparser@7.5.1` only through its browser `slim` entry point
+Phase 5 admits `officeparser@7.6.2` only through its browser `slim` entry point
 for the bounded local Office-to-Markdown proposal path. Its transitive
 `tesseract.js@7.0.0` postinstall remains disabled by the empty lifecycle-script
 allowlist and `pnpm --ignore-scripts`; FileBelt does not enable OCR, download

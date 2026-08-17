@@ -411,7 +411,7 @@ fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
         .find("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
         .expect("pinned Node setup");
     let activation = protocol
-        .find("corepack prepare pnpm@11.21.0 --activate")
+        .find("corepack prepare pnpm@11.22.0 --activate")
         .expect("pinned pnpm activation");
     let install = protocol
         .find("pnpm install --frozen-lockfile --ignore-scripts")

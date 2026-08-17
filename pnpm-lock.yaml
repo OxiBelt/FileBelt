@@ -147,8 +147,8 @@ importers:
         specifier: 3.2.1
         version: 3.2.1
       officeparser:
-        specifier: 7.5.1
-        version: 7.5.1(supports-color@10.2.2)
+        specifier: 7.6.2
+        version: 7.6.2(supports-color@10.2.2)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -2201,8 +2201,8 @@ packages:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
     engines: {node: '>=12.20.0'}
 
-  officeparser@7.5.1:
-    resolution: {integrity: sha512-Gv9146byEWL2e6OpdbrHY3tpgI9+irAG9TrqMvtUpB1bX/o9by7Lm+WjBLPB8pO8mIruIrXSIgCra+jtIGRLgg==}
+  officeparser@7.6.2:
+    resolution: {integrity: sha512-gWPrsipg+umxxwG86eUDS/nncKZ+ymDVJbvTJ7qUFcmBVtd8Q4TNfgaF7tzvvbVW9aMNvoL9TTrvGker4hv1Pw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
     peerDependencies:
@@ -5424,7 +5424,7 @@ snapshots:
 
   obug@2.1.4: {}
 
-  officeparser@7.5.1(supports-color@10.2.2):
+  officeparser@7.6.2(supports-color@10.2.2):
     dependencies:
       '@xmldom/xmldom': 0.9.10
       fflate: 0.8.3

@@ -14,10 +14,18 @@ describe("ParentContentSecurityPolicy", () => {
   });
 
   it("rejects a non-HTTPS or non-launch configuration", () => {
-    expect(() => ParentContentSecurityPolicy("http://editor.example.test/onlyoffice/launch")).toThrow();
-    expect(() => ParentContentSecurityPolicy("https://editor.example.test/integrations/launch")).toThrow();
-    expect(() => ParentContentSecurityPolicy("https://editor.example.test:8443/onlyoffice/launch")).toThrow();
-    expect(() => ParentContentSecurityPolicy("https://editor.example.test./onlyoffice/launch")).toThrow();
+    expect(() =>
+      ParentContentSecurityPolicy("http://editor.example.test/onlyoffice/launch"),
+    ).toThrow();
+    expect(() =>
+      ParentContentSecurityPolicy("https://editor.example.test/integrations/launch"),
+    ).toThrow();
+    expect(() =>
+      ParentContentSecurityPolicy("https://editor.example.test:8443/onlyoffice/launch"),
+    ).toThrow();
+    expect(() =>
+      ParentContentSecurityPolicy("https://editor.example.test./onlyoffice/launch"),
+    ).toThrow();
   });
 });
 
@@ -29,7 +37,17 @@ describe("ResolveFluentIconsContextId", () => {
         "/workspace/node_modules/@fluentui/react-icons/lib/providers.js",
       ),
     ).toBe("/workspace/node_modules/@fluentui/react-icons/lib/contexts/index.js");
-    expect(ResolveFluentIconsContextId("./contexts/other", "/workspace/node_modules/@fluentui/react-icons/lib/providers.js")).toBeNull();
-    expect(ResolveFluentIconsContextId("./contexts/index", "/workspace/node_modules/example/lib/providers.js")).toBeNull();
+    expect(
+      ResolveFluentIconsContextId(
+        "./contexts/other",
+        "/workspace/node_modules/@fluentui/react-icons/lib/providers.js",
+      ),
+    ).toBeNull();
+    expect(
+      ResolveFluentIconsContextId(
+        "./contexts/index",
+        "/workspace/node_modules/example/lib/providers.js",
+      ),
+    ).toBeNull();
   });
 });

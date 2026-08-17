@@ -13,10 +13,21 @@ const OpenWebSocketState = 1;
 const RemoteDocumentOrigin = Symbol("filebelt-remote-document");
 const RemoteAwarenessOrigin = Symbol("filebelt-remote-awareness");
 const McpProposalOrigin = Symbol("filebelt-mcp-proposal");
-const Colors = ["#0078d4", "#107c10", "#d83b01", "#5c2d91", "#008272", "#c239b3", "#ca5010", "#038387"] as const;
+const Colors = [
+  "#0078d4",
+  "#107c10",
+  "#d83b01",
+  "#5c2d91",
+  "#008272",
+  "#c239b3",
+  "#ca5010",
+  "#038387",
+] as const;
 
 // Yjs awareness events and serialized cursor state define these lower-camel wire keys.
-type AwarenessChange = Record<"added", number[]> & Record<"removed", number[]> & Record<"updated", number[]>;
+type AwarenessChange = Record<"added", number[]> &
+  Record<"removed", number[]> &
+  Record<"updated", number[]>;
 type AwarenessCursor = Record<"anchor", unknown> & Record<"head", unknown>;
 type AwarenessLocalState = Record<"cursor", AwarenessCursor>;
 
@@ -51,7 +62,9 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   #InitialSync: ChunkAccumulator | undefined;
   #InFlight: { Id: string; McpInvocationId?: string; Update: Uint8Array } | undefined;
   #PendingUpdates: { McpInvocationId?: string; Update: Uint8Array }[] = [];
-  #PendingCheckpoint: { Reject: (Reason?: unknown) => void; Resolve: (Id: string) => void } | undefined;
+  #PendingCheckpoint:
+    | { Reject: (Reason?: unknown) => void; Resolve: (Id: string) => void }
+    | undefined;
   #Ready = false;
 
   private constructor(Options: ConnectMarkdownCollaborationOptions, Socket: WebSocket) {
@@ -62,8 +75,12 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.Awareness = new Awareness(this.Document);
   }
 
-  static async Connect(Options: ConnectMarkdownCollaborationOptions): Promise<MarkdownRealtimeSession> {
-    const Socket = (Options.WebSocketFactory ?? ((Url: string) => new WebSocket(Url)))(Options.Grant.EndpointUrl);
+  static async Connect(
+    Options: ConnectMarkdownCollaborationOptions,
+  ): Promise<MarkdownRealtimeSession> {
+    const Socket = (Options.WebSocketFactory ?? ((Url: string) => new WebSocket(Url)))(
+      Options.Grant.EndpointUrl,
+    );
     Socket.binaryType = "arraybuffer";
     const Session = new MarkdownRealtimeSession(Options, Socket);
     Options.OnStateChange?.("connecting");
@@ -81,12 +98,18 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   }
 
   ApplyMcpProposal(Markdown: string, InvocationId: string): void {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(InvocationId)) throw new Error("The MCP invocation identifier is invalid.");
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(InvocationId)
+    )
+      throw new Error("The MCP invocation identifier is invalid.");
     const SharedText = this.Document.getText(this.TextName);
-    this.Document.transact(() => {
-      SharedText.delete(0, SharedText.length);
-      SharedText.insert(0, Markdown);
-    }, { InvocationId, Type: McpProposalOrigin });
+    this.Document.transact(
+      () => {
+        SharedText.delete(0, SharedText.length);
+        SharedText.insert(0, Markdown);
+      },
+      { InvocationId, Type: McpProposalOrigin },
+    );
   }
 
   ApplyReconnectMerge(Markdown: string): void {
@@ -98,7 +121,13 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   }
 
   async RequestCheckpoint(): Promise<string> {
-    if (!this.#Ready || this.#Destroyed || this.#InFlight !== undefined || this.#PendingUpdates.length > 0 || this.#PendingCheckpoint !== undefined) {
+    if (
+      !this.#Ready ||
+      this.#Destroyed ||
+      this.#InFlight !== undefined ||
+      this.#PendingUpdates.length > 0 ||
+      this.#PendingCheckpoint !== undefined
+    ) {
       throw new Error("Collaboration changes must be durable before saving.");
     }
     return new Promise<string>((Resolve, Reject) => {
@@ -131,21 +160,31 @@ export class MarkdownRealtimeSession implements TextCollaboration {
           Reject(Reason);
         }
       };
-      this.#Socket.addEventListener("open", () => {
-        try {
-          this.#Send(Frame(1, Message([
-            Bytes(1, Encoder.encode(this.#Grant.Authorization)),
-            Text(2, this.#Grant.RoomId),
-            Unsigned(3, 1),
-            Unsigned(4, 1),
-          ])));
-        } catch (Cause) {
-          Fail(Cause);
-        }
-      }, { once: true });
+      this.#Socket.addEventListener(
+        "open",
+        () => {
+          try {
+            this.#Send(
+              Frame(
+                1,
+                Message([
+                  Bytes(1, Encoder.encode(this.#Grant.Authorization)),
+                  Text(2, this.#Grant.RoomId),
+                  Unsigned(3, 1),
+                  Unsigned(4, 1),
+                ]),
+              ),
+            );
+          } catch (Cause) {
+            Fail(Cause);
+          }
+        },
+        { once: true },
+      );
       this.#Socket.addEventListener("message", (Event) => {
         try {
-          const Bytes = Event.data instanceof ArrayBuffer ? new Uint8Array(Event.data) : new Uint8Array();
+          const Bytes =
+            Event.data instanceof ArrayBuffer ? new Uint8Array(Event.data) : new Uint8Array();
           this.#Receive(Bytes);
           if (this.#Ready && !Settled) {
             Settled = true;
@@ -156,7 +195,11 @@ export class MarkdownRealtimeSession implements TextCollaboration {
           this.#Fail(Cause);
         }
       });
-      this.#Socket.addEventListener("error", () => Fail(new Error("The collaboration transport failed.")), { once: true });
+      this.#Socket.addEventListener(
+        "error",
+        () => Fail(new Error("The collaboration transport failed.")),
+        { once: true },
+      );
       this.#Socket.addEventListener("close", () => {
         const ErrorValue = new Error("The collaboration transport closed.");
         Fail(ErrorValue);
@@ -175,10 +218,9 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     });
     this.#Heartbeat = setInterval(() => {
       if (this.#Socket.readyState !== OpenWebSocketState) return;
-      this.#Send(Frame(10, Message([
-        Unsigned(1, this.#AcknowledgedSequence),
-        Unsigned(2, Date.now()),
-      ])));
+      this.#Send(
+        Frame(10, Message([Unsigned(1, this.#AcknowledgedSequence), Unsigned(2, Date.now())])),
+      );
       this.#SendAwareness(2);
     }, 15_000);
     this.#OnStateChange?.("connected");
@@ -191,11 +233,17 @@ export class MarkdownRealtimeSession implements TextCollaboration {
       return;
     }
     const McpInvocationId = IsMcpProposalOrigin(Origin) ? Origin.InvocationId : undefined;
-    this.#PendingUpdates.push({ ...(McpInvocationId === undefined ? {} : { McpInvocationId }), Update });
+    this.#PendingUpdates.push({
+      ...(McpInvocationId === undefined ? {} : { McpInvocationId }),
+      Update,
+    });
     this.#Pump();
   };
 
-  readonly #AwarenessUpdate = ({ added: Added, removed: Removed, updated: Updated }: AwarenessChange, Origin: unknown): void => {
+  readonly #AwarenessUpdate = (
+    { added: Added, removed: Removed, updated: Updated }: AwarenessChange,
+    Origin: unknown,
+  ): void => {
     if (Origin === RemoteAwarenessOrigin || this.#Destroyed) return;
     const LocalId = this.Document.clientID;
     if (Removed.includes(LocalId)) this.#SendAwareness(3);
@@ -210,32 +258,63 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     const { McpInvocationId, Update } = Pending;
     const Id = crypto.randomUUID();
     this.#InFlight = { Id, ...(McpInvocationId === undefined ? {} : { McpInvocationId }), Update };
-    const Chunks = Array.from({ length: Math.ceil(Update.byteLength / MaximumChunkBytes) }, (Ignored, Index) => {
-      const Start = Index * MaximumChunkBytes;
-      return Message([Unsigned(1, Index), Bytes(2, Update.slice(Start, Start + MaximumChunkBytes))]);
-    });
-    this.#Send(Frame(4, Message([
-      Text(1, Id),
-      Unsigned(2, this.#AcknowledgedSequence),
-      ...Chunks.map((Chunk) => Bytes(3, Chunk)),
-      ...(McpInvocationId === undefined ? [] : [Text(4, McpInvocationId)]),
-    ])));
+    const Chunks = Array.from(
+      { length: Math.ceil(Update.byteLength / MaximumChunkBytes) },
+      (Ignored, Index) => {
+        const Start = Index * MaximumChunkBytes;
+        return Message([
+          Unsigned(1, Index),
+          Bytes(2, Update.slice(Start, Start + MaximumChunkBytes)),
+        ]);
+      },
+    );
+    this.#Send(
+      Frame(
+        4,
+        Message([
+          Text(1, Id),
+          Unsigned(2, this.#AcknowledgedSequence),
+          ...Chunks.map((Chunk) => Bytes(3, Chunk)),
+          ...(McpInvocationId === undefined ? [] : [Text(4, McpInvocationId)]),
+        ]),
+      ),
+    );
   }
 
   #Receive(BytesValue: Uint8Array): void {
-    if (BytesValue.byteLength === 0 || BytesValue.byteLength > MaximumFrameBytes) throw new Error("Invalid collaboration frame.");
+    if (BytesValue.byteLength === 0 || BytesValue.byteLength > MaximumFrameBytes)
+      throw new Error("Invalid collaboration frame.");
     const Outer = Fields(BytesValue);
     const Active = Outer.find((Field) => Field.Wire === 2);
     if (Active?.Bytes === undefined) throw new Error("Empty collaboration frame.");
     switch (Active.Number) {
-      case 3: this.#ReceiveSync(Fields(Active.Bytes)); break;
-      case 5: this.#ReceiveAcknowledgement(Fields(Active.Bytes)); break;
-      case 6: this.#ReceiveAwareness(Fields(Active.Bytes)); break;
-      case 7: this.#ReceiveCheckpoint(Fields(Active.Bytes)); break;
-      case 8: this.#Fail(new Error("The collaboration room was frozen.")); break;
-      case 9: this.#Fail(new Error(StringField(Fields(Active.Bytes), 2) || "The collaboration server rejected the request.")); break;
-      case 10: break;
-      default: throw new Error("Unsupported collaboration frame.");
+      case 3:
+        this.#ReceiveSync(Fields(Active.Bytes));
+        break;
+      case 5:
+        this.#ReceiveAcknowledgement(Fields(Active.Bytes));
+        break;
+      case 6:
+        this.#ReceiveAwareness(Fields(Active.Bytes));
+        break;
+      case 7:
+        this.#ReceiveCheckpoint(Fields(Active.Bytes));
+        break;
+      case 8:
+        this.#Fail(new Error("The collaboration room was frozen."));
+        break;
+      case 9:
+        this.#Fail(
+          new Error(
+            StringField(Fields(Active.Bytes), 2) ||
+              "The collaboration server rejected the request.",
+          ),
+        );
+        break;
+      case 10:
+        break;
+      default:
+        throw new Error("Unsupported collaboration frame.");
     }
   }
 
@@ -245,19 +324,24 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     const Count = NumberField(Values, 3);
     const Update = BytesField(Values, 4);
     const Snapshot = NumberField(Values, 5) === 1;
-    if (Count < 1 || Count > 16 || Index >= Count || Update.byteLength > MaximumChunkBytes) throw new Error("Invalid collaboration sync group.");
+    if (Count < 1 || Count > 16 || Index >= Count || Update.byteLength > MaximumChunkBytes)
+      throw new Error("Invalid collaboration sync group.");
     const Current = this.#InitialSync;
-    if (Current !== undefined && (Current.Sequence !== Sequence || Current.Snapshot !== Snapshot)) throw new Error("Interleaved collaboration sync groups are not permitted.");
-    const Accumulator = Current !== undefined && Current.Sequence === Sequence && Current.Snapshot === Snapshot
-      ? Current
-      : { Chunks: new Array<Uint8Array | undefined>(Count), Sequence, Snapshot };
-    if (Accumulator.Chunks.length !== Count || Accumulator.Chunks[Index] !== undefined) throw new Error("Invalid collaboration sync ordering.");
+    if (Current !== undefined && (Current.Sequence !== Sequence || Current.Snapshot !== Snapshot))
+      throw new Error("Interleaved collaboration sync groups are not permitted.");
+    const Accumulator =
+      Current !== undefined && Current.Sequence === Sequence && Current.Snapshot === Snapshot
+        ? Current
+        : { Chunks: new Array<Uint8Array | undefined>(Count), Sequence, Snapshot };
+    if (Accumulator.Chunks.length !== Count || Accumulator.Chunks[Index] !== undefined)
+      throw new Error("Invalid collaboration sync ordering.");
     Accumulator.Chunks[Index] = Update;
     this.#InitialSync = Accumulator;
     if (Accumulator.Chunks.some((Chunk) => Chunk === undefined)) return;
     const Complete = Concatenate(Accumulator.Chunks as Uint8Array[]);
     this.#InitialSync = undefined;
-    if (Complete.byteLength > 2 * 1024 * 1024) throw new Error("Collaboration sync group exceeds the supported limit.");
+    if (Complete.byteLength > 2 * 1024 * 1024)
+      throw new Error("Collaboration sync group exceeds the supported limit.");
     if (!this.#Ready) {
       if (!Snapshot) throw new Error("Initial collaboration sync must be a snapshot.");
       if (Complete.byteLength > 0) Y.applyUpdate(this.Document, Complete, RemoteDocumentOrigin);
@@ -267,7 +351,8 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     }
     if (Snapshot) throw new Error("Unexpected collaboration snapshot.");
     if (Sequence <= this.#AcknowledgedSequence) return;
-    if (Sequence !== this.#AcknowledgedSequence + 1) throw new Error("Collaboration sync sequence skipped a durable group.");
+    if (Sequence !== this.#AcknowledgedSequence + 1)
+      throw new Error("Collaboration sync sequence skipped a durable group.");
     if (Complete.byteLength > 0) Y.applyUpdate(this.Document, Complete, RemoteDocumentOrigin);
     this.#AcknowledgedSequence = Sequence;
   }
@@ -275,7 +360,12 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   #ReceiveAcknowledgement(Values: WireField[]): void {
     const Id = StringField(Values, 1);
     const Sequence = NumberField(Values, 2);
-    if (this.#InFlight?.Id !== Id || Sequence < this.#AcknowledgedSequence || Sequence > this.#AcknowledgedSequence + 1) throw new Error("Invalid collaboration acknowledgement.");
+    if (
+      this.#InFlight?.Id !== Id ||
+      Sequence < this.#AcknowledgedSequence ||
+      Sequence > this.#AcknowledgedSequence + 1
+    )
+      throw new Error("Invalid collaboration acknowledgement.");
     this.#AcknowledgedSequence = Sequence;
     this.#InFlight = undefined;
     this.#Pump();
@@ -285,7 +375,12 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     const Id = StringField(Values, 1);
     const Sequence = NumberField(Values, 2);
     const State = NumberField(Values, 3);
-    if (this.#PendingCheckpoint === undefined || State !== 2 || Sequence !== this.#AcknowledgedSequence || Id.length === 0) {
+    if (
+      this.#PendingCheckpoint === undefined ||
+      State !== 2 ||
+      Sequence !== this.#AcknowledgedSequence ||
+      Id.length === 0
+    ) {
       throw new Error("Invalid collaboration checkpoint.");
     }
     const Pending = this.#PendingCheckpoint;
@@ -301,43 +396,72 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     const HeadBytes = OptionalBytesField(Values, 5);
     const State = NumberField(Values, 6);
     const ColorIndex = NumberField(Values, 7);
-    const Remote = this.#RemoteClients.get(ClientId) ?? { AwarenessId: RemoteAwarenessId(ClientId, this.Document.clientID), Clock: 0 };
+    const Remote = this.#RemoteClients.get(ClientId) ?? {
+      AwarenessId: RemoteAwarenessId(ClientId, this.Document.clientID),
+      Clock: 0,
+    };
     Remote.Clock += 1;
     this.#RemoteClients.set(ClientId, Remote);
-    const Cursor = AnchorBytes !== undefined && HeadBytes !== undefined && AnchorBytes.byteLength > 0 && HeadBytes.byteLength > 0
-      ? { anchor: Y.decodeRelativePosition(AnchorBytes), head: Y.decodeRelativePosition(HeadBytes) }
-      : undefined;
-    const AwarenessState = State === 3 ? null : {
-      ...(Cursor === undefined ? {} : { cursor: Cursor }),
-      user: { color: Colors[ColorIndex % Colors.length], name: Label },
-    };
+    const Cursor =
+      AnchorBytes !== undefined &&
+      HeadBytes !== undefined &&
+      AnchorBytes.byteLength > 0 &&
+      HeadBytes.byteLength > 0
+        ? {
+            anchor: Y.decodeRelativePosition(AnchorBytes),
+            head: Y.decodeRelativePosition(HeadBytes),
+          }
+        : undefined;
+    const AwarenessState =
+      State === 3
+        ? null
+        : {
+            ...(Cursor === undefined ? {} : { cursor: Cursor }),
+            user: { color: Colors[ColorIndex % Colors.length], name: Label },
+          };
     const StateEncoder = Encoding.createEncoder();
     Encoding.writeVarUint(StateEncoder, 1);
     Encoding.writeVarUint(StateEncoder, Remote.AwarenessId);
     Encoding.writeVarUint(StateEncoder, Remote.Clock);
     Encoding.writeVarString(StateEncoder, JSON.stringify(AwarenessState));
-    applyAwarenessUpdate(this.Awareness, Encoding.toUint8Array(StateEncoder), RemoteAwarenessOrigin);
+    applyAwarenessUpdate(
+      this.Awareness,
+      Encoding.toUint8Array(StateEncoder),
+      RemoteAwarenessOrigin,
+    );
     if (State === 3) this.#RemoteClients.delete(ClientId);
   }
 
   #SendAwareness(State: 1 | 2 | 3): void {
     if (this.#Socket.readyState !== OpenWebSocketState) return;
     const Local = this.Awareness.getLocalState() as Partial<AwarenessLocalState> | null;
-    const Anchor = Local?.cursor?.anchor === undefined ? new Uint8Array() : Y.encodeRelativePosition(Y.createRelativePositionFromJSON(Local.cursor.anchor));
-    const Head = Local?.cursor?.head === undefined ? new Uint8Array() : Y.encodeRelativePosition(Y.createRelativePositionFromJSON(Local.cursor.head));
-    this.#Send(Frame(6, Message([
-      Text(1, this.#Grant.ClientId),
-      Text(2, this.#Grant.PresenceLabel),
-      Unsigned(3, 1),
-      Bytes(4, Anchor),
-      Bytes(5, Head),
-      Unsigned(6, State),
-      Unsigned(7, HashUuid(this.#Grant.ClientId) % Colors.length),
-    ])));
+    const Anchor =
+      Local?.cursor?.anchor === undefined
+        ? new Uint8Array()
+        : Y.encodeRelativePosition(Y.createRelativePositionFromJSON(Local.cursor.anchor));
+    const Head =
+      Local?.cursor?.head === undefined
+        ? new Uint8Array()
+        : Y.encodeRelativePosition(Y.createRelativePositionFromJSON(Local.cursor.head));
+    this.#Send(
+      Frame(
+        6,
+        Message([
+          Text(1, this.#Grant.ClientId),
+          Text(2, this.#Grant.PresenceLabel),
+          Unsigned(3, 1),
+          Bytes(4, Anchor),
+          Bytes(5, Head),
+          Unsigned(6, State),
+          Unsigned(7, HashUuid(this.#Grant.ClientId) % Colors.length),
+        ]),
+      ),
+    );
   }
 
   #Send(BytesValue: Uint8Array): void {
-    if (BytesValue.byteLength > MaximumFrameBytes || this.#Socket.readyState !== OpenWebSocketState) throw new Error("The collaboration transport is unavailable.");
+    if (BytesValue.byteLength > MaximumFrameBytes || this.#Socket.readyState !== OpenWebSocketState)
+      throw new Error("The collaboration transport is unavailable.");
     this.#Socket.send(Uint8Array.from(BytesValue).buffer);
   }
 
@@ -350,7 +474,8 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     this.Awareness.off("update", this.#AwarenessUpdate);
     this.#PendingCheckpoint?.Reject(Reason);
     this.#PendingCheckpoint = undefined;
-    if (this.#Socket.readyState === 0 || this.#Socket.readyState === OpenWebSocketState) this.#Socket.close(4008, "collaboration failed");
+    if (this.#Socket.readyState === 0 || this.#Socket.readyState === OpenWebSocketState)
+      this.#Socket.close(4008, "collaboration failed");
     this.#OnStateChange?.("disconnected");
   }
 }
@@ -364,10 +489,15 @@ interface ChunkAccumulator {
   Snapshot: boolean;
 }
 
-function IsMcpProposalOrigin(Value: unknown): Value is { InvocationId: string; Type: typeof McpProposalOrigin } {
-  return typeof Value === "object" && Value !== null
-    && (Value as { Type?: unknown }).Type === McpProposalOrigin
-    && typeof (Value as { InvocationId?: unknown }).InvocationId === "string";
+function IsMcpProposalOrigin(
+  Value: unknown,
+): Value is { InvocationId: string; Type: typeof McpProposalOrigin } {
+  return (
+    typeof Value === "object" &&
+    Value !== null &&
+    (Value as { Type?: unknown }).Type === McpProposalOrigin &&
+    typeof (Value as { InvocationId?: unknown }).InvocationId === "string"
+  );
 }
 
 interface WireField {
@@ -453,7 +583,10 @@ function ReadVarint(Value: Uint8Array, Start: number): { Offset: number; Value: 
 }
 
 function NumberField(Values: WireField[], NumberValue: number): number {
-  return Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 0)?.Unsigned ?? 0;
+  return (
+    Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 0)
+      ?.Unsigned ?? 0
+  );
 }
 
 function BytesField(Values: WireField[], NumberValue: number): Uint8Array {
@@ -461,7 +594,8 @@ function BytesField(Values: WireField[], NumberValue: number): Uint8Array {
 }
 
 function OptionalBytesField(Values: WireField[], NumberValue: number): Uint8Array | undefined {
-  return Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 2)?.Bytes;
+  return Values.find((FieldValue) => FieldValue.Number === NumberValue && FieldValue.Wire === 2)
+    ?.Bytes;
 }
 
 function StringField(Values: WireField[], NumberValue: number): string {

@@ -20,5 +20,9 @@ export function ParseFileBeltReference(Value: string): FileBeltReference | undef
   if (DriveId === undefined || NodeId === undefined) return undefined;
   return VersionId === undefined
     ? { DriveId: DriveId.toLowerCase(), NodeId: NodeId.toLowerCase() }
-    : { DriveId: DriveId.toLowerCase(), NodeId: NodeId.toLowerCase(), VersionId: VersionId.toLowerCase() };
+    : {
+        DriveId: DriveId.toLowerCase(),
+        NodeId: NodeId.toLowerCase(),
+        VersionId: VersionId.toLowerCase(),
+      };
 }

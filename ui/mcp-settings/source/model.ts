@@ -143,15 +143,38 @@ export interface McpSettingsSnapshot {
 }
 
 export interface McpSettingsClient {
-  approveAndInvoke(Prepared: McpPreparedInvocation, OnEvent: (Event: McpInvocationEventView) => void, Signal?: AbortSignal): Promise<void>;
-  assignTemplate(Template: AdminMcpTemplateView, PrincipalId: string, PrincipalKind: "group" | "service" | "user"): Promise<void>;
+  approveAndInvoke(
+    Prepared: McpPreparedInvocation,
+    OnEvent: (Event: McpInvocationEventView) => void,
+    Signal?: AbortSignal,
+  ): Promise<void>;
+  assignTemplate(
+    Template: AdminMcpTemplateView,
+    PrincipalId: string,
+    PrincipalKind: "group" | "service" | "user",
+  ): Promise<void>;
   cancelInvocation(InvocationId: string): Promise<void>;
-  changeRegistrationState(Registration: McpRegistrationView, Action: "disable" | "enable" | "revoke"): Promise<void>;
-  createBlockRule(Kind: AdminMcpBlockRuleView["Kind"], Value: string, Reason: string): Promise<void>;
+  changeRegistrationState(
+    Registration: McpRegistrationView,
+    Action: "disable" | "enable" | "revoke",
+  ): Promise<void>;
+  createBlockRule(
+    Kind: AdminMcpBlockRuleView["Kind"],
+    Value: string,
+    Reason: string,
+  ): Promise<void>;
   createInvocationIntent(Input: McpInvocationInput): Promise<McpPreparedInvocation>;
   createRegistration(Input: CreateMcpRegistrationInput): Promise<void>;
   createServiceIdentity(DisplayName: string, SpiffeUri: string): Promise<void>;
-  createServiceInvocationGrant(Service: AdminMcpServiceIdentityView, RegistrationId: string, CapabilityKind: McpCapabilityKind, CapabilityName: string, CapabilityFingerprint: string, ApplicationId: string, ExpiresAt: string): Promise<void>;
+  createServiceInvocationGrant(
+    Service: AdminMcpServiceIdentityView,
+    RegistrationId: string,
+    CapabilityKind: McpCapabilityKind,
+    CapabilityName: string,
+    CapabilityFingerprint: string,
+    ApplicationId: string,
+    ExpiresAt: string,
+  ): Promise<void>;
   createTemplate(DisplayName: string, EndpointUri: string, TrustProfile: string): Promise<void>;
   deleteRegistration(Registration: McpRegistrationView): Promise<void>;
   discoverCapabilities(Registration: McpRegistrationView): Promise<McpCapabilityReviewView>;
@@ -159,8 +182,15 @@ export interface McpSettingsClient {
   getCapabilityReview(RegistrationId: string): Promise<McpCapabilityReviewView | null>;
   getSnapshot(IsTenantAdmin: boolean, Signal?: AbortSignal): Promise<McpSettingsSnapshot>;
   importRegistration(Document: string): Promise<void>;
-  putCapabilityReview(Registration: McpRegistrationView, Review: McpCapabilityReviewView): Promise<void>;
-  putCredential(Registration: McpRegistrationView, Kind: "api_key" | "bearer", Secret: string): Promise<void>;
+  putCapabilityReview(
+    Registration: McpRegistrationView,
+    Review: McpCapabilityReviewView,
+  ): Promise<void>;
+  putCredential(
+    Registration: McpRegistrationView,
+    Kind: "api_key" | "bearer",
+    Secret: string,
+  ): Promise<void>;
   startOauth(Registration: McpRegistrationView): Promise<string>;
   testRegistration(Registration: McpRegistrationView): Promise<boolean>;
 }

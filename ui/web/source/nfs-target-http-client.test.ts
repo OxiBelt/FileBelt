@@ -22,33 +22,37 @@ const Session = {
 } satisfies components["schemas"]["Session"];
 
 const Overview = {
-  mappings: [{
-    allowed_drive_ids: [DriveId],
-    credential_id: CredentialId,
-    generation: 2,
-    kerberos_principal: "avery@EXAMPLE.TEST",
-    principal_id: Session.principal_id,
-    projected_gid: 2001,
-    projected_uid: 1001,
-  }],
-  proposals: [{
-    allowed_drive_ids: [DriveId],
-    allowed_drives: [{ display_name: "Research", id: DriveId }],
-    created_at: "2026-08-11T00:00:00Z",
-    decided_at: null,
-    expires_at: "2026-08-12T00:00:00Z",
-    generation: 1,
-    id: ProposalId,
-    kerberos_principal: "avery@EXAMPLE.TEST",
-    principal_id: Session.principal_id,
-    posix_group_id: "00000000-0000-4000-8000-000000000138",
-    posix_group_name: "researchers",
-    posix_name: "avery",
-    projected_gid: 2001,
-    projected_uid: 1001,
-    proposer_principal_id: "00000000-0000-4000-8000-000000000137",
-    state: "pending",
-  }],
+  mappings: [
+    {
+      allowed_drive_ids: [DriveId],
+      credential_id: CredentialId,
+      generation: 2,
+      kerberos_principal: "avery@EXAMPLE.TEST",
+      principal_id: Session.principal_id,
+      projected_gid: 2001,
+      projected_uid: 1001,
+    },
+  ],
+  proposals: [
+    {
+      allowed_drive_ids: [DriveId],
+      allowed_drives: [{ display_name: "Research", id: DriveId }],
+      created_at: "2026-08-11T00:00:00Z",
+      decided_at: null,
+      expires_at: "2026-08-12T00:00:00Z",
+      generation: 1,
+      id: ProposalId,
+      kerberos_principal: "avery@EXAMPLE.TEST",
+      principal_id: Session.principal_id,
+      posix_group_id: "00000000-0000-4000-8000-000000000138",
+      posix_group_name: "researchers",
+      posix_name: "avery",
+      projected_gid: 2001,
+      projected_uid: 1001,
+      proposer_principal_id: "00000000-0000-4000-8000-000000000137",
+      state: "pending",
+    },
+  ],
 } satisfies components["schemas"]["NfsTargetOverview"];
 
 class ContractServer {
@@ -60,17 +64,42 @@ class ContractServer {
     this.Requests.push(RequestValue);
     const Url = new URL(RequestValue.url);
     if (Url.pathname === "/api/v1/session") return Json(Session);
-    if (Url.pathname === "/api/v1/mounts/nfs" && RequestValue.method === "GET") return Json(Overview);
-    if (this.ReauthenticationRequired) return Json({ code: "mount.reauthentication_required", status: 403, title: "Recent OIDC authentication is required", type: "https://filebelt.dev/problems/mount.reauthentication_required" }, 403);
-    if (Url.pathname === `/api/v1/mounts/nfs/mapping-proposals/${ProposalId}/approval` && RequestValue.method === "POST") return Json(Overview.mappings[0]);
-    if (Url.pathname === `/api/v1/mounts/nfs/mapping-proposals/${ProposalId}/decline` && RequestValue.method === "POST") return new Response(null, { status: 204 });
-    if (Url.pathname === `/api/v1/mounts/nfs/mappings/${CredentialId}` && RequestValue.method === "DELETE") return new Response(null, { status: 204 });
+    if (Url.pathname === "/api/v1/mounts/nfs" && RequestValue.method === "GET")
+      return Json(Overview);
+    if (this.ReauthenticationRequired)
+      return Json(
+        {
+          code: "mount.reauthentication_required",
+          status: 403,
+          title: "Recent OIDC authentication is required",
+          type: "https://filebelt.dev/problems/mount.reauthentication_required",
+        },
+        403,
+      );
+    if (
+      Url.pathname === `/api/v1/mounts/nfs/mapping-proposals/${ProposalId}/approval` &&
+      RequestValue.method === "POST"
+    )
+      return Json(Overview.mappings[0]);
+    if (
+      Url.pathname === `/api/v1/mounts/nfs/mapping-proposals/${ProposalId}/decline` &&
+      RequestValue.method === "POST"
+    )
+      return new Response(null, { status: 204 });
+    if (
+      Url.pathname === `/api/v1/mounts/nfs/mappings/${CredentialId}` &&
+      RequestValue.method === "DELETE"
+    )
+      return new Response(null, { status: 204 });
     return new Response(null, { status: 404 });
   };
 }
 
 function Json(Value: unknown, Status = 200): Response {
-  return new Response(JSON.stringify(Value), { headers: { "Content-Type": "application/json" }, status: Status });
+  return new Response(JSON.stringify(Value), {
+    headers: { "Content-Type": "application/json" },
+    status: Status,
+  });
 }
 
 describe("HttpNfsTargetClient", () => {
@@ -101,6 +130,8 @@ describe("HttpNfsTargetClient", () => {
     Server.ReauthenticationRequired = true;
     const Client = new HttpNfsTargetClient(Server.fetch, "https://filebelt.example.test");
 
-    await expect(Client.approveProposal(ProposalId, 1)).rejects.toBeInstanceOf(MountReauthenticationRequiredError);
+    await expect(Client.approveProposal(ProposalId, 1)).rejects.toBeInstanceOf(
+      MountReauthenticationRequiredError,
+    );
   });
 });

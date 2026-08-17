@@ -39,8 +39,10 @@ for (const [Network, Prefix, Family] of [
 
 export function PrivateAddress(Address) {
   const Version = isIP(Address);
-  return Version === 0
-    || (Version === 4 ? DeniedIpv4.check(Address, "ipv4") : DeniedIpv6.check(Address, "ipv6"));
+  return (
+    Version === 0 ||
+    (Version === 4 ? DeniedIpv4.check(Address, "ipv4") : DeniedIpv6.check(Address, "ipv6"))
+  );
 }
 
 export function ParseAuthority(Authority) {
@@ -51,7 +53,9 @@ export function ParseAuthority(Authority) {
   if (Separator <= 0) {
     throw new Error("port is required");
   }
-  const Host = Authority.slice(0, Separator).replace(/^\[|\]$/g, "").toLowerCase();
+  const Host = Authority.slice(0, Separator)
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase();
   const Port = Number(Authority.slice(Separator + 1));
   if (!Host || !AllowedPorts.has(Port) || isIP(Host)) {
     throw new Error("authority is outside the development allowlist");
@@ -59,27 +63,35 @@ export function ParseAuthority(Authority) {
   return { Host, Port };
 }
 
-export function ValidateForwardTarget(TargetValue, MethodValue, TrustProfile, IntegrationHost = "") {
+export function ValidateForwardTarget(
+  TargetValue,
+  MethodValue,
+  TrustProfile,
+  IntegrationHost = "",
+) {
   if (
-    typeof TargetValue !== "string"
-    || !["GET", "POST"].includes(MethodValue ?? "")
-    || !AllowedTrustProfiles.has(TrustProfile ?? "")
+    typeof TargetValue !== "string" ||
+    !["GET", "POST"].includes(MethodValue ?? "") ||
+    !AllowedTrustProfiles.has(TrustProfile ?? "")
   ) {
     throw new Error("forwarding contract is invalid");
   }
   const Target = new URL(TargetValue);
   const Port = Number(Target.port || "443");
   if (
-    Target.protocol !== "https:"
-    || Target.username
-    || Target.password
-    || Target.hash
-    || !AllowedPorts.has(Port)
-    || isIP(Target.hostname)
+    Target.protocol !== "https:" ||
+    Target.username ||
+    Target.password ||
+    Target.hash ||
+    !AllowedPorts.has(Port) ||
+    isIP(Target.hostname)
   ) {
     throw new Error("target is outside the egress policy");
   }
-  if (TrustProfile === "integration" && (IntegrationHost.length === 0 || Target.hostname !== IntegrationHost || Port !== 443)) {
+  if (
+    TrustProfile === "integration" &&
+    (IntegrationHost.length === 0 || Target.hostname !== IntegrationHost || Port !== 443)
+  ) {
     throw new Error("integration target is outside the exact synthetic allowlist");
   }
   return { Port, Target };

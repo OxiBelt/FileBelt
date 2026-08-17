@@ -15,7 +15,15 @@ const OfficeMediaTypes: Readonly<Record<string, string>> = {
 
 /** An exact Office type is eligible for an external document session, not Markdown conversion. */
 export function IsOfficeDocumentCandidate(Entry: FileEntry): boolean {
-  if (Entry.Kind !== "file" || Entry.HeadVersionId === null || Entry.Size === null || Entry.Size > MaximumOfficeDocumentBytes) return false;
-  const Extension = Object.keys(OfficeMediaTypes).find((Candidate) => Entry.Name.endsWith(Candidate));
+  if (
+    Entry.Kind !== "file" ||
+    Entry.HeadVersionId === null ||
+    Entry.Size === null ||
+    Entry.Size > MaximumOfficeDocumentBytes
+  )
+    return false;
+  const Extension = Object.keys(OfficeMediaTypes).find((Candidate) =>
+    Entry.Name.endsWith(Candidate),
+  );
   return Extension !== undefined && Entry.MediaType === OfficeMediaTypes[Extension];
 }

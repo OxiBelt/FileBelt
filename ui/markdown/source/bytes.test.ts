@@ -13,12 +13,18 @@ describe("Markdown byte boundaries", () => {
   it("rejects malformed UTF-8, NUL, mixed endings, and oversize input", () => {
     expect(() => DecodeMarkdown(new Uint8Array([0xc3, 0x28]), 32)).toThrow(MarkdownInputError);
     expect(() => DecodeMarkdown(new Uint8Array([0]), 32)).toThrow(MarkdownInputError);
-    expect(() => DecodeMarkdown(new TextEncoder().encode("a\nb\r\nc"), 32)).toThrow(MarkdownInputError);
+    expect(() => DecodeMarkdown(new TextEncoder().encode("a\nb\r\nc"), 32)).toThrow(
+      MarkdownInputError,
+    );
     expect(() => DecodeMarkdown(new TextEncoder().encode("four"), 3)).toThrow(MarkdownInputError);
   });
 
   it("allows the reviewed 16 MiB editable text boundary", () => {
-    expect(DecodeEditableText(new Uint8Array(16 * 1024 * 1024).fill(0x61)).Text).toHaveLength(16 * 1024 * 1024);
-    expect(() => DecodeEditableText(new Uint8Array(16 * 1024 * 1024 + 1).fill(0x61))).toThrow(MarkdownInputError);
+    expect(DecodeEditableText(new Uint8Array(16 * 1024 * 1024).fill(0x61)).Text).toHaveLength(
+      16 * 1024 * 1024,
+    );
+    expect(() => DecodeEditableText(new Uint8Array(16 * 1024 * 1024 + 1).fill(0x61))).toThrow(
+      MarkdownInputError,
+    );
   });
 });

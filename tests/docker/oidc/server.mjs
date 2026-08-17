@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  createHash,
-  generateKeyPairSync,
-  randomBytes,
-  sign,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -82,10 +76,10 @@ function jwt(claims) {
 function authorize(url, response) {
   const parameters = url.searchParams;
   if (
-    parameters.get("response_type") !== "code"
-    || parameters.get("client_id") !== clientId
-    || parameters.get("redirect_uri") !== redirectUri
-    || parameters.get("code_challenge_method") !== "S256"
+    parameters.get("response_type") !== "code" ||
+    parameters.get("client_id") !== clientId ||
+    parameters.get("redirect_uri") !== redirectUri ||
+    parameters.get("code_challenge_method") !== "S256"
   ) {
     oauthError(response, 400, "invalid_request", "The authorization request is invalid.");
     return;
@@ -104,7 +98,9 @@ function authorize(url, response) {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
     response.setHeader("Content-Type", "text/html; charset=utf-8");
-    response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>FileBelt test identity</title><style>body{font:16px system-ui;max-width:36rem;margin:4rem auto}a{display:block;margin:1rem;padding:1rem;border:1px solid}</style><h1>Development identities</h1><p>This deterministic issuer is for Docker integration only.</p><a href="${escapeHtml(url.pathname + url.search)}&amp;fixture_user=admin">Administrator</a><a href="${escapeHtml(url.pathname + url.search)}&amp;fixture_user=member">Member</a></html>`);
+    response.end(
+      `<!doctype html><html lang="en"><meta charset="utf-8"><title>FileBelt test identity</title><style>body{font:16px system-ui;max-width:36rem;margin:4rem auto}a{display:block;margin:1rem;padding:1rem;border:1px solid}</style><h1>Development identities</h1><p>This deterministic issuer is for Docker integration only.</p><a href="${escapeHtml(url.pathname + url.search)}&amp;fixture_user=admin">Administrator</a><a href="${escapeHtml(url.pathname + url.search)}&amp;fixture_user=member">Member</a></html>`,
+    );
     return;
   }
   const code = randomBytes(32).toString("base64url");
@@ -137,12 +133,12 @@ async function token(request, response) {
   const record = codes.get(code);
   codes.delete(code);
   if (
-    record === undefined
-    || record.expiresAt < Date.now()
-    || parameters.get("grant_type") !== "authorization_code"
-    || parameters.get("redirect_uri") !== redirectUri
-    || parameters.get("client_id") !== clientId
-    || !equalSecret(parameters.get("client_secret") ?? "", clientSecret)
+    record === undefined ||
+    record.expiresAt < Date.now() ||
+    parameters.get("grant_type") !== "authorization_code" ||
+    parameters.get("redirect_uri") !== redirectUri ||
+    parameters.get("client_id") !== clientId ||
+    !equalSecret(parameters.get("client_secret") ?? "", clientSecret)
   ) {
     oauthError(response, 400, "invalid_grant", "The authorization code is invalid or expired.");
     return;
@@ -189,7 +185,10 @@ const server = createServer(async (request, response) => {
     json(response, 200, { keys: [{ ...publicJwk, alg: "RS256", kid: keyId, use: "sig" }] });
     return;
   }
-  if (request.method === "GET" && ["/authorize", "/_filebelt-test-oidc/authorize"].includes(url.pathname)) {
+  if (
+    request.method === "GET" &&
+    ["/authorize", "/_filebelt-test-oidc/authorize"].includes(url.pathname)
+  ) {
     authorize(url, response);
     return;
   }

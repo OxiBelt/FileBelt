@@ -25,7 +25,9 @@ export class OnlyOfficeLauncher {
     this.View.setLaunchEnabled(true);
   }
 
-  public get State(): LauncherState { return this.#State; }
+  public get State(): LauncherState {
+    return this.#State;
+  }
 
   public async launch(Launch: () => Promise<LaunchResponse>): Promise<void> {
     if (this.#State === "launching" || this.#State === "loading-api") return;

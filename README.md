@@ -79,6 +79,7 @@ cargo vet --locked
 corepack pnpm install --frozen-lockfile --ignore-scripts
 pnpm licenses list --json | python3 tests/scripts/check-node-licenses.py --policy supply-chain/node-policy.toml
 pnpm audit --audit-level high
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test

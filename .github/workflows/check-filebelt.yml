@@ -185,6 +185,8 @@ jobs:
           --policy supply-chain/node-policy.toml
       - name: Audit dependencies
         run: pnpm audit --audit-level high
+      - name: Check formatting
+        run: pnpm format:check
       - name: Lint
         run: pnpm lint
       - name: Typecheck

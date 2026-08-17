@@ -17,20 +17,59 @@ test("opens an eligible Markdown file through its lazy editor route", async ({ p
     if (Request.resourceType() !== "fetch") return Route.continue();
     const Path = new URL(Request.url()).pathname;
     if (Path === "/api/v1/session") return Route.fulfill({ json: Session() });
-    if (Path === "/api/v1/drives") return Route.fulfill({ json: { items: [{ display_name: "My Drive", id: DriveId, kind: "private", quota_bytes: 1, root_id: RootId, used_physical_bytes: 0 }], next_cursor: null } });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`) return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`) return Route.fulfill({ json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null } });
-    if (Path === `/api/v1/drives/${DriveId}/trash`) return Route.fulfill({ json: { items: [], next_cursor: null } });
-    if (Path.endsWith("/versions")) return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path === "/api/v1/drives")
+      return Route.fulfill({
+        json: {
+          items: [
+            {
+              display_name: "My Drive",
+              id: DriveId,
+              kind: "private",
+              quota_bytes: 1,
+              root_id: RootId,
+              used_physical_bytes: 0,
+            },
+          ],
+          next_cursor: null,
+        },
+      });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`)
+      return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`)
+      return Route.fulfill({
+        json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null },
+      });
+    if (Path === `/api/v1/drives/${DriveId}/trash`)
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path.endsWith("/versions"))
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path.endsWith("/shares")) return Route.fulfill({ json: [] });
     if (Path === "/api/v1/shared") return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path === "/api/v1/sessions") return Route.fulfill({ json: [] });
-    if (Path.endsWith("/download-grants")) return Route.fulfill({ status: 201, json: { authorization: "unused", authorization_scheme: "fbcap1", expires_at: "2026-08-08T01:00:00Z", grant_id: VersionId, method: "GET", path: `/io/v1/downloads/${VersionId}`, size_bytes: MarkdownBody.length } });
-    if (Path === `/io/v1/downloads/${VersionId}`) return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
-    return Route.fulfill({ status: 404, json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" } });
+    if (Path.endsWith("/download-grants"))
+      return Route.fulfill({
+        status: 201,
+        json: {
+          authorization: "unused",
+          authorization_scheme: "fbcap1",
+          expires_at: "2026-08-08T01:00:00Z",
+          grant_id: VersionId,
+          method: "GET",
+          path: `/io/v1/downloads/${VersionId}`,
+          size_bytes: MarkdownBody.length,
+        },
+      });
+    if (Path === `/io/v1/downloads/${VersionId}`)
+      return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
+    return Route.fulfill({
+      status: 404,
+      json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" },
+    });
   });
 
-  const PreviewResponse = Page.waitForResponse((Response) => new URL(Response.url()).pathname === "/markdown-preview/index.html");
+  const PreviewResponse = Page.waitForResponse(
+    (Response) => new URL(Response.url()).pathname === "/markdown-preview/index.html",
+  );
   await Page.goto(`/markdown/${NodeId}`);
   await expect(Page.getByRole("heading", { name: "README.md" })).toBeVisible();
   await expect(Page.getByRole("tab", { name: "Edit" })).toBeVisible();
@@ -50,13 +89,19 @@ test("opens an eligible Markdown file through its lazy editor route", async ({ p
   const PreviewHeaders = (await PreviewResponse).headers();
   expect(PreviewHeaders["access-control-allow-origin"]).toBe("*");
   expect(PreviewHeaders["content-security-policy"]).toContain("connect-src 'none'");
-  expect(PreviewHeaders["content-security-policy"]).toContain("trusted-types filebelt-markdown-generated");
+  expect(PreviewHeaders["content-security-policy"]).toContain(
+    "trusted-types filebelt-markdown-generated",
+  );
 });
 
-test("reconnects after an initial collaboration failure and closes a live session after guarded navigation", async ({ page: Page }) => {
+test("reconnects after an initial collaboration failure and closes a live session after guarded navigation", async ({
+  page: Page,
+}) => {
   let CollaborationGrantRequests = 0;
   let ReleaseReconnect: (() => void) | undefined;
-  const ReconnectGate = new Promise<void>((Resolve) => { ReleaseReconnect = Resolve; });
+  const ReconnectGate = new Promise<void>((Resolve) => {
+    ReleaseReconnect = Resolve;
+  });
   await Page.addInitScript(() => {
     let Connections = 0;
     (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets = 0;
@@ -85,7 +130,11 @@ test("reconnects after an initial collaboration failure and closes a live sessio
           this.readyState = 1;
           this.dispatchEvent(new Event("open"));
           // Collaboration frame 3: sequence 0, one empty snapshot chunk.
-          this.dispatchEvent(new MessageEvent("message", { data: new Uint8Array([26, 10, 8, 0, 16, 0, 24, 1, 34, 0, 40, 1]).buffer }));
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: new Uint8Array([26, 10, 8, 0, 16, 0, 24, 1, 34, 0, 40, 1]).buffer,
+            }),
+          );
         }, 0);
       }
 
@@ -109,23 +158,69 @@ test("reconnects after an initial collaboration failure and closes a live sessio
     if (Request.resourceType() !== "fetch") return Route.continue();
     const Path = new URL(Request.url()).pathname;
     if (Path === "/api/v1/session") return Route.fulfill({ json: Session() });
-    if (Path === "/api/v1/drives") return Route.fulfill({ json: { items: [{ display_name: "My Drive", id: DriveId, kind: "private", quota_bytes: 1, root_id: RootId, used_physical_bytes: 0 }], next_cursor: null } });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`) return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${NodeId}`) return Route.fulfill({ json: Node(NodeId, "README.md", "file", RootId, VersionId) });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`) return Route.fulfill({ json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null } });
+    if (Path === "/api/v1/drives")
+      return Route.fulfill({
+        json: {
+          items: [
+            {
+              display_name: "My Drive",
+              id: DriveId,
+              kind: "private",
+              quota_bytes: 1,
+              root_id: RootId,
+              used_physical_bytes: 0,
+            },
+          ],
+          next_cursor: null,
+        },
+      });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`)
+      return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${NodeId}`)
+      return Route.fulfill({ json: Node(NodeId, "README.md", "file", RootId, VersionId) });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`)
+      return Route.fulfill({
+        json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null },
+      });
     if (Path.endsWith("/collaboration-grants")) {
       CollaborationGrantRequests += 1;
       if (CollaborationGrantRequests > 1) await ReconnectGate;
-      return Route.fulfill({ status: 201, json: { authorization: "test-grant", endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }], presence_label: "Avery", room: { room_id: "00000000-0000-4000-8000-000000000009" } } });
+      return Route.fulfill({
+        status: 201,
+        json: {
+          authorization: "test-grant",
+          endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }],
+          presence_label: "Avery",
+          room: { room_id: "00000000-0000-4000-8000-000000000009" },
+        },
+      });
     }
-    if (Path === `/api/v1/drives/${DriveId}/trash`) return Route.fulfill({ json: { items: [], next_cursor: null } });
-    if (Path.endsWith("/versions")) return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path === `/api/v1/drives/${DriveId}/trash`)
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path.endsWith("/versions"))
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path.endsWith("/shares")) return Route.fulfill({ json: [] });
     if (Path === "/api/v1/shared") return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path === "/api/v1/sessions") return Route.fulfill({ json: [] });
-    if (Path.endsWith("/download-grants")) return Route.fulfill({ status: 201, json: { authorization: "unused", authorization_scheme: "fbcap1", expires_at: "2026-08-08T01:00:00Z", grant_id: VersionId, method: "GET", path: `/io/v1/downloads/${VersionId}`, size_bytes: MarkdownBody.length } });
-    if (Path === `/io/v1/downloads/${VersionId}`) return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
-    return Route.fulfill({ status: 404, json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" } });
+    if (Path.endsWith("/download-grants"))
+      return Route.fulfill({
+        status: 201,
+        json: {
+          authorization: "unused",
+          authorization_scheme: "fbcap1",
+          expires_at: "2026-08-08T01:00:00Z",
+          grant_id: VersionId,
+          method: "GET",
+          path: `/io/v1/downloads/${VersionId}`,
+          size_bytes: MarkdownBody.length,
+        },
+      });
+    if (Path === `/io/v1/downloads/${VersionId}`)
+      return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
+    return Route.fulfill({
+      status: 404,
+      json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" },
+    });
   });
 
   await Page.goto(`/markdown/${NodeId}`);
@@ -146,10 +241,18 @@ test("reconnects after an initial collaboration failure and closes a live sessio
   await expect(Page.getByRole("dialog", { name: "Leave without saving?" })).toBeVisible();
   await Page.getByRole("button", { name: "Discard changes" }).click();
   await expect(Page.getByRole("heading", { name: "My Drive" })).toBeVisible();
-  await expect.poll(() => Page.evaluate(() => (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets ?? 0)).toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      Page.evaluate(
+        () => (window as Window & { FileBeltClosedSockets?: number }).FileBeltClosedSockets ?? 0,
+      ),
+    )
+    .toBeGreaterThan(0);
 });
 
-test("retains the latest head when reconnect falls back after a frozen room", async ({ page: Page }) => {
+test("retains the latest head when reconnect falls back after a frozen room", async ({
+  page: Page,
+}) => {
   let LatestHead = false;
   let GrantRequests = 0;
   await Page.addInitScript(() => {
@@ -174,7 +277,11 @@ test("retains the latest head when reconnect falls back after a frozen room", as
         window.setTimeout(() => {
           this.readyState = 1;
           this.dispatchEvent(new Event("open"));
-          this.dispatchEvent(new MessageEvent("message", { data: new Uint8Array([26, 10, 8, 0, 16, 0, 24, 1, 34, 0, 40, 1]).buffer }));
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: new Uint8Array([26, 10, 8, 0, 16, 0, 24, 1, 34, 0, 40, 1]).buffer,
+            }),
+          );
         }, 0);
       }
 
@@ -195,29 +302,91 @@ test("retains the latest head when reconnect falls back after a frozen room", as
     if (Request.resourceType() !== "fetch") return Route.continue();
     const Path = new URL(Request.url()).pathname;
     if (Path === "/api/v1/session") return Route.fulfill({ json: Session() });
-    if (Path === "/api/v1/drives") return Route.fulfill({ json: { items: [{ display_name: "My Drive", id: DriveId, kind: "private", quota_bytes: 1, root_id: RootId, used_physical_bytes: 0 }], next_cursor: null } });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`) return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${NodeId}`) return Route.fulfill({ json: Node(NodeId, "README.md", "file", RootId, LatestHead ? NewVersionId : VersionId) });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`) return Route.fulfill({ json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null } });
+    if (Path === "/api/v1/drives")
+      return Route.fulfill({
+        json: {
+          items: [
+            {
+              display_name: "My Drive",
+              id: DriveId,
+              kind: "private",
+              quota_bytes: 1,
+              root_id: RootId,
+              used_physical_bytes: 0,
+            },
+          ],
+          next_cursor: null,
+        },
+      });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}`)
+      return Route.fulfill({ json: Node(RootId, "My Drive", "directory", null, null) });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${NodeId}`)
+      return Route.fulfill({
+        json: Node(NodeId, "README.md", "file", RootId, LatestHead ? NewVersionId : VersionId),
+      });
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children`)
+      return Route.fulfill({
+        json: { items: [Node(NodeId, "README.md", "file", RootId, VersionId)], next_cursor: null },
+      });
     if (Path.endsWith("/collaboration-grants")) {
       GrantRequests += 1;
-      if (GrantRequests > 1) return Route.fulfill({ status: 409, json: { code: "collaboration.room_frozen", status: 409, title: "The request conflicts with current state", type: "about:blank" } });
-      return Route.fulfill({ status: 201, json: { authorization: "test-grant", endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }], presence_label: "Avery", room: { room_id: "00000000-0000-4000-8000-000000000009" } } });
+      if (GrantRequests > 1)
+        return Route.fulfill({
+          status: 409,
+          json: {
+            code: "collaboration.room_frozen",
+            status: 409,
+            title: "The request conflicts with current state",
+            type: "about:blank",
+          },
+        });
+      return Route.fulfill({
+        status: 201,
+        json: {
+          authorization: "test-grant",
+          endpoints: [{ transport: "websocket", url: "ws://collaboration.test/room" }],
+          presence_label: "Avery",
+          room: { room_id: "00000000-0000-4000-8000-000000000009" },
+        },
+      });
     }
-    if (Path === `/api/v1/drives/${DriveId}/trash`) return Route.fulfill({ json: { items: [], next_cursor: null } });
-    if (Path.endsWith("/versions")) return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path === `/api/v1/drives/${DriveId}/trash`)
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Path.endsWith("/versions"))
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path.endsWith("/shares")) return Route.fulfill({ json: [] });
     if (Path === "/api/v1/shared") return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Path === "/api/v1/sessions") return Route.fulfill({ json: [] });
     if (Path.endsWith("/download-grants")) {
       const GrantInput = Request.postDataJSON() as Record<string, unknown>;
-      const RequestedVersion = typeof GrantInput["version_id"] === "string" ? GrantInput["version_id"] : (LatestHead ? NewVersionId : VersionId);
+      const RequestedVersion =
+        typeof GrantInput["version_id"] === "string"
+          ? GrantInput["version_id"]
+          : LatestHead
+            ? NewVersionId
+            : VersionId;
       const Body = RequestedVersion === NewVersionId ? "# Readme\n\nexternal head\n" : MarkdownBody;
-      return Route.fulfill({ status: 201, json: { authorization: "unused", authorization_scheme: "fbcap1", expires_at: "2026-08-08T01:00:00Z", grant_id: RequestedVersion, method: "GET", path: `/io/v1/downloads/${RequestedVersion}`, size_bytes: Body.length } });
+      return Route.fulfill({
+        status: 201,
+        json: {
+          authorization: "unused",
+          authorization_scheme: "fbcap1",
+          expires_at: "2026-08-08T01:00:00Z",
+          grant_id: RequestedVersion,
+          method: "GET",
+          path: `/io/v1/downloads/${RequestedVersion}`,
+          size_bytes: Body.length,
+        },
+      });
     }
-    if (Path === `/io/v1/downloads/${VersionId}`) return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
-    if (Path === `/io/v1/downloads/${NewVersionId}`) return Route.fulfill({ body: "# Readme\n\nexternal head\n", contentType: "text/markdown" });
-    return Route.fulfill({ status: 404, json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" } });
+    if (Path === `/io/v1/downloads/${VersionId}`)
+      return Route.fulfill({ body: MarkdownBody, contentType: "text/markdown" });
+    if (Path === `/io/v1/downloads/${NewVersionId}`)
+      return Route.fulfill({ body: "# Readme\n\nexternal head\n", contentType: "text/markdown" });
+    return Route.fulfill({
+      status: 404,
+      json: { code: "test.unhandled", status: 404, title: Path, type: "about:blank" },
+    });
   });
 
   await Page.goto(`/markdown/${NodeId}`);
@@ -228,7 +397,9 @@ test("retains the latest head when reconnect falls back after a frozen room", as
   await Page.keyboard.type("local dirty");
   await expect(Editor).toContainText("local dirty");
   LatestHead = true;
-  await Page.evaluate(() => (window as Window & { FileBeltDisconnect?: () => void }).FileBeltDisconnect?.());
+  await Page.evaluate(() =>
+    (window as Window & { FileBeltDisconnect?: () => void }).FileBeltDisconnect?.(),
+  );
   await expect(Page.getByText("Live collaboration disconnected.")).toBeVisible();
   await Page.getByRole("button", { name: "Reconnect" }).click();
   await expect(Page.getByRole("button", { name: "Save local edits as a copy" })).toBeVisible();
@@ -237,9 +408,38 @@ test("retains the latest head when reconnect falls back after a frozen room", as
 });
 
 function Session(): object {
-  return { csrf_token: "memory-only", display_name: "Avery Morgan", principal_id: "00000000-0000-4000-8000-000000000005", reauthenticated_recently: true, session_id: "00000000-0000-4000-8000-000000000006", tenant_admin: false, user_id: "00000000-0000-4000-8000-000000000007", verified_email: "avery@example.test" };
+  return {
+    csrf_token: "memory-only",
+    display_name: "Avery Morgan",
+    principal_id: "00000000-0000-4000-8000-000000000005",
+    reauthenticated_recently: true,
+    session_id: "00000000-0000-4000-8000-000000000006",
+    tenant_admin: false,
+    user_id: "00000000-0000-4000-8000-000000000007",
+    verified_email: "avery@example.test",
+  };
 }
 
-function Node(Id: string, Name: string, Kind: "directory" | "file", ParentId: string | null, HeadVersionId: string | null): object {
-  return { acl_generation: 1, display_name: Name, drive_id: DriveId, head_media_type: Kind === "file" ? "text/markdown" : null, head_version_id: HeadVersionId, id: Id, kind: Kind, namespace_generation: 1, parent_id: ParentId, size_bytes: Kind === "file" ? 9 : null, trashed: false, updated_at: "2026-08-08T00:00:00Z", version_ordinal: Kind === "file" ? 1 : null };
+function Node(
+  Id: string,
+  Name: string,
+  Kind: "directory" | "file",
+  ParentId: string | null,
+  HeadVersionId: string | null,
+): object {
+  return {
+    acl_generation: 1,
+    display_name: Name,
+    drive_id: DriveId,
+    head_media_type: Kind === "file" ? "text/markdown" : null,
+    head_version_id: HeadVersionId,
+    id: Id,
+    kind: Kind,
+    namespace_generation: 1,
+    parent_id: ParentId,
+    size_bytes: Kind === "file" ? 9 : null,
+    trashed: false,
+    updated_at: "2026-08-08T00:00:00Z",
+    version_ordinal: Kind === "file" ? 1 : null,
+  };
 }

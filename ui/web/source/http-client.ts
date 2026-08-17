@@ -150,13 +150,17 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
     const RefreshGeneration = ++this.#WorkspaceRefreshGeneration;
-    const Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session", SignalInit(Signal)));
-    const Drives = await this.#collectPages<DriveResponse>(async (Cursor) => RequireData<DrivePage>(
-      await this.#Api.GET("/api/v1/drives", {
-        params: { query: PageQuery(Cursor) },
-        ...SignalInit(Signal),
-      }),
-    ));
+    const Session = RequireData<SessionResponse>(
+      await this.#Api.GET("/api/v1/session", SignalInit(Signal)),
+    );
+    const Drives = await this.#collectPages<DriveResponse>(async (Cursor) =>
+      RequireData<DrivePage>(
+        await this.#Api.GET("/api/v1/drives", {
+          params: { query: PageQuery(Cursor) },
+          ...SignalInit(Signal),
+        }),
+      ),
+    );
     const PrivateDrive = Drives.find(({ kind: Kind }) => Kind === "private") ?? null;
     let UploadTarget: WorkspaceRoutingState["UploadTarget"];
     if (PrivateDrive === null) {
@@ -185,9 +189,11 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
         if (ParentId === undefined) break;
         const Children = await this.#listChildren(Drive.id, ParentId, Signal);
         Nodes.push(...Children);
-        Directories.push(...Children.filter(({ kind: Kind }) => Kind === "directory").map(({ id: Id }) => Id));
+        Directories.push(
+          ...Children.filter(({ kind: Kind }) => Kind === "directory").map(({ id: Id }) => Id),
+        );
       }
-      Nodes.push(...await this.#listTrash(Drive.id, Signal));
+      Nodes.push(...(await this.#listTrash(Drive.id, Signal)));
       for (const Node of Nodes) {
         Locations.set(Node.id, {
           DriveId: Drive.id,
@@ -196,9 +202,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           NamespaceGeneration: Node.namespace_generation,
           ParentId: Node.parent_id,
         });
-        const NodeVersions = Node.kind === "file"
-          ? await this.#listVersions(Drive.id, Node.id, Signal)
-          : [];
+        const NodeVersions =
+          Node.kind === "file" ? await this.#listVersions(Drive.id, Node.id, Signal) : [];
         for (const Version of NodeVersions) {
           VersionLocations.set(Version.id, { DriveId: Drive.id, NodeId: Node.id });
           Versions.push(VersionRecord(Version));
@@ -220,17 +225,25 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             Target: Share.verified_email,
           });
         }
-        Entries.push(FileEntry(Node, Drive.owner_display_name, Drive.kind === "shared" || NodeShares.length > 0));
+        Entries.push(
+          FileEntry(
+            Node,
+            Drive.owner_display_name,
+            Drive.kind === "shared" || NodeShares.length > 0,
+          ),
+        );
       }
     }
 
     const KnownEntries = new Set(Entries.map(({ Id }) => Id));
-    const SharedNodes = await this.#collectPages<NodeResponse>(async (Cursor) => RequireData<NodePage>(
-      await this.#Api.GET("/api/v1/shared", {
-        params: { query: PageQuery(Cursor) },
-        ...SignalInit(Signal),
-      }),
-    ));
+    const SharedNodes = await this.#collectPages<NodeResponse>(async (Cursor) =>
+      RequireData<NodePage>(
+        await this.#Api.GET("/api/v1/shared", {
+          params: { query: PageQuery(Cursor) },
+          ...SignalInit(Signal),
+        }),
+      ),
+    );
     for (const Node of SharedNodes) {
       if (KnownEntries.has(Node.id)) continue;
       Locations.set(Node.id, {
@@ -308,71 +321,84 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       const Root = await this.#getNode(Target.DriveId, Target.RootId);
       if (Root.kind !== "directory") throw new Error("The private drive root is unavailable.");
       Target.NamespaceGeneration = Root.namespace_generation;
-      const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-        body: {
-          declared_size_bytes: Candidate.Size,
-          expected_parent_generation: Target.NamespaceGeneration,
-          name: Candidate.Name,
-          parent_id: Target.RootId,
-        },
-        params: {
-          header: this.#idempotentMutationHeaders(),
-          path: { drive_id: Target.DriveId },
-        },
-      }));
+      const Allocation = RequireData<UploadAllocation>(
+        await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+          body: {
+            declared_size_bytes: Candidate.Size,
+            expected_parent_generation: Target.NamespaceGeneration,
+            name: Candidate.Name,
+            parent_id: Target.RootId,
+          },
+          params: {
+            header: this.#idempotentMutationHeaders(),
+            path: { drive_id: Target.DriveId },
+          },
+        }),
+      );
 
       let Cursor: string | null = null;
       let Finalize: ByteGrant | null;
       do {
-        const Grants: UploadGrants = RequireData<UploadGrants>(await this.#Api.GET("/api/v1/uploads/{upload_id}", {
-          params: {
-            path: { upload_id: Allocation.upload_id },
-            query: PageQuery(Cursor),
-          },
-        }));
+        const Grants: UploadGrants = RequireData<UploadGrants>(
+          await this.#Api.GET("/api/v1/uploads/{upload_id}", {
+            params: {
+              path: { upload_id: Allocation.upload_id },
+              query: PageQuery(Cursor),
+            },
+          }),
+        );
         for (let Index = 0; Index < Grants.parts.length; Index += 1) {
           const Grant = Grants.parts[Index];
           if (Grant === undefined) continue;
           const PartNumber = UploadPartNumber(Grant.path) ?? Index;
           const Start = PartNumber * Allocation.chunk_size_bytes;
           const End = Math.min(Start + Allocation.chunk_size_bytes, Candidate.Size);
-          await this.#ioRequest(Grant.path, {
-            body: Candidate.Data.slice(Start, End),
-            headers: { Authorization: `fbcap1 ${Grant.authorization}` },
-            method: "PUT",
-          }, "omit");
+          await this.#ioRequest(
+            Grant.path,
+            {
+              body: Candidate.Data.slice(Start, End),
+              headers: { Authorization: `fbcap1 ${Grant.authorization}` },
+              method: "PUT",
+            },
+            "omit",
+          );
         }
         Finalize = Grants.finalize;
         Cursor = Grants.next_cursor;
       } while (Cursor !== null);
       if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
-      await this.#ioRequest(Finalize.path, {
-        headers: { Authorization: `fbcap1 ${Finalize.authorization}` },
-        method: "POST",
-      }, "omit");
-      RequireSuccess(await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
-        body: { expected_fencing_token: Allocation.fencing_token },
-        params: {
-          header: this.#idempotentMutationHeaders(),
-          path: { upload_id: Allocation.upload_id },
+      await this.#ioRequest(
+        Finalize.path,
+        {
+          headers: { Authorization: `fbcap1 ${Finalize.authorization}` },
+          method: "POST",
         },
-      }));
+        "omit",
+      );
+      RequireSuccess(
+        await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
+          body: { expected_fencing_token: Allocation.fencing_token },
+          params: {
+            header: this.#idempotentMutationHeaders(),
+            path: { upload_id: Allocation.upload_id },
+          },
+        }),
+      );
     }
   }
 
   async download(EntryId: string): Promise<Blob> {
     const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
-    const Grant = RequireData<DownloadGrant>(await this.#Api.POST(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants",
-      {
+    const Grant = RequireData<DownloadGrant>(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants", {
         body: { version_id: null },
         params: {
           header: this.#mutationHeaders(),
           path: { drive_id: Location.DriveId, node_id: EntryId },
         },
-      },
-    ));
+      }),
+    );
     const Response = await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin");
     return Response.blob();
   }
@@ -380,10 +406,15 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
     const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
-    const Grant = RequireData<DownloadGrant>(await this.#Api.POST(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants",
-      { body: { version_id: VersionId }, params: { header: this.#mutationHeaders(), path: { drive_id: Location.DriveId, node_id: EntryId } } },
-    ));
+    const Grant = RequireData<DownloadGrant>(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants", {
+        body: { version_id: VersionId },
+        params: {
+          header: this.#mutationHeaders(),
+          path: { drive_id: Location.DriveId, node_id: EntryId },
+        },
+      }),
+    );
     return (await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin")).blob();
   }
 
@@ -396,7 +427,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     };
   }
 
-  async updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }> {
+  async updateTextPreferences(
+    Patch: TextPreferences,
+    ExpectedEtag: string,
+  ): Promise<{ Etag: string; Value: TextPreferences }> {
     await this.#ensureSession();
     const Result = await this.#Api.PATCH("/api/v1/preferences/text", {
       body: { edit_limit_bytes: Patch.EditLimitBytes, inline_limit_bytes: Patch.InlineLimitBytes },
@@ -411,23 +445,48 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async listTextVersions(EntryId: string, Cursor: string | null): Promise<TextVersionPage> {
     const Location = this.#fileLocation(EntryId);
-    const Page = RequireData<VersionPage>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
-      params: { path: { drive_id: Location.DriveId, node_id: EntryId }, query: PageQuery(Cursor) },
-    }));
-    for (const Version of Page.items) this.#Routing.Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
+    const Page = RequireData<VersionPage>(
+      await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
+        params: {
+          path: { drive_id: Location.DriveId, node_id: EntryId },
+          query: PageQuery(Cursor),
+        },
+      }),
+    );
+    for (const Version of Page.items)
+      this.#Routing.Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
     return { Items: Page.items.map(VersionRecord), NextCursor: Page.next_cursor };
   }
 
-  async compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison> {
+  async compareTextVersions(
+    EntryId: string,
+    BaseVersionId: string,
+    TargetVersionId: string,
+  ): Promise<TextComparison> {
     const Location = this.#fileLocation(EntryId);
-    const Comparison = RequireData<TextComparisonResponse>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}", {
-      params: { path: { base_version_id: BaseVersionId, drive_id: Location.DriveId, node_id: EntryId, target_version_id: TargetVersionId } },
-    }));
+    const Comparison = RequireData<TextComparisonResponse>(
+      await this.#Api.GET(
+        "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}",
+        {
+          params: {
+            path: {
+              base_version_id: BaseVersionId,
+              drive_id: Location.DriveId,
+              node_id: EntryId,
+              target_version_id: TargetVersionId,
+            },
+          },
+        },
+      ),
+    );
     return {
       Hunks: Comparison.hunks.map((Hunk) => ({
         BaseLines: Hunk.base_lines,
         BaseStart: Hunk.base_start,
-        Lines: Hunk.lines.map((Line) => ({ Kind: Line.kind === "delete" ? "remove" : Line.kind, Text: Line.text })),
+        Lines: Hunk.lines.map((Line) => ({
+          Kind: Line.kind === "delete" ? "remove" : Line.kind,
+          Text: Line.text,
+        })),
         TargetLines: Hunk.target_lines,
         TargetStart: Hunk.target_start,
       })),
@@ -441,55 +500,74 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       params: { path: { drive_id: Location.DriveId, node_id: EntryId } },
     });
     RequireData<NodeResponse>(Current);
-    RequireSuccess(await this.#Api.PATCH("/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy", {
-      body: { policy: ContentClass },
-      params: {
-        header: { ...this.#idempotentMutationHeaders(), "If-Match": RequireEtag(Current.response) },
-        path: { drive_id: Location.DriveId, node_id: EntryId },
-      },
-    }));
+    RequireSuccess(
+      await this.#Api.PATCH("/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy", {
+        body: { policy: ContentClass },
+        params: {
+          header: {
+            ...this.#idempotentMutationHeaders(),
+            "If-Match": RequireEtag(Current.response),
+          },
+          path: { drive_id: Location.DriveId, node_id: EntryId },
+        },
+      }),
+    );
   }
 
   async importMarkdown(Input: MarkdownImportInput): Promise<string> {
     const Location = this.#fileLocation(Input.EntryId);
     await this.#ensureSession();
-    const Intent = RequireData<MarkdownImportIntent>(await this.#Api.POST(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
-      {
+    const Intent = RequireData<MarkdownImportIntent>(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents", {
         body: { source_version_id: Input.SourceVersionId, target_name: Input.TargetName },
-        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId, node_id: Input.EntryId } },
-      },
-    ));
+        params: {
+          header: this.#idempotentMutationHeaders(),
+          path: { drive_id: Location.DriveId, node_id: Input.EntryId },
+        },
+      }),
+    );
     const Parent = await this.#getNode(Location.DriveId, Intent.target_parent_id);
     if (Parent.kind !== "directory") throw new Error("The Office source parent is unavailable.");
-    const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-      body: { declared_media_type: "text/markdown", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, import_intent_id: Intent.id, name: Intent.target_name, parent_id: Intent.target_parent_id },
-      params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
-    }));
+    const Allocation = RequireData<UploadAllocation>(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+        body: {
+          declared_media_type: "text/markdown",
+          declared_size_bytes: Input.Contents.size,
+          expected_parent_generation: Parent.namespace_generation,
+          import_intent_id: Intent.id,
+          name: Intent.target_name,
+          parent_id: Intent.target_parent_id,
+        },
+        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
+      }),
+    );
     return this.#putUploadContents(Allocation, Input.Contents);
   }
 
-  async beginMarkdownCollaboration(EntryId: string, ClientId: string): Promise<MarkdownCollaborationGrant | null> {
+  async beginMarkdownCollaboration(
+    EntryId: string,
+    ClientId: string,
+  ): Promise<MarkdownCollaborationGrant | null> {
     const Location = this.#fileLocation(EntryId);
     await this.#ensureSession();
     let Grant: CollaborationGrant;
     try {
-      Grant = RequireData<CollaborationGrant>(await this.#Api.POST(
-        "/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
-        {
+      Grant = RequireData<CollaborationGrant>(
+        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants", {
           body: { client_id: ClientId, presence_mode: "display_name", transport: "websocket" },
           params: {
             header: this.#idempotentMutationHeaders(),
             path: { drive_id: Location.DriveId, node_id: EntryId },
           },
-        },
-      ));
+        }),
+      );
     } catch (Cause) {
       if (Cause instanceof ApiRequestError && Cause.Status === 404) return null;
       throw Cause;
     }
     const Endpoint = Grant.endpoints.find(({ transport: Transport }) => Transport === "websocket");
-    if (Endpoint === undefined || Grant.room.room_id === null) throw new Error("The collaboration endpoint is unavailable.");
+    if (Endpoint === undefined || Grant.room.room_id === null)
+      throw new Error("The collaboration endpoint is unavailable.");
     return {
       Authorization: Grant.authorization,
       ClientId,
@@ -504,7 +582,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     await this.#ensureSession();
     const Node = await this.#getNode(Location.DriveId, EntryId);
     if (Node.head_version_id === null) throw new Error("The Markdown file has no current version.");
-    return { Contents: await this.readMarkdown(EntryId, Node.head_version_id), VersionId: Node.head_version_id };
+    return {
+      Contents: await this.readMarkdown(EntryId, Node.head_version_id),
+      VersionId: Node.head_version_id,
+    };
   }
 
   async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
@@ -512,27 +593,53 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
     await this.#ensureSession();
     try {
-      const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-        body: { ...(Input.CheckpointId === undefined ? {} : { collaboration_checkpoint_id: Input.CheckpointId }), declared_media_type: Input.Contents.type || "text/plain", declared_size_bytes: Input.Contents.size, expected_head_version_id: Input.ExpectedHeadVersionId, name: Input.Name, node_id: Input.EntryId, parent_id: Location.ParentId },
-        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
-      }));
+      const Allocation = RequireData<UploadAllocation>(
+        await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+          body: {
+            ...(Input.CheckpointId === undefined
+              ? {}
+              : { collaboration_checkpoint_id: Input.CheckpointId }),
+            declared_media_type: Input.Contents.type || "text/plain",
+            declared_size_bytes: Input.Contents.size,
+            expected_head_version_id: Input.ExpectedHeadVersionId,
+            name: Input.Name,
+            node_id: Input.EntryId,
+            parent_id: Location.ParentId,
+          },
+          params: {
+            header: this.#idempotentMutationHeaders(),
+            path: { drive_id: Location.DriveId },
+          },
+        }),
+      );
       return await this.#putUploadContents(Allocation, Input.Contents);
     } catch (Cause) {
-      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new VersionConflictError();
+      if (Cause instanceof ApiRequestError && Cause.Status === 409)
+        throw new VersionConflictError();
       throw Cause;
     }
   }
 
-  async saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string> {
+  async saveMarkdownCopy(
+    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+  ): Promise<string> {
     const Location = this.#fileLocation(Input.EntryId);
     if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
     await this.#ensureSession();
     const Parent = await this.#getNode(Location.DriveId, Location.ParentId);
     if (Parent.kind !== "directory") throw new Error("The Markdown file parent is unavailable.");
-    const Allocation = RequireData<UploadAllocation>(await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
-      body: { declared_media_type: Input.Contents.type || "text/plain", declared_size_bytes: Input.Contents.size, expected_parent_generation: Parent.namespace_generation, name: Input.Name, parent_id: Location.ParentId },
-      params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
-    }));
+    const Allocation = RequireData<UploadAllocation>(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+        body: {
+          declared_media_type: Input.Contents.type || "text/plain",
+          declared_size_bytes: Input.Contents.size,
+          expected_parent_generation: Parent.namespace_generation,
+          name: Input.Name,
+          parent_id: Location.ParentId,
+        },
+        params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
+      }),
+    );
     return this.#putUploadContents(Allocation, Input.Contents);
   }
 
@@ -540,13 +647,15 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     await this.#ensureSession();
     for (const EntryId of EntryIds) {
       const Location = this.#location(EntryId);
-      RequireSuccess(await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/trash", {
-        body: { expected_namespace_generation: Location.NamespaceGeneration },
-        params: {
-          header: this.#mutationHeaders(),
-          path: { drive_id: Location.DriveId, node_id: EntryId },
-        },
-      }));
+      RequireSuccess(
+        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/trash", {
+          body: { expected_namespace_generation: Location.NamespaceGeneration },
+          params: {
+            header: this.#mutationHeaders(),
+            path: { drive_id: Location.DriveId, node_id: EntryId },
+          },
+        }),
+      );
     }
   }
 
@@ -554,13 +663,15 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     await this.#ensureSession();
     for (const EntryId of EntryIds) {
       const Location = this.#location(EntryId);
-      RequireSuccess(await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/restore", {
-        body: { expected_namespace_generation: Location.NamespaceGeneration },
-        params: {
-          header: this.#mutationHeaders(),
-          path: { drive_id: Location.DriveId, node_id: EntryId },
-        },
-      }));
+      RequireSuccess(
+        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/restore", {
+          body: { expected_namespace_generation: Location.NamespaceGeneration },
+          params: {
+            header: this.#mutationHeaders(),
+            path: { drive_id: Location.DriveId, node_id: EntryId },
+          },
+        }),
+      );
     }
   }
 
@@ -570,27 +681,28 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     }
     await this.#ensureSession();
     const Location = this.#location(Input.FileId);
-    RequireSuccess(await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
-      body: {
-        inheritance: "self",
-        kind: Input.Kind,
-        preset: SharePreset(Input.Permission),
-        verified_email: Input.Target,
-      },
-      params: {
-        header: this.#idempotentMutationHeaders(),
-        path: { drive_id: Location.DriveId, node_id: Input.FileId },
-      },
-    }));
+    RequireSuccess(
+      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
+        body: {
+          inheritance: "self",
+          kind: Input.Kind,
+          preset: SharePreset(Input.Permission),
+          verified_email: Input.Target,
+        },
+        params: {
+          header: this.#idempotentMutationHeaders(),
+          path: { drive_id: Location.DriveId, node_id: Input.FileId },
+        },
+      }),
+    );
   }
 
   async revokeShare(ShareId: string): Promise<void> {
     const Location = this.#Routing.Shares.get(ShareId);
     if (Location === undefined) throw new Error("The selected share is unavailable.");
     await this.#ensureSession();
-    RequireSuccess(await this.#Api.DELETE(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}",
-      {
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}", {
         params: {
           header: this.#mutationHeaders(),
           path: {
@@ -599,8 +711,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             principal_id: Location.PrincipalId,
           },
         },
-      },
-    ));
+      }),
+    );
   }
 
   async restoreVersion(VersionId: string): Promise<void> {
@@ -609,30 +721,34 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     const Node = this.#location(Location.NodeId);
     if (Node.HeadVersionId === null) throw new Error("The selected file head is unavailable.");
     await this.#ensureSession();
-    RequireSuccess(await this.#Api.POST(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore",
-      {
-        body: { expected_head_version_id: Node.HeadVersionId },
-        params: {
-          header: this.#idempotentMutationHeaders(),
-          path: {
-            drive_id: Location.DriveId,
-            node_id: Location.NodeId,
-            version_id: VersionId,
+    RequireSuccess(
+      await this.#Api.POST(
+        "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore",
+        {
+          body: { expected_head_version_id: Node.HeadVersionId },
+          params: {
+            header: this.#idempotentMutationHeaders(),
+            path: {
+              drive_id: Location.DriveId,
+              node_id: Location.NodeId,
+              version_id: VersionId,
+            },
           },
         },
-      },
-    ));
+      ),
+    );
   }
 
   async revokeSession(SessionId: string): Promise<void> {
     await this.#ensureSession();
-    RequireSuccess(await this.#Api.DELETE("/api/v1/sessions/{session_id}", {
-      params: {
-        header: this.#mutationHeaders(),
-        path: { session_id: SessionId },
-      },
-    }));
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/sessions/{session_id}", {
+        params: {
+          header: this.#mutationHeaders(),
+          path: { session_id: SessionId },
+        },
+      }),
+    );
   }
 
   async markPrivacyRead(): Promise<void> {
@@ -675,26 +791,45 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     let Cursor: string | null = null;
     let Finalize: ByteGrant | null;
     do {
-      const Grants: UploadGrants = RequireData<UploadGrants>(await this.#Api.GET("/api/v1/uploads/{upload_id}", {
-        params: { path: { upload_id: Allocation.upload_id }, query: PageQuery(Cursor) },
-      }));
+      const Grants: UploadGrants = RequireData<UploadGrants>(
+        await this.#Api.GET("/api/v1/uploads/{upload_id}", {
+          params: { path: { upload_id: Allocation.upload_id }, query: PageQuery(Cursor) },
+        }),
+      );
       for (let Index = 0; Index < Grants.parts.length; Index += 1) {
         const Grant = Grants.parts[Index];
         if (Grant === undefined) continue;
         const PartNumber = UploadPartNumber(Grant.path) ?? Index;
         const Start = PartNumber * Allocation.chunk_size_bytes;
         const End = Math.min(Start + Allocation.chunk_size_bytes, Contents.size);
-        await this.#ioRequest(Grant.path, { body: Contents.slice(Start, End), headers: { Authorization: `fbcap1 ${Grant.authorization}` }, method: "PUT" }, "omit");
+        await this.#ioRequest(
+          Grant.path,
+          {
+            body: Contents.slice(Start, End),
+            headers: { Authorization: `fbcap1 ${Grant.authorization}` },
+            method: "PUT",
+          },
+          "omit",
+        );
       }
       Finalize = Grants.finalize;
       Cursor = Grants.next_cursor;
     } while (Cursor !== null);
     if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
-    await this.#ioRequest(Finalize.path, { headers: { Authorization: `fbcap1 ${Finalize.authorization}` }, method: "POST" }, "omit");
-    const Committed = RequireData<UploadCommit>(await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
-      body: { expected_fencing_token: Allocation.fencing_token },
-      params: { header: this.#idempotentMutationHeaders(), path: { upload_id: Allocation.upload_id } },
-    }));
+    await this.#ioRequest(
+      Finalize.path,
+      { headers: { Authorization: `fbcap1 ${Finalize.authorization}` }, method: "POST" },
+      "omit",
+    );
+    const Committed = RequireData<UploadCommit>(
+      await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
+        body: { expected_fencing_token: Allocation.fencing_token },
+        params: {
+          header: this.#idempotentMutationHeaders(),
+          path: { upload_id: Allocation.upload_id },
+        },
+      }),
+    );
     return Committed.version_id;
   }
 
@@ -710,52 +845,69 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async #getNode(DriveId: string, NodeId: string, Signal?: AbortSignal): Promise<NodeResponse> {
-    return RequireData<NodeResponse>(await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
-      params: { path: { drive_id: DriveId, node_id: NodeId } },
-      ...SignalInit(Signal),
-    }));
+    return RequireData<NodeResponse>(
+      await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
+        params: { path: { drive_id: DriveId, node_id: NodeId } },
+        ...SignalInit(Signal),
+      }),
+    );
   }
 
-  async #listChildren(DriveId: string, NodeId: string, Signal?: AbortSignal): Promise<NodeResponse[]> {
-    return this.#collectPages(async (Cursor) => RequireData<NodePage>(await this.#Api.GET(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/children",
-      {
-        params: {
-          path: { drive_id: DriveId, node_id: NodeId },
-          query: PageQuery(Cursor),
-        },
-        ...SignalInit(Signal),
-      },
-    )));
+  async #listChildren(
+    DriveId: string,
+    NodeId: string,
+    Signal?: AbortSignal,
+  ): Promise<NodeResponse[]> {
+    return this.#collectPages(async (Cursor) =>
+      RequireData<NodePage>(
+        await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/children", {
+          params: {
+            path: { drive_id: DriveId, node_id: NodeId },
+            query: PageQuery(Cursor),
+          },
+          ...SignalInit(Signal),
+        }),
+      ),
+    );
   }
 
   async #listTrash(DriveId: string, Signal?: AbortSignal): Promise<NodeResponse[]> {
-    return this.#collectPages(async (Cursor) => RequireData<NodePage>(await this.#Api.GET(
-      "/api/v1/drives/{drive_id}/trash",
-      {
-        params: {
-          path: { drive_id: DriveId },
-          query: PageQuery(Cursor),
-        },
-        ...SignalInit(Signal),
-      },
-    )));
+    return this.#collectPages(async (Cursor) =>
+      RequireData<NodePage>(
+        await this.#Api.GET("/api/v1/drives/{drive_id}/trash", {
+          params: {
+            path: { drive_id: DriveId },
+            query: PageQuery(Cursor),
+          },
+          ...SignalInit(Signal),
+        }),
+      ),
+    );
   }
 
-  async #listVersions(DriveId: string, NodeId: string, Signal?: AbortSignal): Promise<VersionResponse[]> {
-    return this.#collectPages(async (Cursor) => RequireData<VersionPage>(await this.#Api.GET(
-      "/api/v1/drives/{drive_id}/nodes/{node_id}/versions",
-      {
-        params: {
-          path: { drive_id: DriveId, node_id: NodeId },
-          query: PageQuery(Cursor),
-        },
-        ...SignalInit(Signal),
-      },
-    )));
+  async #listVersions(
+    DriveId: string,
+    NodeId: string,
+    Signal?: AbortSignal,
+  ): Promise<VersionResponse[]> {
+    return this.#collectPages(async (Cursor) =>
+      RequireData<VersionPage>(
+        await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
+          params: {
+            path: { drive_id: DriveId, node_id: NodeId },
+            query: PageQuery(Cursor),
+          },
+          ...SignalInit(Signal),
+        }),
+      ),
+    );
   }
 
-  async #optionalShares(DriveId: string, NodeId: string, Signal?: AbortSignal): Promise<readonly ShareResponse[]> {
+  async #optionalShares(
+    DriveId: string,
+    NodeId: string,
+    Signal?: AbortSignal,
+  ): Promise<readonly ShareResponse[]> {
     const Result = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
       params: { path: { drive_id: DriveId, node_id: NodeId } },
       ...SignalInit(Signal),
@@ -789,7 +941,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     Init: RequestInit,
     Credentials: RequestCredentials,
   ): Promise<Response> {
-    const HttpRequest = new Request(new URL(Path, this.#BaseUrl), { ...Init, credentials: Credentials });
+    const HttpRequest = new Request(new URL(Path, this.#BaseUrl), {
+      ...Init,
+      credentials: Credentials,
+    });
     const Response = await this.#Fetch(HttpRequest);
     if (Response.ok) return Response;
     let Problem: unknown;
@@ -814,7 +969,14 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
     HeadVersionId: IsFile ? Node.head_version_id : null,
     Kind: Node.kind === "directory" ? "folder" : Node.kind,
     ModifiedAt: Node.updated_at,
-    TextEligibility: IsFile ? TextEligibility(Node.content_class_policy, Node.display_name, Node.head_media_type, Node.size_bytes) : "ineligible",
+    TextEligibility: IsFile
+      ? TextEligibility(
+          Node.content_class_policy,
+          Node.display_name,
+          Node.head_media_type,
+          Node.size_bytes,
+        )
+      : "ineligible",
     MediaType: IsFile ? Node.head_media_type : null,
     Name: Node.display_name,
     Owner,
@@ -822,12 +984,21 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
     Size: IsFile ? Node.size_bytes : null,
     Status: "ready",
     Trashed: Node.trashed,
-    Version: IsFile ? Node.version_ordinal ?? 0 : 0,
+    Version: IsFile ? (Node.version_ordinal ?? 0) : 0,
   };
 }
 
-function TextEligibility(Policy: NodeResponse["content_class_policy"], Name: string, MediaType: string | null, Size: number | null): FileEntry["TextEligibility"] {
-  const IsText = MediaType?.startsWith("text/") === true || /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(Name);
+function TextEligibility(
+  Policy: NodeResponse["content_class_policy"],
+  Name: string,
+  MediaType: string | null,
+  Size: number | null,
+): FileEntry["TextEligibility"] {
+  const IsText =
+    MediaType?.startsWith("text/") === true ||
+    /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(
+      Name,
+    );
   if (Policy === "binary") return "history-only";
   if (!IsText || Size === null) return "ineligible";
   if (Size > 100 * 1024 * 1024) return "history-only";
@@ -849,7 +1020,8 @@ function RequireSuccess(Result: ApiResult<unknown>): void {
 
 function RequireEtag(Response: Response): string {
   const Etag = Response.headers.get("ETag");
-  if (Etag === null || Etag.length === 0) throw new Error("The server did not return the required generation ETag.");
+  if (Etag === null || Etag.length === 0)
+    throw new Error("The server did not return the required generation ETag.");
   return Etag;
 }
 
@@ -879,17 +1051,23 @@ function SignalInit(Signal: AbortSignal | undefined): SignalInitShape {
 
 function SharePermission(Preset: ShareResponse["preset"]): ShareRecord["Permission"] {
   switch (Preset) {
-    case "contributor": return "Contributor";
-    case "manager": return "Manager";
-    case "viewer": return "Viewer";
+    case "contributor":
+      return "Contributor";
+    case "manager":
+      return "Manager";
+    case "viewer":
+      return "Viewer";
   }
 }
 
 function SharePreset(Permission: ShareRecord["Permission"]): ShareResponse["preset"] {
   switch (Permission) {
-    case "Contributor": return "contributor";
-    case "Manager": return "manager";
-    case "Viewer": return "viewer";
+    case "Contributor":
+      return "contributor";
+    case "Manager":
+      return "manager";
+    case "Viewer":
+      return "viewer";
   }
 }
 

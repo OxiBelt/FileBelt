@@ -16,12 +16,17 @@ describe("media preview", () => {
       `${ManifestPath}#fragment`,
       "https://untrusted.example/manifest",
       "/api/v1/media-previews/not-a-uuid/playback/manifest",
-    ]) expect(IsMediaPlaybackManifestPath(Value)).toBe(false);
+    ])
+      expect(IsMediaPlaybackManifestPath(Value)).toBe(false);
   });
 
   it("renders native controls and the admitted codec MIME types without autoplay", () => {
-    const Av1 = renderToStaticMarkup(<MediaPreview Codec="av1" ManifestPath={ManifestPath} Title="Video" />);
-    const Vp9 = renderToStaticMarkup(<MediaPreview Codec="vp9" ManifestPath={ManifestPath} Title="Video" />);
+    const Av1 = renderToStaticMarkup(
+      <MediaPreview Codec="av1" ManifestPath={ManifestPath} Title="Video" />,
+    );
+    const Vp9 = renderToStaticMarkup(
+      <MediaPreview Codec="vp9" ManifestPath={ManifestPath} Title="Video" />,
+    );
     expect(Av1).toContain('type="video/webm; codecs=av01,opus"');
     expect(Vp9).toContain('type="video/webm; codecs=vp9,opus"');
     expect(Av1).toContain("controls");
@@ -32,7 +37,9 @@ describe("media preview", () => {
   });
 
   it("never hands an invalid route to a media element", () => {
-    const Markup = renderToStaticMarkup(<MediaPreview Codec="vp9" ManifestPath="https://example.invalid/video" Title="Video" />);
+    const Markup = renderToStaticMarkup(
+      <MediaPreview Codec="vp9" ManifestPath="https://example.invalid/video" Title="Video" />,
+    );
     expect(Markup).toContain('role="alert"');
     expect(Markup).not.toContain("<video");
   });

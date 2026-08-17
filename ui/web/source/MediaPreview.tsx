@@ -20,15 +20,30 @@ export interface MediaPreviewProps {
  * cookie-scoped FileBelt playback route: tokens, external origins, fragments,
  * and query strings cannot reach a media element through this component.
  */
-export function MediaPreview({ Codec, ManifestPath, OnPlaybackError, Title }: MediaPreviewProps): ReactNode {
-  if (!IsMediaPlaybackManifestPath(ManifestPath)) return <p role="alert">{MediaPreviewEn.unavailable}</p>;
+export function MediaPreview({
+  Codec,
+  ManifestPath,
+  OnPlaybackError,
+  Title,
+}: MediaPreviewProps): ReactNode {
+  if (!IsMediaPlaybackManifestPath(ManifestPath))
+    return <p role="alert">{MediaPreviewEn.unavailable}</p>;
   const MimeType = Codec === "av1" ? "video/webm; codecs=av01,opus" : "video/webm; codecs=vp9,opus";
-  return <section aria-label={Title}>
-    <video controls controlsList="nodownload noremoteplayback" disablePictureInPicture onError={OnPlaybackError} playsInline preload="metadata">
-      <source src={ManifestPath} type={MimeType} />
-      <p>{MediaPreviewEn.unsupported}</p>
-    </video>
-  </section>;
+  return (
+    <section aria-label={Title}>
+      <video
+        controls
+        controlsList="nodownload noremoteplayback"
+        disablePictureInPicture
+        onError={OnPlaybackError}
+        playsInline
+        preload="metadata"
+      >
+        <source src={ManifestPath} type={MimeType} />
+        <p>{MediaPreviewEn.unsupported}</p>
+      </video>
+    </section>
+  );
 }
 
 export function IsMediaPlaybackManifestPath(Value: string): boolean {

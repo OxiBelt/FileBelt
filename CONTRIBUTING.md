@@ -86,7 +86,8 @@ Names fixed by platform APIs, wire formats, persisted browser formats, or
 third-party contracts retain their external spelling only at the relevant
 boundary. Alias their local bindings to PascalCase and use a narrowly scoped,
 rationale-bearing naming-rule disable only when the declaration itself must
-keep the external name. Run `pnpm lint`; warnings fail the check. Files
+keep the external name. Run `pnpm format:check` and `pnpm lint`; warnings fail
+the lint check. Use `pnpm format` to apply the repository formatter. Files
 registered as generated outputs retain semantic lint, typecheck, build, and
 generation-drift coverage but are exempt from hand-authored naming and layout
 rules. Never edit generated output directly.
@@ -112,6 +113,7 @@ cargo vet --locked
 corepack pnpm install --frozen-lockfile --ignore-scripts
 pnpm licenses list --json | python3 tests/scripts/check-node-licenses.py --policy supply-chain/node-policy.toml
 pnpm audit --audit-level high
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test

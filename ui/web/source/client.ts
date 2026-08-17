@@ -108,7 +108,10 @@ export class AuthenticationRequiredError extends Error {
  * this interface without exposing transport details to React components.
  */
 export interface FileBeltClient {
-  beginMarkdownCollaboration(EntryId: string, ClientId: string): Promise<MarkdownCollaborationGrant | null>;
+  beginMarkdownCollaboration(
+    EntryId: string,
+    ClientId: string,
+  ): Promise<MarkdownCollaborationGrant | null>;
   createGroup(Name: string): Promise<void>;
   createShare(Input: CreateShareInput): Promise<void>;
   createSharedDrive(Name: string): Promise<void>;
@@ -117,7 +120,9 @@ export interface FileBeltClient {
   readMarkdown(EntryId: string, VersionId: string): Promise<Blob>;
   readMarkdownHead(EntryId: string): Promise<MarkdownHead>;
   saveMarkdown(Input: MarkdownSaveInput): Promise<string>;
-  saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string>;
+  saveMarkdownCopy(
+    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+  ): Promise<string>;
   getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot>;
   markPrivacyRead(): Promise<void>;
   restoreEntries(EntryIds: readonly string[]): Promise<void>;
@@ -127,11 +132,18 @@ export interface FileBeltClient {
   suspendUser(UserId: string): Promise<void>;
   trashEntries(EntryIds: readonly string[]): Promise<void>;
   upload(Files: readonly UploadCandidate[]): Promise<void>;
-  compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison>;
+  compareTextVersions(
+    EntryId: string,
+    BaseVersionId: string,
+    TargetVersionId: string,
+  ): Promise<TextComparison>;
   getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }>;
   listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage>;
   setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void>;
-  updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }>;
+  updateTextPreferences(
+    Patch: TextPreferences,
+    ExpectedEtag: string,
+  ): Promise<{ Etag: string; Value: TextPreferences }>;
 }
 
 const Now = "2026-08-06T12:00:00Z";
@@ -240,22 +252,89 @@ const InitialSnapshot: WorkspaceSnapshot = {
     },
   ],
   Versions: [
-    { Author: "Avery Morgan", CreatedAt: Now, FileId: Uuid("102"), Id: Uuid("301"), Size: 4_782_080, Version: 7 },
-    { Author: "Samir Haddad", CreatedAt: "2026-08-04T15:20:00Z", FileId: Uuid("102"), Id: Uuid("302"), Size: 4_701_184, Version: 6 },
-    { Author: "Avery Morgan", CreatedAt: "2026-08-01T08:00:00Z", FileId: Uuid("102"), Id: Uuid("303"), Size: 4_501_504, Version: 5 },
+    {
+      Author: "Avery Morgan",
+      CreatedAt: Now,
+      FileId: Uuid("102"),
+      Id: Uuid("301"),
+      Size: 4_782_080,
+      Version: 7,
+    },
+    {
+      Author: "Samir Haddad",
+      CreatedAt: "2026-08-04T15:20:00Z",
+      FileId: Uuid("102"),
+      Id: Uuid("302"),
+      Size: 4_701_184,
+      Version: 6,
+    },
+    {
+      Author: "Avery Morgan",
+      CreatedAt: "2026-08-01T08:00:00Z",
+      FileId: Uuid("102"),
+      Id: Uuid("303"),
+      Size: 4_501_504,
+      Version: 5,
+    },
   ],
   Shares: [
-    { Id: Uuid("401"), Kind: "direct", Permission: "Contributor", ResourceId: Uuid("102"), ResourceName: "Q3 forecast.xlsx", Target: "samir@example.test" },
-    { Id: Uuid("402"), Kind: "group", Permission: "Viewer", ResourceId: Uuid("101"), ResourceName: "Launch documents", Target: "Product group" },
-    { ExpiresAt: "2026-08-13T12:00:00Z", Id: Uuid("403"), Kind: "link", Permission: "Viewer", ResourceId: Uuid("103"), ResourceName: "Product brief.pdf", Target: "Anonymous link" },
+    {
+      Id: Uuid("401"),
+      Kind: "direct",
+      Permission: "Contributor",
+      ResourceId: Uuid("102"),
+      ResourceName: "Q3 forecast.xlsx",
+      Target: "samir@example.test",
+    },
+    {
+      Id: Uuid("402"),
+      Kind: "group",
+      Permission: "Viewer",
+      ResourceId: Uuid("101"),
+      ResourceName: "Launch documents",
+      Target: "Product group",
+    },
+    {
+      ExpiresAt: "2026-08-13T12:00:00Z",
+      Id: Uuid("403"),
+      Kind: "link",
+      Permission: "Viewer",
+      ResourceId: Uuid("103"),
+      ResourceName: "Product brief.pdf",
+      Target: "Anonymous link",
+    },
   ],
   Sessions: [
-    { Current: true, Device: "Firefox on Linux", Id: Uuid("501"), LastActiveAt: Now, Location: "Current device" },
-    { Current: false, Device: "Firefox on Android", Id: Uuid("502"), LastActiveAt: "2026-08-05T19:11:00Z", Location: "Berlin, DE" },
+    {
+      Current: true,
+      Device: "Firefox on Linux",
+      Id: Uuid("501"),
+      LastActiveAt: Now,
+      Location: "Current device",
+    },
+    {
+      Current: false,
+      Device: "Firefox on Android",
+      Id: Uuid("502"),
+      LastActiveAt: "2026-08-05T19:11:00Z",
+      Location: "Berlin, DE",
+    },
   ],
   Privacy: [
-    { Action: "Your quota was changed to 1 TB", Actor: "Tenant administrator", CreatedAt: "2026-08-05T14:02:00Z", Id: Uuid("601"), Unread: true },
-    { Action: "A session was revoked", Actor: "You", CreatedAt: "2026-07-29T10:40:00Z", Id: Uuid("602"), Unread: false },
+    {
+      Action: "Your quota was changed to 1 TB",
+      Actor: "Tenant administrator",
+      CreatedAt: "2026-08-05T14:02:00Z",
+      Id: Uuid("601"),
+      Unread: true,
+    },
+    {
+      Action: "A session was revoked",
+      Actor: "You",
+      CreatedAt: "2026-07-29T10:40:00Z",
+      Id: Uuid("602"),
+      Unread: false,
+    },
   ],
   Admin: {
     Users: [
@@ -268,8 +347,18 @@ const InitialSnapshot: WorkspaceSnapshot = {
       { Id: Uuid("802"), ManagerCount: 1, MemberCount: 4, Name: "Finance group" },
     ],
     Drives: [
-      { Id: Uuid("901"), Name: "Product shared drive", QuotaBytes: 10_995_116_277_760, UsedBytes: 2_748_779_069_440 },
-      { Id: Uuid("902"), Name: "Finance shared drive", QuotaBytes: 5_497_558_138_880, UsedBytes: 1_099_511_627_776 },
+      {
+        Id: Uuid("901"),
+        Name: "Product shared drive",
+        QuotaBytes: 10_995_116_277_760,
+        UsedBytes: 2_748_779_069_440,
+      },
+      {
+        Id: Uuid("902"),
+        Name: "Finance shared drive",
+        QuotaBytes: 5_497_558_138_880,
+        UsedBytes: 1_099_511_627_776,
+      },
     ],
   },
 };
@@ -288,9 +377,14 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return { Etag: this.#TextPreferencesEtag, Value: { ...this.#TextPreferences } };
   }
 
-  async updateTextPreferences(Patch: TextPreferences, ExpectedEtag: string): Promise<{ Etag: string; Value: TextPreferences }> {
-    if (ExpectedEtag !== this.#TextPreferencesEtag) throw new Error("Text preferences changed elsewhere. Refresh and try again.");
-    if (Patch.InlineLimitBytes < Patch.EditLimitBytes) throw new Error("The inline limit must be at least the edit limit.");
+  async updateTextPreferences(
+    Patch: TextPreferences,
+    ExpectedEtag: string,
+  ): Promise<{ Etag: string; Value: TextPreferences }> {
+    if (ExpectedEtag !== this.#TextPreferencesEtag)
+      throw new Error("Text preferences changed elsewhere. Refresh and try again.");
+    if (Patch.InlineLimitBytes < Patch.EditLimitBytes)
+      throw new Error("The inline limit must be at least the edit limit.");
     this.#TextPreferences = { ...Patch };
     this.#TextPreferencesEtag = `"text-preferences-${++this.#Sequence}"`;
     return this.getTextPreferences();
@@ -298,19 +392,48 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage> {
     if (Cursor !== null) return { Items: [], NextCursor: null };
-    return { Items: this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId), NextCursor: null };
+    return {
+      Items: this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId),
+      NextCursor: null,
+    };
   }
 
-  async compareTextVersions(EntryId: string, BaseVersionId: string, TargetVersionId: string): Promise<TextComparison> {
+  async compareTextVersions(
+    EntryId: string,
+    BaseVersionId: string,
+    TargetVersionId: string,
+  ): Promise<TextComparison> {
     const Versions = this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId);
-    if (!Versions.some(({ Id }) => Id === BaseVersionId) || !Versions.some(({ Id }) => Id === TargetVersionId)) throw new Error("The selected versions are unavailable.");
-    return { Hunks: [{ BaseLines: 1, BaseStart: 1, Lines: [{ Kind: "context", Text: "Mock comparison is available after the generated API client is connected." }], TargetLines: 1, TargetStart: 1 }] };
+    if (
+      !Versions.some(({ Id }) => Id === BaseVersionId) ||
+      !Versions.some(({ Id }) => Id === TargetVersionId)
+    )
+      throw new Error("The selected versions are unavailable.");
+    return {
+      Hunks: [
+        {
+          BaseLines: 1,
+          BaseStart: 1,
+          Lines: [
+            {
+              Kind: "context",
+              Text: "Mock comparison is available after the generated API client is connected.",
+            },
+          ],
+          TargetLines: 1,
+          TargetStart: 1,
+        },
+      ],
+    };
   }
 
   async setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
     if (Entry === undefined) throw new Error("The selected file is unavailable.");
-    Entry.TextEligibility = ContentClass === "binary" ? "history-only" : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType);
+    Entry.TextEligibility =
+      ContentClass === "binary"
+        ? "history-only"
+        : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType);
   }
 
   async getWorkspace(Signal?: AbortSignal): Promise<WorkspaceSnapshot> {
@@ -338,7 +461,13 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         Trashed: false,
         Version: 1,
       });
-      this.#Snapshot.Uploads.unshift({ Id, Name: File.Name, Progress: 1, Size: File.Size, State: "complete" });
+      this.#Snapshot.Uploads.unshift({
+        Id,
+        Name: File.Name,
+        Progress: 1,
+        Size: File.Size,
+        State: "complete",
+      });
     }
   }
 
@@ -350,16 +479,29 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
-    if (Entry?.HeadVersionId !== VersionId || Entry.Kind !== "file") throw new Error("The requested file version is unavailable.");
+    if (Entry?.HeadVersionId !== VersionId || Entry.Kind !== "file")
+      throw new Error("The requested file version is unavailable.");
     return new Blob([`# ${Entry.Name}\n\nFileBelt Markdown content.\n`], { type: "text/markdown" });
   }
 
   async importMarkdown(Input: MarkdownImportInput): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
-    if (Original?.HeadVersionId !== Input.SourceVersionId) throw new Error("The Office source version is unavailable.");
+    if (Original?.HeadVersionId !== Input.SourceVersionId)
+      throw new Error("The Office source version is unavailable.");
     const Id = Uuid(String(++this.#Sequence));
     const VersionId = Uuid(String(++this.#Sequence));
-    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, TextEligibility: "editable", MediaType: "text/markdown", ModifiedAt: new Date().toISOString(), Name: Input.TargetName, Shared: false, Size: Input.Contents.size, Version: 1 });
+    this.#Snapshot.Entries.unshift({
+      ...Original,
+      HeadVersionId: VersionId,
+      Id,
+      TextEligibility: "editable",
+      MediaType: "text/markdown",
+      ModifiedAt: new Date().toISOString(),
+      Name: Input.TargetName,
+      Shared: false,
+      Size: Input.Contents.size,
+      Version: 1,
+    });
     return VersionId;
   }
 
@@ -371,13 +513,18 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
 
   async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
-    if (Entry?.HeadVersionId === null || Entry?.HeadVersionId === undefined) throw new Error("The Markdown file has no current version.");
-    return { Contents: await this.readMarkdown(EntryId, Entry.HeadVersionId), VersionId: Entry.HeadVersionId };
+    if (Entry?.HeadVersionId === null || Entry?.HeadVersionId === undefined)
+      throw new Error("The Markdown file has no current version.");
+    return {
+      Contents: await this.readMarkdown(EntryId, Entry.HeadVersionId),
+      VersionId: Entry.HeadVersionId,
+    };
   }
 
   async saveMarkdown(Input: MarkdownSaveInput): Promise<string> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
-    if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId) throw new VersionConflictError();
+    if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId)
+      throw new VersionConflictError();
     if (Entry.TextEligibility !== "editable") throw new Error("This text file is view-only.");
     Entry.HeadVersionId = Uuid(String(++this.#Sequence));
     Entry.ModifiedAt = new Date().toISOString();
@@ -386,17 +533,29 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return Entry.HeadVersionId;
   }
 
-  async saveMarkdownCopy(Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">): Promise<string> {
+  async saveMarkdownCopy(
+    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+  ): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId);
     if (Original === undefined) throw new Error("The source Markdown file is unavailable.");
     const Id = Uuid(String(++this.#Sequence));
     const VersionId = Uuid(String(++this.#Sequence));
-    this.#Snapshot.Entries.unshift({ ...Original, HeadVersionId: VersionId, Id, ModifiedAt: new Date().toISOString(), Name: Input.Name, Shared: false, Size: Input.Contents.size, Version: 1 });
+    this.#Snapshot.Entries.unshift({
+      ...Original,
+      HeadVersionId: VersionId,
+      Id,
+      ModifiedAt: new Date().toISOString(),
+      Name: Input.Name,
+      Shared: false,
+      Size: Input.Contents.size,
+      Version: 1,
+    });
     return VersionId;
   }
 
   async exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant> {
-    if (FragmentToken.trim().length < 8) throw new Error("This share link is invalid or has expired.");
+    if (FragmentToken.trim().length < 8)
+      throw new Error("This share link is invalid or has expired.");
     return {
       ExchangeId: Uuid(String(++this.#Sequence)),
       ExpiresAt: "2026-08-13T12:00:00Z",
@@ -444,7 +603,12 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     const Version = this.#Snapshot.Versions.find(({ Id }) => Id === VersionId);
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Version?.FileId);
     if (Version === undefined || Entry === undefined) return;
-    const NextVersion = Math.max(...this.#Snapshot.Versions.filter(({ FileId }) => FileId === Entry.Id).map(({ Version: Value }) => Value)) + 1;
+    const NextVersion =
+      Math.max(
+        ...this.#Snapshot.Versions.filter(({ FileId }) => FileId === Entry.Id).map(
+          ({ Version: Value }) => Value,
+        ),
+      ) + 1;
     Entry.Version = NextVersion;
     Entry.ModifiedAt = new Date().toISOString();
     this.#Snapshot.Versions.unshift({
@@ -473,7 +637,12 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   }
 
   async createGroup(Name: string): Promise<void> {
-    const Group: AdminGroup = { Id: Uuid(String(++this.#Sequence)), ManagerCount: 1, MemberCount: 1, Name };
+    const Group: AdminGroup = {
+      Id: Uuid(String(++this.#Sequence)),
+      ManagerCount: 1,
+      MemberCount: 1,
+      Name,
+    };
     this.#Snapshot.Admin.Groups.push(Group);
   }
 
@@ -489,12 +658,22 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
 
   #updateEntries(EntryIds: readonly string[], Update: (Entry: FileEntry) => FileEntry): void {
     const Wanted = new Set(EntryIds);
-    this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) => Wanted.has(Entry.Id) ? Update(Entry) : Entry);
+    this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) =>
+      Wanted.has(Entry.Id) ? Update(Entry) : Entry,
+    );
   }
 }
 
-function TextEligibility(Name: string, Size: number, MediaType: string | null): FileEntry["TextEligibility"] {
-  const IsText = MediaType?.startsWith("text/") === true || /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(Name);
+function TextEligibility(
+  Name: string,
+  Size: number,
+  MediaType: string | null,
+): FileEntry["TextEligibility"] {
+  const IsText =
+    MediaType?.startsWith("text/") === true ||
+    /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(
+      Name,
+    );
   if (!IsText) return "ineligible";
   if (Size > 100 * 1024 * 1024) return "history-only";
   return Size <= 16 * 1024 * 1024 ? "editable" : "viewable";

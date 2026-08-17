@@ -56,8 +56,19 @@ export function NormalizeMdast(Root: MdastNode, Source: MarkdownSource): ParseRe
   };
   if (!MdastWithinBudget(Root)) {
     return {
-      Ast: { Children: [], Profile: FileBeltGfmProfile, Range: { End: Source.Text.length, Start: 0 } },
-      Diagnostics: [{ Code: "markdown.complexity", Message: "Markdown structure exceeds the preview complexity limit.", Range: { End: Source.Text.length, Start: 0 }, Severity: "error" }],
+      Ast: {
+        Children: [],
+        Profile: FileBeltGfmProfile,
+        Range: { End: Source.Text.length, Start: 0 },
+      },
+      Diagnostics: [
+        {
+          Code: "markdown.complexity",
+          Message: "Markdown structure exceeds the preview complexity limit.",
+          Range: { End: Source.Text.length, Start: 0 },
+          Severity: "error",
+        },
+      ],
     };
   }
   const Ast: FileBeltOfficeAstV1 = {
@@ -76,7 +87,8 @@ function MdastWithinBudget(Root: MdastNode): boolean {
     if (Current === undefined || Current.Depth > 64) return false;
     Nodes += 1;
     if (Nodes > 100_000) return false;
-    for (const Child of Current.Node.children ?? []) Pending.push({ Depth: Current.Depth + 1, Node: Child });
+    for (const Child of Current.Node.children ?? [])
+      Pending.push({ Depth: Current.Depth + 1, Node: Child });
   }
   return true;
 }
@@ -85,9 +97,18 @@ function NormalizeBlock(Node: MdastNode, Context: NormalizationContext): readonl
   const Range = NodeRange(Node, Context);
   switch (Node.type) {
     case "heading":
-      return [{ Children: NormalizeInlines(Node.children ?? [], Context), Depth: ClampHeadingDepth(Node.depth), Kind: "heading", Range }];
+      return [
+        {
+          Children: NormalizeInlines(Node.children ?? [], Context),
+          Depth: ClampHeadingDepth(Node.depth),
+          Kind: "heading",
+          Range,
+        },
+      ];
     case "paragraph":
-      return [{ Children: NormalizeInlines(Node.children ?? [], Context), Kind: "paragraph", Range }];
+      return [
+        { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "paragraph", Range },
+      ];
     case "code":
       return NormalizeCode(Node, Range);
     case "math":
@@ -97,60 +118,102 @@ function NormalizeBlock(Node: MdastNode, Context: NormalizationContext): readonl
     case "blockquote":
       return [NormalizeQuote(Node, Context, Range)];
     case "list":
-      return [{
-        Items: (Node.children ?? []).map((Item) => ({
-          Checked: Item.checked ?? null,
-          Children: (Item.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
-          Range: NodeRange(Item, Context),
-        })),
-        Kind: "list",
-        Ordered: Node.start !== undefined,
-        Range,
-      }];
+      return [
+        {
+          Items: (Node.children ?? []).map((Item) => ({
+            Checked: Item.checked ?? null,
+            Children: (Item.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
+            Range: NodeRange(Item, Context),
+          })),
+          Kind: "list",
+          Ordered: Node.start !== undefined,
+          Range,
+        },
+      ];
     case "table":
-      return [{
-        Align: Node.align ?? [],
-        Kind: "table",
-        Range,
-        Rows: (Node.children ?? []).map((Row) => ({
-          Cells: (Row.children ?? []).map((Cell) => NormalizeInlines(Cell.children ?? [], Context)),
-          Range: NodeRange(Row, Context),
-        })),
-      }];
+      return [
+        {
+          Align: Node.align ?? [],
+          Kind: "table",
+          Range,
+          Rows: (Node.children ?? []).map((Row) => ({
+            Cells: (Row.children ?? []).map((Cell) =>
+              NormalizeInlines(Cell.children ?? [], Context),
+            ),
+            Range: NodeRange(Row, Context),
+          })),
+        },
+      ];
     case "footnoteDefinition":
-      return [{
-        Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
-        Identifier: Node.identifier ?? "",
-        Kind: "footnoteDefinition",
-        Range,
-      }];
+      return [
+        {
+          Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
+          Identifier: Node.identifier ?? "",
+          Kind: "footnoteDefinition",
+          Range,
+        },
+      ];
     case "html":
-      Context.Diagnostics.push({ Code: "markdown.raw-html", Message: "Raw HTML is rendered as literal text.", Range, Severity: "warning" });
-      return [{ Children: [{ Kind: "text", Range, Text: Node.value ?? "" }], Kind: "paragraph", Range }];
+      Context.Diagnostics.push({
+        Code: "markdown.raw-html",
+        Message: "Raw HTML is rendered as literal text.",
+        Range,
+        Severity: "warning",
+      });
+      return [
+        { Children: [{ Kind: "text", Range, Text: Node.value ?? "" }], Kind: "paragraph", Range },
+      ];
     default:
-      Context.Diagnostics.push({ Code: "markdown.unsupported", Message: `Unsupported Markdown node: ${Node.type}.`, Range, Severity: "warning" });
+      Context.Diagnostics.push({
+        Code: "markdown.unsupported",
+        Message: `Unsupported Markdown node: ${Node.type}.`,
+        Range,
+        Severity: "warning",
+      });
       return [];
   }
 }
 
-function NormalizeQuote(Node: MdastNode, Context: NormalizationContext, Range: SourceRange): OfficeBlock {
+function NormalizeQuote(
+  Node: MdastNode,
+  Context: NormalizationContext,
+  Range: SourceRange,
+): OfficeBlock {
   const First = Node.children?.[0];
   const FirstText = First?.children?.[0];
-  const Alert = First?.type === "paragraph" && FirstText?.type === "text"
-    ? /^\[!(CAUTION|IMPORTANT|NOTE|TIP|WARNING)\]\s*/.exec(FirstText.value ?? "")
-    : null;
-  if (Alert === null) return { Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)), Kind: "quote", Range };
-  const Severity = (Alert[1] ?? "note").toLowerCase() as "caution" | "important" | "note" | "tip" | "warning";
+  const Alert =
+    First?.type === "paragraph" && FirstText?.type === "text"
+      ? /^\[!(CAUTION|IMPORTANT|NOTE|TIP|WARNING)\]\s*/.exec(FirstText.value ?? "")
+      : null;
+  if (Alert === null)
+    return {
+      Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
+      Kind: "quote",
+      Range,
+    };
+  const Severity = (Alert[1] ?? "note").toLowerCase() as
+    | "caution"
+    | "important"
+    | "note"
+    | "tip"
+    | "warning";
   const AlertChildren = (Node.children ?? []).map((Child, Index) => {
     if (Index !== 0 || Child !== First) return Child;
     return {
       ...Child,
-      children: (Child.children ?? []).map((Inline, InlineIndex) => InlineIndex === 0 && Inline === FirstText
-        ? { ...Inline, value: (Inline.value ?? "").slice(Alert[0].length) }
-        : Inline),
+      children: (Child.children ?? []).map((Inline, InlineIndex) =>
+        InlineIndex === 0 && Inline === FirstText
+          ? { ...Inline, value: (Inline.value ?? "").slice(Alert[0].length) }
+          : Inline,
+      ),
     };
   });
-  return { Children: AlertChildren.flatMap((Child) => NormalizeBlock(Child, Context)), Kind: "alert", Range, Severity };
+  return {
+    Children: AlertChildren.flatMap((Child) => NormalizeBlock(Child, Context)),
+    Kind: "alert",
+    Range,
+    Severity,
+  };
 }
 
 function NormalizeCode(Node: MdastNode, Range: SourceRange): readonly OfficeBlock[] {
@@ -159,34 +222,76 @@ function NormalizeCode(Node: MdastNode, Range: SourceRange): readonly OfficeBloc
   return [{ Code: Node.value ?? "", Kind: "code", Language: Node.lang ?? null, Range }];
 }
 
-function NormalizeInlines(Nodes: readonly MdastNode[], Context: NormalizationContext): readonly OfficeInline[] {
+function NormalizeInlines(
+  Nodes: readonly MdastNode[],
+  Context: NormalizationContext,
+): readonly OfficeInline[] {
   return Nodes.flatMap((Node) => {
     const Range = NodeRange(Node, Context);
     switch (Node.type) {
-      case "text": return [{ Kind: "text", Range, Text: Node.value ?? "" }];
-      case "inlineCode": return [{ Kind: "code", Range, Text: Node.value ?? "" }];
-      case "emphasis": return [{ Children: NormalizeInlines(Node.children ?? [], Context), Kind: "emphasis", Range }];
-      case "strong": return [{ Children: NormalizeInlines(Node.children ?? [], Context), Kind: "strong", Range }];
-      case "link": return NormalizeLink(Node, Context, Range);
-      case "footnoteReference": return [{ Identifier: Node.identifier ?? "", Kind: "footnoteReference", Range }];
-      case "break": return [{ Kind: "text", Range, Text: "\n" }];
+      case "text":
+        return [{ Kind: "text", Range, Text: Node.value ?? "" }];
+      case "inlineCode":
+        return [{ Kind: "code", Range, Text: Node.value ?? "" }];
+      case "emphasis":
+        return [
+          { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "emphasis", Range },
+        ];
+      case "strong":
+        return [
+          { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "strong", Range },
+        ];
+      case "link":
+        return NormalizeLink(Node, Context, Range);
+      case "footnoteReference":
+        return [{ Identifier: Node.identifier ?? "", Kind: "footnoteReference", Range }];
+      case "break":
+        return [{ Kind: "text", Range, Text: "\n" }];
       case "html":
-        Context.Diagnostics.push({ Code: "markdown.raw-html", Message: "Raw HTML is rendered as literal text.", Range, Severity: "warning" });
+        Context.Diagnostics.push({
+          Code: "markdown.raw-html",
+          Message: "Raw HTML is rendered as literal text.",
+          Range,
+          Severity: "warning",
+        });
         return [{ Kind: "text", Range, Text: Node.value ?? "" }];
       default:
-        Context.Diagnostics.push({ Code: "markdown.unsupported", Message: `Unsupported Markdown inline: ${Node.type}.`, Range, Severity: "warning" });
+        Context.Diagnostics.push({
+          Code: "markdown.unsupported",
+          Message: `Unsupported Markdown inline: ${Node.type}.`,
+          Range,
+          Severity: "warning",
+        });
         return [];
     }
   });
 }
 
-function NormalizeLink(Node: MdastNode, Context: NormalizationContext, Range: SourceRange): readonly OfficeInline[] {
+function NormalizeLink(
+  Node: MdastNode,
+  Context: NormalizationContext,
+  Range: SourceRange,
+): readonly OfficeInline[] {
   const Target = ParseFileBeltReference(Node.url ?? "");
-  if (Target !== undefined) return [{ Kind: "filebeltLink", Range, Target, Title: Node.title ?? null }];
+  if (Target !== undefined)
+    return [{ Kind: "filebeltLink", Range, Target, Title: Node.title ?? null }];
   if ((Node.url ?? "").startsWith("filebelt:")) {
-    Context.Diagnostics.push({ Code: "markdown.filebelt-link", Message: "The FileBelt link is not valid.", Range, Severity: "error" });
+    Context.Diagnostics.push({
+      Code: "markdown.filebelt-link",
+      Message: "The FileBelt link is not valid.",
+      Range,
+      Severity: "error",
+    });
   }
-  return [{ Children: NormalizeInlines(Node.children ?? [], Context), Destination: Node.url ?? "", Kind: "link", Range, Title: Node.title ?? null }];
+  return [
+    {
+      Children: NormalizeInlines(Node.children ?? [], Context),
+      Destination: Node.url ?? "",
+      Kind: "link",
+      Range,
+      Title: Node.title ?? null,
+    },
+  ];
 }
 
 function NodeRange(Node: MdastNode, Context: NormalizationContext): SourceRange {

@@ -7,7 +7,11 @@ export interface MarkdownMergeResult {
   Text: string;
 }
 
-export function MergeMarkdownSources(Base: string, Local: string, Remote: string): MarkdownMergeResult {
+export function MergeMarkdownSources(
+  Base: string,
+  Local: string,
+  Remote: string,
+): MarkdownMergeResult {
   const BaseLines = Base.split("\n");
   const LocalLines = Local.split("\n");
   const RemoteLines = Remote.split("\n");

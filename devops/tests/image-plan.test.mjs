@@ -110,9 +110,12 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
         );
       }
       if (
-        ["filebelt-api", "filebelt-worker-io", "filebelt-mcp-broker", "filebelt-controller"].includes(
-          image.role,
-        )
+        [
+          "filebelt-api",
+          "filebelt-worker-io",
+          "filebelt-mcp-broker",
+          "filebelt-controller",
+        ].includes(image.role)
       ) {
         assert.ok(
           image.artifact.components["linux/amd64"].some(
@@ -165,8 +168,7 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
       purl: "pkg:deb/debian/ninja-build@1.12.1-1?arch=amd64",
       license: "Apache-2.0",
       relationship: "build-tool",
-      evidence:
-        "https://snapshot.debian.org/archive/debian/20260713T000000Z#ninja-build=1.12.1-1",
+      evidence: "https://snapshot.debian.org/archive/debian/20260713T000000Z#ninja-build=1.12.1-1",
     },
   ];
   for (const image of plan.images.filter(({ artifact }) => artifact.kind === "rust-binary")) {
@@ -199,7 +201,10 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
       revision: OxibeltRevision,
     },
   });
-  assert.equal(plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary, "filebeltctl");
+  assert.equal(
+    plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary,
+    "filebeltctl",
+  );
 });
 
 test("Rust Docker targets match their image-plan descriptions", () => {
@@ -209,7 +214,7 @@ test("Rust Docker targets match their image-plan descriptions", () => {
     "utf8",
   );
   assert.ok(Dockerfile.includes("ARG FILEBELT_TARGET_CPU="));
-  assert.ok(Dockerfile.includes("test \"${FILEBELT_TARGET_CPU}\" = x86-64-v3"));
+  assert.ok(Dockerfile.includes('test "${FILEBELT_TARGET_CPU}" = x86-64-v3'));
   assert.ok(Dockerfile.includes("-Ctarget-cpu=${FILEBELT_TARGET_CPU}"));
   assert.ok(Dockerfile.includes("-Clink-arg=-Wl,-z,${FILEBELT_TARGET_CPU}"));
 
@@ -249,10 +254,38 @@ test("adapter publication plan covers six roles without mutable release sources"
   assert.deepEqual(
     AdapterImagePlan.roles.find(({ role }) => role === "filebelt-git-adapter")?.components,
     [
-      { id: "filebelt-git-adapter", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
-      { id: "filebelt-revision-protocol", version: "0.1.0", license: "Apache-2.0", relationship: "linked", path: "/usr/local/bin/filebelt-git-adapter", sourceRequired: true },
-      { id: "git-2.55.0", version: "2.55.0", license: "GPL-2.0-only", relationship: "separate-executable", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
-      { id: "zlib-1.3.1", version: "1.3.1", license: "Zlib", relationship: "linked", path: "/opt/filebelt-git/bin/git", sourceRequired: true },
+      {
+        id: "filebelt-git-adapter",
+        version: "0.1.0",
+        license: "Apache-2.0",
+        relationship: "linked",
+        path: "/usr/local/bin/filebelt-git-adapter",
+        sourceRequired: true,
+      },
+      {
+        id: "filebelt-revision-protocol",
+        version: "0.1.0",
+        license: "Apache-2.0",
+        relationship: "linked",
+        path: "/usr/local/bin/filebelt-git-adapter",
+        sourceRequired: true,
+      },
+      {
+        id: "git-2.55.0",
+        version: "2.55.0",
+        license: "GPL-2.0-only",
+        relationship: "separate-executable",
+        path: "/opt/filebelt-git/bin/git",
+        sourceRequired: true,
+      },
+      {
+        id: "zlib-1.3.1",
+        version: "1.3.1",
+        license: "Zlib",
+        relationship: "linked",
+        path: "/opt/filebelt-git/bin/git",
+        sourceRequired: true,
+      },
     ],
   );
 });
@@ -271,21 +304,21 @@ test("adapter plans reject a missing or altered AMD64 ISA baseline", () => {
 test("adapter native Dockerfiles reject AMD64 ISA drift", () => {
   const Contracts = {
     "../../adapters/git/Dockerfile": [
-      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      'test "${FILEBELT_AMD64_ISA}" = x86-64-v3',
       "-march=${FILEBELT_AMD64_ISA}",
       "-C target-cpu=${FILEBELT_AMD64_ISA}",
-      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+      'io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}"',
     ],
     "../../adapters/onlyoffice/Dockerfile": [
-      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      'test "${FILEBELT_AMD64_ISA}" = x86-64-v3',
       "-C target-cpu=${FILEBELT_AMD64_ISA}",
-      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+      'io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}"',
     ],
     "../../adapters/nfs/Dockerfile": [
-      "test \"${FILEBELT_AMD64_ISA}\" = x86-64-v3",
+      'test "${FILEBELT_AMD64_ISA}" = x86-64-v3',
       "-C target-cpu=${FILEBELT_AMD64_ISA}",
       "-march=${FILEBELT_AMD64_ISA}",
-      "io.filebelt.build.target-cpu=\"${FILEBELT_TARGET_CPU}\"",
+      'io.filebelt.build.target-cpu="${FILEBELT_TARGET_CPU}"',
     ],
   };
   for (const [Path, Fragments] of Object.entries(Contracts)) {
@@ -341,11 +374,12 @@ test("adapter plans reject mutable source refs and false source qualification", 
   );
   const Source = buildSource({ ref: `refs/commits/${REVISION}`, kind: "ci" });
   assert.throws(
-    () => CreateAdapterImagePlan({
-      Version: "0.1.0",
-      Source,
-      Evidence: { "filebelt-git-adapter": { preImage: { sourceBundle: "qualified" } } },
-    }),
+    () =>
+      CreateAdapterImagePlan({
+        Version: "0.1.0",
+        Source,
+        Evidence: { "filebelt-git-adapter": { preImage: { sourceBundle: "qualified" } } },
+      }),
     /cannot qualify a source bundle without its SHA-256/,
   );
 });
@@ -388,7 +422,10 @@ test("release plans accept exact stable and prerelease SemVer tags", () => {
     `1.2.3-${"a".repeat(100_000)}`,
   ]) {
     const source = buildSource({ ref: `refs/tags/${version}`, kind: "release" });
-    assert.equal(CreateImagePlan({ Channel: "release", Version: version, Source: source }).tag, version);
+    assert.equal(
+      CreateImagePlan({ Channel: "release", Version: version, Source: source }).tag,
+      version,
+    );
   }
 
   for (const invalid of [
@@ -428,10 +465,11 @@ test("release tag validation rejects adversarial prerelease input within a fixed
       `if (IsReleaseTag(${JSON.stringify(Value)})) process.exit(1);`,
     ].join("\n");
     assert.doesNotThrow(
-      () => execFileSync(process.execPath, ["--input-type=module", "--eval", Program], {
-        stdio: "pipe",
-        timeout: 2_000,
-      }),
+      () =>
+        execFileSync(process.execPath, ["--input-type=module", "--eval", Program], {
+          stdio: "pipe",
+          timeout: 2_000,
+        }),
       Description,
     );
   };
@@ -542,7 +580,12 @@ test("compiled CLI writes a validated canonical plan", () => {
     const invalidOutput = `${output}.invalid`;
     writeFileSync(invalidOutput, JSON.stringify({ ...JSON.parse(contents), schemaVersion: 1 }));
     assert.throws(() =>
-      execFileSync(process.execPath, ["dist/cli.js", "validate-image-plan", "--input", invalidOutput]),
+      execFileSync(process.execPath, [
+        "dist/cli.js",
+        "validate-image-plan",
+        "--input",
+        invalidOutput,
+      ]),
     );
     rmSync(invalidOutput, { force: true });
   } finally {

@@ -1,9 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Spinner } from "@fluentui/react-components";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Spinner,
+} from "@fluentui/react-components";
 import { ArrowLeft, Save as SaveIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { DecodeEditableText, DecodeViewableText, EncodeText, EnglishMarkdownStrings, MaximumEditableBytes, MarkdownRealtimeSession, MarkdownSurface, MergeMarkdownSources, TextSurface, type FileBeltReference, type MarkdownCollaborationState, type MarkdownMode, type MarkdownSource } from "@filebelt/markdown";
+import {
+  DecodeEditableText,
+  DecodeViewableText,
+  EncodeText,
+  EnglishMarkdownStrings,
+  MaximumEditableBytes,
+  MarkdownRealtimeSession,
+  MarkdownSurface,
+  MergeMarkdownSources,
+  TextSurface,
+  type FileBeltReference,
+  type MarkdownCollaborationState,
+  type MarkdownMode,
+  type MarkdownSource,
+} from "@filebelt/markdown";
 import type { FileBeltClient } from "./client.js";
 import { VersionConflictError } from "./client.js";
 import type { FileEntry } from "./model.js";
@@ -22,7 +45,15 @@ interface MarkdownFileViewProps {
   OnSaved(): void;
 }
 
-export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBeltLink, OnNavigationGuardChange, OnSaved }: MarkdownFileViewProps): ReactNode {
+export function MarkdownFileView({
+  Client,
+  Entry,
+  McpClient,
+  OnClose,
+  OnFileBeltLink,
+  OnNavigationGuardChange,
+  OnSaved,
+}: MarkdownFileViewProps): ReactNode {
   const [Source, SetSource] = useState<MarkdownSource | null>(null);
   const [Mode, SetMode] = useState<MarkdownMode>("split");
   const [ExpectedHeadVersionId, SetExpectedHeadVersionId] = useState(Entry.HeadVersionId);
@@ -31,7 +62,9 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   const [Dirty, SetDirty] = useState(false);
   const [SavedText, SetSavedText] = useState("");
   const [Collaboration, SetCollaboration] = useState<MarkdownRealtimeSession | null>(null);
-  const [CollaborationState, SetCollaborationState] = useState<MarkdownCollaborationState | "fallback">(Entry.TextEligibility === "editable" ? "connecting" : "fallback");
+  const [CollaborationState, SetCollaborationState] = useState<
+    MarkdownCollaborationState | "fallback"
+  >(Entry.TextEligibility === "editable" ? "connecting" : "fallback");
   const [ConflictCopyAvailable, SetConflictCopyAvailable] = useState(false);
   const [Selection, SetSelection] = useState({ End: 0, Start: 0 });
   const [LeaveDialogOpen, SetLeaveDialogOpen] = useState(false);
@@ -43,7 +76,8 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   const Mounted = useRef(true);
   const IsMarkdown = Entry.MediaType === "text/markdown";
   const CanInline = Entry.Size === null || Entry.Size <= TextLimits.Inline;
-  const CanEdit = Entry.TextEligibility === "editable" && (Entry.Size === null || Entry.Size <= TextLimits.Edit);
+  const CanEdit =
+    Entry.TextEligibility === "editable" && (Entry.Size === null || Entry.Size <= TextLimits.Edit);
   useEffect(() => {
     Mounted.current = true;
     return () => {
@@ -53,10 +87,14 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
   }, []);
   useEffect(() => {
     let Active = true;
-    void Client.getTextPreferences().then(({ Value }) => {
-      if (Active) SetTextLimits({ Edit: Value.EditLimitBytes, Inline: Value.InlineLimitBytes });
-    }).catch(() => undefined);
-    return () => { Active = false; };
+    void Client.getTextPreferences()
+      .then(({ Value }) => {
+        if (Active) SetTextLimits({ Edit: Value.EditLimitBytes, Inline: Value.InlineLimitBytes });
+      })
+      .catch(() => undefined);
+    return () => {
+      Active = false;
+    };
   }, [Client]);
   useEffect(() => {
     if (Entry.HeadVersionId === null) return;
@@ -64,37 +102,42 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     let Session: MarkdownRealtimeSession | undefined;
     SetCollaboration(null);
     SetCollaborationState(CanEdit ? "connecting" : "fallback");
-    void Client.readMarkdown(Entry.Id, Entry.HeadVersionId).then(async (Contents) => {
-      const Bytes = new Uint8Array(await Contents.arrayBuffer());
-      const Decoded = CanEdit ? DecodeEditableText(Bytes) : DecodeViewableText(Bytes);
-      if (!Active) return;
-      SetSource(Decoded);
-      SetSavedText(Decoded.Text);
-      SetDirty(false);
-      SetConflictCopyAvailable(false);
-      if (!CanEdit) return;
-      const ClientId = crypto.randomUUID();
-      const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId);
-      if (!Active) return;
-      if (Grant === null) {
-        SetCollaborationState("fallback");
-        return;
-      }
-      Session = await MarkdownRealtimeSession.Connect({ Grant, OnStateChange: SetCollaborationState });
-      if (!Active) {
-        Session.Destroy();
-        return;
-      }
-      SetSource({ ...Decoded, Text: Session.CurrentText() });
-      SetDirty(Session.CurrentText() !== Decoded.Text);
-      SetCollaboration(Session);
-    }).catch((Cause: unknown) => {
-      if (Active) {
-        SetCollaborationState("disconnected");
-        SetInvalidText(true);
-        SetError(Cause instanceof Error ? Cause.message : En.markdownUnavailable);
-      }
-    });
+    void Client.readMarkdown(Entry.Id, Entry.HeadVersionId)
+      .then(async (Contents) => {
+        const Bytes = new Uint8Array(await Contents.arrayBuffer());
+        const Decoded = CanEdit ? DecodeEditableText(Bytes) : DecodeViewableText(Bytes);
+        if (!Active) return;
+        SetSource(Decoded);
+        SetSavedText(Decoded.Text);
+        SetDirty(false);
+        SetConflictCopyAvailable(false);
+        if (!CanEdit) return;
+        const ClientId = crypto.randomUUID();
+        const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId);
+        if (!Active) return;
+        if (Grant === null) {
+          SetCollaborationState("fallback");
+          return;
+        }
+        Session = await MarkdownRealtimeSession.Connect({
+          Grant,
+          OnStateChange: SetCollaborationState,
+        });
+        if (!Active) {
+          Session.Destroy();
+          return;
+        }
+        SetSource({ ...Decoded, Text: Session.CurrentText() });
+        SetDirty(Session.CurrentText() !== Decoded.Text);
+        SetCollaboration(Session);
+      })
+      .catch((Cause: unknown) => {
+        if (Active) {
+          SetCollaborationState("disconnected");
+          SetInvalidText(true);
+          SetError(Cause instanceof Error ? Cause.message : En.markdownUnavailable);
+        }
+      });
     return () => {
       Active = false;
       Session?.Destroy();
@@ -123,7 +166,10 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
         ApplyFallbackMerge(LocalText, Remote, Latest.VersionId);
         return;
       }
-      const Session = await MarkdownRealtimeSession.Connect({ Grant, OnStateChange: SetCollaborationState });
+      const Session = await MarkdownRealtimeSession.Connect({
+        Grant,
+        OnStateChange: SetCollaborationState,
+      });
       const LiveText = Session.CurrentText();
       const Merged = MergeMarkdownSources(SavedText, LocalText, LiveText);
       if (Merged.Conflict) {
@@ -146,7 +192,12 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     }
   };
 
-  const ApplyFallbackMerge = (LocalText: string, Remote: MarkdownSource, VersionId: string, RemoteIsHead = true): void => {
+  const ApplyFallbackMerge = (
+    LocalText: string,
+    Remote: MarkdownSource,
+    VersionId: string,
+    RemoteIsHead = true,
+  ): void => {
     const Merged = MergeMarkdownSources(SavedText, LocalText, Remote.Text);
     const NewBase = RemoteIsHead ? Remote.Text : SavedText;
     SetExpectedHeadVersionId(VersionId);
@@ -163,10 +214,14 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     SetSaving(true);
     SetError(null);
     try {
-      const CurrentSource = Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
-      const CheckpointId = Collaboration === null ? undefined : await Collaboration.RequestCheckpoint();
+      const CurrentSource =
+        Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
+      const CheckpointId =
+        Collaboration === null ? undefined : await Collaboration.RequestCheckpoint();
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit);
-      const Contents = new Blob([Encoded.buffer as ArrayBuffer], { type: Entry.MediaType ?? "text/plain" });
+      const Contents = new Blob([Encoded.buffer as ArrayBuffer], {
+        type: Entry.MediaType ?? "text/plain",
+      });
       const VersionId = await Client.saveMarkdown({
         ...(CheckpointId === undefined ? {} : { CheckpointId }),
         Contents,
@@ -211,10 +266,13 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     SetSaving(true);
     SetError(null);
     try {
-      const CurrentSource = Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
+      const CurrentSource =
+        Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit);
       await Client.saveMarkdownCopy({
-        Contents: new Blob([Encoded.buffer as ArrayBuffer], { type: Entry.MediaType ?? "text/plain" }),
+        Contents: new Blob([Encoded.buffer as ArrayBuffer], {
+          type: Entry.MediaType ?? "text/plain",
+        }),
         EntryId: Entry.Id,
         Name: ConflictCopyName(Entry.Name),
       });
@@ -234,7 +292,7 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     if (Collaboration !== null) {
       Collaboration.ApplyMcpProposal(Proposal, InvocationId);
     } else {
-      SetSource((Current) => Current === null ? Current : { ...Current, Text: Proposal });
+      SetSource((Current) => (Current === null ? Current : { ...Current, Text: Proposal }));
       SetDirty(Proposal !== SavedText);
     }
     return true;
@@ -242,8 +300,13 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
 
   const ExportLocal = (): void => {
     if (Source === null) return;
-    const CurrentSource = Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
-    const Url = URL.createObjectURL(new Blob([EncodeText(CurrentSource, MaximumEditableBytes).buffer as ArrayBuffer], { type: "text/plain" }));
+    const CurrentSource =
+      Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
+    const Url = URL.createObjectURL(
+      new Blob([EncodeText(CurrentSource, MaximumEditableBytes).buffer as ArrayBuffer], {
+        type: "text/plain",
+      }),
+    );
     const Anchor = document.createElement("a");
     Anchor.download = `${Entry.Name}.local.md`;
     Anchor.href = Url;
@@ -251,14 +314,17 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     URL.revokeObjectURL(Url);
   };
 
-  const RequestLeave = useCallback((Continue: () => void): void => {
-    if (!Dirty) {
-      Continue();
-      return;
-    }
-    PendingNavigation.current = Continue;
-    SetLeaveDialogOpen(true);
-  }, [Dirty]);
+  const RequestLeave = useCallback(
+    (Continue: () => void): void => {
+      if (!Dirty) {
+        Continue();
+        return;
+      }
+      PendingNavigation.current = Continue;
+      SetLeaveDialogOpen(true);
+    },
+    [Dirty],
+  );
 
   const Stay = (): void => {
     PendingNavigation.current = undefined;
@@ -292,32 +358,163 @@ export function MarkdownFileView({ Client, Entry, McpClient, OnClose, OnFileBelt
     return () => window.removeEventListener("beforeunload", OnBeforeUnload);
   }, [Dirty]);
 
-  if (Entry.HeadVersionId === null || Entry.TextEligibility === "ineligible" || Entry.TextEligibility === "history-only" || !CanInline) return <div className="fb-error" role="alert">{!CanInline ? En.textInlineLimitReached : En.markdownUnavailable}</div>;
-  if (Source === null) return <div className="fb-loading"><Spinner label={En.markdownLoading} /></div>;
-  const EditingDisabled = !CanEdit || CollaborationState === "connecting" || CollaborationState === "disconnected";
-  return <section aria-labelledby="markdown-heading" className="fb-markdown-view">
-    <header className="fb-page-heading"><div><p className="fb-eyebrow">{En.file}</p><h1 id="markdown-heading">{Entry.Name}</h1></div><div className="fb-heading-actions"><Button icon={<ArrowLeft />} onClick={OnClose}>{En.backToFiles}</Button>{Entry.TextEligibility === "editable" ? <Button appearance="primary" disabled={Saving || !Dirty || EditingDisabled} icon={<SaveIcon />} onClick={() => void SaveMarkdown()}>{En.save}</Button> : null}</div></header>
-    {Entry.TextEligibility === "editable" && CollaborationState !== "fallback" ? <p aria-live="polite" className="fb-muted">{CollaborationState === "connected" ? En.markdownCollaborationConnected : CollaborationState === "connecting" ? En.markdownCollaborationConnecting : En.markdownCollaborationDisconnected}</p> : null}
-    {CollaborationState === "disconnected" || ReconnectPending ? <div className="fb-heading-actions"><Button onClick={ExportLocal}>{En.markdownExportLocal}</Button><Button disabled={ReconnectPending} onClick={() => void Reconnect()}>{En.markdownReconnect}</Button></div> : null}
-    {ErrorMessage === null ? null : <div className="fb-error" role="alert">{ErrorMessage}</div>}
-    {InvalidText ? <div className="fb-heading-actions"><p>{En.textInvalidGuide}</p><Button onClick={() => void Client.setNodeContentClass(Entry.Id, "binary")}>{En.textMarkBinary}</Button></div> : null}
-    {ConflictCopyAvailable ? <div><Button disabled={Saving} onClick={() => void SaveConflictCopy()}>{En.markdownSaveConflictCopy}</Button></div> : null}
-    {IsMarkdown ? <MarkdownSurface {...(Collaboration === null ? {} : { Collaboration })} Disabled={EditingDisabled} Mode={Mode} OnFileBeltLink={(Target) => { if (!OnFileBeltLink(Target)) SetError(En.markdownReferenceUnavailable); }} OnModeChange={SetMode} OnSelectionChange={SetSelection} OnTextChange={(Text) => { SetDirty(Text !== SavedText); SetSource((Current) => Current === null ? Current : { ...Current, Text }); }} Source={Source} Strings={EnglishMarkdownStrings} /> : <TextSurface {...(Collaboration === null ? {} : { Collaboration })} Disabled={EditingDisabled} OnSelectionChange={SetSelection} OnTextChange={(Text) => { SetDirty(Text !== SavedText); SetSource((Current) => Current === null ? Current : { ...Current, Text }); }} Source={Source} Strings={{ Edit: "Edit source", SourceEditor: "Text source", View: "View source" }} />}
-    {McpClient === undefined || !IsMarkdown || !CanEdit || ExpectedHeadVersionId === null ? null : <MarkdownMcpProposals BaseVersionId={ExpectedHeadVersionId} Client={McpClient} NodeId={Entry.Id} OnApply={ApplyProposal} Selection={Selection} Source={Collaboration?.CurrentText() ?? Source.Text} />}
-    <Dialog modalType="modal" onOpenChange={(Event, Data) => { void Event; if (!Data.open) Stay(); }} open={LeaveDialogOpen}>
-      <DialogSurface aria-describedby="markdown-leave-description">
-        <DialogBody>
-          <DialogTitle>{En.markdownLeaveHeading}</DialogTitle>
-          <DialogContent id="markdown-leave-description">{En.markdownLeaveDescription}</DialogContent>
-          <DialogActions>
-            <Button appearance="secondary" onClick={Stay}>{En.markdownStay}</Button>
-            <Button onClick={() => { ExportLocal(); Leave(); }}>{En.markdownExportLocal}</Button>
-            <Button appearance="primary" onClick={Leave}>{En.markdownDiscardChanges}</Button>
-          </DialogActions>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
-  </section>;
+  if (
+    Entry.HeadVersionId === null ||
+    Entry.TextEligibility === "ineligible" ||
+    Entry.TextEligibility === "history-only" ||
+    !CanInline
+  )
+    return (
+      <div className="fb-error" role="alert">
+        {!CanInline ? En.textInlineLimitReached : En.markdownUnavailable}
+      </div>
+    );
+  if (Source === null)
+    return (
+      <div className="fb-loading">
+        <Spinner label={En.markdownLoading} />
+      </div>
+    );
+  const EditingDisabled =
+    !CanEdit || CollaborationState === "connecting" || CollaborationState === "disconnected";
+  return (
+    <section aria-labelledby="markdown-heading" className="fb-markdown-view">
+      <header className="fb-page-heading">
+        <div>
+          <p className="fb-eyebrow">{En.file}</p>
+          <h1 id="markdown-heading">{Entry.Name}</h1>
+        </div>
+        <div className="fb-heading-actions">
+          <Button icon={<ArrowLeft />} onClick={OnClose}>
+            {En.backToFiles}
+          </Button>
+          {Entry.TextEligibility === "editable" ? (
+            <Button
+              appearance="primary"
+              disabled={Saving || !Dirty || EditingDisabled}
+              icon={<SaveIcon />}
+              onClick={() => void SaveMarkdown()}
+            >
+              {En.save}
+            </Button>
+          ) : null}
+        </div>
+      </header>
+      {Entry.TextEligibility === "editable" && CollaborationState !== "fallback" ? (
+        <p aria-live="polite" className="fb-muted">
+          {CollaborationState === "connected"
+            ? En.markdownCollaborationConnected
+            : CollaborationState === "connecting"
+              ? En.markdownCollaborationConnecting
+              : En.markdownCollaborationDisconnected}
+        </p>
+      ) : null}
+      {CollaborationState === "disconnected" || ReconnectPending ? (
+        <div className="fb-heading-actions">
+          <Button onClick={ExportLocal}>{En.markdownExportLocal}</Button>
+          <Button disabled={ReconnectPending} onClick={() => void Reconnect()}>
+            {En.markdownReconnect}
+          </Button>
+        </div>
+      ) : null}
+      {ErrorMessage === null ? null : (
+        <div className="fb-error" role="alert">
+          {ErrorMessage}
+        </div>
+      )}
+      {InvalidText ? (
+        <div className="fb-heading-actions">
+          <p>{En.textInvalidGuide}</p>
+          <Button onClick={() => void Client.setNodeContentClass(Entry.Id, "binary")}>
+            {En.textMarkBinary}
+          </Button>
+        </div>
+      ) : null}
+      {ConflictCopyAvailable ? (
+        <div>
+          <Button disabled={Saving} onClick={() => void SaveConflictCopy()}>
+            {En.markdownSaveConflictCopy}
+          </Button>
+        </div>
+      ) : null}
+      {IsMarkdown ? (
+        <MarkdownSurface
+          {...(Collaboration === null ? {} : { Collaboration })}
+          Disabled={EditingDisabled}
+          Mode={Mode}
+          OnFileBeltLink={(Target) => {
+            if (!OnFileBeltLink(Target)) SetError(En.markdownReferenceUnavailable);
+          }}
+          OnModeChange={SetMode}
+          OnSelectionChange={SetSelection}
+          OnTextChange={(Text) => {
+            SetDirty(Text !== SavedText);
+            SetSource((Current) => (Current === null ? Current : { ...Current, Text }));
+          }}
+          Source={Source}
+          Strings={EnglishMarkdownStrings}
+        />
+      ) : (
+        <TextSurface
+          {...(Collaboration === null ? {} : { Collaboration })}
+          Disabled={EditingDisabled}
+          OnSelectionChange={SetSelection}
+          OnTextChange={(Text) => {
+            SetDirty(Text !== SavedText);
+            SetSource((Current) => (Current === null ? Current : { ...Current, Text }));
+          }}
+          Source={Source}
+          Strings={{ Edit: "Edit source", SourceEditor: "Text source", View: "View source" }}
+        />
+      )}
+      {McpClient === undefined ||
+      !IsMarkdown ||
+      !CanEdit ||
+      ExpectedHeadVersionId === null ? null : (
+        <MarkdownMcpProposals
+          BaseVersionId={ExpectedHeadVersionId}
+          Client={McpClient}
+          NodeId={Entry.Id}
+          OnApply={ApplyProposal}
+          Selection={Selection}
+          Source={Collaboration?.CurrentText() ?? Source.Text}
+        />
+      )}
+      <Dialog
+        modalType="modal"
+        onOpenChange={(Event, Data) => {
+          void Event;
+          if (!Data.open) Stay();
+        }}
+        open={LeaveDialogOpen}
+      >
+        <DialogSurface aria-describedby="markdown-leave-description">
+          <DialogBody>
+            <DialogTitle>{En.markdownLeaveHeading}</DialogTitle>
+            <DialogContent id="markdown-leave-description">
+              {En.markdownLeaveDescription}
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={Stay}>
+                {En.markdownStay}
+              </Button>
+              <Button
+                onClick={() => {
+                  ExportLocal();
+                  Leave();
+                }}
+              >
+                {En.markdownExportLocal}
+              </Button>
+              <Button appearance="primary" onClick={Leave}>
+                {En.markdownDiscardChanges}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+    </section>
+  );
 }
 
 function ConflictCopyName(Name: string): string {

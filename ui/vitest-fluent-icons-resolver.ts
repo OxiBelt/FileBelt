@@ -12,7 +12,10 @@ export function ResolveFluentIconsContext() {
   };
 }
 
-export function ResolveFluentIconsContextId(Source: string, Importer: string | undefined): string | null {
+export function ResolveFluentIconsContextId(
+  Source: string,
+  Importer: string | undefined,
+): string | null {
   if (
     Source !== "./contexts/index" ||
     Importer === undefined ||

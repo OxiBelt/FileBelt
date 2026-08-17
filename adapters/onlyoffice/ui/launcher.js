@@ -7,9 +7,11 @@ const descriptorElement = document.getElementById("onlyoffice-launch-descriptor"
 const stateElement = document.getElementById("onlyoffice-launch-state");
 const launchButton = document.getElementById("onlyoffice-launch-button");
 
-if (!(descriptorElement instanceof HTMLScriptElement)
-  || !(stateElement instanceof HTMLElement)
-  || !(launchButton instanceof HTMLButtonElement)) {
+if (
+  !(descriptorElement instanceof HTMLScriptElement) ||
+  !(stateElement instanceof HTMLElement) ||
+  !(launchButton instanceof HTMLButtonElement)
+) {
   throw new Error("ONLYOFFICE launcher shell is incomplete");
 }
 
@@ -56,4 +58,6 @@ const launch = async () => {
 };
 
 setState(state, "Editor is ready to launch.");
-launchButton.addEventListener("click", () => { void launch(); });
+launchButton.addEventListener("click", () => {
+  void launch();
+});

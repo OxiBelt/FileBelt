@@ -20,14 +20,19 @@ export const En = {
   createShare: "Create share",
   dark: "Dark",
   details: "Details",
-  documentCollaborators: "Collaborators are shown by their FileBelt display name and current status only.",
-  documentConflict: "This document has conflicting saved content. Save it as a separate copy before the 7-day retention window ends.",
+  documentCollaborators:
+    "Collaborators are shown by their FileBelt display name and current status only.",
+  documentConflict:
+    "This document has conflicting saved content. Save it as a separate copy before the 7-day retention window ends.",
   documentConflictCopy: "Save as copy",
-  documentConflictCopyName: (Name: string): string => `${Name.replace(/\.[^.]+$/, "") || "Document"} (conflicted copy)`,
+  documentConflictCopyName: (Name: string): string =>
+    `${Name.replace(/\.[^.]+$/, "") || "Document"} (conflicted copy)`,
   documentConsent: "Before opening the external editor",
-  documentConsentCollaborators: "The provider can show the names and active status of document collaborators.",
+  documentConsentCollaborators:
+    "The provider can show the names and active status of document collaborators.",
   documentConsentExport: "The provider can export the document in the selected editing mode.",
-  documentConsentSource: "The selected immutable FileBelt version is sent to the provider for this session.",
+  documentConsentSource:
+    "The selected immutable FileBelt version is sent to the provider for this session.",
   documentEditor: "Open in document editor",
   documentEditorUnavailable: "The document provider handoff is not configured for this deployment.",
   documentExport: "Export",
@@ -44,11 +49,13 @@ export const En = {
   documentModeView: "View",
   documentProvider: "Integration origin",
   documentSessions: "Document sessions",
-  documentSessionsDescription: "Review and revoke document-editor sessions that you started. These controls do not grant access to a file.",
+  documentSessionsDescription:
+    "Review and revoke document-editor sessions that you started. These controls do not grant access to a file.",
   documentSessionsEmpty: "You have no document-editor sessions.",
   documentSessionRevoked: "Document session revoked.",
   documentSessionCreated: "Document session created.",
-  documentParticipantCount: (Count: number): string => `${Count} ${Count === 1 ? "participant" : "participants"}`,
+  documentParticipantCount: (Count: number): string =>
+    `${Count} ${Count === 1 ? "participant" : "participants"}`,
   documentDefaultName: "Document",
   documentSource: "Source version",
   documentStatusActive: "Active",
@@ -73,37 +80,45 @@ export const En = {
   loading: "Loading your files",
   mainNavigation: "FileBelt navigation",
   markdown: "Markdown",
-  markdownConflict: "This file changed on the server. Your local edits are still available; reload before saving again.",
+  markdownConflict:
+    "This file changed on the server. Your local edits are still available; reload before saving again.",
   markdownExportLocal: "Export local copy",
   markdownDiscardChanges: "Discard changes",
-  markdownLeaveDescription: "You have unsaved Markdown changes. Export a local copy before leaving, discard them, or stay and continue editing.",
+  markdownLeaveDescription:
+    "You have unsaved Markdown changes. Export a local copy before leaving, discard them, or stay and continue editing.",
   markdownLeaveHeading: "Leave without saving?",
   markdownStay: "Stay",
   markdownConflictCopySaved: "Saved the local edits as a new sibling file.",
-  markdownConflictMerged: "The latest version was merged with your local edits. Review and save the result.",
-  markdownConflictReview: "Both versions changed the same lines. Resolve the marked sections, then save or keep a conflict copy.",
+  markdownConflictMerged:
+    "The latest version was merged with your local edits. Review and save the result.",
+  markdownConflictReview:
+    "Both versions changed the same lines. Resolve the marked sections, then save or keep a conflict copy.",
   markdownCollaborationConnected: "Live collaboration connected.",
   markdownCollaborationConnecting: "Connecting live collaboration…",
-  markdownCollaborationDisconnected: "Live collaboration disconnected. Reconnect to continue editing.",
+  markdownCollaborationDisconnected:
+    "Live collaboration disconnected. Reconnect to continue editing.",
   markdownLoading: "Loading Markdown file",
   markdownMcpCapability: "Approved capability",
   markdownMcpConfirm: "Confirm this exact MCP proposal request. It cannot save your file.",
   markdownMcpConfirmButton: "Confirm proposal",
   markdownMcpHeading: "MCP proposal",
-  markdownMcpNotice: "The current Markdown source and selected range are sent only after confirmation. Results remain proposals until you apply them.",
+  markdownMcpNotice:
+    "The current Markdown source and selected range are sent only after confirmation. Results remain proposals until you apply them.",
   markdownMcpPropose: "Request proposal",
   markdownMcpSelect: "Select an option",
   markdownMcpServer: "MCP server",
   markdownMcpUnavailable: "MCP proposals are unavailable.",
   markdownProposalApply: "Apply proposal to current source",
   markdownProposalPreview: "Markdown proposal",
-  markdownProposalStale: "The source changed while this proposal was running. Review it and request a new proposal.",
+  markdownProposalStale:
+    "The source changed while this proposal was running. Review it and request a new proposal.",
   markdownReconnect: "Reconnect",
   markdownReferenceUnavailable: "This FileBelt item is not available in the current workspace.",
   markdownSaveFailed: "Markdown could not be saved. Your local edits are still available.",
   markdownSaveConflictCopy: "Save local edits as a copy",
   markdownUnavailable: "This file cannot be opened as Markdown.",
-  markdownSelection: (Start: number, End: number): string => `Selected source range: ${Start}–${End}`,
+  markdownSelection: (Start: number, End: number): string =>
+    `Selected source range: ${Start}–${End}`,
   manager: "Manager",
   mcp: "MCP servers",
   mounts: "Mounted access",
@@ -128,7 +143,8 @@ export const En = {
   selectionActions: "Selection actions",
   owner: "Owner",
   privacy: "Privacy",
-  privacyDescription: "Security-sensitive administrative actions involving your account appear here for 90 days.",
+  privacyDescription:
+    "Security-sensitive administrative actions involving your account appear here for 90 days.",
   privacyRead: "Privacy events marked as read",
   publicDownload: "Download shared file",
   publicExpired: "This link is invalid, revoked, or expired.",
@@ -150,10 +166,12 @@ export const En = {
   signInDescription: "Your FileBelt session is missing or has expired. Sign in again to continue.",
   signInRequired: "Sign in to FileBelt",
   selected: "selected",
-  selectedAnnouncement: (Count: number): string => `${Count} ${Count === 1 ? "item" : "items"} selected`,
+  selectedAnnouncement: (Count: number): string =>
+    `${Count} ${Count === 1 ? "item" : "items"} selected`,
   selectItem: (Name: string): string => `Select ${Name}`,
   sessions: "Sessions",
-  sessionsDescription: "Review where your FileBelt account is signed in and revoke devices you no longer use.",
+  sessionsDescription:
+    "Review where your FileBelt account is signed in and revoke devices you no longer use.",
   sessionRevoked: "Session revoked",
   shareKind: "Share type",
   sharePermission: "Permission",
@@ -168,16 +186,21 @@ export const En = {
   skipToContent: "Skip to content",
   system: "System",
   symlink: "Symbolic link",
-  symlinkActionsUnavailable: "Symbolic links are shown as metadata only. File content, version, Markdown, and document-editor actions are unavailable.",
+  symlinkActionsUnavailable:
+    "Symbolic links are shown as metadata only. File content, version, Markdown, and document-editor actions are unavailable.",
   theme: "Theme",
   textEditing: "Text editing",
-  textInlineLimitReached: "This file exceeds your inline text limit. Download it or inspect its history metadata.",
-  textInvalidGuide: "This file is not valid text. Mark it as binary to keep it out of text handling, then retry your task.",
+  textInlineLimitReached:
+    "This file exceeds your inline text limit. Download it or inspect its history metadata.",
+  textInvalidGuide:
+    "This file is not valid text. Mark it as binary to keep it out of text handling, then retry your task.",
   textMarkBinary: "Mark as binary",
   trash: "Trash",
   upload: "Upload",
-  uploadCompleted: (Count: number): string => `${Count} ${Count === 1 ? "upload" : "uploads"} completed`,
-  uploadPrivacy: "Uploads remain resumable without storing account or capability tokens in this browser.",
+  uploadCompleted: (Count: number): string =>
+    `${Count} ${Count === 1 ? "upload" : "uploads"} completed`,
+  uploadPrivacy:
+    "Uploads remain resumable without storing account or capability tokens in this browser.",
   userStatusUpdated: "Updated account status",
   uploading: "Uploading",
   uploadHint: "Upload files to My Drive",

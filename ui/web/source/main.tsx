@@ -30,6 +30,17 @@ const FragmentToken = IsPublicShare ? TakePublicShareFragment() : "";
 
 createRoot(Root).render(
   <StrictMode>
-    {IsPublicShare ? <PublicShareApp Client={Client} FragmentToken={FragmentToken} /> : <App Client={Client} DocumentClient={DocumentClient} McpClient={McpClient} MountClient={MountClient} NfsClient={NfsClient} NfsTargetClient={NfsTargetClient} />}
+    {IsPublicShare ? (
+      <PublicShareApp Client={Client} FragmentToken={FragmentToken} />
+    ) : (
+      <App
+        Client={Client}
+        DocumentClient={DocumentClient}
+        McpClient={McpClient}
+        MountClient={MountClient}
+        NfsClient={NfsClient}
+        NfsTargetClient={NfsTargetClient}
+      />
+    )}
   </StrictMode>,
 );

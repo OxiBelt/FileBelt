@@ -24,11 +24,16 @@ export interface SafeMediaValue {
 }
 
 function DecodeBase64(Value: string): Uint8Array | null {
-  if (Value.length > Math.ceil(MaximumMediaBytes / 3) * 4 + 8 || !/^[A-Za-z0-9+/]*={0,2}$/.test(Value)) return null;
+  if (
+    Value.length > Math.ceil(MaximumMediaBytes / 3) * 4 + 8 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(Value)
+  )
+    return null;
   try {
     const Decoded = globalThis.atob(Value);
     const Bytes = new Uint8Array(Decoded.length);
-    for (let Index = 0; Index < Decoded.length; Index += 1) Bytes[Index] = Decoded.charCodeAt(Index);
+    for (let Index = 0; Index < Decoded.length; Index += 1)
+      Bytes[Index] = Decoded.charCodeAt(Index);
     return Bytes;
   } catch {
     return null;
@@ -40,12 +45,23 @@ function HasPrefix(Bytes: Uint8Array, Prefix: readonly number[], Offset = 0): bo
 }
 
 function MatchesMagic(Bytes: Uint8Array, MimeType: string): boolean {
-  if (MimeType === "image/png") return HasPrefix(Bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (MimeType === "image/png")
+    return HasPrefix(Bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (MimeType === "image/jpeg") return HasPrefix(Bytes, [0xff, 0xd8, 0xff]);
-  if (MimeType === "image/webp") return HasPrefix(Bytes, [0x52, 0x49, 0x46, 0x46]) && HasPrefix(Bytes, [0x57, 0x45, 0x42, 0x50], 8);
+  if (MimeType === "image/webp")
+    return (
+      HasPrefix(Bytes, [0x52, 0x49, 0x46, 0x46]) && HasPrefix(Bytes, [0x57, 0x45, 0x42, 0x50], 8)
+    );
   if (MimeType === "audio/ogg") return HasPrefix(Bytes, [0x4f, 0x67, 0x67, 0x53]);
-  if (MimeType === "audio/wav") return HasPrefix(Bytes, [0x52, 0x49, 0x46, 0x46]) && HasPrefix(Bytes, [0x57, 0x41, 0x56, 0x45], 8);
-  if (MimeType === "audio/mpeg") return HasPrefix(Bytes, [0x49, 0x44, 0x33]) || (Bytes[0] === 0xff && ((Bytes[1] ?? 0) & 0xe0) === 0xe0);
+  if (MimeType === "audio/wav")
+    return (
+      HasPrefix(Bytes, [0x52, 0x49, 0x46, 0x46]) && HasPrefix(Bytes, [0x57, 0x41, 0x56, 0x45], 8)
+    );
+  if (MimeType === "audio/mpeg")
+    return (
+      HasPrefix(Bytes, [0x49, 0x44, 0x33]) ||
+      (Bytes[0] === 0xff && ((Bytes[1] ?? 0) & 0xe0) === 0xe0)
+    );
   return false;
 }
 
@@ -54,12 +70,20 @@ interface JsonRenderBudget {
   TruncationRendered: boolean;
 }
 
-function JsonChildren(Depth: number, Entries: readonly (readonly [string, unknown])[], Budget: JsonRenderBudget): ReactNode[] {
+function JsonChildren(
+  Depth: number,
+  Entries: readonly (readonly [string, unknown])[],
+  Budget: JsonRenderBudget,
+): ReactNode[] {
   const Children: ReactNode[] = [];
   for (const [Name, Value] of Entries) {
     if (Budget.Remaining === 0) {
       if (!Budget.TruncationRendered) {
-        Children.push(<li key="filebelt-json-truncated"><span>{McpEn.resultTruncated}</span></li>);
+        Children.push(
+          <li key="filebelt-json-truncated">
+            <span>{McpEn.resultTruncated}</span>
+          </li>,
+        );
         Budget.TruncationRendered = true;
       }
       break;
@@ -69,31 +93,94 @@ function JsonChildren(Depth: number, Entries: readonly (readonly [string, unknow
   return Children;
 }
 
-function JsonNode(Depth: number, Name: string | undefined, Value: unknown, Budget: JsonRenderBudget): ReactNode {
+function JsonNode(
+  Depth: number,
+  Name: string | undefined,
+  Value: unknown,
+  Budget: JsonRenderBudget,
+): ReactNode {
   Budget.Remaining -= 1;
-  const Label = Name === undefined ? null : <span className="fb-mcp-json-key"><bdi dir="auto">{Name}</bdi>: </span>;
-  if (Depth >= MaximumJsonDepth) return <li>{Label}<span>…</span></li>;
-  if (Value === null) return <li>{Label}<span>null</span></li>;
-  if (typeof Value === "string") return <li>{Label}<span><bdi dir="auto">{JSON.stringify(Value)}</bdi></span></li>;
-  if (typeof Value === "number" || typeof Value === "boolean") return <li>{Label}<span>{String(Value)}</span></li>;
+  const Label =
+    Name === undefined ? null : (
+      <span className="fb-mcp-json-key">
+        <bdi dir="auto">{Name}</bdi>:{" "}
+      </span>
+    );
+  if (Depth >= MaximumJsonDepth)
+    return (
+      <li>
+        {Label}
+        <span>…</span>
+      </li>
+    );
+  if (Value === null)
+    return (
+      <li>
+        {Label}
+        <span>null</span>
+      </li>
+    );
+  if (typeof Value === "string")
+    return (
+      <li>
+        {Label}
+        <span>
+          <bdi dir="auto">{JSON.stringify(Value)}</bdi>
+        </span>
+      </li>
+    );
+  if (typeof Value === "number" || typeof Value === "boolean")
+    return (
+      <li>
+        {Label}
+        <span>{String(Value)}</span>
+      </li>
+    );
   if (Array.isArray(Value)) {
     const Entries = Value.slice(0, 200).map((Item, Index) => [String(Index), Item] as const);
-    return <li>{Label}<span>[</span><ol>{JsonChildren(Depth + 1, Entries, Budget)}</ol><span>]</span></li>;
+    return (
+      <li>
+        {Label}
+        <span>[</span>
+        <ol>{JsonChildren(Depth + 1, Entries, Budget)}</ol>
+        <span>]</span>
+      </li>
+    );
   }
   if (typeof Value === "object") {
     const Entries = Object.entries(Value).slice(0, 200);
-    return <li>{Label}<span>{"{"}</span><ul>{JsonChildren(Depth + 1, Entries, Budget)}</ul><span>{"}"}</span></li>;
+    return (
+      <li>
+        {Label}
+        <span>{"{"}</span>
+        <ul>{JsonChildren(Depth + 1, Entries, Budget)}</ul>
+        <span>{"}"}</span>
+      </li>
+    );
   }
-  return <li>{Label}<span>{McpEn.resultUnsupported}</span></li>;
+  return (
+    <li>
+      {Label}
+      <span>{McpEn.resultUnsupported}</span>
+    </li>
+  );
 }
 
 export function SafeJsonResult({ Value }: { Value: unknown }): ReactNode {
   const Budget: JsonRenderBudget = { Remaining: MaximumJsonRenderNodes, TruncationRendered: false };
-  return <div aria-label={McpEn.jsonResult} className="fb-mcp-json" role="tree"><ul>{JsonNode(0, undefined, Value, Budget)}</ul></div>;
+  return (
+    <div aria-label={McpEn.jsonResult} className="fb-mcp-json" role="tree">
+      <ul>{JsonNode(0, undefined, Value, Budget)}</ul>
+    </div>
+  );
 }
 
 export function SafeTextResult({ Value }: { Value: string }): ReactNode {
-  return <pre className="fb-mcp-text" dir="auto"><bdi>{Value}</bdi></pre>;
+  return (
+    <pre className="fb-mcp-text" dir="auto">
+      <bdi>{Value}</bdi>
+    </pre>
+  );
 }
 
 export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode {
@@ -103,11 +190,11 @@ export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode
   useEffect(() => {
     const Bytes = DecodeBase64(Value.Base64);
     if (
-      Bytes === null
-      || Bytes.byteLength !== Value.SizeBytes
-      || Bytes.byteLength > MaximumMediaBytes
-      || !SafeMediaTypes.has(Value.MimeType)
-      || !MatchesMagic(Bytes, Value.MimeType)
+      Bytes === null ||
+      Bytes.byteLength !== Value.SizeBytes ||
+      Bytes.byteLength > MaximumMediaBytes ||
+      !SafeMediaTypes.has(Value.MimeType) ||
+      !MatchesMagic(Bytes, Value.MimeType)
     ) {
       SetRejected(true);
       return;
@@ -125,7 +212,12 @@ export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode
     SetRejected(true);
   };
 
-  if (Rejected) return <p className="fb-error" role="alert">{McpEn.unsafeMedia}</p>;
+  if (Rejected)
+    return (
+      <p className="fb-error" role="alert">
+        {McpEn.unsafeMedia}
+      </p>
+    );
   if (ObjectUrl === null) return <p aria-live="polite">{McpEn.working}</p>;
   if (Value.MimeType.startsWith("image/")) {
     return (
@@ -135,7 +227,12 @@ export function SafeMediaResult({ Value }: { Value: SafeMediaValue }): ReactNode
         onError={Reject}
         onLoad={(Event) => {
           const Image = Event.currentTarget;
-          if (Image.naturalWidth > 4096 || Image.naturalHeight > 4096 || Image.naturalWidth * Image.naturalHeight > 16_000_000) Reject();
+          if (
+            Image.naturalWidth > 4096 ||
+            Image.naturalHeight > 4096 ||
+            Image.naturalWidth * Image.naturalHeight > 16_000_000
+          )
+            Reject();
         }}
         src={ObjectUrl}
       />

@@ -22,21 +22,35 @@ const Client: McpSettingsClient = {
   async assignTemplate() {},
   async changeRegistrationState() {},
   async createBlockRule() {},
-  async createInvocationIntent() { throw new Error("not used"); },
+  async createInvocationIntent() {
+    throw new Error("not used");
+  },
   async createRegistration() {},
   async createServiceIdentity() {},
   async createServiceInvocationGrant() {},
   async createTemplate() {},
   async deleteRegistration() {},
-  async discoverCapabilities() { throw new Error("not used"); },
-  async exportRegistration() { return "{}"; },
-  async getCapabilityReview() { return null; },
-  async getSnapshot() { return EmptySnapshot; },
+  async discoverCapabilities() {
+    throw new Error("not used");
+  },
+  async exportRegistration() {
+    return "{}";
+  },
+  async getCapabilityReview() {
+    return null;
+  },
+  async getSnapshot() {
+    return EmptySnapshot;
+  },
   async importRegistration() {},
   async putCapabilityReview() {},
   async putCredential() {},
-  async startOauth() { return "https://issuer.example.test/authorize"; },
-  async testRegistration() { return true; },
+  async startOauth() {
+    return "https://issuer.example.test/authorize";
+  },
+  async testRegistration() {
+    return true;
+  },
 };
 
 describe("McpSettings", () => {
@@ -50,7 +64,12 @@ describe("McpSettings", () => {
 
   it("renders server-controlled text and JSON without an HTML insertion boundary", () => {
     const Value = '<img src=x onerror="alert(1)">';
-    const Markup = renderToStaticMarkup(<><SafeTextResult Value={Value} /><SafeJsonResult Value={{ "‫name‬": Value }} /></>);
+    const Markup = renderToStaticMarkup(
+      <>
+        <SafeTextResult Value={Value} />
+        <SafeJsonResult Value={{ "‫name‬": Value }} />
+      </>,
+    );
 
     expect(Markup).not.toContain("<img");
     expect(Markup).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
@@ -58,7 +77,9 @@ describe("McpSettings", () => {
   });
 
   it("shares one aggregate node budget across an adversarial nested JSON result", () => {
-    const Value = Array.from({ length: 10 }, () => Array.from({ length: 30 }, () => Array.from({ length: 30 }, () => "x")));
+    const Value = Array.from({ length: 10 }, () =>
+      Array.from({ length: 30 }, () => Array.from({ length: 30 }, () => "x")),
+    );
     const Markup = renderToStaticMarkup(<SafeJsonResult Value={Value} />);
     const RenderedNodes = Markup.match(/<li/g)?.length ?? 0;
 

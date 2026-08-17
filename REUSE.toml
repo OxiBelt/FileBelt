@@ -13,6 +13,7 @@ path = [
   ".gitignore",
   ".node-version",
   ".npmrc",
+  ".oxfmtrc.json",
   ".serena/**",
   "AGENTS.md",
   "CHANGELOG.md",

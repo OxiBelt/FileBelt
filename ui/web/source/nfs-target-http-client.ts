@@ -58,32 +58,41 @@ export class HttpNfsTargetClient implements NfsTargetClient {
   }
 
   async getOverview(Signal?: AbortSignal): Promise<NfsTargetOverview> {
-    const Result = await this.#Api.GET("/api/v1/mounts/nfs", Signal === undefined ? {} : { signal: Signal });
+    const Result = await this.#Api.GET(
+      "/api/v1/mounts/nfs",
+      Signal === undefined ? {} : { signal: Signal },
+    );
     return RequireData<NfsTargetOverview>(Result);
   }
 
   async approveProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval", {
-      body: { expected_generation: ExpectedGeneration },
-      params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
-    }));
+    RequireData(
+      await this.#Api.POST("/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval", {
+        body: { expected_generation: ExpectedGeneration },
+        params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
+      }),
+    );
   }
 
   async declineProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
-    RequireSuccess(await this.#Api.POST("/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline", {
-      body: { expected_generation: ExpectedGeneration },
-      params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
-    }));
+    RequireSuccess(
+      await this.#Api.POST("/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline", {
+        body: { expected_generation: ExpectedGeneration },
+        params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
+      }),
+    );
   }
 
   async revokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void> {
-    RequireSuccess(await this.#Api.DELETE("/api/v1/mounts/nfs/mappings/{credential_id}", {
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { credential_id: CredentialId },
-        query: { expected_generation: ExpectedGeneration },
-      },
-    }));
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/mounts/nfs/mappings/{credential_id}", {
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { credential_id: CredentialId },
+          query: { expected_generation: ExpectedGeneration },
+        },
+      }),
+    );
   }
 
   async #mutationHeaders(): Promise<MutationHeaders> {
@@ -115,7 +124,8 @@ function RequireSuccess(Result: ApiResult<unknown>): void {
 
 function RequestError(Result: ApiResult<unknown>): Error {
   if (Result.response.status === 401) return new AuthenticationRequiredError();
-  if (ProblemCode(Result.error) === "mount.reauthentication_required") return new MountReauthenticationRequiredError();
+  if (ProblemCode(Result.error) === "mount.reauthentication_required")
+    return new MountReauthenticationRequiredError();
   const Title = ProblemTitle(Result.error);
   return new Error(Title ?? `FileBelt NFS consent request failed (${Result.response.status}).`);
 }

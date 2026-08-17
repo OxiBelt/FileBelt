@@ -22,10 +22,15 @@ export function DecodeMarkdown(Bytes: Uint8Array, MaximumBytes: number): Markdow
     throw new MarkdownInputError("utf8");
   }
   if (Text.includes("\0")) throw new MarkdownInputError("nul");
-  const HasByteOrderMark = Bytes.length >= 3 && Bytes[0] === 0xef && Bytes[1] === 0xbb && Bytes[2] === 0xbf;
+  const HasByteOrderMark =
+    Bytes.length >= 3 && Bytes[0] === 0xef && Bytes[1] === 0xbb && Bytes[2] === 0xbf;
   const Content = HasByteOrderMark && Text.startsWith("\ufeff") ? Text.slice(1) : Text;
   const LineEnding = DetectLineEnding(Content);
-  return { HasByteOrderMark, LineEnding, Text: LineEnding === "crlf" ? Content.replaceAll("\r\n", "\n") : Content };
+  return {
+    HasByteOrderMark,
+    LineEnding,
+    Text: LineEnding === "crlf" ? Content.replaceAll("\r\n", "\n") : Content,
+  };
 }
 
 export function EncodeMarkdown(Source: MarkdownSource, MaximumBytes: number): Uint8Array {

@@ -11,8 +11,21 @@ describe("Markdown collaboration transport", () => {
     const Snapshot = Y.encodeStateAsUpdate(ServerDocument);
     const Socket = new FakeWebSocket((Payload) => {
       const FrameNumber = Math.floor((Payload[0] ?? 0) / 8);
-      if (FrameNumber === 1) Socket.Receive(Frame(3, Message([Unsigned(2, 0), Unsigned(3, 1), Bytes(4, Snapshot), Unsigned(5, 1)])));
-      if (FrameNumber === 11) Socket.Receive(Frame(7, Message([Text(1, "00000000-0000-4000-8000-000000000099"), Unsigned(2, 0), Unsigned(3, 2)])));
+      if (FrameNumber === 1)
+        Socket.Receive(
+          Frame(3, Message([Unsigned(2, 0), Unsigned(3, 1), Bytes(4, Snapshot), Unsigned(5, 1)])),
+        );
+      if (FrameNumber === 11)
+        Socket.Receive(
+          Frame(
+            7,
+            Message([
+              Text(1, "00000000-0000-4000-8000-000000000099"),
+              Unsigned(2, 0),
+              Unsigned(3, 2),
+            ]),
+          ),
+        );
     });
     const Connected = MarkdownRealtimeSession.Connect({
       Grant: {
@@ -70,7 +83,9 @@ class FakeWebSocket extends EventTarget {
   }
 
   Receive(Payload: Uint8Array): void {
-    queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: Uint8Array.from(Payload).buffer })));
+    queueMicrotask(() =>
+      this.dispatchEvent(new MessageEvent("message", { data: Uint8Array.from(Payload).buffer })),
+    );
   }
 
   send(Payload: ArrayBuffer): void {

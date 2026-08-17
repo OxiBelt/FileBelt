@@ -121,7 +121,8 @@ function CreateAdapterImagePlanFile(InputArguments: readonly string[]): void {
   });
   const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
   FileSystemModule.writeFileSync(ReadOption(Options, "output"), SerializeAdapterImagePlan(Plan), {
-    encoding: "utf8", flag: "w",
+    encoding: "utf8",
+    flag: "w",
   });
 }
 
@@ -185,11 +186,7 @@ function EvaluateVulnerabilities(InputArguments: readonly string[]): void {
   const Platform = ReadPlatform(Options);
   const Findings = NormalizeTrivy(ReadJson(ReadOption(Options, "trivy")), Role, Platform);
   const Policy = ReadJson(ReadOption(Options, "policy"));
-  const Decision = EvaluateVulnerabilityPolicy(
-    Findings,
-    Policy,
-    ReadOption(Options, "as-of"),
-  );
+  const Decision = EvaluateVulnerabilityPolicy(Findings, Policy, ReadOption(Options, "as-of"));
   const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
   FileSystemModule.writeFileSync(
     ReadOption(Options, "output"),
@@ -236,16 +233,22 @@ function ReadJson(Path: string): unknown {
   try {
     Contents = FileSystemModule.readFileSync(Path, { encoding: "utf8" });
   } catch (ErrorValue: unknown) {
-    throw new Error(`cannot read ${Path}: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`, {
-      cause: ErrorValue,
-    });
+    throw new Error(
+      `cannot read ${Path}: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`,
+      {
+        cause: ErrorValue,
+      },
+    );
   }
   try {
     return JSON.parse(Contents) as unknown;
   } catch (ErrorValue: unknown) {
-    throw new Error(`${Path} is not valid JSON: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`, {
-      cause: ErrorValue,
-    });
+    throw new Error(
+      `${Path} is not valid JSON: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`,
+      {
+        cause: ErrorValue,
+      },
+    );
   }
 }
 
@@ -313,7 +316,11 @@ function NormalizeTrivy(
         vulnerabilityId: ReadTrivyString(Vulnerability, "VulnerabilityID", Description),
         packageName: ReadTrivyString(Vulnerability, "PkgName", Description),
         installedVersion: ReadTrivyString(Vulnerability, "InstalledVersion", Description),
-        severity: ReadTrivyString(Vulnerability, "Severity", Description) as VulnerabilityFinding["severity"],
+        severity: ReadTrivyString(
+          Vulnerability,
+          "Severity",
+          Description,
+        ) as VulnerabilityFinding["severity"],
       });
     }
   }
@@ -323,11 +330,7 @@ function NormalizeTrivy(
   return Findings;
 }
 
-function ReadTrivyString(
-  Value: Record<string, unknown>,
-  Key: string,
-  Description: string,
-): string {
+function ReadTrivyString(Value: Record<string, unknown>, Key: string, Description: string): string {
   const Field = Value[Key];
   if (typeof Field !== "string" || Field.length === 0) {
     throw new Error(`${Description} ${Key} must be a non-empty string`);

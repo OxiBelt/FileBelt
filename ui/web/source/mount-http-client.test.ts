@@ -3,7 +3,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { components } from "./generated/openapi.js";
-import { HttpMountSettingsClient, MountReauthenticationRequiredError } from "./mount-http-client.js";
+import {
+  HttpMountSettingsClient,
+  MountReauthenticationRequiredError,
+} from "./mount-http-client.js";
 
 const DriveId = "00000000-0000-4000-8000-000000000071";
 const CredentialId = "00000000-0000-4000-8000-000000000072";
@@ -30,16 +33,36 @@ class ContractServer {
     if (Url.pathname === "/api/v1/session") return Json(Session);
     if (Url.pathname === "/api/v1/mounts/credentials" && RequestValue.method === "POST") {
       if (this.ReauthenticationRequired) {
-        return Json({ code: "mount.reauthentication_required", status: 403, title: "Recent OIDC authentication is required", type: "https://filebelt.dev/problems/mount.reauthentication_required" }, 403);
+        return Json(
+          {
+            code: "mount.reauthentication_required",
+            status: 403,
+            title: "Recent OIDC authentication is required",
+            type: "https://filebelt.dev/problems/mount.reauthentication_required",
+          },
+          403,
+        );
       }
-      return Json({ credential_id: CredentialId, expires_at: "2026-08-15T10:00:00Z", password: "one-time-password", protocol: "smb", username: "fb-example" }, 201);
+      return Json(
+        {
+          credential_id: CredentialId,
+          expires_at: "2026-08-15T10:00:00Z",
+          password: "one-time-password",
+          protocol: "smb",
+          username: "fb-example",
+        },
+        201,
+      );
     }
     return new Response(null, { status: 404 });
   };
 }
 
 function Json(Value: unknown, Status = 200): Response {
-  return new Response(JSON.stringify(Value), { headers: { "Content-Type": "application/json" }, status: Status });
+  return new Response(JSON.stringify(Value), {
+    headers: { "Content-Type": "application/json" },
+    status: Status,
+  });
 }
 
 describe("HttpMountSettingsClient", () => {
@@ -72,12 +95,14 @@ describe("HttpMountSettingsClient", () => {
     Server.ReauthenticationRequired = true;
     const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
 
-    await expect(Client.createCredential({
-      allowed_drive_ids: [DriveId],
-      bound_device_id: null,
-      expires_at: "2026-08-15T10:00:00Z",
-      protocol: "smb",
-      read_only: true,
-    })).rejects.toBeInstanceOf(MountReauthenticationRequiredError);
+    await expect(
+      Client.createCredential({
+        allowed_drive_ids: [DriveId],
+        bound_device_id: null,
+        expires_at: "2026-08-15T10:00:00Z",
+        protocol: "smb",
+        read_only: true,
+      }),
+    ).rejects.toBeInstanceOf(MountReauthenticationRequiredError);
   });
 });

@@ -6,8 +6,7 @@ export const ImageRegistry = "ghcr.io/oxibelt" as const;
 export const SourceUrl = "https://github.com/OxiBelt/FileBelt" as const;
 export const RuntimeIdentity = Object.freeze({ uid: 10001, gid: 10001 });
 export const RustImageLicense = "Apache-2.0 AND MIT" as const;
-export const RustCdlaImageLicense =
-  "Apache-2.0 AND MIT AND CDLA-Permissive-2.0" as const;
+export const RustCdlaImageLicense = "Apache-2.0 AND MIT AND CDLA-Permissive-2.0" as const;
 export const RustIggyImageLicense =
   "Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0" as const;
 export const WebImageLicense = "Apache-2.0 AND MIT AND ISC AND 0BSD" as const;
@@ -36,11 +35,7 @@ export const ImageRoles = [
 
 export type ImageRole = (typeof ImageRoles)[number];
 
-export const ImagePlatforms = [
-  "linux/amd64",
-  "linux/arm64",
-  "linux/riscv64",
-] as const;
+export const ImagePlatforms = ["linux/amd64", "linux/arm64", "linux/riscv64"] as const;
 
 export type ImagePlatform = (typeof ImagePlatforms)[number];
 export type ImagePlanChannel = "build" | "release";
@@ -63,9 +58,7 @@ export interface ImageComponent {
   readonly evidence: string;
 }
 
-export type PlatformComponentInventory = Readonly<
-  Record<ImagePlatform, readonly ImageComponent[]>
->;
+export type PlatformComponentInventory = Readonly<Record<ImagePlatform, readonly ImageComponent[]>>;
 export type PlatformTargetCpu = Readonly<Record<ImagePlatform, typeof Amd64IsaBaseline | null>>;
 
 export interface ImagePlanSource {
@@ -79,21 +72,21 @@ export interface ImagePlanSource {
 
 export type ImageArtifact =
   | {
-    readonly kind: "rust-binary";
-    readonly binary: string;
-    readonly targetCpu: PlatformTargetCpu;
-    readonly components: PlatformComponentInventory;
-  }
+      readonly kind: "rust-binary";
+      readonly binary: string;
+      readonly targetCpu: PlatformTargetCpu;
+      readonly components: PlatformComponentInventory;
+    }
   | {
-    readonly kind: "oxibelt-edge";
-    readonly targetCpu: PlatformTargetCpu;
-    readonly packages: readonly ["ui/web", "ui/markdown"];
-    readonly base: {
-      readonly image: typeof OxibeltImage;
-      readonly version: typeof OxibeltVersion;
-      readonly revision: typeof OxibeltRevision;
+      readonly kind: "oxibelt-edge";
+      readonly targetCpu: PlatformTargetCpu;
+      readonly packages: readonly ["ui/web", "ui/markdown"];
+      readonly base: {
+        readonly image: typeof OxibeltImage;
+        readonly version: typeof OxibeltVersion;
+        readonly revision: typeof OxibeltRevision;
+      };
     };
-  };
 
 export interface ImageRow {
   readonly role: ImageRole;
@@ -136,8 +129,7 @@ interface RoleDefinition {
 
 const RustBuilderEvidence =
   "docker.io/library/rust@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f";
-const NativeSnapshotEvidence =
-  "https://snapshot.debian.org/archive/debian/20260713T000000Z";
+const NativeSnapshotEvidence = "https://snapshot.debian.org/archive/debian/20260713T000000Z";
 const Riscv64BuilderSnapshotEvidence =
   "https://snapshot.debian.org/archive/debian/20260713T000000Z";
 const Riscv64ToolchainEvidence =
@@ -282,18 +274,8 @@ const RoleDefinitions: readonly RoleDefinition[] = [
     IggyRuntimeComponents,
   ),
   RustRole("filebelt-media-controller", "filebelt-media-controller"),
-  RustRole(
-    "filebelt-document",
-    "filebelt-document",
-    RustCdlaImageLicense,
-    WebpkiRuntimeComponents,
-  ),
-  RustRole(
-    "filebelt-revision",
-    "filebelt-revision",
-    RustCdlaImageLicense,
-    WebpkiRuntimeComponents,
-  ),
+  RustRole("filebelt-document", "filebelt-document", RustCdlaImageLicense, WebpkiRuntimeComponents),
+  RustRole("filebelt-revision", "filebelt-revision", RustCdlaImageLicense, WebpkiRuntimeComponents),
   RustRole(
     "filebelt-collaboration",
     "filebelt-collaboration",
@@ -314,12 +296,7 @@ const RoleDefinitions: readonly RoleDefinition[] = [
   ),
   RustRole("filebelt-mcp-runner", "filebelt-mcp-runner"),
   RustRole("filebelt-tools", "filebeltctl", RustIggyImageLicense, IggyRuntimeComponents),
-  RustRole(
-    "filebelt-vfs",
-    "filebelt-vfs",
-    RustCdlaImageLicense,
-    WebpkiRuntimeComponents,
-  ),
+  RustRole("filebelt-vfs", "filebelt-vfs", RustCdlaImageLicense, WebpkiRuntimeComponents),
   RustRole(
     "filebelt-headscale-sync",
     "filebelt-headscale-sync",
@@ -544,8 +521,7 @@ function IsAsciiDigit(Character: number): boolean {
 }
 
 function IsAsciiLetter(Character: number): boolean {
-  return (Character >= 0x41 && Character <= 0x5a)
-    || (Character >= 0x61 && Character <= 0x7a);
+  return (Character >= 0x41 && Character <= 0x5a) || (Character >= 0x61 && Character <= 0x7a);
 }
 
 export function CreateLocalBuildTag(Version: string, Revision: string): string {
@@ -587,7 +563,16 @@ export function ValidateImagePlan(Value: unknown): ImagePlanV2 {
   const Plan = AssertRecord(Value, "image plan");
   AssertExactKeys(
     Plan,
-    ["schemaVersion", "amd64IsaBaseline", "channel", "version", "tag", "source", "runtime", "images"],
+    [
+      "schemaVersion",
+      "amd64IsaBaseline",
+      "channel",
+      "version",
+      "tag",
+      "source",
+      "runtime",
+      "images",
+    ],
     "image plan",
   );
   if (Plan.schemaVersion !== ImagePlanSchemaVersion) {
@@ -604,9 +589,7 @@ export function ValidateImagePlan(Value: unknown): ImagePlanV2 {
 
   const Source = ValidateSource(Plan.source, Plan.channel, Plan.version);
   const ExpectedTag =
-    Plan.channel === "release"
-      ? Plan.version
-      : CreateLocalBuildTag(Plan.version, Source.revision);
+    Plan.channel === "release" ? Plan.version : CreateLocalBuildTag(Plan.version, Source.revision);
   if (Plan.tag !== ExpectedTag) {
     throw new Error(`image plan tag must be ${ExpectedTag}`);
   }
@@ -635,17 +618,17 @@ function CreateImageRow(Definition: RoleDefinition): ImageRow {
     artifact:
       Definition.Artifact.kind === "rust-binary"
         ? {
-          kind: "rust-binary",
-          binary: Definition.Artifact.binary,
-          targetCpu: { ...Definition.Artifact.targetCpu },
-          components: CloneComponentInventory(Definition.Artifact.components),
-        }
+            kind: "rust-binary",
+            binary: Definition.Artifact.binary,
+            targetCpu: { ...Definition.Artifact.targetCpu },
+            components: CloneComponentInventory(Definition.Artifact.components),
+          }
         : {
-          kind: "oxibelt-edge",
-          targetCpu: { ...Definition.Artifact.targetCpu },
-          packages: [...Definition.Artifact.packages],
-          base: { ...Definition.Artifact.base },
-        },
+            kind: "oxibelt-edge",
+            targetCpu: { ...Definition.Artifact.targetCpu },
+            packages: [...Definition.Artifact.packages],
+            base: { ...Definition.Artifact.base },
+          },
   };
 }
 
@@ -736,16 +719,7 @@ function ValidateImageRows(Value: unknown): void {
     const Row = AssertRecord(Value[Index], `image plan image ${Index}`);
     AssertExactKeys(
       Row,
-      [
-        "role",
-        "repository",
-        "title",
-        "description",
-        "platforms",
-        "license",
-        "build",
-        "artifact",
-      ],
+      ["role", "repository", "title", "description", "platforms", "license", "build", "artifact"],
       `image plan image ${Index}`,
     );
     if (typeof Row.role !== "string" || Seen.has(Row.role)) {
@@ -790,12 +764,17 @@ function AssertReleaseTag(Value: string, Description: string): void {
 
 function AssertRevision(Value: string): void {
   if (!RevisionPattern.test(Value)) {
-    throw new Error("image plan source revision must be a full lowercase hexadecimal Git object ID");
+    throw new Error(
+      "image plan source revision must be a full lowercase hexadecimal Git object ID",
+    );
   }
 }
 
 function AssertCreated(Value: string): void {
-  if (!CreatedPattern.test(Value) || new Date(Value).toISOString() !== Value.replace("Z", ".000Z")) {
+  if (
+    !CreatedPattern.test(Value) ||
+    new Date(Value).toISOString() !== Value.replace("Z", ".000Z")
+  ) {
     throw new Error("image plan source created must be an exact RFC 3339 UTC second");
   }
 }

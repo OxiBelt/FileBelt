@@ -37,7 +37,11 @@ export function SelectionReducer(State: SelectionState, Action: SelectionAction)
       const TargetIndex = Math.max(0, Action.OrderedIds.indexOf(Action.Id));
       const Start = Math.min(AnchorIndex, TargetIndex);
       const End = Math.max(AnchorIndex, TargetIndex);
-      return { ...State, FocusedId: Action.Id, SelectedIds: new Set(Action.OrderedIds.slice(Start, End + 1)) };
+      return {
+        ...State,
+        FocusedId: Action.Id,
+        SelectedIds: new Set(Action.OrderedIds.slice(Start, End + 1)),
+      };
     }
     case "replace":
       return { AnchorId: Action.Id, FocusedId: Action.Id, SelectedIds: new Set([Action.Id]) };

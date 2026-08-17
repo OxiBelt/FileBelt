@@ -4,7 +4,8 @@ export const McpEn = {
   activity: "Activity",
   add: "Add server",
   administration: "Managed MCP",
-  adminNotice: "Sensitive changes require recent sign-in. Administration does not grant access to user credentials, arguments, results, filenames, or content.",
+  adminNotice:
+    "Sensitive changes require recent sign-in. Administration does not grant access to user credentials, arguments, results, filenames, or content.",
   apiKey: "API key",
   argumentsInvalid: "Arguments must be valid JSON.",
   application: "Application",
@@ -22,22 +23,27 @@ export const McpEn = {
   cancelInvocation: "Cancel invocation",
   capabilities: "Capabilities",
   capability: "Capability",
-  capabilityOption: (Title: string, Kind: string, Name: string): string => `${Title} (${Kind}: ${Name})`,
-  capabilityChanged: "Capabilities changed. Review new or changed entries before enabling this server.",
+  capabilityOption: (Title: string, Kind: string, Name: string): string =>
+    `${Title} (${Kind}: ${Name})`,
+  capabilityChanged:
+    "Capabilities changed. Review new or changed entries before enabling this server.",
   capabilityFingerprint: "Exact capability fingerprint",
   capabilityKind: "Capability kind",
   capabilityName: "Exact capability name",
   connectOauth: "Connect with OAuth",
   confirmInvocation: "Confirm exact invocation",
-  confirmInvocationNotice: "FileBelt will approve only this exact server, capability, application, arguments, and attachment set. The approval is consumed by this invocation.",
-  credentialNotice: "Credentials are sent once to FileBelt and are never displayed or stored by this browser.",
+  confirmInvocationNotice:
+    "FileBelt will approve only this exact server, capability, application, arguments, and attachment set. The approval is consumed by this invocation.",
+  credentialNotice:
+    "Credentials are sent once to FileBelt and are never displayed or stored by this browser.",
   credentialState: "Current credential state",
   credentialType: "Credential type",
   createGrant: "Create 24-hour grant",
   createService: "Create service",
   createTemplate: "Create template",
   delete: "Delete",
-  description: "Connect reviewed read-only MCP servers and control exactly what each invocation may receive.",
+  description:
+    "Connect reviewed read-only MCP servers and control exactly what each invocation may receive.",
   displayName: "Display name",
   disable: "Disable",
   disabled: "Disabled",
@@ -61,7 +67,8 @@ export const McpEn = {
   jsonArguments: "JSON arguments",
   jsonResult: "JSON result",
   managed: "Managed",
-  managedLocked: "Endpoint and trust settings are managed by your administrator. Your credentials and approvals remain private.",
+  managedLocked:
+    "Endpoint and trust settings are managed by your administrator. Your credentials and approvals remain private.",
   managedTemplateUnavailable: "Managed template is unavailable.",
   managedTemplate: "Managed template",
   managedTemplates: "Managed templates",
@@ -69,7 +76,8 @@ export const McpEn = {
   noActivity: "No MCP activity in the last 90 days.",
   noCapabilities: "Discover this server before reviewing capabilities.",
   none: "None",
-  oauthNotice: "OAuth opens the authorization server in this tab. FileBelt stores the pending state on the server.",
+  oauthNotice:
+    "OAuth opens the authorization server in this tab. FileBelt stores the pending state on the server.",
   resultAudioUnavailable: "Audio playback is unavailable.",
   resultImageAlt: "MCP server result",
   resultUnsupported: "Unsupported value",
@@ -89,7 +97,8 @@ export const McpEn = {
   server: "Server",
   serverTested: "Connection test completed.",
   service: "Service",
-  serviceGrantNotice: "Creates a 24-hour exact grant. Data grants must already be assigned to the service.",
+  serviceGrantNotice:
+    "Creates a 24-hour exact grant. Data grants must already be assigned to the service.",
   serviceGrants: "Service invocation grants",
   serviceIdentities: "Service identities",
   serviceUnavailable: "Service identity is unavailable.",
@@ -103,7 +112,8 @@ export const McpEn = {
   resource: "Resource",
   tool: "Tool",
   user: "User",
-  assignmentCount: (Count: number): string => `${Count} ${Count === 1 ? "assignment" : "assignments"}`,
+  assignmentCount: (Count: number): string =>
+    `${Count} ${Count === 1 ? "assignment" : "assignments"}`,
   test: "Test connection",
   trustProfile: "Trust profile",
   unsafeMedia: "Media was rejected because its type or size is not supported.",

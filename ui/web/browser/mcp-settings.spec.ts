@@ -9,7 +9,9 @@ const InvocationId = "00000000-0000-4000-8000-000000000073";
 const ToolFingerprint = "b".repeat(64);
 const ResourceFingerprint = "c".repeat(64);
 
-test("keeps credentials out of browser persistence and renders MCP output as text", async ({ page: Page }) => {
+test("keeps credentials out of browser persistence and renders MCP output as text", async ({
+  page: Page,
+}) => {
   const Credential = "browser-test-secret";
   const CredentialRequests: { Body: string; Url: string }[] = [];
   const IntentRequests: string[] = [];
@@ -20,19 +22,44 @@ test("keeps credentials out of browser persistence and renders MCP output as tex
     const Url = new URL(Request.url());
     if (Request.resourceType() !== "fetch") return Route.continue();
     if (Url.pathname === "/api/v1/session") return Route.fulfill({ json: Session() });
-    if (Url.pathname === "/api/v1/drives") return Route.fulfill({ json: { items: [], next_cursor: null } });
-    if (Url.pathname === "/api/v1/shared") return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Url.pathname === "/api/v1/drives")
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Url.pathname === "/api/v1/shared")
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
     if (Url.pathname === "/api/v1/sessions") return Route.fulfill({ json: [] });
-    if (Url.pathname === "/api/v1/mcp/registrations") return Route.fulfill({ json: { items: [Registration(RegistrationId, "Planning server"), Registration(SecondaryRegistrationId, "Backup server")], next_cursor: null } });
-    if (Url.pathname === "/api/v1/mcp/activity") return Route.fulfill({ json: { items: [], next_cursor: null } });
-    if (Url.pathname.endsWith("/capability-review")) return Route.fulfill({ json: Review(Url.pathname.includes(SecondaryRegistrationId) ? SecondaryRegistrationId : RegistrationId) });
+    if (Url.pathname === "/api/v1/mcp/registrations")
+      return Route.fulfill({
+        json: {
+          items: [
+            Registration(RegistrationId, "Planning server"),
+            Registration(SecondaryRegistrationId, "Backup server"),
+          ],
+          next_cursor: null,
+        },
+      });
+    if (Url.pathname === "/api/v1/mcp/activity")
+      return Route.fulfill({ json: { items: [], next_cursor: null } });
+    if (Url.pathname.endsWith("/capability-review"))
+      return Route.fulfill({
+        json: Review(
+          Url.pathname.includes(SecondaryRegistrationId) ? SecondaryRegistrationId : RegistrationId,
+        ),
+      });
     if (Url.pathname.endsWith("/credentials")) {
       CredentialRequests.push({ Body: Request.postData() ?? "", Url: Request.url() });
       return Route.fulfill({ status: 204 });
     }
     if (Url.pathname === "/api/v1/mcp/invocation-intents") {
       IntentRequests.push(Request.postData() ?? "");
-      return Route.fulfill({ json: { approval_required: true, expires_at: "2026-08-07T10:05:00Z", id: InvocationId, request_digest: "d".repeat(64) }, status: 201 });
+      return Route.fulfill({
+        json: {
+          approval_required: true,
+          expires_at: "2026-08-07T10:05:00Z",
+          id: InvocationId,
+          request_digest: "d".repeat(64),
+        },
+        status: 201,
+      });
     }
     if (Url.pathname.endsWith("/approval")) {
       return Route.fulfill({ json: { id: "00000000-0000-4000-8000-000000000077" }, status: 201 });
@@ -41,14 +68,38 @@ test("keeps credentials out of browser persistence and renders MCP output as tex
       StreamRequests += 1;
       return Route.fulfill({
         body: [
-          JSON.stringify({ created_at: "2026-08-07T10:00:00Z", event: "started", invocation_id: InvocationId, sequence: 0 }),
-          JSON.stringify({ created_at: "2026-08-07T10:00:01Z", event: "text", invocation_id: InvocationId, sequence: 1, text: "<script>window.pwned=true</script>" }),
-          JSON.stringify({ created_at: "2026-08-07T10:00:02Z", event: "completed", invocation_id: InvocationId, sequence: 2 }),
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:00Z",
+            event: "started",
+            invocation_id: InvocationId,
+            sequence: 0,
+          }),
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:01Z",
+            event: "text",
+            invocation_id: InvocationId,
+            sequence: 1,
+            text: "<script>window.pwned=true</script>",
+          }),
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:02Z",
+            event: "completed",
+            invocation_id: InvocationId,
+            sequence: 2,
+          }),
         ].join("\n"),
         contentType: "application/x-ndjson",
       });
     }
-    return Route.fulfill({ json: { code: "test.unhandled", status: 404, title: `Unhandled ${Request.method()} ${Url.pathname}`, type: "about:blank" }, status: 404 });
+    return Route.fulfill({
+      json: {
+        code: "test.unhandled",
+        status: 404,
+        title: `Unhandled ${Request.method()} ${Url.pathname}`,
+        type: "about:blank",
+      },
+      status: 404,
+    });
   });
 
   await Page.goto("/settings/mcp");
@@ -70,21 +121,31 @@ test("keeps credentials out of browser persistence and renders MCP output as tex
   const StoredValues = await Page.evaluate(async () => ({
     Local: Object.values(localStorage),
     Session: Object.values(sessionStorage),
-    Databases: typeof indexedDB.databases === "function" ? (await indexedDB.databases()).map(({ name: Name }) => Name ?? "") : [],
+    Databases:
+      typeof indexedDB.databases === "function"
+        ? (await indexedDB.databases()).map(({ name: Name }) => Name ?? "")
+        : [],
   }));
   expect(JSON.stringify(StoredValues)).not.toContain(Credential);
 
-  const InvocationForm = Page.getByRole("heading", { exact: true, name: "Run test invocation" }).locator("..");
+  const InvocationForm = Page.getByRole("heading", {
+    exact: true,
+    name: "Run test invocation",
+  }).locator("..");
   await InvocationForm.getByRole("combobox").selectOption(ResourceFingerprint);
   await Page.getByLabel("JSON arguments").fill('{"query":"roadmap"}');
   await Page.getByRole("button", { exact: true, name: "Run test invocation" }).click();
-  const Confirmation = Page.getByRole("heading", { name: "Confirm exact invocation" }).locator("..");
+  const Confirmation = Page.getByRole("heading", { name: "Confirm exact invocation" }).locator(
+    "..",
+  );
   await expect(Confirmation).toBeVisible();
   await expect(Confirmation.getByText("resource", { exact: true })).toBeVisible();
   await expect(Confirmation.getByText("shared", { exact: true })).toBeVisible();
   await expect(Confirmation.getByText(ResourceFingerprint, { exact: true })).toBeVisible();
   await expect.poll(() => IntentRequests.length).toBe(1);
-  expect(JSON.parse(IntentRequests[0] ?? "null")).toMatchObject({ capability: { fingerprint: ResourceFingerprint, kind: "resource", name: "shared" } });
+  expect(JSON.parse(IntentRequests[0] ?? "null")).toMatchObject({
+    capability: { fingerprint: ResourceFingerprint, kind: "resource", name: "shared" },
+  });
   expect(StreamRequests).toBe(0);
   await Page.getByRole("button", { name: "Approve once and run" }).click();
   await expect(Page.getByText("<script>window.pwned=true</script>", { exact: true })).toBeVisible();
@@ -107,7 +168,13 @@ function Session(): object {
 
 function Registration(Id: string, DisplayName: string): object {
   return {
-    attachment_policy: { allowed_encodings: ["utf8"], allowed_mime_patterns: ["text/*"], max_attachments: 4, max_item_bytes: 1048576, max_total_bytes: 4194304 },
+    attachment_policy: {
+      allowed_encodings: ["utf8"],
+      allowed_mime_patterns: ["text/*"],
+      max_attachments: 4,
+      max_item_bytes: 1048576,
+      max_total_bytes: 4194304,
+    },
     authentication_state: "ready",
     capability_snapshot_id: SnapshotId,
     capability_state: "reviewed",
@@ -141,8 +208,28 @@ function Review(Registration: string): object {
     reviewed_at: "2026-08-07T10:00:00Z",
     snapshot: {
       capabilities: [
-        { description: "Runs a shared action", fingerprint: ToolFingerprint, input_schema: { type: "object" }, kind: "tool", name: "shared", read_only_hint: true, risk: "low", state: "unchanged", title: "Run shared action" },
-        { description: "Reads shared data", fingerprint: ResourceFingerprint, input_schema: { type: "object" }, kind: "resource", name: "shared", read_only_hint: null, risk: "low", state: "unchanged", title: "Read shared data" },
+        {
+          description: "Runs a shared action",
+          fingerprint: ToolFingerprint,
+          input_schema: { type: "object" },
+          kind: "tool",
+          name: "shared",
+          read_only_hint: true,
+          risk: "low",
+          state: "unchanged",
+          title: "Run shared action",
+        },
+        {
+          description: "Reads shared data",
+          fingerprint: ResourceFingerprint,
+          input_schema: { type: "object" },
+          kind: "resource",
+          name: "shared",
+          read_only_hint: null,
+          risk: "low",
+          state: "unchanged",
+          title: "Read shared data",
+        },
       ],
       created_at: "2026-08-07T10:00:00Z",
       fingerprint: "e".repeat(64),

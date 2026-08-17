@@ -3,7 +3,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { FormatMountSessionDetail, NfsActiveMappingCard, NfsProposalConsentCard } from "./MountSettings.js";
+import {
+  FormatMountSessionDetail,
+  NfsActiveMappingCard,
+  NfsProposalConsentCard,
+} from "./MountSettings.js";
 import type { NfsMappingProposal, NfsPrincipalMapping } from "./nfs-target-http-client.js";
 
 const DriveId = "00000000-0000-4000-8000-000000000141";
@@ -56,7 +60,14 @@ describe("NFS target approval controls", () => {
   });
 
   it("shows every server-held consent field and gates approval on explicit review", () => {
-    const Markup = renderToStaticMarkup(<NfsProposalConsentCard Busy={false} OnApprove={async () => undefined} OnDecline={async () => undefined} Proposal={Proposal} />);
+    const Markup = renderToStaticMarkup(
+      <NfsProposalConsentCard
+        Busy={false}
+        OnApprove={async () => undefined}
+        OnDecline={async () => undefined}
+        Proposal={Proposal}
+      />,
+    );
 
     expect(Markup).toContain("avery@EXAMPLE.TEST");
     expect(Markup).toContain(Proposal.principal_id);
@@ -74,7 +85,9 @@ describe("NFS target approval controls", () => {
   });
 
   it("shows the active alias ceiling and confirmation-gates direct revocation", () => {
-    const Markup = renderToStaticMarkup(<NfsActiveMappingCard Busy={false} Mapping={Mapping} OnRevoke={async () => undefined} />);
+    const Markup = renderToStaticMarkup(
+      <NfsActiveMappingCard Busy={false} Mapping={Mapping} OnRevoke={async () => undefined} />,
+    );
 
     expect(Markup).toContain(Mapping.kerberos_principal);
     expect(Markup).toContain(DriveId);

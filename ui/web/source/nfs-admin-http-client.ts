@@ -73,12 +73,14 @@ export class HttpNfsAdminClient implements NfsAdminClient {
   }
 
   async getOverview(Signal?: AbortSignal): Promise<NfsAdminSnapshot> {
-    const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all([
-      this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
-      this.#Api.GET("/api/v1/admin/mounts/nfs/conflicts", SignalInit(Signal)),
-      this.#Api.GET("/api/v1/admin/mounts/nfs/mapping-proposals", SignalInit(Signal)),
-      this.#Api.GET("/api/v1/admin/mounts/nfs/quarantined-mappings", SignalInit(Signal)),
-    ]);
+    const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all(
+      [
+        this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
+        this.#Api.GET("/api/v1/admin/mounts/nfs/conflicts", SignalInit(Signal)),
+        this.#Api.GET("/api/v1/admin/mounts/nfs/mapping-proposals", SignalInit(Signal)),
+        this.#Api.GET("/api/v1/admin/mounts/nfs/quarantined-mappings", SignalInit(Signal)),
+      ],
+    );
     return Snapshot(
       RequireData<NfsOverviewResponse>(OverviewResult),
       RequireData<NfsConflictResponse[]>(ConflictsResult),
@@ -87,18 +89,30 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     );
   }
 
-  async transitionFeature(ExpectedGeneration: number, TargetState: NfsFeatureState, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/feature", {
-      body: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration, target_state: TargetState },
-      params: { header: await this.#mutationHeaders() },
-    }));
+  async transitionFeature(
+    ExpectedGeneration: number,
+    TargetState: NfsFeatureState,
+    ConfirmTenant: string,
+  ): Promise<void> {
+    RequireData(
+      await this.#Api.PUT("/api/v1/admin/mounts/nfs/feature", {
+        body: {
+          confirm_tenant: ConfirmTenant,
+          expected_generation: ExpectedGeneration,
+          target_state: TargetState,
+        },
+        params: { header: await this.#mutationHeaders() },
+      }),
+    );
   }
 
   async registerExport(Input: NfsExportRegistration, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/exports", {
-      body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
-      params: { header: await this.#mutationHeaders() },
-    }));
+    RequireData(
+      await this.#Api.POST("/api/v1/admin/mounts/nfs/exports", {
+        body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
+        params: { header: await this.#mutationHeaders() },
+      }),
+    );
   }
 
   async transitionExport(
@@ -107,95 +121,136 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     TargetState: NfsExportState,
     ConfirmTenant: string,
   ): Promise<void> {
-    RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/exports/{drive_id}", {
-      body: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration, target_state: TargetState },
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { drive_id: DriveId },
-      },
-    }));
+    RequireData(
+      await this.#Api.PUT("/api/v1/admin/mounts/nfs/exports/{drive_id}", {
+        body: {
+          confirm_tenant: ConfirmTenant,
+          expected_generation: ExpectedGeneration,
+          target_state: TargetState,
+        },
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { drive_id: DriveId },
+        },
+      }),
+    );
   }
 
   async registerPosixGroup(Input: NfsPosixGroupRegistration, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/posix-groups", {
-      body: {
-        confirm_tenant: ConfirmTenant,
-        group_id: Input.GroupId,
-        posix_name: Input.PosixName,
-        projected_gid: Input.ProjectedGid,
-      },
-      params: { header: await this.#mutationHeaders() },
-    }));
+    RequireData(
+      await this.#Api.POST("/api/v1/admin/mounts/nfs/posix-groups", {
+        body: {
+          confirm_tenant: ConfirmTenant,
+          group_id: Input.GroupId,
+          posix_name: Input.PosixName,
+          projected_gid: Input.ProjectedGid,
+        },
+        params: { header: await this.#mutationHeaders() },
+      }),
+    );
   }
 
   async proposeMapping(Input: NfsMappingUpsert, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/mapping-proposals", {
-      body: {
-        allowed_drive_ids: Input.AllowedDriveIds,
-        confirm_tenant: ConfirmTenant,
-        kerberos_principal: Input.KerberosPrincipal,
-        principal_id: Input.PrincipalId,
-        projected_gid: Input.ProjectedGid,
-        projected_uid: Input.ProjectedUid,
-      },
-      params: { header: await this.#mutationHeaders() },
-    }));
+    RequireData(
+      await this.#Api.POST("/api/v1/admin/mounts/nfs/mapping-proposals", {
+        body: {
+          allowed_drive_ids: Input.AllowedDriveIds,
+          confirm_tenant: ConfirmTenant,
+          kerberos_principal: Input.KerberosPrincipal,
+          principal_id: Input.PrincipalId,
+          projected_gid: Input.ProjectedGid,
+          projected_uid: Input.ProjectedUid,
+        },
+        params: { header: await this.#mutationHeaders() },
+      }),
+    );
   }
 
-  async cancelProposal(ProposalId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
-    RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}", {
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { proposal_id: ProposalId },
-        query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
-      },
-    }));
+  async cancelProposal(
+    ProposalId: string,
+    ExpectedGeneration: number,
+    ConfirmTenant: string,
+  ): Promise<void> {
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}", {
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { proposal_id: ProposalId },
+          query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
+        },
+      }),
+    );
   }
 
-  async attenuateMappingScope(CredentialId: string, AllowedDriveIds: readonly string[], ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.PUT("/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope", {
-      body: { allowed_drive_ids: AllowedDriveIds, confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { credential_id: CredentialId },
-      },
-    }));
+  async attenuateMappingScope(
+    CredentialId: string,
+    AllowedDriveIds: readonly string[],
+    ExpectedGeneration: number,
+    ConfirmTenant: string,
+  ): Promise<void> {
+    RequireData(
+      await this.#Api.PUT("/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope", {
+        body: {
+          allowed_drive_ids: AllowedDriveIds,
+          confirm_tenant: ConfirmTenant,
+          expected_generation: ExpectedGeneration,
+        },
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { credential_id: CredentialId },
+        },
+      }),
+    );
   }
 
-  async revokeMapping(CredentialId: string, ExpectedGeneration: number, ConfirmTenant: string): Promise<void> {
-    RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mappings/{credential_id}", {
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { credential_id: CredentialId },
-        query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
-      },
-    }));
+  async revokeMapping(
+    CredentialId: string,
+    ExpectedGeneration: number,
+    ConfirmTenant: string,
+  ): Promise<void> {
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mappings/{credential_id}", {
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { credential_id: CredentialId },
+          query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
+        },
+      }),
+    );
   }
 
-  async copyConflict(ConflictId: string, Input: NfsConflictCopyInput, ConfirmTenant: string): Promise<void> {
-    RequireData(await this.#Api.POST("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy", {
-      body: {
-        confirm_tenant: ConfirmTenant,
-        display_name: Input.DisplayName,
-        drive_id: Input.DriveId,
-        expected_parent_generation: Input.ExpectedParentGeneration,
-        parent_id: Input.ParentId,
-      },
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { conflict_id: ConflictId },
-      },
-    }));
+  async copyConflict(
+    ConflictId: string,
+    Input: NfsConflictCopyInput,
+    ConfirmTenant: string,
+  ): Promise<void> {
+    RequireData(
+      await this.#Api.POST("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy", {
+        body: {
+          confirm_tenant: ConfirmTenant,
+          display_name: Input.DisplayName,
+          drive_id: Input.DriveId,
+          expected_parent_generation: Input.ExpectedParentGeneration,
+          parent_id: Input.ParentId,
+        },
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { conflict_id: ConflictId },
+        },
+      }),
+    );
   }
 
   async discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void> {
-    RequireSuccess(await this.#Api.DELETE("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}", {
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { conflict_id: ConflictId },
-        query: { confirm_tenant: ConfirmTenant },
-      },
-    }));
+    RequireSuccess(
+      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}", {
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { conflict_id: ConflictId },
+          query: { confirm_tenant: ConfirmTenant },
+        },
+      }),
+    );
   }
 
   async #mutationHeaders(): Promise<MutationHeaders> {
@@ -255,7 +310,9 @@ function Snapshot(
       State: Response.feature.state,
     },
     Mappings: Response.mappings.map((Mapping) => ({
-      ...(Mapping.allowed_drive_ids === undefined ? {} : { AllowedDriveIds: Mapping.allowed_drive_ids }),
+      ...(Mapping.allowed_drive_ids === undefined
+        ? {}
+        : { AllowedDriveIds: Mapping.allowed_drive_ids }),
       CredentialId: Mapping.credential_id,
       Generation: Mapping.generation,
       KerberosPrincipal: Mapping.kerberos_principal,
@@ -263,27 +320,31 @@ function Snapshot(
       ProjectedGid: Mapping.projected_gid,
       ProjectedUid: Mapping.projected_uid,
     })),
-    PendingProposals: Proposals.filter(({ state: State }) => State === "pending").map((Proposal) => ({
-      AllowedDriveIds: Proposal.allowed_drive_ids,
-      CreatedAt: Proposal.created_at,
-      DecidedAt: Proposal.decided_at ?? null,
-      ExpiresAt: Proposal.expires_at,
-      Generation: Proposal.generation,
-      Id: Proposal.id,
-      KerberosPrincipal: Proposal.kerberos_principal,
-      PrincipalId: Proposal.principal_id,
-      ProjectedGid: Proposal.projected_gid,
-      ProjectedUid: Proposal.projected_uid,
-      ProposerPrincipalId: Proposal.proposer_principal_id,
-      State: Proposal.state,
-    })),
+    PendingProposals: Proposals.filter(({ state: State }) => State === "pending").map(
+      (Proposal) => ({
+        AllowedDriveIds: Proposal.allowed_drive_ids,
+        CreatedAt: Proposal.created_at,
+        DecidedAt: Proposal.decided_at ?? null,
+        ExpiresAt: Proposal.expires_at,
+        Generation: Proposal.generation,
+        Id: Proposal.id,
+        KerberosPrincipal: Proposal.kerberos_principal,
+        PrincipalId: Proposal.principal_id,
+        ProjectedGid: Proposal.projected_gid,
+        ProjectedUid: Proposal.projected_uid,
+        ProposerPrincipalId: Proposal.proposer_principal_id,
+        State: Proposal.state,
+      }),
+    ),
     PosixGroups: Response.posix_groups.map((Group) => ({
       GroupId: Group.group_id,
       PosixName: Group.posix_name,
       ProjectedGid: Group.projected_gid,
     })),
     QuarantinedMappings: QuarantinedMappings.map((Mapping) => ({
-      ...(Mapping.allowed_drive_ids === undefined ? {} : { AllowedDriveIds: Mapping.allowed_drive_ids }),
+      ...(Mapping.allowed_drive_ids === undefined
+        ? {}
+        : { AllowedDriveIds: Mapping.allowed_drive_ids }),
       CredentialId: Mapping.credential_id,
       Generation: Mapping.generation,
       KerberosPrincipal: Mapping.kerberos_principal,
@@ -321,7 +382,9 @@ function RequestError(Result: ApiResult<unknown>): Error {
     return new NfsReauthenticationRequiredError();
   }
   const Title = ProblemTitle(Result.error);
-  return new Error(Title ?? `FileBelt NFS administration request failed (${Result.response.status}).`);
+  return new Error(
+    Title ?? `FileBelt NFS administration request failed (${Result.response.status}).`,
+  );
 }
 
 function ProblemCode(Value: unknown): string | null {

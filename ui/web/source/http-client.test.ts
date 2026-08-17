@@ -127,8 +127,12 @@ class ContractServer {
         version_ordinal: null,
       });
     }
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}` && HttpRequest.method === "GET") return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-2"' });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children` && HttpRequest.method === "GET") {
+    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}` && HttpRequest.method === "GET")
+      return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-2"' });
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children` &&
+      HttpRequest.method === "GET"
+    ) {
       return Json({ items: this.#Nodes, next_cursor: null });
     }
     if (Path === `/api/v1/drives/${DriveId}/trash` && HttpRequest.method === "GET") {
@@ -138,19 +142,75 @@ class ContractServer {
       return Json({ items: [], next_cursor: null });
     }
     if (Path === "/api/v1/sessions" && HttpRequest.method === "GET") return Json([SessionSummary]);
-    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "GET") return Json({ edit_limit_bytes: 2_097_152, generation: 5, inline_limit_bytes: 8_388_608 }, 200, { ETag: '"preferences-5"' });
-    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "PATCH") return Json({ edit_limit_bytes: 4_194_304, generation: 6, inline_limit_bytes: 8_388_608 }, 200, { ETag: '"preferences-6"' });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/compare/${SecondVersionId}` && HttpRequest.method === "GET") return Json({ algorithm: "git-histogram-v1", base_final_newline: true, base_version_id: FirstVersionId, context_lines: 3, hunks: [{ base_lines: 1, base_start: 1, lines: [{ base_line: 1, kind: "context", target_line: 1, text: "same" }], target_lines: 1, target_start: 1 }], target_final_newline: true, target_version_id: SecondVersionId });
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy` && HttpRequest.method === "PATCH") return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-3"' });
+    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "GET")
+      return Json(
+        { edit_limit_bytes: 2_097_152, generation: 5, inline_limit_bytes: 8_388_608 },
+        200,
+        { ETag: '"preferences-5"' },
+      );
+    if (Path === "/api/v1/preferences/text" && HttpRequest.method === "PATCH")
+      return Json(
+        { edit_limit_bytes: 4_194_304, generation: 6, inline_limit_bytes: 8_388_608 },
+        200,
+        { ETag: '"preferences-6"' },
+      );
+    if (
+      Path ===
+        `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/compare/${SecondVersionId}` &&
+      HttpRequest.method === "GET"
+    )
+      return Json({
+        algorithm: "git-histogram-v1",
+        base_final_newline: true,
+        base_version_id: FirstVersionId,
+        context_lines: 3,
+        hunks: [
+          {
+            base_lines: 1,
+            base_start: 1,
+            lines: [{ base_line: 1, kind: "context", target_line: 1, text: "same" }],
+            target_lines: 1,
+            target_start: 1,
+          },
+        ],
+        target_final_newline: true,
+        target_version_id: SecondVersionId,
+      });
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy` &&
+      HttpRequest.method === "PATCH"
+    )
+      return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-3"' });
     if (Path.endsWith("/versions") && HttpRequest.method === "GET") {
-      return Json({ items: [FileVersion(FirstNodeId, FirstVersionId), FileVersion(FirstNodeId, SecondVersionId)], next_cursor: null });
+      return Json({
+        items: [
+          FileVersion(FirstNodeId, FirstVersionId),
+          FileVersion(FirstNodeId, SecondVersionId),
+        ],
+        next_cursor: null,
+      });
     }
     if (Path.endsWith("/shares") && HttpRequest.method === "GET") return Json([DirectShare()]);
     if (Path === `/api/v1/drives/${DriveId}/uploads` && HttpRequest.method === "POST") {
       return Json(UploadAllocation(), 201);
     }
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents` && HttpRequest.method === "POST") {
-      return Json({ expires_at: "2026-08-06T12:15:00Z", id: ImportIntentId, source_drive_id: DriveId, source_node_id: FirstNodeId, source_version_id: Node(FirstNodeId, "Source.docx").head_version_id as string, target_media_type: "text/markdown", target_name: "Source.md", target_parent_id: RootId }, 201);
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents` &&
+      HttpRequest.method === "POST"
+    ) {
+      return Json(
+        {
+          expires_at: "2026-08-06T12:15:00Z",
+          id: ImportIntentId,
+          source_drive_id: DriveId,
+          source_node_id: FirstNodeId,
+          source_version_id: Node(FirstNodeId, "Source.docx").head_version_id as string,
+          target_media_type: "text/markdown",
+          target_name: "Source.md",
+          target_parent_id: RootId,
+        },
+        201,
+      );
     }
     if (Path === `/api/v1/uploads/${UploadId}` && HttpRequest.method === "GET") {
       return Json({
@@ -164,27 +224,51 @@ class ContractServer {
       return Json({ blake3: "abc", part_number: 0, size_bytes: 4, upload_id: UploadId });
     }
     if (Path === `/io/v1/uploads/${UploadId}/finalize` && HttpRequest.method === "POST") {
-      return Json({ blake3: "abc", payload_id: PayloadId, size_bytes: 4, state: "finalized", upload_id: UploadId });
+      return Json({
+        blake3: "abc",
+        payload_id: PayloadId,
+        size_bytes: 4,
+        state: "finalized",
+        upload_id: UploadId,
+      });
     }
     if (Path === `/api/v1/uploads/${UploadId}/commit` && HttpRequest.method === "POST") {
-      return Json({ node_id: FirstNodeId, version_id: "00000000-0000-4000-8000-000000000013" }, 201);
+      return Json(
+        { node_id: FirstNodeId, version_id: "00000000-0000-4000-8000-000000000013" },
+        201,
+      );
     }
-    if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/download-grants` && HttpRequest.method === "POST") {
-      return Json({
-        authorization: "download-secret-must-not-be-forwarded",
-        authorization_scheme: "fbcap1",
-        expires_at: "2026-08-06T12:01:00Z",
-        grant_id: GrantId,
-        method: "GET",
-        path: `/io/v1/downloads/${GrantId}`,
-        size_bytes: 4,
-      }, 201);
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/download-grants` &&
+      HttpRequest.method === "POST"
+    ) {
+      return Json(
+        {
+          authorization: "download-secret-must-not-be-forwarded",
+          authorization_scheme: "fbcap1",
+          expires_at: "2026-08-06T12:01:00Z",
+          grant_id: GrantId,
+          method: "GET",
+          path: `/io/v1/downloads/${GrantId}`,
+          size_bytes: 4,
+        },
+        201,
+      );
     }
     if (Path === `/io/v1/downloads/${GrantId}` && HttpRequest.method === "GET") {
       return new Response("data", { status: 200 });
     }
-    if (Path.includes("/shares/") && HttpRequest.method === "DELETE") return new Response(null, { status: 204 });
-    return Json({ code: "test.unhandled", status: 500, title: `Unhandled ${HttpRequest.method} ${Path}`, type: "about:blank" }, 500);
+    if (Path.includes("/shares/") && HttpRequest.method === "DELETE")
+      return new Response(null, { status: 204 });
+    return Json(
+      {
+        code: "test.unhandled",
+        status: 500,
+        title: `Unhandled ${HttpRequest.method} ${Path}`,
+        type: "about:blank",
+      },
+      500,
+    );
   };
 }
 
@@ -196,7 +280,9 @@ describe("HttpFileBeltClient", () => {
     await Client.getWorkspace();
     await Client.upload([{ Data: new Blob(["data"]), Name: "upload.txt", Size: 4 }]);
     expect(await (await Client.download(FirstNodeId)).text()).toBe("data");
-    expect(await (await Client.readMarkdown(FirstNodeId, "00000000-0000-4000-8000-000000000012")).text()).toBe("data");
+    expect(
+      await (await Client.readMarkdown(FirstNodeId, "00000000-0000-4000-8000-000000000012")).text(),
+    ).toBe("data");
     await Client.saveMarkdown({
       Contents: new Blob(["# replacement"], { type: "text/markdown" }),
       EntryId: FirstNodeId,
@@ -212,13 +298,18 @@ describe("HttpFileBeltClient", () => {
     });
     expect(Allocation.headers.get("x-filebelt-csrf")).toBe(Session.csrf_token);
     expect(Allocation.headers.get("idempotency-key")).not.toBeNull();
-    const MarkdownAllocation = Server.Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    const MarkdownAllocation = Server.Requests.filter(
+      (Request) =>
+        new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` &&
+        Request.method === "POST",
+    ).at(-1);
     expect(MarkdownAllocation).toBeDefined();
-    if (MarkdownAllocation !== undefined) expect(await MarkdownAllocation.clone().json()).toMatchObject({
-      declared_media_type: "text/markdown",
-      expected_head_version_id: "00000000-0000-4000-8000-000000000012",
-      node_id: FirstNodeId,
-    });
+    if (MarkdownAllocation !== undefined)
+      expect(await MarkdownAllocation.clone().json()).toMatchObject({
+        declared_media_type: "text/markdown",
+        expected_head_version_id: "00000000-0000-4000-8000-000000000012",
+        node_id: FirstNodeId,
+      });
 
     const Part = FindRequest(Server.Requests, "PUT", `/io/v1/uploads/${UploadId}/parts/0`);
     expect(Part.credentials).toBe("omit");
@@ -258,12 +349,16 @@ describe("HttpFileBeltClient", () => {
   });
 
   it("converts a session 401 into an explicit authentication-required signal", async () => {
-    const FetchImplementation: typeof fetch = async () => Json({
-      code: "session.unauthorized",
-      status: 401,
-      title: "Authentication is required",
-      type: "about:blank",
-    }, 401);
+    const FetchImplementation: typeof fetch = async () =>
+      Json(
+        {
+          code: "session.unauthorized",
+          status: 401,
+          title: "Authentication is required",
+          type: "about:blank",
+        },
+        401,
+      );
     const Client = new HttpFileBeltClient(FetchImplementation, "https://filebelt.localhost");
 
     await expect(Client.getWorkspace()).rejects.toBeInstanceOf(AuthenticationRequiredError);
@@ -286,7 +381,15 @@ describe("HttpFileBeltClient", () => {
         return Json({ items: [], next_cursor: null });
       }
       if (FailRefresh && Path === "/api/v1/sessions" && HttpRequest.method === "GET") {
-        return Json({ code: "test.refresh_failed", status: 503, title: "Refresh failed", type: "about:blank" }, 503);
+        return Json(
+          {
+            code: "test.refresh_failed",
+            status: 503,
+            title: "Refresh failed",
+            type: "about:blank",
+          },
+          503,
+        );
       }
       if (Path.endsWith(`/versions/${FirstVersionId}/restore`) && HttpRequest.method === "POST") {
         return new Response(null, { status: 204 });
@@ -306,9 +409,21 @@ describe("HttpFileBeltClient", () => {
     await Client.restoreVersion(FirstVersionId);
     await Client.upload([{ Data: new Blob(["data"]), Name: "after-failure.txt", Size: 4 }]);
 
-    const Revocation = FindRequest(Requests, "DELETE", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/shares/${PrincipalId}`);
-    const Restore = FindRequest(Requests, "POST", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/restore`);
-    const Allocation = Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    const Revocation = FindRequest(
+      Requests,
+      "DELETE",
+      `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/shares/${PrincipalId}`,
+    );
+    const Restore = FindRequest(
+      Requests,
+      "POST",
+      `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/restore`,
+    );
+    const Allocation = Requests.filter(
+      (Request) =>
+        new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` &&
+        Request.method === "POST",
+    ).at(-1);
     expect(Restore.headers.get("x-filebelt-csrf")).toBe("csrf-1");
     expect(Revocation.headers.get("x-filebelt-csrf")).toBe("csrf-1");
     expect(Allocation).toBeDefined();
@@ -319,7 +434,9 @@ describe("HttpFileBeltClient", () => {
     const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
     let AbortRefresh = false;
     let MarkAbortRequestReached = (): void => undefined;
-    const AbortRequestReached = new Promise<void>((Resolve) => { MarkAbortRequestReached = Resolve; });
+    const AbortRequestReached = new Promise<void>((Resolve) => {
+      MarkAbortRequestReached = Resolve;
+    });
     const Fetch: typeof fetch = async (Input, Init) => {
       const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
       const Path = new URL(HttpRequest.url).pathname;
@@ -327,7 +444,8 @@ describe("HttpFileBeltClient", () => {
         MarkAbortRequestReached();
         return new Promise<Response>((IgnoredResolve, Reject) => {
           void IgnoredResolve;
-          const RejectAbort = (): void => Reject(new DOMException("The operation was aborted.", "AbortError"));
+          const RejectAbort = (): void =>
+            Reject(new DOMException("The operation was aborted.", "AbortError"));
           if (HttpRequest.signal.aborted) RejectAbort();
           else HttpRequest.signal.addEventListener("abort", RejectAbort, { once: true });
         });
@@ -354,8 +472,12 @@ describe("HttpFileBeltClient", () => {
     let SessionListReads = 0;
     let MarkFirstRefreshReached = (): void => undefined;
     let ReleaseFirstRefresh = (): void => undefined;
-    const FirstRefreshReached = new Promise<void>((Resolve) => { MarkFirstRefreshReached = Resolve; });
-    const FirstRefreshGate = new Promise<void>((Resolve) => { ReleaseFirstRefresh = Resolve; });
+    const FirstRefreshReached = new Promise<void>((Resolve) => {
+      MarkFirstRefreshReached = Resolve;
+    });
+    const FirstRefreshGate = new Promise<void>((Resolve) => {
+      ReleaseFirstRefresh = Resolve;
+    });
     const Fetch: typeof fetch = async (Input, Init) => {
       const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
       const Path = new URL(HttpRequest.url).pathname;
@@ -387,13 +509,36 @@ describe("HttpFileBeltClient", () => {
     await Client.getWorkspace();
     if (Source.head_version_id === null) return;
 
-    await Client.importMarkdown({ Contents: new Blob(["# hi"], { type: "text/markdown" }), EntryId: FirstNodeId, SourceVersionId: Source.head_version_id, TargetName: "Source.md" });
+    await Client.importMarkdown({
+      Contents: new Blob(["# hi"], { type: "text/markdown" }),
+      EntryId: FirstNodeId,
+      SourceVersionId: Source.head_version_id,
+      TargetName: "Source.md",
+    });
 
-    const Intent = FindRequest(Server.Requests, "POST", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents`);
-    expect(await Intent.clone().json()).toEqual({ source_version_id: Source.head_version_id, target_name: "Source.md" });
-    const Allocation = Server.Requests.filter((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` && Request.method === "POST").at(-1);
+    const Intent = FindRequest(
+      Server.Requests,
+      "POST",
+      `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/markdown-import-intents`,
+    );
+    expect(await Intent.clone().json()).toEqual({
+      source_version_id: Source.head_version_id,
+      target_name: "Source.md",
+    });
+    const Allocation = Server.Requests.filter(
+      (Request) =>
+        new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/uploads` &&
+        Request.method === "POST",
+    ).at(-1);
     expect(Allocation).toBeDefined();
-    if (Allocation !== undefined) expect(await Allocation.clone().json()).toMatchObject({ declared_media_type: "text/markdown", expected_parent_generation: 19, import_intent_id: ImportIntentId, name: "Source.md", parent_id: RootId });
+    if (Allocation !== undefined)
+      expect(await Allocation.clone().json()).toMatchObject({
+        declared_media_type: "text/markdown",
+        expected_parent_generation: 19,
+        import_intent_id: ImportIntentId,
+        name: "Source.md",
+        parent_id: RootId,
+      });
   });
 
   it("uses generated text preferences, history, comparison, and content-class routes", async () => {
@@ -401,17 +546,35 @@ describe("HttpFileBeltClient", () => {
     const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
     await Client.getWorkspace();
     const Preferences = await Client.getTextPreferences();
-    expect(Preferences).toMatchObject({ Etag: '"preferences-5"', Value: { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 } });
-    await Client.updateTextPreferences({ EditLimitBytes: 4_194_304, InlineLimitBytes: 8_388_608 }, Preferences.Etag);
+    expect(Preferences).toMatchObject({
+      Etag: '"preferences-5"',
+      Value: { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 },
+    });
+    await Client.updateTextPreferences(
+      { EditLimitBytes: 4_194_304, InlineLimitBytes: 8_388_608 },
+      Preferences.Etag,
+    );
     const History = await Client.listTextVersions(FirstNodeId, null);
     expect(History.Items).toHaveLength(2);
-    expect(History.Items[0]).toMatchObject({ GitCommitOid: "a".repeat(64), ObservedContentClass: "text", RevisionBackend: "git_sha256" });
-    const Comparison = await Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId);
+    expect(History.Items[0]).toMatchObject({
+      GitCommitOid: "a".repeat(64),
+      ObservedContentClass: "text",
+      RevisionBackend: "git_sha256",
+    });
+    const Comparison = await Client.compareTextVersions(
+      FirstNodeId,
+      FirstVersionId,
+      SecondVersionId,
+    );
     expect(Comparison.Hunks[0]?.Lines[0]).toEqual({ Kind: "context", Text: "same" });
     await Client.setNodeContentClass(FirstNodeId, "binary");
     const PreferencePatch = FindRequest(Server.Requests, "PATCH", "/api/v1/preferences/text");
     expect(PreferencePatch.headers.get("if-match")).toBe('"preferences-5"');
-    const PolicyPatch = FindRequest(Server.Requests, "PATCH", `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy`);
+    const PolicyPatch = FindRequest(
+      Server.Requests,
+      "PATCH",
+      `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/content-class-policy`,
+    );
     expect(PolicyPatch.headers.get("if-match")).toBe('"node-attribute-2"');
     expect(await PolicyPatch.clone().json()).toEqual({ policy: "binary" });
   });
@@ -420,20 +583,29 @@ describe("HttpFileBeltClient", () => {
     const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
     const Fetch: typeof fetch = async (Input, Init) => {
       const RequestValue = Input instanceof Request ? Input : new Request(Input, Init);
-      if (new URL(RequestValue.url).pathname.endsWith(`/versions/${FirstVersionId}/compare/${SecondVersionId}`)) {
-        return Json({
-          code: "revision.admission_limited",
-          status: 429,
-          title: "Text revision comparison is temporarily at capacity",
-          type: "https://filebelt.dev/problems/revision.admission_limited",
-        }, 429, { "Retry-After": "5" });
+      if (
+        new URL(RequestValue.url).pathname.endsWith(
+          `/versions/${FirstVersionId}/compare/${SecondVersionId}`,
+        )
+      ) {
+        return Json(
+          {
+            code: "revision.admission_limited",
+            status: 429,
+            title: "Text revision comparison is temporarily at capacity",
+            type: "https://filebelt.dev/problems/revision.admission_limited",
+          },
+          429,
+          { "Retry-After": "5" },
+        );
       }
       return Server.fetch(RequestValue);
     };
     const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
     await Client.getWorkspace();
-    await expect(Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId))
-      .rejects.toThrow("Text revision comparison is temporarily at capacity");
+    await expect(
+      Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId),
+    ).rejects.toThrow("Text revision comparison is temporarily at capacity");
   });
 
   it("projects symlinks without traversing them or requesting file versions and content", async () => {
@@ -449,10 +621,28 @@ describe("HttpFileBeltClient", () => {
       Size: null,
       Version: 0,
     });
-    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/children`)).toBe(false);
-    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/versions`)).toBe(false);
+    expect(
+      Server.Requests.some(
+        (Request) =>
+          new URL(Request.url).pathname ===
+          `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/children`,
+      ),
+    ).toBe(false);
+    expect(
+      Server.Requests.some(
+        (Request) =>
+          new URL(Request.url).pathname ===
+          `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/versions`,
+      ),
+    ).toBe(false);
     await expect(Client.download(SymlinkNodeId)).rejects.toThrow("not a file");
-    expect(Server.Requests.some((Request) => new URL(Request.url).pathname === `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/download-grants`)).toBe(false);
+    expect(
+      Server.Requests.some(
+        (Request) =>
+          new URL(Request.url).pathname ===
+          `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/download-grants`,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -483,7 +673,12 @@ function FileVersion(NodeId: string, Id: string): components["schemas"]["FileVer
     node_id: NodeId,
     observed_content_class: "text",
     ordinal: Id === FirstVersionId ? 2 : 1,
-    provenance: { creator_display_name: "Avery Morgan", mcp_assisted: false, origin: "upload", source_version_id: null },
+    provenance: {
+      creator_display_name: "Avery Morgan",
+      mcp_assisted: false,
+      origin: "upload",
+      source_version_id: null,
+    },
     restored_from_version_id: null,
     revision_backend: "git_sha256",
     size_bytes: 4,
@@ -512,16 +707,16 @@ function Json(Value: unknown, Status = 200, Headers: HeadersInit = {}): Response
 }
 
 function FindRequest(Requests: readonly Request[], Method: string, Path: string): Request {
-  const Request = Requests.find((Candidate) => (
-    Candidate.method === Method && new URL(Candidate.url).pathname === Path
-  ));
+  const Request = Requests.find(
+    (Candidate) => Candidate.method === Method && new URL(Candidate.url).pathname === Path,
+  );
   expect(Request, `${Method} ${Path}`).toBeDefined();
   if (Request === undefined) throw new Error(`Missing ${Method} ${Path}`);
   return Request;
 }
 
 function RequestPaths(Requests: readonly Request[], Method: string): string[] {
-  return Requests
-    .filter((Request) => Request.method === Method)
-    .map((Request) => new URL(Request.url).pathname);
+  return Requests.filter((Request) => Request.method === Method).map(
+    (Request) => new URL(Request.url).pathname,
+  );
 }

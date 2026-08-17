@@ -137,13 +137,7 @@ export class PascalClass {
   );
   const rules = ruleIds(result);
 
-  for (const rule of [
-    "@stylistic/indent",
-    "@stylistic/jsx-quotes",
-    "@stylistic/quotes",
-    "@stylistic/semi",
-    "@typescript-eslint/naming-convention",
-  ]) {
+  for (const rule of ["@typescript-eslint/naming-convention"]) {
     assert.ok(rules.has(rule), `expected ${rule}: ${JSON.stringify(result.messages)}`);
   }
   const namingMessages = result.messages
@@ -191,10 +185,6 @@ export type unsafe_shape = any
   assert.ok(rules.has("@typescript-eslint/no-explicit-any"));
   assert.ok(rules.has("@typescript-eslint/no-unused-vars"));
   for (const rule of [
-    "@stylistic/indent",
-    "@stylistic/jsx-quotes",
-    "@stylistic/quotes",
-    "@stylistic/semi",
     "@typescript-eslint/consistent-type-imports",
     "@typescript-eslint/naming-convention",
   ]) {

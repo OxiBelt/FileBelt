@@ -31,7 +31,9 @@ function FormatBytes(Value: number | null): string {
 }
 
 function FormatDate(Value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Value));
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+    new Date(Value),
+  );
 }
 
 export function FileTable({
@@ -49,8 +51,16 @@ export function FileTable({
     requestAnimationFrame(() => document.getElementById(`file-row-${Id}`)?.focus());
   };
 
-  const OnRowKeyDown = (Event: KeyboardEvent<HTMLTableRowElement>, Entry: FileEntry, Index: number): void => {
-    if (Event.key === "Enter" && Entry.TextEligibility !== "ineligible" && Entry.TextEligibility !== "history-only") {
+  const OnRowKeyDown = (
+    Event: KeyboardEvent<HTMLTableRowElement>,
+    Entry: FileEntry,
+    Index: number,
+  ): void => {
+    if (
+      Event.key === "Enter" &&
+      Entry.TextEligibility !== "ineligible" &&
+      Entry.TextEligibility !== "history-only"
+    ) {
       Event.preventDefault();
       OnOpenEntry(Entry);
       return;
@@ -62,7 +72,11 @@ export function FileTable({
     }
     if (Event.key === " " || Event.key === "Spacebar") {
       Event.preventDefault();
-      DispatchSelection({ Id: Entry.Id, Type: Event.shiftKey ? "range" : "toggle", ...(Event.shiftKey ? { OrderedIds } : {}) } as SelectionAction);
+      DispatchSelection({
+        Id: Entry.Id,
+        Type: Event.shiftKey ? "range" : "toggle",
+        ...(Event.shiftKey ? { OrderedIds } : {}),
+      } as SelectionAction);
       return;
     }
     if (Event.key === "ArrowDown" || Event.key === "ArrowUp") {
@@ -88,12 +102,22 @@ export function FileTable({
   };
 
   if (Entries.length === 0) {
-    return <div className="fb-empty"><Folder aria-hidden="true" size={40} strokeWidth={1.5} /><p>{Strings.noFiles}</p></div>;
+    return (
+      <div className="fb-empty">
+        <Folder aria-hidden="true" size={40} strokeWidth={1.5} />
+        <p>{Strings.noFiles}</p>
+      </div>
+    );
   }
 
   return (
     <div className="fb-table-scroll">
-      <table aria-label={Strings.files} aria-multiselectable="true" className="fb-file-table" role="grid">
+      <table
+        aria-label={Strings.files}
+        aria-multiselectable="true"
+        className="fb-file-table"
+        role="grid"
+      >
         <thead>
           <tr role="row">
             <th aria-label={Strings.selected} className="fb-select-column" role="columnheader" />
@@ -107,8 +131,10 @@ export function FileTable({
         <tbody>
           {Entries.map((Entry, Index) => {
             const Selected = Selection.SelectedIds.has(Entry.Id);
-            const Focused = Selection.FocusedId === Entry.Id || (Selection.FocusedId === null && Index === 0);
-            const EntryIcon = Entry.Kind === "folder" ? Folder : Entry.Kind === "symlink" ? FileSymlink : File;
+            const Focused =
+              Selection.FocusedId === Entry.Id || (Selection.FocusedId === null && Index === 0);
+            const EntryIcon =
+              Entry.Kind === "folder" ? Folder : Entry.Kind === "symlink" ? FileSymlink : File;
             return (
               <tr
                 aria-selected={Selected}
@@ -116,7 +142,13 @@ export function FileTable({
                 id={`file-row-${Entry.Id}`}
                 key={Entry.Id}
                 onClick={(Event) => OnRowClick(Event, Entry)}
-                onDoubleClick={() => { if (Entry.TextEligibility !== "ineligible" && Entry.TextEligibility !== "history-only") OnOpenEntry(Entry); }}
+                onDoubleClick={() => {
+                  if (
+                    Entry.TextEligibility !== "ineligible" &&
+                    Entry.TextEligibility !== "history-only"
+                  )
+                    OnOpenEntry(Entry);
+                }}
                 onContextMenu={(Event) => {
                   Event.preventDefault();
                   if (!Selected) DispatchSelection({ Id: Entry.Id, Type: "replace" });
@@ -129,7 +161,9 @@ export function FileTable({
               >
                 <td className="fb-select-column" role="gridcell">
                   <Checkbox
-                    aria-label={Selected ? Strings.deselectItem(Entry.Name) : Strings.selectItem(Entry.Name)}
+                    aria-label={
+                      Selected ? Strings.deselectItem(Entry.Name) : Strings.selectItem(Entry.Name)
+                    }
                     checked={Selected}
                     onChange={() => DispatchSelection({ Id: Entry.Id, Type: "toggle" })}
                     onClick={(Event) => Event.stopPropagation()}
@@ -137,19 +171,38 @@ export function FileTable({
                 </td>
                 <td role="gridcell">
                   <span className="fb-name-cell">
-                    <FileBeltIcon Icon={EntryIcon} {...(Entry.Kind === "symlink" ? { Label: Strings.symlink } : {})} />
+                    <FileBeltIcon
+                      Icon={EntryIcon}
+                      {...(Entry.Kind === "symlink" ? { Label: Strings.symlink } : {})}
+                    />
                     <BidiText>{Entry.Name}</BidiText>
                     {Entry.Shared ? <FileBeltIcon Icon={Share2} size={16} /> : null}
                   </span>
                 </td>
-                <td role="gridcell"><BidiText>{Entry.Owner}</BidiText></td>
-                <td role="gridcell"><time dateTime={Entry.ModifiedAt}>{FormatDate(Entry.ModifiedAt)}</time></td>
+                <td role="gridcell">
+                  <BidiText>{Entry.Owner}</BidiText>
+                </td>
+                <td role="gridcell">
+                  <time dateTime={Entry.ModifiedAt}>{FormatDate(Entry.ModifiedAt)}</time>
+                </td>
                 <td role="gridcell">{FormatBytes(Entry.Size)}</td>
                 <td role="gridcell">
-                  {Entry.Status === "conflict" ? <StatusPill Kind="warning"><FileBeltIcon Icon={AlertTriangle} size={16} /> {Strings.conflict}</StatusPill> : null}
-                  {Entry.Status === "quarantined" ? <StatusPill Kind="danger"><FileBeltIcon Icon={LockKeyhole} size={16} /> {Strings.quarantined}</StatusPill> : null}
-                  {Entry.Status === "ready" ? <StatusPill Kind="success">{Strings.ready}</StatusPill> : null}
-                  {Entry.Status === "uploading" ? <StatusPill Kind="informative">{Strings.uploading}</StatusPill> : null}
+                  {Entry.Status === "conflict" ? (
+                    <StatusPill Kind="warning">
+                      <FileBeltIcon Icon={AlertTriangle} size={16} /> {Strings.conflict}
+                    </StatusPill>
+                  ) : null}
+                  {Entry.Status === "quarantined" ? (
+                    <StatusPill Kind="danger">
+                      <FileBeltIcon Icon={LockKeyhole} size={16} /> {Strings.quarantined}
+                    </StatusPill>
+                  ) : null}
+                  {Entry.Status === "ready" ? (
+                    <StatusPill Kind="success">{Strings.ready}</StatusPill>
+                  ) : null}
+                  {Entry.Status === "uploading" ? (
+                    <StatusPill Kind="informative">{Strings.uploading}</StatusPill>
+                  ) : null}
                 </td>
               </tr>
             );

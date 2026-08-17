@@ -11,11 +11,7 @@ const TARGET_PORT = 8443;
 const MAXIMUM_CONNECTIONS = 64;
 const CONNECT_TIMEOUT_MS = 5_000;
 
-export function createRelay({
-  targetHost,
-  targetPort,
-  maximumConnections = MAXIMUM_CONNECTIONS,
-}) {
+export function createRelay({ targetHost, targetPort, maximumConnections = MAXIMUM_CONNECTIONS }) {
   const connections = new Set();
   let activeConnections = 0;
   const server = createServer((client) => {

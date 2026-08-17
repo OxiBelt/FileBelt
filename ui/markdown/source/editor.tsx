@@ -25,7 +25,15 @@ export interface TextSourceEditorProps {
   SourceEditorLabel: string;
 }
 
-export function TextSourceEditor({ Collaboration, Disabled = false, Identity, OnSelectionChange, OnTextChange, Source, SourceEditorLabel }: TextSourceEditorProps): JSX.Element {
+export function TextSourceEditor({
+  Collaboration,
+  Disabled = false,
+  Identity,
+  OnSelectionChange,
+  OnTextChange,
+  Source,
+  SourceEditorLabel,
+}: TextSourceEditorProps): JSX.Element {
   const Host = useRef<HTMLDivElement>(null);
   const ViewReference = useRef<EditorView | null>(null);
   const ActiveCollaborationReference = useRef<TextCollaboration | null>(null);
@@ -40,10 +48,15 @@ export function TextSourceEditor({ Collaboration, Disabled = false, Identity, On
   useEffect(() => {
     if (Host.current === null) return;
     const LocalDocument = new Y.Doc();
-    const ActiveCollaboration = Collaboration ?? { Awareness: new Awareness(LocalDocument), Document: LocalDocument, TextName: "markdown" };
+    const ActiveCollaboration = Collaboration ?? {
+      Awareness: new Awareness(LocalDocument),
+      Document: LocalDocument,
+      TextName: "markdown",
+    };
     const OwnsDocument = Collaboration === undefined;
     const SharedText = ActiveCollaboration.Document.getText(ActiveCollaboration.TextName);
-    if (OwnsDocument && SharedText.length === 0 && InitialSource.current.length > 0) SharedText.insert(0, InitialSource.current);
+    if (OwnsDocument && SharedText.length === 0 && InitialSource.current.length > 0)
+      SharedText.insert(0, InitialSource.current);
     const View = new EditorView({
       parent: Host.current,
       state: EditorState.create({
@@ -54,8 +67,15 @@ export function TextSourceEditor({ Collaboration, Disabled = false, Identity, On
           // Text content is server-classified; language-specific parsing stays
           // in the Markdown preview path and never changes source semantics.
           DisabledCompartment.current.of(EditorView.editable.of(!Disabled)),
-          LabelCompartment.current.of(EditorView.contentAttributes.of({ "aria-label": SourceEditorLabel, "aria-multiline": "true" })),
-          yCollab(SharedText, ActiveCollaboration.Awareness, { undoManager: new Y.UndoManager(SharedText) }),
+          LabelCompartment.current.of(
+            EditorView.contentAttributes.of({
+              "aria-label": SourceEditorLabel,
+              "aria-multiline": "true",
+            }),
+          ),
+          yCollab(SharedText, ActiveCollaboration.Awareness, {
+            undoManager: new Y.UndoManager(SharedText),
+          }),
           EditorView.updateListener.of((Update) => {
             if (Update.docChanged) OnTextChangeReference.current?.(Update.state.doc.toString());
             if (Update.selectionSet) {
@@ -79,12 +99,23 @@ export function TextSourceEditor({ Collaboration, Disabled = false, Identity, On
 
   useEffect(() => {
     const View = ViewReference.current;
-    if (View !== null) View.dispatch({ effects: DisabledCompartment.current.reconfigure(EditorView.editable.of(!Disabled)) });
+    if (View !== null)
+      View.dispatch({
+        effects: DisabledCompartment.current.reconfigure(EditorView.editable.of(!Disabled)),
+      });
   }, [Disabled]);
 
   useEffect(() => {
     const View = ViewReference.current;
-    if (View !== null) View.dispatch({ effects: LabelCompartment.current.reconfigure(EditorView.contentAttributes.of({ "aria-label": SourceEditorLabel, "aria-multiline": "true" })) });
+    if (View !== null)
+      View.dispatch({
+        effects: LabelCompartment.current.reconfigure(
+          EditorView.contentAttributes.of({
+            "aria-label": SourceEditorLabel,
+            "aria-multiline": "true",
+          }),
+        ),
+      });
   }, [SourceEditorLabel]);
 
   useEffect(() => {
@@ -98,7 +129,10 @@ export function TextSourceEditor({ Collaboration, Disabled = false, Identity, On
     const AwarenessValue = ActiveCollaborationReference.current?.Awareness;
     if (AwarenessValue === undefined) return;
     AwarenessValue.setLocalStateField("filebelt", Identity ?? null);
-    AwarenessValue.setLocalStateField("user", Identity === undefined ? null : { color: Identity.Color, name: Identity.DisplayName });
+    AwarenessValue.setLocalStateField(
+      "user",
+      Identity === undefined ? null : { color: Identity.Color, name: Identity.DisplayName },
+    );
   }, [Identity]);
 
   return <div data-filebelt-text-editor="source" ref={Host} />;

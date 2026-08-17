@@ -61,25 +61,62 @@ class ContractServer {
     this.Requests.push(RequestValue);
     const Url = new URL(RequestValue.url);
     if (Url.pathname === "/api/v1/session") return Json(Session);
-    if (Url.pathname === "/api/v1/mcp/registrations" && RequestValue.method === "GET") return Json({ items: [Registration], next_cursor: null });
+    if (Url.pathname === "/api/v1/mcp/registrations" && RequestValue.method === "GET")
+      return Json({ items: [Registration], next_cursor: null });
     if (Url.pathname === "/api/v1/mcp/activity") return Json({ items: [], next_cursor: null });
     if (Url.pathname.endsWith("/credentials")) return new Response(null, { status: 204 });
-    if (Url.pathname === "/api/v1/mcp/invocation-intents") return Json({ approval_required: true, expires_at: "2026-08-07T10:05:00Z", id: InvocationId, request_digest: "a".repeat(64) }, 201);
-    if (Url.pathname.endsWith("/approval")) return Json({ id: "00000000-0000-4000-8000-000000000047" }, 201);
-    if (Url.pathname === `/api/v1/mcp/invocations/${InvocationId}` && RequestValue.method === "DELETE") return new Response(null, { status: 204 });
+    if (Url.pathname === "/api/v1/mcp/invocation-intents")
+      return Json(
+        {
+          approval_required: true,
+          expires_at: "2026-08-07T10:05:00Z",
+          id: InvocationId,
+          request_digest: "a".repeat(64),
+        },
+        201,
+      );
+    if (Url.pathname.endsWith("/approval"))
+      return Json({ id: "00000000-0000-4000-8000-000000000047" }, 201);
+    if (
+      Url.pathname === `/api/v1/mcp/invocations/${InvocationId}` &&
+      RequestValue.method === "DELETE"
+    )
+      return new Response(null, { status: 204 });
     if (Url.pathname.endsWith("/stream")) {
-      return new Response([
-        JSON.stringify({ created_at: "2026-08-07T10:00:00Z", event: "started", invocation_id: InvocationId, sequence: 0 }),
-        JSON.stringify({ created_at: "2026-08-07T10:00:01Z", event: "text", invocation_id: InvocationId, sequence: 1, text: "<script>not markup</script>" }),
-        JSON.stringify({ created_at: "2026-08-07T10:00:02Z", event: "completed", invocation_id: InvocationId, sequence: 2 }),
-      ].join("\n"), { headers: { "Content-Type": "application/x-ndjson" } });
+      return new Response(
+        [
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:00Z",
+            event: "started",
+            invocation_id: InvocationId,
+            sequence: 0,
+          }),
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:01Z",
+            event: "text",
+            invocation_id: InvocationId,
+            sequence: 1,
+            text: "<script>not markup</script>",
+          }),
+          JSON.stringify({
+            created_at: "2026-08-07T10:00:02Z",
+            event: "completed",
+            invocation_id: InvocationId,
+            sequence: 2,
+          }),
+        ].join("\n"),
+        { headers: { "Content-Type": "application/x-ndjson" } },
+      );
     }
     return new Response(null, { status: 404 });
   };
 }
 
 function Json(Value: unknown, Status = 200): Response {
-  return new Response(JSON.stringify(Value), { headers: { "Content-Type": "application/json" }, status: Status });
+  return new Response(JSON.stringify(Value), {
+    headers: { "Content-Type": "application/json" },
+    status: Status,
+  });
 }
 
 describe("HttpMcpSettingsClient", () => {
@@ -96,7 +133,10 @@ describe("HttpMcpSettingsClient", () => {
     expect(RequestValue?.url).not.toContain("top-secret-value");
     expect(RequestValue?.headers.get("X-FileBelt-Csrf")).toBe("csrf-memory-only");
     expect(RequestValue?.headers.get("If-Match")).toBe('"mcp-7"');
-    expect(await RequestValue?.clone().json()).toEqual({ kind: "bearer", secret: "top-secret-value" });
+    expect(await RequestValue?.clone().json()).toEqual({
+      kind: "bearer",
+      secret: "top-secret-value",
+    });
   });
 
   it("resubmits the exact intent request to an authenticated POST stream and parses bounded events", async () => {
@@ -119,7 +159,14 @@ describe("HttpMcpSettingsClient", () => {
     expect(Requests.map(({ method: Method }) => Method)).toEqual(["POST", "POST", "POST"]);
     expect(await Requests[0]?.clone().text()).toBe(await Requests[2]?.clone().text());
     expect(await Requests[1]?.clone().json()).toEqual({ expires_at: null, scope: "once" });
-    expect(await Requests[0]?.clone().json()).toMatchObject({ semantic_input: { base_version_id: BaseVersionId, format: "filebelt.markdown.semantic.v1", markdown: "# Current source", node_id: NodeId } });
+    expect(await Requests[0]?.clone().json()).toMatchObject({
+      semantic_input: {
+        base_version_id: BaseVersionId,
+        format: "filebelt.markdown.semantic.v1",
+        markdown: "# Current source",
+        node_id: NodeId,
+      },
+    });
     expect(Requests[2]?.headers.get("Cache-Control")).toBeNull();
     expect(Requests[2]?.headers.get("X-FileBelt-Csrf")).toBe("csrf-memory-only");
   });

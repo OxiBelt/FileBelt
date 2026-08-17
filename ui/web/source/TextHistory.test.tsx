@@ -25,7 +25,13 @@ const Entry: FileEntry = {
 
 describe("TextHistory", () => {
   it("renders a labeled lazy history shell", () => {
-    const Markup = renderToStaticMarkup(<TextHistory Client={new MockFileBeltClient()} Entry={Entry} OnRestore={async () => undefined} />);
+    const Markup = renderToStaticMarkup(
+      <TextHistory
+        Client={new MockFileBeltClient()}
+        Entry={Entry}
+        OnRestore={async () => undefined}
+      />,
+    );
     expect(Markup).toContain("Text history");
     expect(Markup).toContain("Loading history");
   });

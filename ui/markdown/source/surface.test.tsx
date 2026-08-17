@@ -8,21 +8,38 @@ import { EnglishMarkdownStrings } from "./strings.js";
 import type { FileBeltOfficeAstV1, MarkdownSource } from "./types.js";
 
 const Source: MarkdownSource = { HasByteOrderMark: false, LineEnding: "lf", Text: "# title" };
-const Ast: FileBeltOfficeAstV1 = { Children: [], Profile: "filebelt-gfm-v1", Range: { End: 0, Start: 0 } };
+const Ast: FileBeltOfficeAstV1 = {
+  Children: [],
+  Profile: "filebelt-gfm-v1",
+  Range: { End: 0, Start: 0 },
+};
 
 describe("Markdown isolation and accessibility", () => {
   it("uses an opaque script-only preview frame and labels keyboard tabs", () => {
     const Preview = renderToStaticMarkup(<MarkdownPreview Ast={Ast} />);
     expect(Preview).toContain('sandbox="allow-scripts"');
     expect(Preview).toContain('title="Markdown preview"');
-    const Surface = renderToStaticMarkup(<MarkdownSurface Mode="split" OnModeChange={() => undefined} Source={Source} Strings={EnglishMarkdownStrings} />);
+    const Surface = renderToStaticMarkup(
+      <MarkdownSurface
+        Mode="split"
+        OnModeChange={() => undefined}
+        Source={Source}
+        Strings={EnglishMarkdownStrings}
+      />,
+    );
     expect(Surface).toContain('role="tablist"');
     expect(Surface).toContain("aria-controls=");
     expect(Surface).toContain('role="tabpanel"');
   });
 
   it("provides a language-neutral source-only surface", () => {
-    const Surface = renderToStaticMarkup(<TextSurface Disabled Source={Source} Strings={{ Edit: "Edit", SourceEditor: "Text source", View: "View source" }} />);
+    const Surface = renderToStaticMarkup(
+      <TextSurface
+        Disabled
+        Source={Source}
+        Strings={{ Edit: "Edit", SourceEditor: "Text source", View: "View source" }}
+      />,
+    );
     expect(Surface).toContain('data-filebelt-text-mode="view"');
     expect(Surface).toContain("View source");
   });

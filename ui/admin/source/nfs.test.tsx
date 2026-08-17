@@ -3,38 +3,39 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import {
-  ExportTransitions,
-  NfsAdminOverviewView,
-} from "./nfs.js";
+import { ExportTransitions, NfsAdminOverviewView } from "./nfs.js";
 import type { NfsAdminSnapshot } from "./nfs.js";
 
 const Snapshot: NfsAdminSnapshot = {
-  Conflicts: [{
-    BaseVersionId: null,
-    ConflictCopyNodeId: null,
-    ConflictCopyVersionId: null,
-    CreatedAt: "2026-08-11T00:00:00Z",
-    DriveId: "00000000-0000-4000-8000-000000000101",
-    ExpectedHeadVersionId: null,
-    ExpiresAt: "2026-08-18T00:00:00Z",
-    Id: "00000000-0000-4000-8000-000000000107",
-    LogicalSizeBytes: 17,
-    ObservedHeadVersionId: null,
-    SourceNodeId: "00000000-0000-4000-8000-000000000108",
-    State: "retained",
-    WriteSessionId: "00000000-0000-4000-8000-000000000109",
-  }],
-  Exports: [{
-    AppliedGeneration: 2,
-    AppliedState: "active",
-    DesiredGeneration: 3,
-    DesiredState: "draining",
-    DriveId: "00000000-0000-4000-8000-000000000101",
-    ExportId: 7,
-    ExportPath: "/filebelt/00000000-0000-4000-8000-000000000101",
-    InSync: false,
-  }],
+  Conflicts: [
+    {
+      BaseVersionId: null,
+      ConflictCopyNodeId: null,
+      ConflictCopyVersionId: null,
+      CreatedAt: "2026-08-11T00:00:00Z",
+      DriveId: "00000000-0000-4000-8000-000000000101",
+      ExpectedHeadVersionId: null,
+      ExpiresAt: "2026-08-18T00:00:00Z",
+      Id: "00000000-0000-4000-8000-000000000107",
+      LogicalSizeBytes: 17,
+      ObservedHeadVersionId: null,
+      SourceNodeId: "00000000-0000-4000-8000-000000000108",
+      State: "retained",
+      WriteSessionId: "00000000-0000-4000-8000-000000000109",
+    },
+  ],
+  Exports: [
+    {
+      AppliedGeneration: 2,
+      AppliedState: "active",
+      DesiredGeneration: 3,
+      DesiredState: "draining",
+      DriveId: "00000000-0000-4000-8000-000000000101",
+      ExportId: 7,
+      ExportPath: "/filebelt/00000000-0000-4000-8000-000000000101",
+      InSync: false,
+    },
+  ],
   Feature: {
     AppliedGatewayEpoch: 4,
     AppliedGatewayId: "nfs-gateway-1",
@@ -45,45 +46,53 @@ const Snapshot: NfsAdminSnapshot = {
     RestoreGeneration: 1,
     State: "draining",
   },
-  Mappings: [{
-    AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
-    CredentialId: "00000000-0000-4000-8000-000000000102",
-    Generation: 2,
-    KerberosPrincipal: "alice@EXAMPLE.TEST",
-    PrincipalId: "00000000-0000-4000-8000-000000000103",
-    ProjectedGid: 2001,
-    ProjectedUid: 1001,
-  }],
-  PendingProposals: [{
-    AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
-    CreatedAt: "2026-08-11T00:00:00Z",
-    DecidedAt: null,
-    ExpiresAt: "2026-08-12T00:00:00Z",
-    Generation: 1,
-    Id: "00000000-0000-4000-8000-000000000110",
-    KerberosPrincipal: "bob@EXAMPLE.TEST",
-    PrincipalId: "00000000-0000-4000-8000-000000000111",
-    ProjectedGid: 2002,
-    ProjectedUid: 1002,
-    ProposerPrincipalId: "00000000-0000-4000-8000-000000000112",
-    State: "pending",
-  }],
-  PosixGroups: [{
-    GroupId: "00000000-0000-4000-8000-000000000104",
-    PosixName: "engineering.platform",
-    ProjectedGid: 2001,
-  }],
-  QuarantinedMappings: [{
-    AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
-    CredentialId: "00000000-0000-4000-8000-000000000113",
-    Generation: 3,
-    KerberosPrincipal: "legacy@EXAMPLE.TEST",
-    PrincipalId: "00000000-0000-4000-8000-000000000114",
-    ProjectedGid: 2001,
-    ProjectedUid: 1003,
-    QuarantinedAt: "2026-08-11T01:00:00Z",
-    QuarantineReason: "target_approval_cutover",
-  }],
+  Mappings: [
+    {
+      AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
+      CredentialId: "00000000-0000-4000-8000-000000000102",
+      Generation: 2,
+      KerberosPrincipal: "alice@EXAMPLE.TEST",
+      PrincipalId: "00000000-0000-4000-8000-000000000103",
+      ProjectedGid: 2001,
+      ProjectedUid: 1001,
+    },
+  ],
+  PendingProposals: [
+    {
+      AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
+      CreatedAt: "2026-08-11T00:00:00Z",
+      DecidedAt: null,
+      ExpiresAt: "2026-08-12T00:00:00Z",
+      Generation: 1,
+      Id: "00000000-0000-4000-8000-000000000110",
+      KerberosPrincipal: "bob@EXAMPLE.TEST",
+      PrincipalId: "00000000-0000-4000-8000-000000000111",
+      ProjectedGid: 2002,
+      ProjectedUid: 1002,
+      ProposerPrincipalId: "00000000-0000-4000-8000-000000000112",
+      State: "pending",
+    },
+  ],
+  PosixGroups: [
+    {
+      GroupId: "00000000-0000-4000-8000-000000000104",
+      PosixName: "engineering.platform",
+      ProjectedGid: 2001,
+    },
+  ],
+  QuarantinedMappings: [
+    {
+      AllowedDriveIds: ["00000000-0000-4000-8000-000000000101"],
+      CredentialId: "00000000-0000-4000-8000-000000000113",
+      Generation: 3,
+      KerberosPrincipal: "legacy@EXAMPLE.TEST",
+      PrincipalId: "00000000-0000-4000-8000-000000000114",
+      ProjectedGid: 2001,
+      ProjectedUid: 1003,
+      QuarantinedAt: "2026-08-11T01:00:00Z",
+      QuarantineReason: "target_approval_cutover",
+    },
+  ],
   Realm: "EXAMPLE.TEST",
   TenantSlug: "acme",
 };
@@ -132,24 +141,31 @@ describe("NfsAdminOverviewView", () => {
 
   it("does not allow disable before the draining generation is applied", () => {
     expect(ExportTransitions(Snapshot.Exports[0]!, "draining")).toEqual(["active"]);
-    expect(ExportTransitions({
-      ...Snapshot.Exports[0]!,
-      AppliedGeneration: 3,
-      AppliedState: "draining",
-    }, "draining")).toEqual(["active", "disabled"]);
+    expect(
+      ExportTransitions(
+        {
+          ...Snapshot.Exports[0]!,
+          AppliedGeneration: 3,
+          AppliedState: "draining",
+        },
+        "draining",
+      ),
+    ).toEqual(["active", "disabled"]);
   });
 
   it("renders legacy mapping authority as unknown rather than an empty drive set", () => {
     const LegacySnapshot: NfsAdminSnapshot = {
       ...Snapshot,
-      Mappings: [{
-        CredentialId: "00000000-0000-4000-8000-000000000105",
-        Generation: 1,
-        KerberosPrincipal: "legacy@EXAMPLE.TEST",
-        PrincipalId: "00000000-0000-4000-8000-000000000106",
-        ProjectedGid: 2001,
-        ProjectedUid: 1001,
-      }],
+      Mappings: [
+        {
+          CredentialId: "00000000-0000-4000-8000-000000000105",
+          Generation: 1,
+          KerberosPrincipal: "legacy@EXAMPLE.TEST",
+          PrincipalId: "00000000-0000-4000-8000-000000000106",
+          ProjectedGid: 2001,
+          ProjectedUid: 1001,
+        },
+      ],
     };
     const Markup = renderToStaticMarkup(
       <NfsAdminOverviewView

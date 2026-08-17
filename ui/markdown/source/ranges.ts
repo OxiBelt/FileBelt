@@ -36,7 +36,10 @@ export function OffsetFromPoint(Point: MarkdownPoint, LineStarts: readonly numbe
   return LineStart + Point.column - 1;
 }
 
-export function RangeFromPosition(Position: MarkdownPosition | undefined, LineStarts: readonly number[]): SourceRange {
+export function RangeFromPosition(
+  Position: MarkdownPosition | undefined,
+  LineStarts: readonly number[],
+): SourceRange {
   if (Position === undefined) {
     return { End: 0, Start: 0 };
   }

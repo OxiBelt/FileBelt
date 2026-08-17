@@ -34,10 +34,10 @@ export async function CompleteLoginWithNetworkChangeRetry(Page, IdentityName, Lo
       });
     } catch (ErrorValue) {
       if (
-        ErrorValue?.name !== "TimeoutError"
-        || !ExactNetworkChangeObserved
-        || await WorkspaceHeading.isVisible()
-        || await WorkspaceFailure.isVisible()
+        ErrorValue?.name !== "TimeoutError" ||
+        !ExactNetworkChangeObserved ||
+        (await WorkspaceHeading.isVisible()) ||
+        (await WorkspaceFailure.isVisible())
       ) {
         throw ErrorValue;
       }
@@ -56,10 +56,11 @@ export async function CompleteLoginWithNetworkChangeRetry(Page, IdentityName, Lo
       return { ExactNetworkChangeObserved, LoginReplayed, RefreshClicked };
     }
     await Page.waitForTimeout(RetryDelayMilliseconds);
-    if (await WorkspaceHeading.isVisible() || !(await WorkspaceFailure.isVisible())) {
+    if ((await WorkspaceHeading.isVisible()) || !(await WorkspaceFailure.isVisible())) {
       return { ExactNetworkChangeObserved, LoginReplayed, RefreshClicked };
     }
-    if (!ExactNetworkChangeObserved) return { ExactNetworkChangeObserved, LoginReplayed, RefreshClicked };
+    if (!ExactNetworkChangeObserved)
+      return { ExactNetworkChangeObserved, LoginReplayed, RefreshClicked };
     await WorkspaceFailure.getByRole("button", { name: "Refresh" }).click();
     RefreshClicked = true;
     return { ExactNetworkChangeObserved, LoginReplayed, RefreshClicked };

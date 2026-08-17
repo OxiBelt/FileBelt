@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Button, Input, Tab as FluentTab, TabList } from "@fluentui/react-components";
-import { CircleGauge, HardDrive, Network, Plus, ShieldCheck, Users as UsersIcon } from "lucide-react";
+import {
+  CircleGauge,
+  HardDrive,
+  Network,
+  Plus,
+  ShieldCheck,
+  Users as UsersIcon,
+} from "lucide-react";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
@@ -66,10 +73,18 @@ export interface AdminPanelProps {
 type AdminTab = "drives" | "groups" | "nfs" | "users";
 
 function FormatBytes(Value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact", style: "unit", unit: "byte", unitDisplay: "narrow" }).format(Value);
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    notation: "compact",
+    style: "unit",
+    unit: "byte",
+    unitDisplay: "narrow",
+  }).format(Value);
 }
 
-function Bidi({ children: Children }: {
+function Bidi({
+  children: Children,
+}: {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- React reserves `children` for nested JSX content.
   children: string;
 }): ReactNode {
@@ -108,7 +123,12 @@ function CreationForm({
         placeholder={Label}
         value={Name}
       />
-      <Button appearance="primary" disabled={Busy || Name.trim().length === 0} icon={<Plus aria-hidden="true" size={20} strokeWidth={1.75} />} type="submit">
+      <Button
+        appearance="primary"
+        disabled={Busy || Name.trim().length === 0}
+        icon={<Plus aria-hidden="true" size={20} strokeWidth={1.75} />}
+        type="submit"
+      >
         {strings.create}
       </Button>
     </form>
@@ -140,17 +160,42 @@ export default function AdminPanel({
     <section aria-labelledby="admin-heading" className="fb-admin-page">
       <header className="fb-page-heading">
         <div>
-          <p className="fb-eyebrow"><ShieldCheck aria-hidden="true" size={18} strokeWidth={1.75} /> {strings.heading}</p>
+          <p className="fb-eyebrow">
+            <ShieldCheck aria-hidden="true" size={18} strokeWidth={1.75} /> {strings.heading}
+          </p>
           <h1 id="admin-heading">{strings.heading}</h1>
           <p className="fb-muted">{strings.reauth}</p>
         </div>
       </header>
 
-      <TabList aria-label={strings.heading} onTabSelect={(Ignored, Data) => SetTab(Data.value as AdminTab)} selectedValue={Tab}>
-        <FluentTab icon={<UsersIcon aria-hidden="true" size={20} strokeWidth={1.75} />} value="users">{strings.users}</FluentTab>
-        <FluentTab icon={<CircleGauge aria-hidden="true" size={20} strokeWidth={1.75} />} value="groups">{strings.groups}</FluentTab>
-        <FluentTab icon={<HardDrive aria-hidden="true" size={20} strokeWidth={1.75} />} value="drives">{strings.drives}</FluentTab>
-        {NfsClient === undefined ? null : <FluentTab icon={<Network aria-hidden="true" size={20} strokeWidth={1.75} />} value="nfs">{strings.nfs}</FluentTab>}
+      <TabList
+        aria-label={strings.heading}
+        onTabSelect={(Ignored, Data) => SetTab(Data.value as AdminTab)}
+        selectedValue={Tab}
+      >
+        <FluentTab
+          icon={<UsersIcon aria-hidden="true" size={20} strokeWidth={1.75} />}
+          value="users"
+        >
+          {strings.users}
+        </FluentTab>
+        <FluentTab
+          icon={<CircleGauge aria-hidden="true" size={20} strokeWidth={1.75} />}
+          value="groups"
+        >
+          {strings.groups}
+        </FluentTab>
+        <FluentTab
+          icon={<HardDrive aria-hidden="true" size={20} strokeWidth={1.75} />}
+          value="drives"
+        >
+          {strings.drives}
+        </FluentTab>
+        {NfsClient === undefined ? null : (
+          <FluentTab icon={<Network aria-hidden="true" size={20} strokeWidth={1.75} />} value="nfs">
+            {strings.nfs}
+          </FluentTab>
+        )}
       </TabList>
 
       {Tab === "users" ? (
@@ -158,8 +203,12 @@ export default function AdminPanel({
           {Users.map((User) => (
             <article className="fb-admin-card" key={User.Id} role="listitem">
               <div>
-                <h2><Bidi>{User.Name}</Bidi></h2>
-                <p className="fb-muted"><Bidi>{User.Email}</Bidi></p>
+                <h2>
+                  <Bidi>{User.Name}</Bidi>
+                </h2>
+                <p className="fb-muted">
+                  <Bidi>{User.Email}</Bidi>
+                </p>
               </div>
               <Badge appearance="tint" color={User.Status === "active" ? "success" : "danger"}>
                 {User.Status === "active" ? strings.active : strings.suspended}
@@ -182,10 +231,20 @@ export default function AdminPanel({
           <div className="fb-admin-cards" role="list">
             {Groups.map((Group) => (
               <article className="fb-admin-card" key={Group.Id} role="listitem">
-                <div><h2><Bidi>{Group.Name}</Bidi></h2></div>
+                <div>
+                  <h2>
+                    <Bidi>{Group.Name}</Bidi>
+                  </h2>
+                </div>
                 <dl className="fb-inline-stats">
-                  <div><dt>{strings.memberCount}</dt><dd>{Group.MemberCount}</dd></div>
-                  <div><dt>{strings.managerCount}</dt><dd>{Group.ManagerCount}</dd></div>
+                  <div>
+                    <dt>{strings.memberCount}</dt>
+                    <dd>{Group.MemberCount}</dd>
+                  </div>
+                  <div>
+                    <dt>{strings.managerCount}</dt>
+                    <dd>{Group.ManagerCount}</dd>
+                  </div>
                 </dl>
               </article>
             ))}
@@ -199,10 +258,23 @@ export default function AdminPanel({
           <div className="fb-admin-cards" role="list">
             {Drives.map((Drive) => (
               <article className="fb-admin-card" key={Drive.Id} role="listitem">
-                <div><h2><Bidi>{Drive.Name}</Bidi></h2><p className="fb-muted">{strings.quota}: {FormatBytes(Drive.QuotaBytes)}</p></div>
+                <div>
+                  <h2>
+                    <Bidi>{Drive.Name}</Bidi>
+                  </h2>
+                  <p className="fb-muted">
+                    {strings.quota}: {FormatBytes(Drive.QuotaBytes)}
+                  </p>
+                </div>
                 <div className="fb-quota">
-                  <span>{strings.usage}: {FormatBytes(Drive.UsedBytes)}</span>
-                  <progress aria-label={`${Drive.Name} ${strings.usage}`} max={Drive.QuotaBytes} value={Drive.UsedBytes} />
+                  <span>
+                    {strings.usage}: {FormatBytes(Drive.UsedBytes)}
+                  </span>
+                  <progress
+                    aria-label={`${Drive.Name} ${strings.usage}`}
+                    max={Drive.QuotaBytes}
+                    value={Drive.UsedBytes}
+                  />
                 </div>
               </article>
             ))}

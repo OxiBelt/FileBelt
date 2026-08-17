@@ -36,10 +36,13 @@ launcher lock must remain dependency-free; adding a package requires a
 separate adapter-local admission review before its frozen install may run.
 
 Repository lint tooling is also lockfile-pinned. The root uses `eslint` 10.8.1,
-`@eslint/js` 10.0.1, `typescript-eslint` 8.67.0, TypeScript 6.0.3, and
-`@stylistic/eslint-plugin` 5.10.0. The Stylistic package supplies maintained
-layout rules without lifecycle scripts; its resolved license must remain
-admitted by `supply-chain/node-policy.toml`. Rust production-package closures
+`@eslint/js` 10.0.1, `typescript-eslint` 8.67.0, and TypeScript 6.0.3.
+Formatting uses exact
+`oxfmt` 0.63.0 with its registry-integrity-pinned optional native bindings.
+Oxfmt and its bindings are MIT-licensed, declare no install-time lifecycle
+scripts, run only while developing or validating source, and are not copied
+into published browser or OxiBelt images. Every resolved license must remain admitted by
+`supply-chain/node-policy.toml`. Rust production-package closures
 and first-party features are independently reviewed in
 `supply-chain/cargo-boundaries-v1.toml`; registered package and manifest pairs
 are resolved against metadata and the locked tree without duplicating versions

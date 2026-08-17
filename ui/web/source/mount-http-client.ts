@@ -63,31 +63,40 @@ export class HttpMountSettingsClient implements MountSettingsClient {
   }
 
   async getOverview(Signal?: AbortSignal): Promise<MountOverview> {
-    const Result = await this.#Api.GET("/api/v1/mounts", Signal === undefined ? {} : { signal: Signal });
+    const Result = await this.#Api.GET(
+      "/api/v1/mounts",
+      Signal === undefined ? {} : { signal: Signal },
+    );
     return RequireData<MountOverview>(Result);
   }
 
   async putPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void> {
-    await RequireSuccess(await this.#Api.PUT("/api/v1/mounts/policies/{protocol}", {
-      body: Input,
-      params: { header: await this.#mutationHeaders(), path: { protocol: Protocol } },
-    }));
+    await RequireSuccess(
+      await this.#Api.PUT("/api/v1/mounts/policies/{protocol}", {
+        body: Input,
+        params: { header: await this.#mutationHeaders(), path: { protocol: Protocol } },
+      }),
+    );
   }
 
   async createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential> {
-    return RequireData<CreatedMountCredential>(await this.#Api.POST("/api/v1/mounts/credentials", {
-      body: Input,
-      params: { header: await this.#mutationHeaders() },
-    }));
+    return RequireData<CreatedMountCredential>(
+      await this.#Api.POST("/api/v1/mounts/credentials", {
+        body: Input,
+        params: { header: await this.#mutationHeaders() },
+      }),
+    );
   }
 
   async revokeCredential(CredentialId: string): Promise<void> {
-    await RequireSuccess(await this.#Api.DELETE("/api/v1/mounts/credentials/{credential_id}", {
-      params: {
-        header: await this.#mutationHeaders(),
-        path: { credential_id: CredentialId },
-      },
-    }));
+    await RequireSuccess(
+      await this.#Api.DELETE("/api/v1/mounts/credentials/{credential_id}", {
+        params: {
+          header: await this.#mutationHeaders(),
+          path: { credential_id: CredentialId },
+        },
+      }),
+    );
   }
 
   async #mutationHeaders(): Promise<MutationHeaders> {

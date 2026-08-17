@@ -38,7 +38,18 @@ export interface FileBeltOfficeAstV1 {
   Range: SourceRange;
 }
 
-export type OfficeBlock = AlertBlock | CodeBlock | FootnoteDefinitionBlock | HeadingBlock | ListBlock | MathBlock | MermaidBlock | ParagraphBlock | QuoteBlock | TableBlock | ThematicBreakBlock;
+export type OfficeBlock =
+  | AlertBlock
+  | CodeBlock
+  | FootnoteDefinitionBlock
+  | HeadingBlock
+  | ListBlock
+  | MathBlock
+  | MermaidBlock
+  | ParagraphBlock
+  | QuoteBlock
+  | TableBlock
+  | ThematicBreakBlock;
 
 export interface AlertBlock {
   Children: readonly OfficeBlock[];
@@ -122,7 +133,14 @@ export interface ThematicBreakBlock {
   Range: SourceRange;
 }
 
-export type OfficeInline = CodeInline | EmphasisInline | FileBeltLinkInline | FootnoteReferenceInline | LinkInline | StrongInline | TextInline;
+export type OfficeInline =
+  | CodeInline
+  | EmphasisInline
+  | FileBeltLinkInline
+  | FootnoteReferenceInline
+  | LinkInline
+  | StrongInline
+  | TextInline;
 
 export interface CodeInline {
   Kind: "code";
@@ -176,7 +194,11 @@ export interface FileBeltReference {
 }
 
 export interface MarkdownDiagnostic {
-  Code: "markdown.complexity" | "markdown.filebelt-link" | "markdown.raw-html" | "markdown.unsupported";
+  Code:
+    | "markdown.complexity"
+    | "markdown.filebelt-link"
+    | "markdown.raw-html"
+    | "markdown.unsupported";
   Message: string;
   Range: SourceRange;
   Severity: "error" | "warning";

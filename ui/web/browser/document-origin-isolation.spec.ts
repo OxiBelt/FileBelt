@@ -97,7 +97,10 @@ test.afterAll(async () => {
   await Promise.all([Close(PublicServer), Close(ProviderServer), Close(EditorServer)]);
 });
 
-test("provider JavaScript cannot read a FileBelt session or send a credentialed mutation", async ({ context: Context, page: Page }) => {
+test("provider JavaScript cannot read a FileBelt session or send a credentialed mutation", async ({
+  context: Context,
+  page: Page,
+}) => {
   await Context.addCookies([
     {
       name: "filebelt_session",
@@ -144,17 +147,19 @@ async function Listen(Server: typeof PublicServer, Host: string): Promise<string
 async function Close(Server: typeof PublicServer): Promise<void> {
   if (!Server.listening) return;
   await new Promise<void>((Resolve, Reject) => {
-    Server.close((Error) => Error === undefined ? Resolve() : Reject(Error));
+    Server.close((Error) => (Error === undefined ? Resolve() : Reject(Error)));
   });
 }
 
 declare global {
   // Browser-only test evidence populated by the hostile provider fixture.
-  var ProviderEvidence: {
-    EditorOrigin: string;
-    VisibleCookie: string;
-    SessionReadable: boolean;
-    MutationSent: boolean;
-    Complete: boolean;
-  } | undefined;
+  var ProviderEvidence:
+    | {
+        EditorOrigin: string;
+        VisibleCookie: string;
+        SessionReadable: boolean;
+        MutationSent: boolean;
+        Complete: boolean;
+      }
+    | undefined;
 }

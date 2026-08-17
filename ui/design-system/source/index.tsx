@@ -38,10 +38,7 @@ const FileBeltBrand: BrandVariants = {
 const LightTheme = createLightTheme(FileBeltBrand);
 const DarkTheme = createDarkTheme(FileBeltBrand);
 
-export function ResolveTheme(
-  Choice: ThemeChoice,
-  SystemPrefersDark: boolean,
-): ResolvedTheme {
+export function ResolveTheme(Choice: ThemeChoice, SystemPrefersDark: boolean): ResolvedTheme {
   return Choice === "system" ? (SystemPrefersDark ? "dark" : "light") : Choice;
 }
 
@@ -74,10 +71,7 @@ export function FileBeltProvider({
 }: FileBeltProviderProps): ReactNode {
   const SystemPrefersDark = useSystemTheme();
   const Resolved = ResolveTheme(ThemeChoice, SystemPrefersDark);
-  const Theme = useMemo<Theme>(
-    () => (Resolved === "dark" ? DarkTheme : LightTheme),
-    [Resolved],
-  );
+  const Theme = useMemo<Theme>(() => (Resolved === "dark" ? DarkTheme : LightTheme), [Resolved]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = Resolved;
@@ -125,7 +119,11 @@ export interface BidiTextProps {
   title?: string;
 }
 
-export function BidiText({ children: Children, className: ClassName, title: Title }: BidiTextProps): ReactNode {
+export function BidiText({
+  children: Children,
+  className: ClassName,
+  title: Title,
+}: BidiTextProps): ReactNode {
   return (
     <bdi className={ClassName} dir="auto" title={Title}>
       {Children}
@@ -173,7 +171,13 @@ export function BrandMark({ className: ClassName, Label }: BrandMarkProps): Reac
       />
       <path d="M21 4.8V11h6" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
       <path d="M4 20.5h28" stroke="currentColor" strokeLinecap="round" strokeWidth="5" />
-      <path d="M5 20.5h26" stroke="var(--fb-brand-cut, #121212)" strokeDasharray="2.5 3" strokeLinecap="round" strokeWidth="1.5" />
+      <path
+        d="M5 20.5h26"
+        stroke="var(--fb-brand-cut, #121212)"
+        strokeDasharray="2.5 3"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }

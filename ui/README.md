@@ -95,8 +95,9 @@ assets; see the [License Map](../docs/LicenseMap.md) and
 
 ## Verification
 
-Run the root pnpm typecheck, tests, lint, build, dependency-license, and audit
-gates. Add regression coverage at the lowest useful layer for state changes,
+Run the root pnpm format check, lint, typecheck, tests, build,
+dependency-license, and audit gates. Add regression coverage at the lowest
+useful layer for state changes,
 permission-dependent actions, keyboard and screen-reader semantics, browser
 storage, Trusted Types, forced colors, and reduced motion. Browser behavior is
 covered in Chromium and Firefox where the artifact exists, and the production

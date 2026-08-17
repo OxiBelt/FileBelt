@@ -25,45 +25,111 @@ const Office: FileEntry = {
 describe("document session controls", () => {
   it("accepts exact OOXML and ODF document types through 100 MiB", () => {
     expect(IsOfficeDocumentCandidate(Office)).toBe(true);
-    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/vnd.oasis.opendocument.text", Name: "Plan.odt" })).toBe(true);
-    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/vnd.oasis.opendocument.text", Name: "Plan.ODT" })).toBe(false);
-    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/octet-stream" })).toBe(false);
+    expect(
+      IsOfficeDocumentCandidate({
+        ...Office,
+        MediaType: "application/vnd.oasis.opendocument.text",
+        Name: "Plan.odt",
+      }),
+    ).toBe(true);
+    expect(
+      IsOfficeDocumentCandidate({
+        ...Office,
+        MediaType: "application/vnd.oasis.opendocument.text",
+        Name: "Plan.ODT",
+      }),
+    ).toBe(false);
+    expect(IsOfficeDocumentCandidate({ ...Office, MediaType: "application/octet-stream" })).toBe(
+      false,
+    );
     expect(IsOfficeDocumentCandidate({ ...Office, Name: "Plan.pdf" })).toBe(false);
     expect(IsOfficeDocumentCandidate({ ...Office, Size: 100 * 1024 * 1024 + 1 })).toBe(false);
   });
 
   it("prepares consent before issuing a one-use handoff and keeps it out of state", async () => {
-    const Source = await import("node:fs/promises").then((Fs) => Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"));
+    const Source = await import("node:fs/promises").then((Fs) =>
+      Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"),
+    );
     expect(Source).toContain("En.documentConsent");
     expect(Source).toContain("En.documentConsentCollaborators");
-    expect(Source).toContain("SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })");
+    expect(Source).toContain(
+      "SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })",
+    );
     expect(Source).toContain("Client.redeemLaunch(PreparedLaunch.SessionId)");
     expect(Source).toContain("PreparedLaunch.ProviderOrigin");
     expect(Source).not.toContain("window.location.origin");
     const AfterCreation = Source.slice(Source.indexOf("const Detail = await Client.createSession"));
-    expect(AfterCreation).toContain("SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })");
+    expect(AfterCreation).toContain(
+      "SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })",
+    );
     expect(AfterCreation).not.toContain("redeemLaunch(Detail.session.id)");
     expect(Source).not.toContain("useState<DocumentSessionLaunchHandoff");
-    expect(Source).toContain("IsIsolatedDocumentLaunchAction(Handoff.action, window.location.hostname)");
-    expect(Source).toContain("Form.method = \"post\"");
-    expect(Source).toContain("Form.target = \"_self\"");
-    expect(Source).toContain("Grant.name = \"launch_grant\"");
-    expect(Source).not.toMatch(/(?:localStorage|sessionStorage|indexedDB)\s*[.(]|documents\/api\.js/);
+    expect(Source).toContain(
+      "IsIsolatedDocumentLaunchAction(Handoff.action, window.location.hostname)",
+    );
+    expect(Source).toContain('Form.method = "post"');
+    expect(Source).toContain('Form.target = "_self"');
+    expect(Source).toContain('Grant.name = "launch_grant"');
+    expect(Source).not.toMatch(
+      /(?:localStorage|sessionStorage|indexedDB)\s*[.(]|documents\/api\.js/,
+    );
   });
 
   it("accepts only an isolated HTTPS editor launch action", () => {
-    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/onlyoffice/launch", "files.example.test")).toBe(true);
-    expect(IsIsolatedDocumentLaunchAction("https://files.example.test/onlyoffice/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("https://files.example.test:8443/onlyoffice/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test:8443/onlyoffice/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test./onlyoffice/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("http://editor.example.test/onlyoffice/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/integrations/launch", "files.example.test")).toBe(false);
-    expect(IsIsolatedDocumentLaunchAction("https://editor.example.test/onlyoffice/launch?grant=leak", "files.example.test")).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://editor.example.test/onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(true);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://files.example.test/onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://files.example.test:8443/onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://editor.example.test:8443/onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://editor.example.test./onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "http://editor.example.test/onlyoffice/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://editor.example.test/integrations/launch",
+        "files.example.test",
+      ),
+    ).toBe(false);
+    expect(
+      IsIsolatedDocumentLaunchAction(
+        "https://editor.example.test/onlyoffice/launch?grant=leak",
+        "files.example.test",
+      ),
+    ).toBe(false);
   });
 
   it("surfaces detail failures, follows pagination, and refreshes conflict copies", async () => {
-    const Source = await import("node:fs/promises").then((Fs) => Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"));
+    const Source = await import("node:fs/promises").then((Fs) =>
+      Fs.readFile(new URL("./DocumentSessions.tsx", import.meta.url), "utf8"),
+    );
     expect(Source).toContain("Client.listOwnSessions({ Cursor })");
     expect(Source).toContain("OnFailure(Cause)");
     expect(Source).toContain("if (WorkspaceChanged) await OnWorkspaceChanged?.()");

@@ -291,6 +291,12 @@ criteria = "safe-to-deploy"
 delta = "0.24.0 -> 0.24.1"
 notes = "Reviewed the checksum-matched patch delta with empty default features. It omits empty metric families and fixes integer encoding bounds, adds only opt-in test utilities, keeps the protobuf build path unselected, and adds no unsafe or ambient capability."
 
+[[audits.prometheus-client]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.24.1 -> 0.25.0"
+notes = "Reviewed the checksum-matched delta with empty default features. Native histogram and Prometheus protobuf paths remain unselected; the build script is a no-op without either protobuf feature. FileBelt retains text exposition with bounded labels, and focused runtime/API tests preserve the encoded metric contract."
+
 [[audits.prometheus-client-derive-encode]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"

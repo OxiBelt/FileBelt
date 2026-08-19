@@ -11,7 +11,10 @@ server-side dry-run, changes the FileBelt configuration, proves that the
 Deployment selects a new immutable content-addressed ConfigMap, and verifies
 that Helm rollback restores the prior identity. Every administrative Job type
 is also submitted to the live API server under restricted admission without
-executing it.
+executing it. The same cluster creates separate restricted namespaces and
+submits qualified `filebelt-onlyoffice` and `filebelt-git` renders to
+server-side dry-run, validating their release-evidence annotations without
+pulling or executing either adapter image.
 
 `run-kubernetes-network-policy.sh` creates a uniquely named Minikube profile
 with either Calico or Cilium. It runs digest-pinned `agnhost` servers and curl

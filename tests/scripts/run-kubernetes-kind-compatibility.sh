@@ -11,11 +11,17 @@ readonly KIND_136_IMAGE="kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977bae
 readonly RELEASE_NAME="phase3"
 readonly NAMESPACE="filebelt-kind"
 readonly RUNNER_NAMESPACE="filebelt-kind-mcp-runners"
+readonly ONLYOFFICE_NAMESPACE="filebelt-kind-onlyoffice"
+readonly GIT_NAMESPACE="filebelt-kind-git"
 readonly OPERATION_ID="123e4567-e89b-42d3-a456-426614174000"
+readonly ADMITTED_ADAPTER_DIGEST="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+readonly ADMITTED_SOURCE_SHA="1111111111111111111111111111111111111111111111111111111111111111"
 
 script_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 chart_dir="${repo_root}/deploy/helm/filebelt"
+onlyoffice_chart_dir="${repo_root}/deploy/helm/filebelt-onlyoffice"
+git_chart_dir="${repo_root}/deploy/helm/filebelt-git"
 ci_values="${repo_root}/tests/kubernetes/values-ci.yaml"
 temp_root="${TMPDIR:-/tmp}"
 work_dir=""
@@ -48,6 +54,10 @@ diagnose() {
     --namespace "${NAMESPACE}" -o wide >&2
   kubectl_cmd get serviceaccount,role,rolebinding,networkpolicy \
     --namespace "${RUNNER_NAMESPACE}" -o wide >&2
+  kubectl_cmd get all,networkpolicy,poddisruptionbudget \
+    --namespace "${ONLYOFFICE_NAMESPACE}" -o wide >&2
+  kubectl_cmd get all,networkpolicy,poddisruptionbudget \
+    --namespace "${GIT_NAMESPACE}" -o wide >&2
   kubectl_cmd get events --all-namespaces --sort-by=.lastTimestamp >&2
   helm --kubeconfig "${KUBECONFIG}" history "${RELEASE_NAME}" \
     --namespace "${NAMESPACE}" >&2
@@ -97,6 +107,25 @@ server_validate() {
   fi
 }
 
+server_validate_adapter() {
+  local release_name="$1"
+  local adapter_chart="$2"
+  local namespace="$3"
+  local expected_workload="$4"
+  local output="${work_dir}/server-adapter-${release_name}.log"
+
+  helm template "${release_name}" "${adapter_chart}" \
+    --namespace "${namespace}" \
+    --set image.qualification=qualified \
+    --set-string "image.digest=${ADMITTED_ADAPTER_DIGEST}" \
+    --set-string "image.correspondingSourceSha256=${ADMITTED_SOURCE_SHA}" |
+    kubectl_cmd apply --server-side --dry-run=server --field-manager=filebelt-acceptance \
+      --filename - >"${output}"
+
+  grep -E "^${expected_workload}[[:space:]]" "${output}" >/dev/null \
+    || die "${release_name} did not produce an API-valid adapter workload"
+}
+
 node_image=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -134,6 +163,9 @@ for command in docker grep helm kind kubectl mktemp; do
   require_command "${command}"
 done
 [[ -f "${chart_dir}/Chart.yaml" ]] || die "chart is unavailable: ${chart_dir}"
+[[ -f "${onlyoffice_chart_dir}/Chart.yaml" ]] \
+  || die "chart is unavailable: ${onlyoffice_chart_dir}"
+[[ -f "${git_chart_dir}/Chart.yaml" ]] || die "chart is unavailable: ${git_chart_dir}"
 [[ -f "${ci_values}" ]] || die "CI values are unavailable: ${ci_values}"
 
 work_dir="$(mktemp -d "${temp_root%/}/filebelt-kind-compatibility.XXXXXX")"
@@ -172,7 +204,13 @@ actual_version="$(kubectl_cmd get --raw /version \
 
 kubectl_cmd create namespace "${NAMESPACE}"
 kubectl_cmd create namespace "${RUNNER_NAMESPACE}"
-for namespace in "${NAMESPACE}" "${RUNNER_NAMESPACE}"; do
+kubectl_cmd create namespace "${ONLYOFFICE_NAMESPACE}"
+kubectl_cmd create namespace "${GIT_NAMESPACE}"
+for namespace in \
+  "${NAMESPACE}" \
+  "${RUNNER_NAMESPACE}" \
+  "${ONLYOFFICE_NAMESPACE}" \
+  "${GIT_NAMESPACE}"; do
   kubectl_cmd label --overwrite namespace "${namespace}" \
     pod-security.kubernetes.io/enforce=restricted \
     pod-security.kubernetes.io/enforce-version=latest \
@@ -183,6 +221,14 @@ done
 # The restricted namespace admission path and the live API server jointly
 # validate every base object before Helm records a revision.
 server_validate base
+
+# Qualified adapter renders remain read-only here: server dry-run validates
+# exact release-evidence metadata and restricted workload admission without
+# pulling either independently released adapter image.
+server_validate_adapter onlyoffice "${onlyoffice_chart_dir}" \
+  "${ONLYOFFICE_NAMESPACE}" deployment.apps/filebelt-onlyoffice
+server_validate_adapter git "${git_chart_dir}" \
+  "${GIT_NAMESPACE}" statefulset.apps/filebelt-git
 
 # Submit the opt-in broker, controller, namespace RBAC, and NetworkPolicy
 # topology to the live API server as well. Quiescing keeps this a pure schema

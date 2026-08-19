@@ -210,6 +210,8 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(checks.contains("azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310"));
     assert!(checks.contains("version: v4.2.4"));
     assert!(checks.contains("tests/scripts/check-helm-chart.sh"));
+    assert!(checks.contains("tests/scripts/check-onlyoffice-helm-chart.sh"));
+    assert!(checks.contains("tests/scripts/check-git-helm-chart.sh"));
     assert!(checks.contains("tests/scripts/verify-release-tag.sh --check-trust"));
     assert!(checks.contains("python3 -m unittest discover -s tests/scripts -p 'test_*.py'"));
     assert_eq!(

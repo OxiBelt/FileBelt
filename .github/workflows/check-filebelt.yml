@@ -40,6 +40,10 @@ jobs:
         run: tests/scripts/verify-release-tag.sh --check-trust
       - name: Check Helm image contract
         run: tests/scripts/check-helm-chart.sh
+      - name: Check isolated adapter Helm charts
+        run: |
+          tests/scripts/check-onlyoffice-helm-chart.sh
+          tests/scripts/check-git-helm-chart.sh
       - name: Check Kubernetes acceptance contracts
         run: tests/kubernetes/check-acceptance-contract.sh
       - name: Check fail-closed NFS qualification contract

@@ -75,6 +75,18 @@ for mount_boundary in \
   assert_contains "${kind_script}" "${mount_boundary}"
 done
 
+for adapter_chart_boundary in \
+  'ONLYOFFICE_NAMESPACE="filebelt-kind-onlyoffice"' \
+  'GIT_NAMESPACE="filebelt-kind-git"' \
+  'onlyoffice_chart_dir="${repo_root}/deploy/helm/filebelt-onlyoffice"' \
+  'git_chart_dir="${repo_root}/deploy/helm/filebelt-git"' \
+  'server_validate_adapter onlyoffice "${onlyoffice_chart_dir}"' \
+  'server_validate_adapter git "${git_chart_dir}"' \
+  'deployment.apps/filebelt-onlyoffice' \
+  'statefulset.apps/filebelt-git'; do
+  assert_contains "${kind_script}" "${adapter_chart_boundary}"
+done
+
 for security_operation in \
   "server_validate security-descendant-shares-status" \
   'operation.type="security-descendant-shares-${security_operation}"' \

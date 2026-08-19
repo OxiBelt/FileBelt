@@ -63,7 +63,23 @@ RUN if [ "${BUILDARCH}" != amd64 ]; then \
     test "$(sha256sum "${compiler}" | awk '{print $1}')" = \
       "3fe20d705129f8ba4ae6be393fd4c484479f688f576af78c0ff2bb10e59d5f86"
 
-FROM ${FILEBELT_BUILDER_STAGE} AS role-builder
+FROM ${FILEBELT_BUILDER_STAGE} AS role-dependencies
+
+ARG TARGETARCH
+
+WORKDIR /repo
+COPY . .
+
+RUN case "${TARGETARCH}" in \
+      amd64) target=x86_64-unknown-linux-musl ;; \
+      arm64) target=aarch64-unknown-linux-musl ;; \
+      riscv64) target=riscv64gc-unknown-linux-musl ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    rustup target add "${target}" && \
+    CARGO_NET_RETRY=10 cargo fetch --locked --target "${target}"
+
+FROM role-dependencies AS role-builder
 
 ARG BUILDARCH
 ARG TARGETARCH
@@ -81,9 +97,6 @@ ENV FILEBELT_BUILD_VERSION=${FILEBELT_BUILD_VERSION} \
     FILEBELT_BUILD_SOURCE_REF=${FILEBELT_BUILD_SOURCE_REF} \
     FILEBELT_BUILD_DIRTY=${FILEBELT_BUILD_DIRTY} \
     FILEBELT_BUILD_KIND=${FILEBELT_BUILD_KIND}
-
-WORKDIR /repo
-COPY . .
 
 RUN case "${TARGETARCH}" in \
       amd64) target=x86_64-unknown-linux-musl ;; \
@@ -106,7 +119,6 @@ RUN case "${TARGETARCH}" in \
     else \
       test "${FILEBELT_TARGET_CPU}" = architecture-default; \
     fi && \
-    rustup target add "${target}" && \
     case "${FILEBELT_ROLE}" in \
       filebelt-api) package=filebelt-api; binary=filebelt-api ;; \
       filebelt-worker-io) package=filebelt-worker-io; binary=filebelt-worker-io ;; \
@@ -124,7 +136,7 @@ RUN case "${TARGETARCH}" in \
       filebelt-tools) package=filebeltctl; binary=filebeltctl ;; \
       *) echo "unsupported Rust FILEBELT_ROLE=${FILEBELT_ROLE}" >&2; exit 1 ;; \
     esac && \
-    cargo build --locked --release --package "${package}" --bin "${binary}" --target "${target}" && \
+    cargo build --locked --offline --release --package "${package}" --bin "${binary}" --target "${target}" && \
     install -D -m 0755 "target/${target}/release/${binary}" /out/filebelt && \
     sh source/ops/verify-static-elf.sh /out/filebelt "${target}" && \
     rust_notice=$(find /usr/local/rustup/toolchains -path '*/share/doc/rust/COPYRIGHT-library.html' -type f) && \

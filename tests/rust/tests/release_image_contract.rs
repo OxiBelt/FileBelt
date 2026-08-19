@@ -198,6 +198,64 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
 }
 
 #[test]
+fn rust_role_dependency_bootstrap_is_shared_bounded_and_offline() {
+    let root = repository_root();
+    let dockerfile =
+        fs::read_to_string(root.join("source/ops/Dockerfile.roles")).expect("Rust role Dockerfile");
+    let cargo_config =
+        fs::read_to_string(root.join(".cargo/config.toml")).expect("workspace Cargo config");
+    let bootstrap_start = dockerfile
+        .find("FROM ${FILEBELT_BUILDER_STAGE} AS role-dependencies")
+        .expect("role-independent dependency bootstrap");
+    let role_start = dockerfile
+        .find("FROM role-dependencies AS role-builder")
+        .expect("role builder must inherit the dependency bootstrap");
+    let role_argument = dockerfile
+        .find("ARG FILEBELT_ROLE")
+        .expect("role builder argument");
+    assert!(bootstrap_start < role_start);
+    assert!(role_start < role_argument);
+
+    let bootstrap = &dockerfile[bootstrap_start..role_start];
+    assert!(bootstrap.contains("WORKDIR /repo\nCOPY . ."));
+    assert!(bootstrap.contains("rustup target add \"${target}\""));
+    assert!(bootstrap.contains("CARGO_NET_RETRY=10 cargo fetch --locked --target \"${target}\""));
+    for target in [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-musl",
+        "riscv64gc-unknown-linux-musl",
+    ] {
+        assert!(
+            bootstrap.contains(target),
+            "dependency bootstrap must map target {target}"
+        );
+    }
+    assert!(bootstrap.contains("unsupported TARGETARCH=${TARGETARCH}"));
+
+    let role_builder = &dockerfile[role_start..];
+    assert!(
+        role_builder.contains("cargo build --locked --offline --release --package \"${package}\"")
+    );
+    assert!(!role_builder.contains("rustup target add"));
+    assert_eq!(dockerfile.matches("rustup target add").count(), 1);
+    assert_eq!(dockerfile.matches("cargo fetch").count(), 1);
+    assert_eq!(dockerfile.matches("CARGO_NET_RETRY=10").count(), 1);
+    assert_eq!(dockerfile.matches("COPY . .").count(), 1);
+    assert!(!dockerfile.contains("--mount=type=cache"));
+
+    assert!(cargo_config.contains("[net]\n"));
+    assert!(cargo_config.contains("retry = 2"));
+    assert!(!cargo_config.contains("retry = 10"));
+    assert!(!cargo_config.contains("[source.crates-io]"));
+    assert!(!cargo_config.contains("replace-with"));
+    assert!(!cargo_config.contains("vendored-sources"));
+    assert!(
+        !root.join("vendor").exists(),
+        "Rust inputs must not silently fall back to a vendored source tree"
+    );
+}
+
+#[test]
 fn onlyoffice_source_recipe_includes_its_protocol_build_inputs() {
     let root = repository_root();
     let dockerfile = fs::read_to_string(root.join("adapters/onlyoffice/Dockerfile"))

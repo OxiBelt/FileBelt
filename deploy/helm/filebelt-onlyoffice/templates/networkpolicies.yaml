@@ -5,6 +5,8 @@ metadata:
   name: {{ include "filebelt-onlyoffice.name" . }}-default-deny
   labels:
 {{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-onlyoffice.annotations" . | indent 4 }}
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
@@ -17,6 +19,8 @@ metadata:
   name: {{ include "filebelt-onlyoffice.name" . }}-ingress
   labels:
 {{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-onlyoffice.annotations" . | indent 4 }}
 spec:
   podSelector:
     matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}
@@ -32,6 +36,8 @@ metadata:
   name: {{ include "filebelt-onlyoffice.name" . }}-egress
   labels:
 {{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-onlyoffice.annotations" . | indent 4 }}
 spec:
   podSelector:
     matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: onlyoffice-adapter}

@@ -9,6 +9,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/component: onlyoffice-adapter
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+{{- end -}}
+
+{{- define "filebelt-onlyoffice.annotations" -}}
 filebelt.dev/adapter-license: {{ .Values.image.license | quote }}
 filebelt.dev/adapter-source: {{ .Values.image.correspondingSource | quote }}
 filebelt.dev/adapter-source-sha256: {{ .Values.image.correspondingSourceSha256 | quote }}

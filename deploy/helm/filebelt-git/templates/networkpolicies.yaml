@@ -5,6 +5,8 @@ metadata:
   name: {{ include "filebelt-git.name" . }}-default-deny
   labels:
 {{ include "filebelt-git.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-git.annotations" . | indent 4 }}
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
@@ -17,6 +19,8 @@ metadata:
   name: {{ include "filebelt-git.name" . }}-coordinator-ingress
   labels:
 {{ include "filebelt-git.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-git.annotations" . | indent 4 }}
 spec:
   podSelector:
     matchLabels: {app.kubernetes.io/name: filebelt-git, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: git-adapter}

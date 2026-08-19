@@ -5,6 +5,8 @@ metadata:
   name: {{ include "filebelt-onlyoffice.name" . }}
   labels:
 {{ include "filebelt-onlyoffice.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-onlyoffice.annotations" . | indent 4 }}
 spec:
   replicas: {{ .Values.workload.replicas }}
   minReadySeconds: 10
@@ -18,6 +20,7 @@ spec:
       labels:
 {{ include "filebelt-onlyoffice.labels" . | indent 8 }}
       annotations:
+{{ include "filebelt-onlyoffice.annotations" . | indent 8 }}
         checksum/provider-config: {{ printf "%s:%s:%s" .Values.providerConfig.existingConfigMap .Values.providerConfig.key .Values.providerConfig.generation | sha256sum | quote }}
         checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s" .Values.secrets.browserJwt.generation .Values.secrets.outboxJwt.generation .Values.secrets.serverTls.generation .Values.secrets.coreClientTls.generation .Values.secrets.ioClientTls.generation .Values.secrets.egressClientTls.generation | sha256sum | quote }}
     spec:

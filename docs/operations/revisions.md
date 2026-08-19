@@ -22,7 +22,10 @@ version heads, chunk references, quota, backfill state, holds, and activation.
 4. Deploy the external Git chart into its integration namespace with an
    operator-created Git-only RWX claim. Admit only an immutable adapter image
    that enforces exact Git `2.55.0`, SHA-256 objects, source/SBOM/provenance and
-   license evidence. Do not mount FileBelt payloads or database credentials.
+   license evidence. Verify the chart's non-selector
+   `filebelt.dev/adapter-*` annotations carry the exact SPDX license,
+   corresponding-source URL, and source SHA-256. Do not mount FileBelt payloads
+   or database credentials.
 5. Enable the coordinator and move the tenant to `backfilling`. Watch durable
    backfill jobs and unresolved holds; Iggy delivery has no bearing on
    correctness. Repair the exact held version and choose retry, recovered, or

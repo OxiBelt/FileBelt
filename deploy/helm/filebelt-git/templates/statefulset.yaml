@@ -5,6 +5,8 @@ metadata:
   name: {{ include "filebelt-git.name" . }}
   labels:
 {{ include "filebelt-git.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-git.annotations" . | indent 4 }}
 spec:
   serviceName: {{ include "filebelt-git.name" . }}
   replicas: 1
@@ -15,6 +17,7 @@ spec:
       labels:
 {{ include "filebelt-git.labels" . | indent 8 }}
       annotations:
+{{ include "filebelt-git.annotations" . | indent 8 }}
         checksum/config: {{ printf "%s:%s:%s" .Values.config.existingConfigMap .Values.config.key .Values.config.generation | sha256sum | quote }}
         checksum/server-tls: {{ .Values.secrets.serverTls.generation | sha256sum | quote }}
     spec:

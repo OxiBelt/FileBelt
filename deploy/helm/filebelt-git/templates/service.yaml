@@ -5,6 +5,8 @@ metadata:
   name: {{ include "filebelt-git.name" . }}
   labels:
 {{ include "filebelt-git.labels" . | indent 4 }}
+  annotations:
+{{ include "filebelt-git.annotations" . | indent 4 }}
 spec:
   type: ClusterIP
   selector: {app.kubernetes.io/name: filebelt-git, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: git-adapter}

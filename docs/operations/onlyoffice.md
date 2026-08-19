@@ -65,10 +65,12 @@ conflict never overwrites the current FileBelt head.
    secrets in Helm values or a ConfigMap. Advance the chart's external
    provider-configuration generation whenever its ConfigMap content changes so
    every adapter replica rolls to the same reviewed configuration.
-8. Verify the adapter image labels, SBOM, signature, provenance, AGPL license,
-   immutable corresponding-source bundle URL and SHA-256, build instructions,
-   notices, exact source/about endpoint response, and visible `Source &
-   License` link. Verify the operator-supplied provider independently.
+8. Verify the adapter image OCI labels, the chart's non-selector
+   `filebelt.dev/adapter-*` release-evidence annotations, SBOM, signature,
+   provenance, AGPL license, immutable corresponding-source bundle URL and
+   SHA-256, build instructions, notices, exact source/about endpoint response,
+   and visible `Source & License` link. Verify the operator-supplied provider
+   independently.
 9. Configure OxiBelt's two fixed adapter virtual hosts with write retries and
    caching disabled. The public host admits only input, callback, source/about,
    and health paths. The editor host admits only `POST /onlyoffice/launch` and

@@ -2,8 +2,68 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::path::Path;
 
 use filebelt_repository_tests::repository_root;
+
+fn helm_template_body<'a>(source: &'a str, definition: &str) -> &'a str {
+    let body = source
+        .split_once(definition)
+        .unwrap_or_else(|| panic!("missing Helm definition: {definition}"))
+        .1;
+    body.split_once("{{- end -}}")
+        .unwrap_or_else(|| panic!("unterminated Helm definition: {definition}"))
+        .0
+}
+
+fn assert_adapter_release_evidence_annotations(
+    chart: &Path,
+    helper_prefix: &str,
+    expected_metadata_locations: usize,
+) {
+    let template_dir = chart.join("templates");
+    let helpers = fs::read_to_string(template_dir.join("_helpers.tpl")).expect("chart helpers");
+    let label_definition = format!("{{{{- define \"{helper_prefix}.labels\" -}}}}");
+    let annotation_definition = format!("{{{{- define \"{helper_prefix}.annotations\" -}}}}");
+    let labels = helm_template_body(&helpers, &label_definition);
+    let annotations = helm_template_body(&helpers, &annotation_definition);
+    let evidence_keys = [
+        "filebelt.dev/adapter-license",
+        "filebelt.dev/adapter-source",
+        "filebelt.dev/adapter-source-sha256",
+    ];
+
+    for key in evidence_keys {
+        assert!(
+            !labels.contains(key),
+            "{key} must not be a Kubernetes label"
+        );
+        assert!(
+            annotations.contains(key),
+            "{key} must be a Kubernetes annotation"
+        );
+    }
+
+    let rendered_sources = fs::read_dir(&template_dir)
+        .expect("templates")
+        .map(|entry| {
+            let path = entry.expect("template entry").path();
+            fs::read_to_string(path).expect("template source")
+        })
+        .collect::<String>();
+    assert_eq!(
+        rendered_sources
+            .matches(&format!("include \"{helper_prefix}.labels\""))
+            .count(),
+        expected_metadata_locations
+    );
+    assert_eq!(
+        rendered_sources
+            .matches(&format!("include \"{helper_prefix}.annotations\""))
+            .count(),
+        expected_metadata_locations
+    );
+}
 
 #[test]
 fn production_chart_has_the_role_and_disabled_document_contract() {
@@ -143,6 +203,21 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
             "boolean"
         );
     }
+}
+
+#[test]
+fn adapter_charts_keep_release_evidence_in_annotations() {
+    let root = repository_root();
+    assert_adapter_release_evidence_annotations(
+        &root.join("deploy/helm/filebelt-onlyoffice"),
+        "filebelt-onlyoffice",
+        8,
+    );
+    assert_adapter_release_evidence_annotations(
+        &root.join("deploy/helm/filebelt-git"),
+        "filebelt-git",
+        7,
+    );
 }
 
 #[test]

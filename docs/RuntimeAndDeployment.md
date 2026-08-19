@@ -122,8 +122,12 @@ license map, supply-chain evidence, and runtime contract are updated together.
 Adapter charts default to `qualification: blocked` with zero sentinel digests.
 Helm rendering fails until promotion supplies a qualified state, an exact
 nonzero image digest, and the exact source-bundle SHA-256. Core asset packaging
-does not publish adapter charts. Once all seven pre-image prerequisites pass,
-the bundle-image runner may build OCI archives without publishing them; only
+does not publish adapter charts. Each rendered adapter object and workload Pod
+template carries the exact SPDX license, corresponding-source URL, and source
+SHA-256 as `filebelt.dev/adapter-*` annotations. These non-identifying release
+evidence values are never labels or selectors. Once all seven pre-image
+prerequisites pass, the bundle-image runner may build OCI archives without
+publishing them; only
 the signed-tag release owner may later publish roles whose security,
 functional, and native-platform states are also qualified. No adapter
 subject-map or promotion implementation exists in this revision, so the plan

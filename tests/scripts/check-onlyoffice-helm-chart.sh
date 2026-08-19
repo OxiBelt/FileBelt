@@ -35,6 +35,7 @@ done
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/filebelt-onlyoffice-helm.XXXXXX")"
 readonly admitted_digest="sha256:1111111111111111111111111111111111111111111111111111111111111111"
 readonly admitted_source_sha="1111111111111111111111111111111111111111111111111111111111111111"
+readonly corresponding_source="https://github.com/OxiBelt/FileBelt/releases/download/0.1.0/filebelt-onlyoffice-adapter-source-0.1.0.tar.gz"
 qualified=(--set image.qualification=qualified --set "image.digest=${admitted_digest}" --set "image.correspondingSourceSha256=${admitted_source_sha}")
 if helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-integrations \
     >"${temporary}/blocked.log" 2>&1; then
@@ -46,6 +47,13 @@ helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-i
   "${qualified[@]}" >"${temporary}/rendered.yaml"
 
 manifest="${temporary}/rendered.yaml"
+for evidence in \
+  'filebelt.dev/adapter-license: "AGPL-3.0-only"' \
+  "filebelt.dev/adapter-source: \"${corresponding_source}\"" \
+  "filebelt.dev/adapter-source-sha256: \"${admitted_source_sha}\""; do
+  [[ "$(grep -Fc -- "${evidence}" "${manifest}")" == "8" ]] \
+    || die "release evidence must annotate all eight rendered metadata locations: ${evidence}"
+done
 for required in \
   'kind: Deployment' \
   'replicas: 2' \

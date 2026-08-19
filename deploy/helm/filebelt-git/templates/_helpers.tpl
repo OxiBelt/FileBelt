@@ -5,6 +5,8 @@ app.kubernetes.io/name: filebelt-git
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: git-adapter
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+{{- define "filebelt-git.annotations" -}}
 filebelt.dev/adapter-license: {{ .Values.image.license | quote }}
 filebelt.dev/adapter-source: {{ .Values.image.correspondingSource | quote }}
 filebelt.dev/adapter-source-sha256: {{ .Values.image.correspondingSourceSha256 | quote }}

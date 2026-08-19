@@ -7,6 +7,11 @@ All notable changes to FileBelt are documented here. The project uses
 
 ## [Unreleased]
 
+### Security
+
+- OxiBelt admission schema v2 removes repository-record control of the
+  Sigstore trust anchor and requires the offline verifier's exact pinned root.
+
 ### Added
 
 - A canonical `x86-64-v3` AMD64 image contract with plan-derived Rust, C/C++,

@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 
+ADMISSION_PATH = "supply-chain/oxibelt-admission-v2.json"
+TRUSTED_ROOT_PATH = "supply-chain/attestations/sigstore/trusted-root-2026-08-16.jsonl"
+TRUSTED_ROOT_SHA256 = "65ca537f6ed8a47fd0e560c421baa1f6c1efb8b25fc200d8c5c02c0e92eb2b9c"
+
+
 class AdmissionError(RuntimeError):
     """The retained admission record or bundle is invalid."""
 
@@ -143,17 +148,17 @@ def validate_statement(
         raise AdmissionError("platform build parameters do not bind the AMD64 baseline")
 
 
-def validate(root: Path, admission_path: Path) -> None:
+def validate(root: Path, admission_path: Path) -> Path:
     try:
         record = json.loads(admission_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise AdmissionError("OxiBelt admission record is not valid JSON") from error
     exact_keys(
         record,
-        {"schemaVersion", "baseline", "source", "image", "verification", "trustedRoot", "bundles"},
+        {"schemaVersion", "baseline", "source", "image", "verification", "bundles"},
         "admission record",
     )
-    if record["schemaVersion"] != 1 or record["baseline"] != "x86-64-v3":
+    if record["schemaVersion"] != 2 or record["baseline"] != "x86-64-v3":
         raise AdmissionError("OxiBelt admission schema or baseline is invalid")
     exact_keys(record["source"], {"repository", "ref", "revision"}, "admission source")
     exact_keys(record["image"], {"name", "role", "indexDigest", "amd64Digest"}, "admission image")
@@ -178,13 +183,12 @@ def validate(root: Path, admission_path: Path) -> None:
         or verification["denySelfHostedRunners"] is not True
     ):
         raise AdmissionError("OxiBelt admission signer policy is invalid")
-    trusted_root = exact_keys(record["trustedRoot"], {"path", "sha256"}, "trusted root")
-    trusted_root_path = repository_file(root, trusted_root["path"], "trusted root path")
+    trusted_root_path = repository_file(root, TRUSTED_ROOT_PATH, "trusted root path")
     trusted_root_bytes = trusted_root_path.read_bytes()
     if not trusted_root_bytes or len(trusted_root_bytes) > 1024 * 1024:
         raise AdmissionError("trusted root has an invalid size")
-    if hashlib.sha256(trusted_root_bytes).hexdigest() != text(trusted_root["sha256"], "trusted root sha256"):
-        raise AdmissionError("trusted root sha256 does not match")
+    if hashlib.sha256(trusted_root_bytes).hexdigest() != TRUSTED_ROOT_SHA256:
+        raise AdmissionError("trusted root does not match the verifier-pinned sha256")
     try:
         roots = [json.loads(line) for line in trusted_root_bytes.splitlines() if line]
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -210,17 +214,21 @@ def validate(root: Path, admission_path: Path) -> None:
             raise AdmissionError(f"{entry.get('kind')} bundle signer policy is invalid")
         validate_subject(root, entry, record)
         validate_statement(load_bundle(root, entry), entry, record)
+    return trusted_root_path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--print-trusted-root-path", action="store_true")
     args = parser.parse_args()
     root = args.repo_root.resolve()
     try:
-        validate(root, root / "supply-chain/oxibelt-admission-v1.json")
+        trusted_root_path = validate(root, root / ADMISSION_PATH)
     except AdmissionError as error:
         parser.error(str(error))
+    if args.print_trusted_root_path:
+        print(trusted_root_path)
     return 0
 
 

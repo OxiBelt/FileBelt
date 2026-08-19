@@ -212,7 +212,19 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     assert!(checks.contains("tests/scripts/check-helm-chart.sh"));
     assert!(checks.contains("tests/scripts/verify-release-tag.sh --check-trust"));
     assert!(checks.contains("python3 -m unittest discover -s tests/scripts -p 'test_*.py'"));
+    assert_eq!(
+        checks
+            .matches("run: tests/scripts/verify-oxibelt-admission.sh .")
+            .count(),
+        1
+    );
     assert!(dry_run.contains("normalized-rebuild:"));
+    assert_eq!(
+        dry_run
+            .matches("run: tests/scripts/verify-oxibelt-admission.sh .")
+            .count(),
+        2
+    );
     assert!(dry_run.contains("retention-days: 30"));
     assert!(dry_run.contains("on:\n  workflow_dispatch:"));
     assert!(!dry_run.contains("tags:"));
@@ -220,6 +232,12 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
     let release =
         fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release workflow");
     assert_no_workflow_permissions(&release);
+    assert_eq!(
+        release
+            .matches("run: tests/scripts/verify-oxibelt-admission.sh .")
+            .count(),
+        2
+    );
     assert!(release.contains("tags:\n      - \"[0-9]*.[0-9]*.[0-9]*\""));
     assert!(!release.contains("workflow_dispatch:"));
     assert!(!release.contains("pull_request:"));

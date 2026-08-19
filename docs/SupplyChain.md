@@ -374,15 +374,19 @@ their probe contracts with role-specific runtime contracts. Evidence adds:
 - the exact OxiBelt base/source/route relationship for `filebelt-web`.
 
 The OxiBelt relationship is admitted offline through
-`supply-chain/oxibelt-admission-v1.json` and the retained index and AMD64-child
+`supply-chain/oxibelt-admission-v2.json` and the retained index and AMD64-child
 GitHub/Sigstore rebuild bundles. Admission verified the public-good signature,
 GitHub-hosted runner, `OxiBelt/OxiBelt` release workflow identity, tag, and
 source revision. Routine checks use the retained raw OCI manifest subjects and
 Sigstore trusted-root snapshot to repeat the signature, certificate identity,
 OIDC issuer, transparency-log, source, and runner-policy verification without a
-network lookup. They also bind retained bundle and trusted-root hashes, decoded
-predicates, the index-to-child digest, child `targetCpu: x86-64-v3`, and the
-admitted index directly to the `ui/web/Dockerfile` base.
+network lookup. The verifier code independently fixes the snapshot path and
+SHA-256; the v2 admission record contains no root selector, and the verifier
+rejects the legacy self-referential v1 schema. Routine checks also bind retained
+bundle hashes, decoded predicates, the index-to-child digest, child
+`targetCpu: x86-64-v3`, and the admitted index directly to the
+`ui/web/Dockerfile` base. Root rotation changes the retained snapshot, verifier
+pin, regression evidence, and this contract atomically.
 
 The media-controller image remains probe-only and its evidence must continue to
 say so. Broker, controller, and runner evidence instead proves their active
@@ -486,7 +490,9 @@ diagnostic.
 Artifact rollback selects a previous verified digest. The project does not
 move version tags or automatically delete packages/attestations; a compromised
 artifact is withdrawn only through a separately reviewed administrator
-incident procedure and replaced by a new SemVer release.
+incident procedure and replaced by a new SemVer release. Each previous release
+retains its own admission schema, verifier, and pinned root; current verification
+is not weakened to admit legacy evidence during rollback.
 
 ## Phase 7 document and ONLYOFFICE evidence
 

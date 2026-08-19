@@ -195,13 +195,18 @@ Its admitted AMD64 child is
 and its retained GitHub/Sigstore rebuild predicate binds role `standalone`,
 source revision `bf40172e40298325775ca9d708162a9d8d14e6d4`, and target CPU
 `x86-64-v3`. The retained raw index and AMD64 manifests provide the exact
-attestation subjects, and the retained Sigstore trusted-root snapshot permits
-offline signature, certificate-identity, OIDC-issuer, transparency-log, source,
-and GitHub-hosted-runner verification. The admission validator also binds this
-index digest directly to the `ui/web/Dockerfile` base. FileBelt does not rebuild
-that upstream binary.
+attestation subjects. The verifier fixes the retained Sigstore trusted-root
+snapshot path and SHA-256 independently of admission schema v2, which contains
+no trust-root selector. This permits offline signature, certificate-identity,
+OIDC-issuer, transparency-log, source, and GitHub-hosted-runner verification.
+The admission validator also binds this index digest directly to the
+`ui/web/Dockerfile` base. FileBelt does not rebuild that upstream binary.
 Changing that prerelease input requires a focused source, route, mTLS,
 architecture, vulnerability, license, and notice review.
+Changing the trust root requires one reviewed change to the retained snapshot,
+verifier pin, regression tests, and this contract. An older release remains
+verifiable only with that release's retained verifier and root; rollback never
+weakens the current verifier to accept its legacy admission schema.
 
 ## Platform and artifact evidence
 

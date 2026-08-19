@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -25,15 +26,16 @@ SPEC.loader.exec_module(CHECKER)
 
 class OxiBeltAdmissionTests(unittest.TestCase):
     def test_repository_admission_is_valid(self) -> None:
-        CHECKER.validate(REPO_ROOT, REPO_ROOT / "supply-chain/oxibelt-admission-v1.json")
+        trusted_root = CHECKER.validate(REPO_ROOT, REPO_ROOT / CHECKER.ADMISSION_PATH)
+        self.assertEqual(trusted_root, REPO_ROOT / CHECKER.TRUSTED_ROOT_PATH)
 
     def copy_admission(self) -> tuple[tempfile.TemporaryDirectory[str], Path, Path]:
         directory = tempfile.TemporaryDirectory()
         root = Path(directory.name)
         source = REPO_ROOT / "supply-chain"
         shutil.copytree(source / "attestations", root / "supply-chain/attestations")
-        admission = root / "supply-chain/oxibelt-admission-v1.json"
-        shutil.copy2(source / "oxibelt-admission-v1.json", admission)
+        admission = root / CHECKER.ADMISSION_PATH
+        shutil.copy2(source / "oxibelt-admission-v2.json", admission)
         (root / "ui/web").mkdir(parents=True)
         shutil.copy2(REPO_ROOT / "ui/web/Dockerfile", root / "ui/web/Dockerfile")
         return directory, root, admission
@@ -55,11 +57,40 @@ class OxiBeltAdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(CHECKER.AdmissionError, "signer policy"):
             CHECKER.validate(root, admission)
 
+    def test_rejects_repository_replacement_of_pinned_trusted_root(self) -> None:
+        directory, root, admission = self.copy_admission()
+        self.addCleanup(directory.cleanup)
+        trusted_root = root / CHECKER.TRUSTED_ROOT_PATH
+        trusted_root.write_bytes(trusted_root.read_bytes() + b"\n")
+        with self.assertRaisesRegex(CHECKER.AdmissionError, "verifier-pinned sha256"):
+            CHECKER.validate(root, admission)
+
+    def test_rejects_missing_pinned_trusted_root(self) -> None:
+        directory, root, admission = self.copy_admission()
+        self.addCleanup(directory.cleanup)
+        (root / CHECKER.TRUSTED_ROOT_PATH).unlink()
+        with self.assertRaisesRegex(CHECKER.AdmissionError, "trusted root path is missing"):
+            CHECKER.validate(root, admission)
+
+    def test_rejects_admission_selected_trusted_root(self) -> None:
+        directory, root, admission = self.copy_admission()
+        self.addCleanup(directory.cleanup)
+        attacker_root = root / "supply-chain/attestations/sigstore/attacker-root.jsonl"
+        attacker_root.write_bytes((root / CHECKER.TRUSTED_ROOT_PATH).read_bytes())
+        record = json.loads(admission.read_text(encoding="utf-8"))
+        record["trustedRoot"] = {
+            "path": str(attacker_root.relative_to(root)),
+            "sha256": hashlib.sha256(attacker_root.read_bytes()).hexdigest(),
+        }
+        admission.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaisesRegex(CHECKER.AdmissionError, "admission record must contain exactly"):
+            CHECKER.validate(root, admission)
+
     def test_rejects_legacy_schema(self) -> None:
         directory, root, admission = self.copy_admission()
         self.addCleanup(directory.cleanup)
         record = json.loads(admission.read_text(encoding="utf-8"))
-        record["schemaVersion"] = 0
+        record["schemaVersion"] = 1
         admission.write_text(json.dumps(record), encoding="utf-8")
         with self.assertRaisesRegex(CHECKER.AdmissionError, "schema or baseline"):
             CHECKER.validate(root, admission)
@@ -96,6 +127,40 @@ class OxiBeltAdmissionTests(unittest.TestCase):
             check=False,
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_offline_verifier_passes_only_the_pinned_root_to_gh(self) -> None:
+        directory, root, _admission = self.copy_admission()
+        self.addCleanup(directory.cleanup)
+        fake_bin = root / "fake-bin"
+        fake_bin.mkdir()
+        capture = root / "gh-arguments.txt"
+        fake_gh = fake_bin / "gh"
+        fake_gh.write_text(
+            "#!/usr/bin/env sh\n"
+            "set -eu\n"
+            "printf 'CALL\\n' >> \"${GH_CAPTURE}\"\n"
+            "printf '%s\\n' \"$@\" >> \"${GH_CAPTURE}\"\n",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(0o755)
+        environment = os.environ.copy()
+        environment["GH_CAPTURE"] = str(capture)
+        environment["PATH"] = f"{fake_bin}:{environment.get('PATH', '')}"
+        result = subprocess.run(
+            [str(REPO_ROOT / "tests/scripts/verify-oxibelt-admission.sh"), str(root)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = capture.read_text(encoding="utf-8").splitlines()
+        custom_roots = [
+            arguments[index + 1]
+            for index, argument in enumerate(arguments)
+            if argument == "--custom-trusted-root"
+        ]
+        self.assertEqual(custom_roots, [str(root / CHECKER.TRUSTED_ROOT_PATH)] * 2)
 
 
 if __name__ == "__main__":

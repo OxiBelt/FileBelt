@@ -237,14 +237,15 @@ uses that release's retained tooling and evidence rather than weakening current
 validators.
 
 For each platform build, one role-independent Rust stage installs the selected
-target component and fetches the exact target-specific locked Cargo closure
-with a finite ten-retry budget. All role-specific compilation then runs locked
-and offline from that stage. BuildKit layer reuse prevents ordinary image
-matrices from reacquiring the same inputs for every role, but it is not
+output-target component, derives the builder-host triple from its pinned
+`rustc -vV`, and makes one locked Cargo fetch for the host and output-target
+closures with a finite ten-retry budget. All role-specific compilation then
+runs locked and offline from that stage. BuildKit layer reuse prevents ordinary
+image matrices from reacquiring the same inputs for every role, but it is not
 admission or release evidence; a full no-cache rebuild deliberately reacquires
-the closure. Exhausted retries, missing target inputs, checksum failure, or an
-incomplete closure stop the build before any role archive is accepted. No
-registry mirror or vendored fallback is part of this contract.
+the closures. Exhausted retries, a missing host or target input, checksum
+failure, or an incomplete closure stop the build before any role archive is
+accepted. No registry mirror or vendored fallback is part of this contract.
 
 AMD64 and ARM64 run native behavior suites. Before an AMD64 build or native
 test, the FileBelt host checker verifies every `/proc/cpuinfo` processor and

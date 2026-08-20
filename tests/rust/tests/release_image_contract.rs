@@ -210,33 +210,52 @@ fn rust_role_dependency_bootstrap_is_shared_bounded_and_offline() {
     let role_start = dockerfile
         .find("FROM role-dependencies AS role-builder")
         .expect("role builder must inherit the dependency bootstrap");
+    let role_builder_end = dockerfile
+        .find("FROM role-builder AS runtime-rootfs")
+        .expect("role builder must precede its runtime rootfs stage");
     let role_argument = dockerfile
         .find("ARG FILEBELT_ROLE")
         .expect("role builder argument");
     assert!(bootstrap_start < role_start);
+    assert!(role_start < role_builder_end);
     assert!(role_start < role_argument);
 
     let bootstrap = &dockerfile[bootstrap_start..role_start];
-    assert!(bootstrap.contains("WORKDIR /repo\nCOPY . ."));
-    assert!(bootstrap.contains("rustup target add \"${target}\""));
-    assert!(bootstrap.contains("CARGO_NET_RETRY=10 cargo fetch --locked --target \"${target}\""));
+    let executable_bootstrap = bootstrap
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(executable_bootstrap.contains("WORKDIR /repo\nCOPY . ."));
+    assert!(executable_bootstrap.contains("rustup target add \"${target}\""));
+    assert!(executable_bootstrap.contains("host_target=\"$(rustc -vV | sed -n 's/^host: //p')\""));
+    assert!(executable_bootstrap.contains("test -n \"${host_target}\""));
+    assert!(executable_bootstrap.contains(
+        "CARGO_NET_RETRY=10 cargo fetch --locked --target \"${host_target}\" --target \"${target}\""
+    ));
     for target in [
         "x86_64-unknown-linux-musl",
         "aarch64-unknown-linux-musl",
         "riscv64gc-unknown-linux-musl",
     ] {
         assert!(
-            bootstrap.contains(target),
+            executable_bootstrap.contains(target),
             "dependency bootstrap must map target {target}"
         );
     }
-    assert!(bootstrap.contains("unsupported TARGETARCH=${TARGETARCH}"));
+    assert!(executable_bootstrap.contains("unsupported TARGETARCH=${TARGETARCH}"));
 
-    let role_builder = &dockerfile[role_start..];
+    let role_builder = &dockerfile[role_start..role_builder_end];
+    let executable_role_builder = role_builder
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        role_builder.contains("cargo build --locked --offline --release --package \"${package}\"")
+        executable_role_builder
+            .contains("cargo build --locked --offline --release --package \"${package}\"")
     );
-    assert!(!role_builder.contains("rustup target add"));
+    assert!(!executable_role_builder.contains("rustup target add"));
     assert_eq!(dockerfile.matches("rustup target add").count(), 1);
     assert_eq!(dockerfile.matches("cargo fetch").count(), 1);
     assert_eq!(dockerfile.matches("CARGO_NET_RETRY=10").count(), 1);

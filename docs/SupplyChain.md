@@ -308,16 +308,17 @@ before Cargo unless the compiler version, target triple, linker version, and
 compiler digest match the admitted cross-toolchain identity. A live package
 mirror or an unversioned toolchain package is not an admitted build input.
 
-Each platform's Rust builder installs its pinned target component and fetches
-the exact target-specific `Cargo.lock` closure once in a role-independent
-stage. Only that fetch may access the Cargo registry, and it has a finite
-ten-retry budget; every role compile remains locked and runs offline. BuildKit
-may reuse the resulting layer between roles in the same builder, but that cache
-is acceleration rather than dependency admission or release evidence. Cargo
+Each platform's Rust builder installs its pinned output-target component,
+derives its host triple from the pinned `rustc -vV`, and fetches the exact host
+and output-target `Cargo.lock` closures once in a role-independent stage. That
+single fetch is the only Cargo registry access and has a finite ten-retry
+budget; every role compile remains locked and runs offline. BuildKit may reuse
+the resulting layer between roles in the same builder, but that cache is
+acceleration rather than dependency admission or release evidence. Cargo
 checksums, the committed lockfile, Cargo Audit, Cargo Deny, and Cargo Vet remain
-authoritative. An unavailable or incomplete closure fails before any role
-archive is produced; FileBelt does not fall back to a mirror, unreviewed
-vendor tree, or mutable dependency source.
+authoritative. An unavailable or incomplete host or output closure fails before
+any role archive is produced; FileBelt does not fall back to a mirror,
+unreviewed vendor tree, or mutable dependency source.
 
 Each role/platform archive produces:
 

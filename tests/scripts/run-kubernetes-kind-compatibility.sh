@@ -111,15 +111,18 @@ server_validate_adapter() {
   local release_name="$1"
   local adapter_chart="$2"
   local namespace="$3"
-  local expected_workload="$4"
+  local namespace_value_key="$4"
+  local expected_workload="$5"
   local output="${work_dir}/server-adapter-${release_name}.log"
 
   helm template "${release_name}" "${adapter_chart}" \
     --namespace "${namespace}" \
+    --set-string "${namespace_value_key}=${namespace}" \
     --set image.qualification=qualified \
     --set-string "image.digest=${ADMITTED_ADAPTER_DIGEST}" \
     --set-string "image.correspondingSourceSha256=${ADMITTED_SOURCE_SHA}" |
-    kubectl_cmd apply --server-side --dry-run=server --field-manager=filebelt-acceptance \
+    kubectl_cmd apply --namespace "${namespace}" --server-side --dry-run=server \
+      --field-manager=filebelt-acceptance \
       --filename - >"${output}"
 
   grep -E "^${expected_workload}[[:space:]]" "${output}" >/dev/null \
@@ -226,9 +229,9 @@ server_validate base
 # exact release-evidence metadata and restricted workload admission without
 # pulling either independently released adapter image.
 server_validate_adapter onlyoffice "${onlyoffice_chart_dir}" \
-  "${ONLYOFFICE_NAMESPACE}" deployment.apps/filebelt-onlyoffice
+  "${ONLYOFFICE_NAMESPACE}" integrationNamespace deployment.apps/filebelt-onlyoffice
 server_validate_adapter git "${git_chart_dir}" \
-  "${GIT_NAMESPACE}" statefulset.apps/filebelt-git
+  "${GIT_NAMESPACE}" gitNamespace statefulset.apps/filebelt-git
 
 # Submit the opt-in broker, controller, namespace RBAC, and NetworkPolicy
 # topology to the live API server as well. Quiescing keeps this a pure schema

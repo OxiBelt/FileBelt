@@ -80,12 +80,20 @@ for adapter_chart_boundary in \
   'GIT_NAMESPACE="filebelt-kind-git"' \
   'onlyoffice_chart_dir="${repo_root}/deploy/helm/filebelt-onlyoffice"' \
   'git_chart_dir="${repo_root}/deploy/helm/filebelt-git"' \
+  'local namespace_value_key="$4"' \
+  '--set-string "${namespace_value_key}=${namespace}"' \
   'server_validate_adapter onlyoffice "${onlyoffice_chart_dir}"' \
   'server_validate_adapter git "${git_chart_dir}"' \
+  '"${ONLYOFFICE_NAMESPACE}" integrationNamespace deployment.apps/filebelt-onlyoffice' \
+  '"${GIT_NAMESPACE}" gitNamespace statefulset.apps/filebelt-git' \
   'deployment.apps/filebelt-onlyoffice' \
   'statefulset.apps/filebelt-git'; do
   assert_contains "${kind_script}" "${adapter_chart_boundary}"
 done
+
+adapter_validator="$(awk '/^server_validate_adapter\(\) \{/{found=1} found{print} found && /^\}/{exit}' "${kind_script}")"
+[[ "${adapter_validator}" == *'kubectl_cmd apply --namespace "${namespace}" --server-side --dry-run=server'* ]] \
+  || die "server_validate_adapter is missing its namespace-scoped server-side apply"
 
 for security_operation in \
   "server_validate security-descendant-shares-status" \

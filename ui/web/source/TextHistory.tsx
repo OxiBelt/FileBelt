@@ -104,8 +104,13 @@ export function TextHistory({
                 icon={<Copy aria-hidden="true" />}
                 onClick={() => {
                   const GitCommitOid = Version.GitCommitOid;
-                  if (GitCommitOid !== null && GitCommitOid !== undefined)
-                    void navigator.clipboard.writeText(GitCommitOid);
+                  const ClipboardApi = navigator.clipboard as Clipboard | undefined;
+                  if (
+                    GitCommitOid !== null &&
+                    GitCommitOid !== undefined &&
+                    ClipboardApi !== undefined
+                  )
+                    void ClipboardApi.writeText(GitCommitOid);
                 }}
                 title={Version.GitCommitOid}
               >

@@ -83,7 +83,14 @@ principals observe disconnection. It then starts the service, waits for the
 internal operations endpoint and collaboration listener, and reconnects both
 principals before revocation. The final revocation assertion therefore proves
 a connected member transitions to disconnected rather than accepting the
-restart state.
+restart state. The administrator's browser context submits that revocation
+exactly once through its API request client, which shares the context's
+authenticated cookies and traverses the same real TLS edge. It retains the
+current CSRF and same-origin headers but does not retry the non-idempotent
+mutation after an unknown outcome or follow a redirect that could replay its
+method. Keeping this one-shot control request outside Chromium's page network
+isolates it from the Docker interface change without weakening authentication
+or the revocation deadline.
 
 The MCP unit covers two-user registration isolation, discovery, immutable
 review, intent/approval/invocation, replay and argument mismatch, revocation,

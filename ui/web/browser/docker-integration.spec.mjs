@@ -372,22 +372,19 @@ test("converges, checkpoints, reconnects, and revokes a two-user room", async ({
   // contract's 60-second post-revocation deadline.
   await Member.waitForTimeout(1_000);
 
-  const Revoked = await Admin.evaluate(
-    async ({ Drive, Node, Principal, Csrf }) => {
-      const Response = await fetch(`/api/v1/drives/${Drive}/nodes/${Node}/shares/${Principal}`, {
-        credentials: "same-origin",
-        headers: {
-          Origin: location.origin,
-          "Sec-Fetch-Site": "same-origin",
-          "X-FileBelt-Csrf": Csrf,
-        },
-        method: "DELETE",
-      });
-      return Response.status;
+  const RevocationResponse = await AdminContext.request.delete(
+    new URL(`/api/v1/drives/${DriveId}/nodes/${NodeId}/shares/${MemberId}`, Admin.url()).href,
+    {
+      headers: {
+        Origin: new URL(Admin.url()).origin,
+        "Sec-Fetch-Site": "same-origin",
+        "X-FileBelt-Csrf": AdminSession.csrf_token,
+      },
+      maxRedirects: 0,
+      maxRetries: 0,
     },
-    { Drive: DriveId, Node: NodeId, Principal: MemberId, Csrf: AdminSession.csrf_token },
   );
-  expect(Revoked).toBe(204);
+  expect(RevocationResponse.status()).toBe(204);
   await expect(Member.getByText("Live collaboration disconnected.")).toBeVisible({
     timeout: 60_000,
   });

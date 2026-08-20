@@ -39,6 +39,18 @@ assert_contains "${workflow}" "phase3-gate:"
 assert_contains "${workflow}" "Kubernetes v1.37.0-rc.0 prerelease qualification"
 assert_contains "${network_script}" 'PRERELEASE_KUBERNETES_VERSION="v1.37.0-rc.0"'
 assert_contains "${network_script}" '--kubernetes-version="${kubernetes_version}"'
+assert_contains "${network_script}" 'MINIKUBE_START_ATTEMPTS=2'
+assert_contains "${network_script}" 'MINIKUBE_START_RETRY_DELAY_SECONDS=5'
+assert_contains "${network_script}" 'MINIKUBE_CLEANUP_TIMEOUT_SECONDS=120'
+assert_contains "${network_script}" 'MINIKUBE_TERMINATION_GRACE_SECONDS=30'
+assert_contains "${network_script}" 'timeout --kill-after="${MINIKUBE_TERMINATION_GRACE_SECONDS}s"'
+assert_contains "${network_script}" '"${timeout_seconds}s" minikube start'
+assert_contains "${network_script}" 'minikube-start-${attempt}.log'
+assert_contains "${network_script}" 'rm -f -- "${KUBECONFIG}"'
+assert_contains "${network_script}" 'if [[ -s "${KUBECONFIG}" ]]'
+assert_contains "${network_script}" 'minikube delete --profile "${profile_name}"'
+assert_contains "${network_script}" 'attempt == MINIKUBE_START_ATTEMPTS'
+assert_contains "${network_script}" 'Minikube did not create a kubeconfig'
 
 for node_image in \
   "kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256" \

@@ -7,6 +7,10 @@ umask 077
 
 readonly SUPPORTED_KUBERNETES_VERSION="v1.34.10"
 readonly PRERELEASE_KUBERNETES_VERSION="v1.37.0-rc.0"
+readonly MINIKUBE_START_ATTEMPTS=2
+readonly MINIKUBE_START_RETRY_DELAY_SECONDS=5
+readonly MINIKUBE_CLEANUP_TIMEOUT_SECONDS=120
+readonly MINIKUBE_TERMINATION_GRACE_SECONDS=30
 readonly RELEASE_NAME="network-policy"
 readonly FILEBELT_NAMESPACE="filebelt-ci"
 readonly CLIENT_NAMESPACE="filebelt-ci-clients"
@@ -44,6 +48,10 @@ kubectl_cmd() {
 diagnose() {
   set +e
   echo "--- Kubernetes NetworkPolicy diagnostics (${cni:-unknown}) ---" >&2
+  if [[ ! -s "${KUBECONFIG:-}" ]]; then
+    echo "Kubernetes API diagnostics unavailable: Minikube did not create a kubeconfig" >&2
+    return
+  fi
   kubectl_cmd get nodes -o wide >&2
   kubectl_cmd get pods,service,networkpolicy --all-namespaces -o wide >&2
   kubectl_cmd get events --all-namespaces --sort-by=.lastTimestamp >&2
@@ -64,7 +72,9 @@ cleanup() {
     diagnose
   fi
   if [[ -n "${profile_name}" ]]; then
-    minikube delete --profile "${profile_name}" >/dev/null 2>&1 || true
+    timeout --kill-after="${MINIKUBE_TERMINATION_GRACE_SECONDS}s" \
+      "${MINIKUBE_CLEANUP_TIMEOUT_SECONDS}s" \
+      minikube delete --profile "${profile_name}" >/dev/null 2>&1 || true
   fi
   case "${work_dir}" in
     "${temp_root%/}"/filebelt-network-policy.*)
@@ -191,7 +201,7 @@ if ! [[ "${timeout_seconds}" =~ ^[0-9]+$ ]] \
   die "FILEBELT_KUBERNETES_TIMEOUT_SECONDS must be a decimal value from 120 through 900"
 fi
 
-for command in awk docker grep helm kubectl minikube mktemp; do
+for command in awk docker grep helm kubectl minikube mktemp timeout; do
   require_command "${command}"
 done
 [[ -f "${chart_dir}/Chart.yaml" ]] || die "chart is unavailable: ${chart_dir}"
@@ -211,19 +221,39 @@ mkdir -p "${MINIKUBE_HOME}"
 run_id="$(date -u +%s)-$$-${RANDOM}"
 profile_name="filebelt-np-${run_id}"
 
-if ! minikube start \
-  --profile "${profile_name}" \
-  --driver=docker \
-  --container-runtime=containerd \
-  --cni="${cni}" \
-  --kubernetes-version="${kubernetes_version}" \
-  --output=json \
-  --wait=all \
-  --wait-timeout="${timeout_seconds}s" \
-  "${minikube_root_compatibility[@]}" >"${work_dir}/minikube-start.log" 2>&1; then
-  tail -n 160 "${work_dir}/minikube-start.log" >&2 || true
-  die "Minikube did not start with the requested ${cni} CNI"
-fi
+for ((attempt = 1; attempt <= MINIKUBE_START_ATTEMPTS; attempt++)); do
+  minikube_start_log="${work_dir}/minikube-start-${attempt}.log"
+  rm -f -- "${KUBECONFIG}"
+  if timeout --kill-after="${MINIKUBE_TERMINATION_GRACE_SECONDS}s" \
+    "${timeout_seconds}s" minikube start \
+    --profile "${profile_name}" \
+    --driver=docker \
+    --container-runtime=containerd \
+    --cni="${cni}" \
+    --kubernetes-version="${kubernetes_version}" \
+    --output=json \
+    --wait=all \
+    --wait-timeout="${timeout_seconds}s" \
+    "${minikube_root_compatibility[@]}" >"${minikube_start_log}" 2>&1; then
+    if [[ -s "${KUBECONFIG}" ]]; then
+      break
+    fi
+    echo "Minikube reported success without creating a kubeconfig" >&2
+  fi
+
+  echo "--- Minikube bootstrap attempt ${attempt}/${MINIKUBE_START_ATTEMPTS} failed ---" >&2
+  tail -n 160 "${minikube_start_log}" >&2 || true
+  if (( attempt == MINIKUBE_START_ATTEMPTS )); then
+    die "Minikube did not start with the requested ${cni} CNI after ${MINIKUBE_START_ATTEMPTS} attempts"
+  fi
+  if ! timeout --kill-after="${MINIKUBE_TERMINATION_GRACE_SECONDS}s" \
+    "${MINIKUBE_CLEANUP_TIMEOUT_SECONDS}s" \
+    minikube delete --profile "${profile_name}" >/dev/null 2>&1; then
+    die "Minikube could not clean the failed ${cni} bootstrap before retry"
+  fi
+  echo "retrying Minikube bootstrap after ${MINIKUBE_START_RETRY_DELAY_SECONDS} seconds" >&2
+  sleep "${MINIKUBE_START_RETRY_DELAY_SECONDS}"
+done
 
 kubectl_cmd wait --for=condition=Ready node --all --timeout="${timeout_seconds}s"
 actual_version="$(kubectl_cmd get --raw /version \

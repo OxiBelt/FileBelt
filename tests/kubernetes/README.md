@@ -22,6 +22,12 @@ clients under restricted Pod Security, applies only the chart's standard
 `NetworkPolicy` resources, and proves both sides of each intended trust edge.
 Negative assertions have a live positive control and require three consecutive
 drops so an unavailable fixture cannot be misreported as policy enforcement.
+Minikube bootstrap has two bounded attempts with a fixed five-second delay.
+The script requires deletion of the exact run-owned partial profile before the
+second attempt and still fails if bootstrap or any live policy assertion does
+not pass. Bootstrap and cleanup have separate deadlines and termination grace
+periods, and success requires a fresh nonempty kubeconfig; the retry never
+changes the pinned inputs or substitutes static evidence.
 
 Both scripts delete only their exact run-owned cluster/profile and a temporary
 directory whose generated prefix they validate. They never prune shared Docker

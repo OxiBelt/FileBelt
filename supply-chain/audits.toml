@@ -21,6 +21,12 @@ criteria = "safe-to-deploy"
 version = "1.9.2"
 notes = "Reviewed complete checksum-matched source and the default feature. It has no build script or ambient I/O. Its raw-pointer debt and reference-count paths preserve ownership through the sealed standard Arc/Rc implementations; FileBelt reaches it only through Yrs using standard Arc values, not a custom unsafe RefCnt implementation. Contention can affect availability but does not provide an untrusted memory-safety or authority boundary bypass."
 
+[[audits.arrayref]]
+who = "OpenAI Codex"
+criteria = "filebelt-constrained-deployment"
+version = "0.3.9"
+notes = "Reviewed the complete checksum-matched crates.io 0.3.9 archive (76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb). It has no build script, runtime dependencies, or ambient I/O. Its public macros are unsound with a malicious custom Index implementation that returns a short slice; BLAKE3 reaches them only with standard arrays and slices, and no FileBelt package imports arrayref directly. The exact yanked release is accepted temporarily through 2026-09-19 under https://github.com/OxiBelt/OxiBelt/issues/154. This does not certify generic deployment."
+
 [[audits.async-lock]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"

@@ -125,6 +125,34 @@ audits as that evidence becomes available. `cargo audit`, `cargo deny check`,
 the exact Cargo lockfile, and the locked import set remain independent required
 controls; an exemption weakens none of those gates.
 
+A temporary yanked-release exception contains the compromised crates.io
+`arrayref` publisher path. BLAKE3 `1.8.6` continues to resolve `arrayref`
+`0.3.9` from the checksum-matched crates.io archive
+`76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb`.
+The root workspace and independently locked FTP/FTPS, NFS, and SMB adapter
+workspaces retain `yanked = "deny"`; each has one exact ignored-yank entry for
+`arrayref@0.3.9`. The exception expires on 2026-09-19 and is tracked by
+[OxiBelt/OxiBelt#154](https://github.com/OxiBelt/OxiBelt/issues/154). The policy
+test binds the version, checksum, sole BLAKE3 dependent, empty dependency list,
+affected workspace set, tracker, and expiry. It also rejects the incident's
+`proc-macro1` and `proc-macro-en` names. `arrayref` `0.3.10`, any other version,
+and any Git or mirror substitution remain unadmitted.
+
+The reviewed `arrayref` archive has a known generic soundness defect when a
+caller supplies a malicious custom `Index` implementation that returns a short
+slice. The root Cargo Vet policy accepts it only under
+`filebelt-constrained-deployment`: BLAKE3 uses the macros with standard arrays
+and slices, and FileBelt has no direct `arrayref` edge. Adapter graphs do not
+inherit that audit, so their independent Cargo Audit and Cargo Deny gates are
+paired with the repository policy test's exact dependency-path enforcement.
+The exception must be removed by its expiry or in the same change that adopts a
+separately authenticated and reviewed BLAKE3 or `arrayref` recovery. Extending
+it requires a new explicit review and updated tracker decision; builds never
+fall back to a branch, tag, unyank, mirror, or newer publication. Rollback may
+deploy only a retained, previously admitted image and evidence. Replacing this
+policy requires fresh locked-graph, Cargo Audit, Cargo Deny, Cargo Vet, license,
+and source review.
+
 The fuzz-only graph pins `cargo-fuzz 0.13.2`, `libfuzzer-sys 0.4.13`, and the
 transitive `arbitrary 1.4.2`. Complete checksum-matched local audits admit the
 two crates only for `safe-to-run`; `filebelt-fuzz` policy does not promote that
@@ -312,9 +340,9 @@ Each platform's Rust builder installs its pinned output-target component,
 derives its host triple from the pinned `rustc -vV`, and fetches the exact host
 and output-target `Cargo.lock` closures once in a role-independent stage. That
 single fetch is the only Cargo registry access and has a finite ten-retry
-budget; every role compile remains locked and runs offline. BuildKit may reuse
-the resulting layer between roles in the same builder, but that cache is
-acceleration rather than dependency admission or release evidence. Cargo
+budget; every role compile remains locked and runs offline. BuildKit
+may reuse the resulting layer between roles in the same builder, but that cache
+is acceleration rather than dependency admission or release evidence. Cargo
 checksums, the committed lockfile, Cargo Audit, Cargo Deny, and Cargo Vet remain
 authoritative. An unavailable or incomplete host or output closure fails before
 any role archive is produced; FileBelt does not fall back to a mirror,

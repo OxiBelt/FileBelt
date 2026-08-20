@@ -8,7 +8,10 @@ unmaintained = "workspace"
 yanked = "deny"
 # `openidconnect` verifies issuer RSA signatures but never holds or performs a
 # private-key RSA operation, so the Marvin private-key timing sink is absent.
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+  "RUSTSEC-2023-0071",
+  { crate = "arrayref@0.3.9", reason = "Temporary through 2026-09-19 under https://github.com/OxiBelt/OxiBelt/issues/154; remove after separately authenticated upstream recovery." },
+]
 
 [licenses]
 confidence-threshold = 0.93

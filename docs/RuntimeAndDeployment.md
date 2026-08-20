@@ -239,13 +239,18 @@ validators.
 For each platform build, one role-independent Rust stage installs the selected
 output-target component, derives the builder-host triple from its pinned
 `rustc -vV`, and makes one locked Cargo fetch for the host and output-target
-closures with a finite ten-retry budget. All role-specific compilation then
-runs locked and offline from that stage. BuildKit layer reuse prevents ordinary
-image matrices from reacquiring the same inputs for every role, but it is not
-admission or release evidence; a full no-cache rebuild deliberately reacquires
-the closures. Exhausted retries, a missing host or target input, checksum
-failure, or an incomplete closure stop the build before any role archive is
-accepted. No registry mirror or vendored fallback is part of this contract.
+closures with a finite ten-retry budget. This fetch admits only checksum-locked
+crates.io inputs; it never resolves a branch, tag, mirror, or newer publication.
+All role-specific compilation then runs locked and offline from that stage.
+BuildKit layer reuse prevents
+ordinary image matrices from reacquiring the same inputs for every role, but
+it is not admission or release evidence; a full no-cache rebuild deliberately
+reacquires the closures. Exhausted retries, a missing host or target input,
+checksum failure, or an incomplete closure stop the build before any role
+archive is accepted. The temporary, exact `arrayref@0.3.9` ignored-yank policy
+is documented in [Supply chain](SupplyChain.md) and tracked by
+[OxiBelt/OxiBelt#154](https://github.com/OxiBelt/OxiBelt/issues/154); no registry
+mirror, unyank, Git source, or vendored fallback is part of this contract.
 
 AMD64 and ARM64 run native behavior suites. Before an AMD64 build or native
 test, the FileBelt host checker verifies every `/proc/cpuinfo` processor and

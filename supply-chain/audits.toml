@@ -99,6 +99,12 @@ criteria = "safe-to-deploy"
 version = "1.0.11"
 notes = "Reviewed complete checksum-matched source. Formatting uses a fixed 25-byte buffer with bounds derived from IEEE-754 inputs, has no build script or ambient I/O, and FileBelt reaches it only through metrics formatting."
 
+[[audits.either]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.17.0 -> 1.18.0"
+notes = "Reviewed the checksum-matched delta with the resolved std and serde features. It adds safe Extend and FromIterator partitioning implementations plus documentation; existing Pin-projection unsafe code is unchanged. It adds no dependency, build script, or ambient I/O."
+
 [[audits.find-msvc-tools]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -116,6 +122,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 delta = "0.14.9 -> 0.14.7"
 notes = "Reviewed the resolver-selected reverse delta. Unsafe implementation code is unchanged; the newer release only added deprecation and check-cfg build output that is absent from 0.14.7."
+
+[[audits.h2]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.4.16 -> 0.4.18"
+notes = "Reviewed the checksum-matched delta. It bounds small DATA-frame buffering with balanced release on consumption and stream cleanup, exempts the single end-of-stream frame, caps the HPACK encoder table at 4 KiB, and adds client/server budget setters. Dependencies, features, build behavior, unsafe code, and ambient authority are unchanged."
 
 [[audits.icu_collections]]
 who = "OpenAI Codex"
@@ -156,8 +168,8 @@ notes = "Reviewed the checksum-matched generated property tables. The build scri
 [[audits.icu_provider]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
-delta = "2.2.0 -> 2.3.0"
-notes = "Reviewed the checksum-matched provider delta. Segmented marker attributes remain validated, raw Box casts preserve transparent str layout, and no ambient capability or build behavior is added."
+delta = "2.2.0 -> 2.3.1"
+notes = "Reviewed the checksum-matched provider deltas through 2.3.1 with the resolved baked feature. Segmented marker attributes remain validated and raw Box casts preserve transparent str layout. The new cursor wrapper stops formatting after a failed trie prefix without changing successful lookup semantics or the existing trie-index unsafe invariant. No new unsafe code, build script, or ambient I/O is added; the zerovec update is audited separately."
 
 [[audits.io-uring]]
 who = "OpenAI Codex"
@@ -315,6 +327,18 @@ criteria = "safe-to-deploy"
 delta = "0.14.8 -> 0.14.9"
 notes = "Reviewed the checksum-matched certificate delta. BasicConstraints and CSR encoding is corrected to standards-compliant DER; no build script, unsafe code, FFI, or native behavior is added."
 
+[[audits.ref-cast]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.0.26 -> 1.0.27"
+notes = "Reviewed the checksum-matched delta. Runtime source and the build script are unchanged apart from the documentation version; only the paired proc-macro dependency and tests move. The existing build script reads Cargo variables, invokes the configured rustc with --version, and writes only to OUT_DIR. No unsafe or ambient-authority behavior changes; FileBelt leaves it lock-only behind unselected Schemars edges."
+
+[[audits.ref-cast-impl]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.0.26 -> 1.0.27"
+notes = "Reviewed the checksum-matched proc-macro delta. It only adds a Clippy lint allowance to the generated lifetime-check closure; representation checks and emitted unsafe casts are unchanged. It has no build script or ambient I/O and is lock-only behind unselected Schemars edges."
+
 [[audits.reqwest]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -332,6 +356,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 delta = "3.1.1 -> 3.1.2"
 notes = "Reviewed the checksum-matched delta with default features disabled. OAuth issuer validation is tightened, challenged responses are mapped explicitly, recursive SSE polling becomes an iterative loop, and FileBelt continues to use bounded model types only."
+
+[[audits.rmcp]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "3.1.2 -> 3.1.4"
+notes = "Reviewed the checksum-matched delta with default features disabled. The reachable model delta preserves elicitation property order and the JSON Schema dialect; FileBelt continues to use bounded model response types only. Feature-gated changes strengthen response correlation, initialization errors, OAuth callback validation, secret redaction, and request-state key handling. The unchanged conditional git-hooks build script is inert in registry and FileBelt dependency layouts; no unsafe code or new ambient authority is introduced."
 
 [[audits.ryu-js]]
 who = "OpenAI Codex"
@@ -522,11 +552,11 @@ notes = "Reviewed the checksum-matched trie delta. New query conveniences preser
 [[audits.zerovec]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
-delta = "0.11.6 -> 0.11.7"
-notes = "Reviewed the checksum-matched zero-copy delta. Box metadata reconstruction is provenance-preserving and checked arithmetic hardens owned variable vectors; no ambient capability is added."
+delta = "0.11.6 -> 0.11.8"
+notes = "Reviewed the checksum-matched zero-copy deltas through 0.11.8 with the resolved derive and yoke features. Box metadata reconstruction is provenance-preserving and checked arithmetic hardens owned variable vectors. Array ULE validation now rejects zero-length arrays and byte lengths not divisible by the array width before element validation, closing an invalid slice-cast path. No other runtime source, build behavior, or ambient capability changes; the derive update is audited separately."
 
 [[audits.zerovec-derive]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
-delta = "0.11.3 -> 0.11.4"
-notes = "Reviewed the checksum-matched proc-macro delta. Generated ULE conversion now validates exact sparse enum discriminants instead of a permissive range, with no unsafe or ambient capability in the macro crate."
+delta = "0.11.3 -> 0.11.6"
+notes = "Reviewed the checksum-matched proc-macro deltas through 0.11.6. Generated ULE conversion validates exact sparse enum discriminants and now checks every fixed-size element chunk instead of repeatedly checking the outer slice prefix. VarULE reconstruction creates a raw slice pointer instead of materializing an intermediate reference, preserving the input pointer and metadata until the final caller-validated DST cast. The macro crate has no build script or ambient I/O."

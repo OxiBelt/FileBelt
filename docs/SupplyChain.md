@@ -227,7 +227,7 @@ exception reaches a FileBelt container or another profile service.
 
 ## Phase 4 MCP dependency admission
 
-Phase 4 admits `rmcp@3.1.2` with default features disabled for bounded MCP
+Phase 4 admits `rmcp@3.1.4` with default features disabled for bounded MCP
 model decoding and `sigstore-verify@0.11.0` with default features disabled for
 offline runner-catalog verification. They are lockfile exact. The broker still
 owns HTTP transport, size/deadline enforcement, egress-gateway routing,

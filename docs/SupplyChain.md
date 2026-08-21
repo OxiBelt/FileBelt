@@ -36,7 +36,7 @@ launcher lock must remain dependency-free; adding a package requires a
 separate adapter-local admission review before its frozen install may run.
 
 Repository JavaScript and TypeScript tooling is also lockfile-pinned. The root
-uses exact `oxfmt` 0.63.0, `oxlint` 1.78.0, `oxlint-tsgolint` 7.0.2001, and
+uses exact `oxfmt` 0.64.0, `oxlint` 1.79.0, `oxlint-tsgolint` 7.0.2001, and
 TypeScript 6.0.3. Oxlint enables every one of tsgolint v7's 59 implemented
 type-aware rules as an error while compiler diagnostics remain in the separate
 `pnpm typecheck` lane. The local diagnostic-only `filebelt/pascal-case` rule
@@ -265,7 +265,7 @@ deterministic public-client generator; Phase 4 regeneration covers all MCP
 personal, administrative, intent/approval, OAuth, and data-grant schemas.
 Generated output is committed and drift checked.
 
-Phase 5 admits `officeparser@7.6.2` only through its browser `slim` entry point
+Phase 5 admits `officeparser@7.8.0` only through its browser `slim` entry point
 for the bounded local Office-to-Markdown proposal path. Its transitive
 `tesseract.js@7.0.0` postinstall remains disabled by the empty lifecycle-script
 allowlist and `pnpm --ignore-scripts`; FileBelt does not enable OCR, download

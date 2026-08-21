@@ -17,8 +17,8 @@
     "typecheck": "pnpm --recursive --if-present run typecheck"
   },
   "devDependencies": {
-    "oxfmt": "0.63.0",
-    "oxlint": "1.78.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "6.0.3"
   }

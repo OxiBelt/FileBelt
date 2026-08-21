@@ -74,7 +74,17 @@ The direct compiler remains on TypeScript 6 until an official
 FileBelt does not hide this gate behind a TypeScript 6 alias or broader peer
 exception.
 
-The browser packages use Vite `8.2.1` with TypeScript remaining at `6.0.3` and
+The reviewed replacement candidate `@hey-api/openapi-ts@0.99.0` is also
+deferred. With client bundling disabled, its generated SDK imports a
+`ClientMeta` export and an `Options` generic shape that the latest published
+external runtime, `@hey-api/client-fetch@0.13.1`, does not provide. FileBelt
+does not patch generated output, add a compatibility facade, or copy the MIT
+client implementation into the Apache UI tree to hide that incompatibility.
+The replacement may be reconsidered only when an exact stable generator and
+external runtime pair typecheck together, regenerate deterministically, and
+pass the existing capability and browser-client behavior suite.
+
+The browser packages use Vite `8.2.2` with TypeScript remaining at `6.0.3` and
 Fluent UI React Components `9.74.6`. Vite reaches Rolldown `1.2.4` and its
 optional platform bindings under MIT, plus Lightning CSS `1.33.0` and its
 optional platform bindings under MPL-2.0. These registry-integrity-pinned
@@ -101,8 +111,8 @@ path uses `nanoid/non-secure` with a fixed size rather than the React Native
 async custom generator affected by `GHSA-2v37-7h3g-55p8`; the patched release
 is still required because Node advisory admission fails closed. Version 3.3.18
 retains the reviewed MIT license and introduces no dependency, lifecycle
-script, native-code, or engine change. The Vite 8.2.1 graph retains
-`postcss@8.5.25` and the same non-secure entrypoint. Changing Vite, PostCSS, the
+script, native-code, or engine change. The Vite 8.2.2 graph retains
+`postcss@8.5.26` and the same non-secure entrypoint. Changing Vite, PostCSS, the
 Nano ID entrypoint, or its runtime reachability invalidates this review. Remove
 the override only when the exact locked graph remains outside the advisory
 range and the frozen install, license, audit, test, and build gates pass.
@@ -218,8 +228,24 @@ The immutable external integration inputs are:
 Changing one of these versions or digests requires a focused dependency
 review. OxiBelt review repeats source-revision, prerelease rationale, route
 behavior, architecture, SBOM, vulnerability, license, and notice checks.
+
+The compatible resolver candidate `quinn-proto@0.11.17` remains deferred
+pending upstream qualification. FileBelt retains the reviewed `0.11.16`
+identity until a replacement source delta passes the root test, fuzz, Cargo
+policy, and native image gates.
+
 FileBelt never copies from or builds the local reference checkout. PostgreSQL
 and Iggy helpers are not republished as FileBelt images.
+
+Dependabot [PR #26](https://github.com/OxiBelt/FileBelt/pull/26) proposes the
+Iggy Rust client `0.10.0`, but remains deferred. Its locked graph has 51
+dependencies without `safe-to-deploy` evidence and makes 59 exact prior-graph
+exemptions stale. It also removes the current `option-ext@0.2.0` MPL runtime
+edge, which changes the maintenance/tools image license, notice, source-offer,
+and SBOM contracts, while compatibility with the still-pinned Iggy `0.8.0`
+helper has not been demonstrated. A future qualification must test publish,
+outage retention, reconnect, fixed topology, and PostgreSQL fallback against
+that exact helper before changing either client or image evidence.
 
 The pinned Iggy helper alone receives its documented `SYS_NICE`, unlimited
 memlock, and seccomp exception. Image and Compose contract tests fail if that

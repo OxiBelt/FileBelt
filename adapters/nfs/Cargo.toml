@@ -16,7 +16,7 @@ resolver = "3"
 # This adapter-local client consumes only the Apache protocol schema over the
 # documented VFS process boundary. The Apache workspace has no dependency on
 # this LGPL package.
-blake3 = "=1.8.6"
+blake3 = "=1.8.7"
 filebelt-vfs-protocol = { version = "=0.1.0", path = "../../source/crates/filebelt-vfs-protocol" }
 nix = { version = "=0.31.3", features = ["fs", "socket", "uio", "user"] }
 prost = "=0.14.4"

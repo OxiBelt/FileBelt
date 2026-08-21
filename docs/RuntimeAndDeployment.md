@@ -247,10 +247,10 @@ ordinary image matrices from reacquiring the same inputs for every role, but
 it is not admission or release evidence; a full no-cache rebuild deliberately
 reacquires the closures. Exhausted retries, a missing host or target input,
 checksum failure, or an incomplete closure stop the build before any role
-archive is accepted. The temporary, exact `arrayref@0.3.9` ignored-yank policy
-is documented in [Supply chain](SupplyChain.md) and tracked by
-[OxiBelt/OxiBelt#154](https://github.com/OxiBelt/OxiBelt/issues/154); no registry
-mirror, unyank, Git source, or vendored fallback is part of this contract.
+archive is accepted. BLAKE3 `1.8.7` removes the former yanked `arrayref` edge;
+the checksum-bound source review and fail-closed regression policy are
+documented in [Supply chain](SupplyChain.md). No registry mirror, unyank, Git
+source, or vendored fallback is part of this contract.
 
 AMD64 and ARM64 run native behavior suites. Before an AMD64 build or native
 test, the FileBelt host checker verifies every `/proc/cpuinfo` processor and

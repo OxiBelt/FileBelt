@@ -125,33 +125,16 @@ audits as that evidence becomes available. `cargo audit`, `cargo deny check`,
 the exact Cargo lockfile, and the locked import set remain independent required
 controls; an exemption weakens none of those gates.
 
-A temporary yanked-release exception contains the compromised crates.io
-`arrayref` publisher path. BLAKE3 `1.8.6` continues to resolve `arrayref`
-`0.3.9` from the checksum-matched crates.io archive
-`76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb`.
-The root workspace and independently locked FTP/FTPS, NFS, and SMB adapter
-workspaces retain `yanked = "deny"`; each has one exact ignored-yank entry for
-`arrayref@0.3.9`. The exception expires on 2026-09-19 and is tracked by
-[OxiBelt/OxiBelt#154](https://github.com/OxiBelt/OxiBelt/issues/154). The policy
-test binds the version, checksum, sole BLAKE3 dependent, empty dependency list,
-affected workspace set, tracker, and expiry. It also rejects the incident's
-`proc-macro1` and `proc-macro-en` names. `arrayref` `0.3.10`, any other version,
-and any Git or mirror substitution remain unadmitted.
-
-The reviewed `arrayref` archive has a known generic soundness defect when a
-caller supplies a malicious custom `Index` implementation that returns a short
-slice. The root Cargo Vet policy accepts it only under
-`filebelt-constrained-deployment`: BLAKE3 uses the macros with standard arrays
-and slices, and FileBelt has no direct `arrayref` edge. Adapter graphs do not
-inherit that audit, so their independent Cargo Audit and Cargo Deny gates are
-paired with the repository policy test's exact dependency-path enforcement.
-The exception must be removed by its expiry or in the same change that adopts a
-separately authenticated and reviewed BLAKE3 or `arrayref` recovery. Extending
-it requires a new explicit review and updated tracker decision; builds never
-fall back to a branch, tag, unyank, mirror, or newer publication. Rollback may
-deploy only a retained, previously admitted image and evidence. Replacing this
-policy requires fresh locked-graph, Cargo Audit, Cargo Deny, Cargo Vet, license,
-and source review.
+BLAKE3 `1.8.7` removes the yanked `arrayref` edge from the root, FTP/FTPS, NFS,
+and SMB graphs. The checksum-matched source delta replaces the macros with
+checked, statically bounded slice-to-array conversions in portable and SIMD
+paths and adds no graph node or feature. Cargo Vet records that review, every
+affected lockfile binds checksum
+`6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae`,
+and each workspace retains `yanked = "deny"` without an ignored-yank entry.
+The policy test rejects `arrayref`, the incident's `proc-macro1` and
+`proc-macro-en` names, the retired exception, and any BLAKE3 version or checksum
+drift. Git, mirror, unyank, and latest-version fallback remain unadmitted.
 
 The fuzz-only graph pins `cargo-fuzz 0.13.2`, `libfuzzer-sys 0.4.13`, and the
 transitive `arbitrary 1.4.2`. Complete checksum-matched local audits admit the

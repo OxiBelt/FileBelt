@@ -313,7 +313,7 @@ from every workload except the runner controller's narrowly authorized Pod.
 | An AMD64 artifact omits the v3 build flags, lies about its baseline, or runs on an incompatible host | Schema-bound target CPU, plan-derived Rust/C/C++/linker flags, OCI/SBOM/receipt binding, exact GNU ISA-needed note validation, every-processor host check, and all-node Kubernetes preflight | Image-plan, ELF-note, evidence, host-fixture, and Kubernetes-preflight tests |
 | Retained OxiBelt AMD64 evidence is forged, replaced, or detached from the pinned web base and multi-platform index | Offline GitHub/Sigstore verification against a verifier-pinned retained trusted root and raw manifest subjects; admission schema contains no root selector; exact certificate/OIDC/source/runner policy; direct Dockerfile binding; retained bundle hashes; and exact index, child, source, role, platform, and target-CPU predicates | Root-replacement, schema-downgrade, offline-signature, forged-signature, Dockerfile-drift, workflow-gate, and bundle-tamper tests |
 | Cargo Vet acceptance is mistaken for a source audit or silently broadened | Exact locked-version exemptions only; no trusted publishers or ranges; independent audit, deny, lockfile, and import-lock gates | Cargo Vet policy tests and `cargo vet --locked` |
-| A compromised crate publisher yanks the reviewed release or publishes a malicious replacement | Exact checksum-locked `arrayref` `0.3.9` registry archive; global yank denial with one exact, expiring ignored-yank entry per affected workspace; sole-dependent and forbidden-dependency assertions; constrained BLAKE3-only Cargo Vet policy; no other version, Git source, unyank, mirror, or latest fallback | Cargo Vet policy tests, `cargo deny check`, `cargo vet --locked`, locked metadata, and offline image builds |
+| A compromised crate publisher yanks a release or publishes a malicious replacement | BLAKE3 `1.8.7` removes the former yanked `arrayref` edge; exact checksum locks, global yank denial without ignored-yank entries, forbidden-dependency assertions, and Cargo Vet source-delta evidence; no Git source, unyank, mirror, or latest fallback | Cargo Vet policy tests, `cargo deny check`, `cargo vet --locked`, locked metadata, and offline image builds |
 | Pull request or manual run publishes an untrusted image | Read-only validation workflows; tag-only promotion job consumes validated archives, verifies an authorized signed tag, attests and reads back immutable digests | Workflow-integrity and release dry-run tests |
 | Promotion rebuilds or moves a tag after validation | Promotion cannot build; it assembles validated per-platform archives, publishes only version tags, verifies manifest/chart digests, and emits attestations | Release artifact/digest tests |
 | Apache core imports an adapter implementation or a same-name local, registry, or Git package substitutes a reviewed first-party identity | Manifest-bound metadata and locked-tree identity enforcement; workspace-inherited dependency resolution; generic protocol process boundary | Dependency-boundary identity and adapter-path regression tests |
@@ -394,14 +394,10 @@ Dependency scans, attestations, and signed source mappings reduce known
 supply-chain risk but do not eliminate unknown vulnerabilities. Cargo Vet exemptions record
 acceptance of the current locked graph rather than a complete source audit, so
 their review debt remains until equivalent audit evidence replaces them.
-The exact checksum-matched `arrayref` `0.3.9` registry archive contains the
-observed publisher incident but retains a generic soundness defect for
-malicious custom `Index` implementations. FileBelt accepts only BLAKE3's
-standard array/slice call path. That reachability constraint and the temporary
-yanked-release exception, expiring 2026-09-19 and tracked by
-[OxiBelt/OxiBelt#154](https://github.com/OxiBelt/OxiBelt/issues/154), remain
-residual risks until a separately authenticated and reviewed replacement is
-adopted.
+The checksum-matched BLAKE3 `1.8.7` source delta removes the former `arrayref`
+publisher and soundness exposure. The remaining native C and SIMD build inputs
+still require the normal architecture-specific image, ELF, and runtime gates;
+the source review does not replace those release qualifications.
 
 The threat model must be extended before enabling a second issuer, another
 tenant per deployment, a service mesh, another adapter, mount writes, media, MCP

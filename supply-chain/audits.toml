@@ -21,12 +21,6 @@ criteria = "safe-to-deploy"
 version = "1.9.2"
 notes = "Reviewed complete checksum-matched source and the default feature. It has no build script or ambient I/O. Its raw-pointer debt and reference-count paths preserve ownership through the sealed standard Arc/Rc implementations; FileBelt reaches it only through Yrs using standard Arc values, not a custom unsafe RefCnt implementation. Contention can affect availability but does not provide an untrusted memory-safety or authority boundary bypass."
 
-[[audits.arrayref]]
-who = "OpenAI Codex"
-criteria = "filebelt-constrained-deployment"
-version = "0.3.9"
-notes = "Reviewed the complete checksum-matched crates.io 0.3.9 archive (76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb). It has no build script, runtime dependencies, or ambient I/O. Its public macros are unsound with a malicious custom Index implementation that returns a short slice; BLAKE3 reaches them only with standard arrays and slices, and no FileBelt package imports arrayref directly. The exact yanked release is accepted temporarily through 2026-09-19 under https://github.com/OxiBelt/OxiBelt/issues/154. This does not certify generic deployment."
-
 [[audits.async-lock]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"
@@ -38,6 +32,12 @@ who = "OpenAI Codex"
 criteria = "safe-to-deploy"
 delta = "0.1.91 -> 0.1.92"
 notes = "Reviewed the checksum-matched proc-macro delta. It only stops attaching must_use to transformed default async trait methods, adds no build script or unsafe code, and changes no runtime authority."
+
+[[audits.blake3]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "1.8.6 -> 1.8.7"
+notes = "Reviewed the checksum-matched crates.io delta (6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae). It removes arrayref and replaces its macros with checked, statically bounded slice-to-array conversions in the portable and SIMD paths. The enabled features, build-script and native C/SIMD inputs, platform dispatch, and remaining dependency graph do not broaden; no new ambient I/O or unsafe invariant is introduced."
 
 [[audits.cc]]
 who = "OpenAI Codex"

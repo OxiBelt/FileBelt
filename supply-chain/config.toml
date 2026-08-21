@@ -25,10 +25,6 @@ url = "https://raw.githubusercontent.com/OxiBelt/OxiBelt/main/supply-chain/audit
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-[policy."blake3:1.8.6"]
-dependency-criteria = { arrayref = "filebelt-constrained-deployment" }
-notes = "BLAKE3 uses arrayref only with standard arrays and slices, excluding the custom Index implementation required to reach arrayref's known soundness defect."
-
 [policy."cmpv2:0.2.0"]
 dependency-criteria = { crmf = "filebelt-constrained-deployment" }
 notes = "The CRMF encoding surface with the known GeneralName recursion is unreachable from FileBelt's no-TSA controller path."

@@ -6,14 +6,12 @@ all-features = true
 [advisories]
 unmaintained = "workspace"
 yanked = "deny"
-ignore = [
-  { crate = "arrayref@0.3.9", reason = "Temporary through 2026-09-19 under https://github.com/OxiBelt/OxiBelt/issues/154; remove after separately authenticated upstream recovery." },
-]
+ignore = []
 
 [licenses]
 confidence-threshold = 0.93
 unused-allowed-license = "deny"
-allow = ["Apache-2.0", "BSD-2-Clause", "MIT", "MIT-0", "Unicode-3.0"]
+allow = ["Apache-2.0", "MIT", "MIT-0", "Unicode-3.0"]
 exceptions = [{ crate = "filebelt-smb-bridge@0.1.0", allow = ["GPL-3.0-or-later"] }]
 
 [bans]

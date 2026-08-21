@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 import re
 import tomllib
 import unittest
@@ -16,12 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXACT_VERSION = re.compile(
     r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
 )
-ARRAYREF_CHECKSUM = (
-    "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+BLAKE3_VERSION = "1.8.7"
+BLAKE3_CHECKSUM = (
+    "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
 )
-ARRAYREF_CRATE = "arrayref@0.3.9"
-ARRAYREF_EXPIRY = date(2026, 9, 19)
-ARRAYREF_TRACKER = "https://github.com/OxiBelt/OxiBelt/issues/154"
 CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 
 
@@ -40,30 +37,28 @@ def cargo_workspaces() -> tuple[Path, ...]:
 
 
 class CargoVetPolicyTests(unittest.TestCase):
-    def test_arrayref_yank_exception_is_exact_expiring_and_constrained(self) -> None:
+    def test_arrayref_recovery_is_exact_and_fail_closed(self) -> None:
         config = load_toml("supply-chain/config.toml")
         audits = load_toml("supply-chain/audits.toml")
 
-        affected_workspaces: set[Path] = set()
+        affected_workspaces = {
+            Path("."),
+            Path("adapters/ftp-ftps"),
+            Path("adapters/nfs"),
+            Path("adapters/smb"),
+        }
         for workspace in cargo_workspaces():
             with self.subTest(workspace=str(workspace)):
                 cargo_lock = load_toml(str(workspace / "Cargo.lock"))
-                arrayref_packages = [
-                    package
-                    for package in cargo_lock.get("package", [])
-                    if package["name"] == "arrayref"
-                ]
+                packages = cargo_lock.get("package", [])
+                package_names = {package["name"] for package in packages}
                 cargo_manifest = load_toml(str(workspace / "Cargo.toml"))
                 deny = load_toml(str(workspace / "deny.toml"))
-                ignored_crates = [
+                ignored_arrayref = [
                     item
                     for item in deny["advisories"].get("ignore", [])
                     if isinstance(item, dict)
-                ]
-                ignored_yanks = [
-                    item
-                    for item in ignored_crates
-                    if item.get("crate") == ARRAYREF_CRATE
+                    and item.get("crate", "").startswith("arrayref@")
                 ]
 
                 self.assertEqual(deny["advisories"]["yanked"], "deny")
@@ -73,66 +68,43 @@ class CargoVetPolicyTests(unittest.TestCase):
                     cargo_manifest.get("patch", {}).get("crates-io", {}),
                 )
                 self.assertNotIn("allow-git", deny["sources"])
-
-                if not arrayref_packages:
-                    self.assertEqual(ignored_crates, [])
-                    continue
-
-                affected_workspaces.add(workspace)
-                self.assertEqual(len(arrayref_packages), 1)
-                self.assertEqual(arrayref_packages[0]["version"], "0.3.9")
-                self.assertEqual(arrayref_packages[0]["source"], CRATES_IO_SOURCE)
-                self.assertEqual(arrayref_packages[0]["checksum"], ARRAYREF_CHECKSUM)
-                self.assertNotIn("dependencies", arrayref_packages[0])
                 self.assertFalse(
-                    {"proc-macro1", "proc-macro-en"}
-                    & {package["name"] for package in cargo_lock.get("package", [])}
+                    {"arrayref", "proc-macro1", "proc-macro-en"} & package_names
                 )
+                self.assertEqual(ignored_arrayref, [])
 
-                dependents = {
-                    (package["name"], package["version"])
-                    for package in cargo_lock.get("package", [])
-                    if "arrayref" in package.get("dependencies", [])
-                }
-                self.assertEqual(dependents, {("blake3", "1.8.6")})
+                blake3_packages = [
+                    package for package in packages if package["name"] == "blake3"
+                ]
+                if workspace in affected_workspaces:
+                    self.assertEqual(len(blake3_packages), 1)
+                    self.assertEqual(blake3_packages[0]["version"], BLAKE3_VERSION)
+                    self.assertEqual(blake3_packages[0]["source"], CRATES_IO_SOURCE)
+                    self.assertEqual(blake3_packages[0]["checksum"], BLAKE3_CHECKSUM)
+                    self.assertNotIn(
+                        "arrayref", blake3_packages[0].get("dependencies", [])
+                    )
+                else:
+                    self.assertEqual(blake3_packages, [])
 
-                self.assertEqual(len(ignored_yanks), 1)
-                self.assertEqual(ignored_crates, ignored_yanks)
-                reason = ignored_yanks[0].get("reason")
-                self.assertIsInstance(reason, str)
-                self.assertIn(ARRAYREF_TRACKER, reason)
-                self.assertIn(ARRAYREF_EXPIRY.isoformat(), reason)
-
-        self.assertEqual(
-            affected_workspaces,
-            {
-                Path("."),
-                Path("adapters/ftp-ftps"),
-                Path("adapters/nfs"),
-                Path("adapters/smb"),
-            },
-        )
-        self.assertLessEqual(
-            date.today(),
-            ARRAYREF_EXPIRY,
-            f"temporary {ARRAYREF_CRATE} exception expired; resolve {ARRAYREF_TRACKER}",
-        )
         self.assertNotIn("arrayref:0.3.9", config["policy"])
+        self.assertNotIn("blake3:1.8.6", config["policy"])
+        self.assertNotIn("arrayref", audits["audits"])
+        self.assertNotIn("arrayref", config.get("exemptions", {}))
         self.assertEqual(
-            config["policy"]["blake3:1.8.6"]["dependency-criteria"],
-            {"arrayref": "filebelt-constrained-deployment"},
+            config.get("exemptions", {}).get("blake3"),
+            [{"version": "1.8.6", "criteria": "safe-to-deploy"}],
         )
 
-        arrayref_audits = audits["audits"]["arrayref"]
-        self.assertEqual(len(arrayref_audits), 1)
-        self.assertEqual(arrayref_audits[0]["who"], "OpenAI Codex")
-        self.assertEqual(
-            arrayref_audits[0]["criteria"],
-            "filebelt-constrained-deployment",
+        blake3_audits = audits["audits"]["blake3"]
+        self.assertTrue(
+            any(
+                audit.get("criteria") == "safe-to-deploy"
+                and audit.get("delta") == "1.8.6 -> 1.8.7"
+                and BLAKE3_CHECKSUM in audit.get("notes", "")
+                for audit in blake3_audits
+            )
         )
-        self.assertEqual(arrayref_audits[0]["version"], "0.3.9")
-        self.assertIn(ARRAYREF_CHECKSUM, arrayref_audits[0]["notes"])
-        self.assertIn(ARRAYREF_TRACKER, arrayref_audits[0]["notes"])
 
     def test_opentelemetry_graph_is_coordinated_and_patched(self) -> None:
         cargo_lock = load_toml("Cargo.lock")

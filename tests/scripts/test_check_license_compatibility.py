@@ -27,9 +27,12 @@ WORKSPACES = {workspace.id: workspace for workspace in POLICY.workspaces}
 CHECK_COMMAND = "python3 tests/scripts/check-license-compatibility.py"
 FETCH_LOOP = (
     "for manifest in Cargo.toml "
-    "adapters/{smb,ftp-ftps,onlyoffice,git,nfs,transcode}/Cargo.toml; do"
+    "adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do"
 )
 FETCH_COMMAND = 'cargo fetch --locked --manifest-path "$manifest"'
+ADAPTER_WORKSPACE_MATRIX = (
+    "adapter: [smb, ftp-ftps, onlyoffice, git, nfs, wireguard, transcode]"
+)
 
 
 def workflow_job_run_lines(source: str) -> dict[str, tuple[str, ...]]:
@@ -190,6 +193,7 @@ class LicenseCompatibilityTests(unittest.TestCase):
                 "git",
                 "directory-repository",
                 "nfs",
+                "wireguard",
                 "transcode",
             },
         )
@@ -197,7 +201,7 @@ class LicenseCompatibilityTests(unittest.TestCase):
             POLICY.relationship_types,
             {"linked", "copied", "separate-executable", "external", "build-only"},
         )
-        self.assertEqual(len(POLICY.artifacts), 7)
+        self.assertEqual(len(POLICY.artifacts), 8)
         CHECKER.validate_repository_layout(REPO_ROOT, POLICY)
 
     def test_rejects_unknown_workspace_relationship_and_missing_component(self) -> None:
@@ -205,7 +209,7 @@ class LicenseCompatibilityTests(unittest.TestCase):
         unknown_workspace = source.replace(
             'id = "transcode"\nmanifest = ', 'id = "unknown"\nmanifest = ', 1
         )
-        with self.assertRaisesRegex(CHECKER.CompatibilityError, "all seven adapter workspaces"):
+        with self.assertRaisesRegex(CHECKER.CompatibilityError, "all eight adapter workspaces"):
             self.load_mutated_policy(unknown_workspace)
 
         unknown_relationship = source.replace(
@@ -529,6 +533,10 @@ source_required = true
             }
             <= checked_jobs
         )
+
+    def test_adapter_workspace_matrix_explicitly_includes_wireguard(self) -> None:
+        workflow = REPO_ROOT / ".github/workflows/adapter-license-qualification.yml"
+        self.assertIn(ADAPTER_WORKSPACE_MATRIX, workflow.read_text(encoding="utf-8"))
 
     def test_workflow_run_parser_ignores_names_and_comments(self) -> None:
         jobs = workflow_job_run_lines(

@@ -32,7 +32,7 @@ jobs:
         run: tests/scripts/prepare-adapter-image-plan.sh --channel release --output artifacts/adapter-image-plan.json
       - name: Prime exact locked dependency sources
         run: |
-          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,transcode}/Cargo.toml; do
+          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do
             cargo fetch --locked --manifest-path "$manifest"
           done
       - name: Enforce pre-image gates without publishing

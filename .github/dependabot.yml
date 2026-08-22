@@ -65,6 +65,13 @@ updates:
     groups:
       transcode-adapter:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: "/adapters/wireguard"
+    schedule:
+      interval: weekly
+    groups:
+      wireguard-adapter:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: "/"
     schedule:
@@ -116,6 +123,13 @@ updates:
         patterns: ["*"]
   - package-ecosystem: docker
     directory: "/adapters/transcode"
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/adapters/wireguard"
     schedule:
       interval: weekly
     groups:

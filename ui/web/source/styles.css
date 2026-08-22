@@ -104,6 +104,11 @@ select:focus-visible,
   min-height: 100dvh;
 }
 
+.fb-app-shell.is-development {
+  grid-template-areas: "topbar topbar" "development development" "navigation main";
+  grid-template-rows: 64px auto minmax(0, 1fr);
+}
+
 .fb-skip-link {
   background: var(--fb-accent);
   color: white;
@@ -432,6 +437,20 @@ select:focus-visible,
 
 .fb-file-row {
   cursor: default;
+}
+
+.fb-interactive-button:not(:disabled) {
+  cursor: pointer;
+}
+
+.fb-development-banner {
+  background: var(--colorPaletteYellowBackground2);
+  border-block-end: 1px solid var(--colorPaletteYellowBorder2);
+  color: var(--colorNeutralForeground1);
+  font-size: var(--fontSizeBase200);
+  grid-area: development;
+  padding: 0.35rem 1rem;
+  text-align: center;
 }
 
 .fb-file-row:hover td {
@@ -807,6 +826,16 @@ select:focus-visible,
   padding: 8px 12px;
 }
 
+.fb-batch-error {
+  align-items: flex-start;
+}
+
+.fb-batch-error ul {
+  margin-block: 8px 0;
+  overflow-wrap: anywhere;
+  padding-inline-start: 22px;
+}
+
 .fb-working {
   align-items: center;
   background: var(--fb-bg-surface-1);
@@ -852,6 +881,162 @@ select:focus-visible,
 
 .fb-action-menu > button {
   justify-content: flex-start;
+}
+
+.fb-acl-dialog {
+  max-height: min(900px, calc(100dvh - 32px));
+  max-width: min(1040px, calc(100vw - 32px));
+  width: 100%;
+}
+
+.fb-acl-title {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.fb-acl-content,
+.fb-acl-edit,
+.fb-acl-principals,
+.fb-acl-principal,
+.fb-acl-draft {
+  display: grid;
+  gap: 14px;
+}
+
+.fb-acl-content {
+  max-height: calc(100dvh - 190px);
+  overflow: auto;
+  padding-inline-end: 6px;
+}
+
+.fb-acl-content h2,
+.fb-acl-content h3,
+.fb-acl-content p {
+  margin-block: 0;
+}
+
+.fb-acl-principal {
+  border: 1px solid var(--fb-border-subtle);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.fb-acl-principal > header {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.fb-acl-table-scroll {
+  overflow-x: auto;
+}
+
+.fb-acl-table {
+  border-collapse: collapse;
+  min-width: 620px;
+  width: 100%;
+}
+
+.fb-acl-table th,
+.fb-acl-table td {
+  border-top: 1px solid var(--fb-border-subtle);
+  padding: 8px;
+  text-align: start;
+}
+
+.fb-acl-table th {
+  color: var(--fb-text-muted);
+  font-size: 12px;
+}
+
+.fb-acl-edit,
+.fb-acl-edit fieldset {
+  border: 1px solid var(--fb-border-subtle);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.fb-acl-edit fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+}
+
+.fb-acl-edit legend {
+  font-weight: 650;
+  padding-inline: 5px;
+}
+
+.fb-acl-subject,
+.fb-acl-draft-row,
+.fb-acl-add-rule {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+}
+
+.fb-acl-subject {
+  grid-template-columns: minmax(140px, 0.4fr) minmax(220px, 1fr);
+}
+
+.fb-acl-draft-row {
+  grid-template-columns: minmax(190px, 1fr) minmax(120px, 0.45fr) minmax(180px, 0.7fr) auto;
+}
+
+.fb-acl-add-rule {
+  grid-template-columns: minmax(220px, 1fr) auto;
+}
+
+.fb-acl-subject label,
+.fb-acl-presets > label,
+.fb-acl-draft-row label,
+.fb-acl-add-rule label {
+  display: grid;
+  gap: 6px;
+}
+
+.fb-acl-edit input,
+.fb-acl-edit select {
+  background: var(--fb-bg-surface-1);
+  border: 1px solid var(--fb-border-subtle);
+  border-radius: 4px;
+  color: var(--fb-text-primary);
+  min-height: 40px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.fb-acl-presets > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fb-acl-notice {
+  background: color-mix(in srgb, var(--fb-accent) 10%, var(--fb-bg-surface-1));
+  border: 1px solid var(--fb-accent);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+@media (max-width: 680px) {
+  .fb-acl-dialog {
+    max-height: calc(100dvh - 16px);
+    max-width: calc(100vw - 16px);
+  }
+
+  .fb-acl-content {
+    max-height: calc(100dvh - 170px);
+  }
+
+  .fb-acl-subject,
+  .fb-acl-draft-row,
+  .fb-acl-add-rule {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fb-sr-only {
@@ -1257,6 +1442,11 @@ select:focus-visible,
   .fb-app-shell {
     grid-template-areas: "topbar" "main";
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fb-app-shell.is-development {
+    grid-template-areas: "topbar" "development" "main";
+    grid-template-rows: 64px auto minmax(0, 1fr);
   }
 
   .fb-topbar {

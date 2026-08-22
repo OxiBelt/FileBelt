@@ -5,6 +5,46 @@ import { describe, expect, it } from "vitest";
 import { MockFileBeltClient, VersionConflictError } from "./client.js";
 
 describe("MockFileBeltClient", () => {
+  it("returns one ordered outcome per trash and restore target after a mixed failure", async () => {
+    const Client = new MockFileBeltClient();
+    const Initial = await Client.getWorkspace();
+    const First = Initial.Entries[0];
+    const Second = Initial.Entries[1];
+    const MissingId = "00000000-0000-4000-8000-000000009999";
+    expect(First).toBeDefined();
+    expect(Second).toBeDefined();
+    if (First === undefined || Second === undefined) return;
+
+    const Trash = await Client.trashEntries([First.Id, MissingId, Second.Id]);
+    expect(Trash).toEqual([
+      { EntryId: First.Id, Kind: "success" },
+      {
+        EntryId: MissingId,
+        Error: {
+          Code: "node.unavailable",
+          Detail: null,
+          Message: "The selected resource is unavailable.",
+          Status: 404,
+        },
+        Kind: "failure",
+      },
+      { EntryId: Second.Id, Kind: "success" },
+    ]);
+    let Current = await Client.getWorkspace();
+    expect(Current.Entries.find(({ Id }) => Id === First.Id)?.Trashed).toBe(true);
+    expect(Current.Entries.find(({ Id }) => Id === Second.Id)?.Trashed).toBe(true);
+
+    const Restore = await Client.restoreEntries([First.Id, MissingId, Second.Id]);
+    expect(Restore.map(({ EntryId, Kind }) => ({ EntryId, Kind }))).toEqual([
+      { EntryId: First.Id, Kind: "success" },
+      { EntryId: MissingId, Kind: "failure" },
+      { EntryId: Second.Id, Kind: "success" },
+    ]);
+    Current = await Client.getWorkspace();
+    expect(Current.Entries.find(({ Id }) => Id === First.Id)?.Trashed).toBe(false);
+    expect(Current.Entries.find(({ Id }) => Id === Second.Id)?.Trashed).toBe(false);
+  });
+
   it("exercises trash, restore, upload, and share workflows through the API boundary", async () => {
     const Client = new MockFileBeltClient();
     const Initial = await Client.getWorkspace();

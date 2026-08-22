@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AuthenticationRequiredError } from "./client.js";
+import { AclConflictError, AuthenticationRequiredError } from "./client.js";
 import type { components } from "./generated/openapi.js";
 import { HttpFileBeltClient } from "./http-client.js";
 
@@ -11,6 +11,7 @@ const RootId = "00000000-0000-4000-8000-000000000002";
 const FirstNodeId = "00000000-0000-4000-8000-000000000003";
 const SecondNodeId = "00000000-0000-4000-8000-000000000004";
 const PrincipalId = "00000000-0000-4000-8000-000000000005";
+const GroupId = "00000000-0000-4000-8000-000000000016";
 const UploadId = "00000000-0000-4000-8000-000000000006";
 const PayloadId = "00000000-0000-4000-8000-000000000007";
 const GrantId = "00000000-0000-4000-8000-000000000008";
@@ -85,6 +86,17 @@ function SymlinkNode(): components["schemas"]["Node"] {
   };
 }
 
+function DirectoryNode(Id: string, Name: string): components["schemas"]["Node"] {
+  return {
+    ...Node(Id, Name),
+    head_media_type: null,
+    head_version_id: null,
+    kind: "directory",
+    size_bytes: null,
+    version_ordinal: null,
+  };
+}
+
 function DirectShare(): components["schemas"]["DirectShare"] {
   return {
     created_at: "2026-08-06T12:00:00Z",
@@ -129,7 +141,11 @@ class ContractServer {
       });
     }
     if (Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}` && HttpRequest.method === "GET")
-      return Json(Node(FirstNodeId, "File one.txt"), 200, { ETag: '"node-attribute-2"' });
+      return Json(
+        this.#Nodes.find(({ id: Id }) => Id === FirstNodeId) ?? Node(FirstNodeId, "File one.txt"),
+        200,
+        { ETag: '"node-attribute-2"' },
+      );
     if (
       Path === `/api/v1/drives/${DriveId}/nodes/${RootId}/children` &&
       HttpRequest.method === "GET"
@@ -155,6 +171,16 @@ class ContractServer {
         200,
         { ETag: '"preferences-6"' },
       );
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/acl` &&
+      HttpRequest.method === "GET"
+    )
+      return Json(AclCollection(), 200, { ETag: '"acl-7"' });
+    if (
+      Path === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/acl` &&
+      HttpRequest.method === "PUT"
+    )
+      return Json(AclCollection(), 200, { ETag: '"acl-8"' });
     if (
       Path ===
         `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/versions/${FirstVersionId}/compare/${SecondVersionId}` &&
@@ -276,6 +302,50 @@ class ContractServer {
 }
 
 describe("HttpFileBeltClient", () => {
+  it("uploads to a selected nested directory using its immutable routing record", async () => {
+    const NestedDirectory = DirectoryNode(FirstNodeId, "Nested");
+    const Server = new ContractServer([NestedDirectory]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+    await Client.getWorkspace(undefined, { DriveId, Kind: "folder", NodeId: null });
+
+    await Client.upload([{ Data: new Blob(["data"]), Name: "nested.txt", Size: 4 }], {
+      DriveId,
+      ParentId: FirstNodeId,
+    });
+
+    const Allocation = FindRequest(Server.Requests, "POST", `/api/v1/drives/${DriveId}/uploads`);
+    expect(await Allocation.clone().json()).toMatchObject({
+      expected_parent_generation: NestedDirectory.namespace_generation,
+      parent_id: FirstNodeId,
+    });
+  });
+
+  it("loads only root children for ordinary drive browsing and never walks nested directories", async () => {
+    const NestedDirectory = DirectoryNode(FirstNodeId, "Nested");
+    const Server = new ContractServer([NestedDirectory]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+
+    const Workspace = await Client.getWorkspace(undefined, {
+      DriveId,
+      Kind: "folder",
+      NodeId: null,
+    });
+
+    expect(Workspace.Entries.map(({ Id }) => Id)).toEqual([FirstNodeId]);
+    expect(
+      Server.Requests.some(
+        (Request) =>
+          new URL(Request.url).pathname ===
+          `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/children`,
+      ),
+    ).toBe(false);
+    expect(RequestPaths(Server.Requests, "GET")).not.toContain(`/api/v1/drives/${DriveId}/trash`);
+    expect(RequestPaths(Server.Requests, "GET")).not.toContain("/api/v1/shared");
+    expect(RequestPaths(Server.Requests, "GET").some((Path) => Path.endsWith("/versions"))).toBe(
+      false,
+    );
+  });
+
   it("uses generated API routes, the fresh root generation, and narrow capability transports", async () => {
     const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
     const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
@@ -349,6 +419,54 @@ describe("HttpFileBeltClient", () => {
       `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/shares/${PrincipalId}`,
       `/api/v1/drives/${DriveId}/nodes/${SecondNodeId}/shares/${PrincipalId}`,
     ]);
+  });
+
+  it("continues trash and restore batches after a failure and preserves problem detail per ID", async () => {
+    const Server = new ContractServer([
+      Node(FirstNodeId, "File one.txt"),
+      Node(SecondNodeId, "File two.txt"),
+    ]);
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
+      const Path = new URL(HttpRequest.url).pathname;
+      const IsEntryMutation = Path.endsWith("/trash") || Path.endsWith("/restore");
+      if (HttpRequest.method === "POST" && IsEntryMutation) {
+        if (Path.includes(FirstNodeId))
+          return Json(
+            {
+              code: "node.generation_conflict",
+              detail: "Expected namespace generation 4, but found 5.",
+              status: 409,
+              title: "The item changed",
+            },
+            409,
+          );
+        return new Response(null, { status: 204 });
+      }
+      return Server.fetch(HttpRequest);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+
+    for (const Mutate of [
+      async (EntryIds: readonly string[]) => Client.trashEntries(EntryIds),
+      async (EntryIds: readonly string[]) => Client.restoreEntries(EntryIds),
+    ]) {
+      const Outcomes = await Mutate([FirstNodeId, SecondNodeId]);
+      expect(Outcomes).toEqual([
+        {
+          EntryId: FirstNodeId,
+          Error: {
+            Code: "node.generation_conflict",
+            Detail: "Expected namespace generation 4, but found 5.",
+            Message: "The item changed",
+            Status: 409,
+          },
+          Kind: "failure",
+        },
+        { EntryId: SecondNodeId, Kind: "success" },
+      ]);
+    }
   });
 
   it("converts a session 401 into an explicit authentication-required signal", async () => {
@@ -584,6 +702,70 @@ describe("HttpFileBeltClient", () => {
     expect(await PolicyPatch.clone().json()).toEqual({ policy: "binary" });
   });
 
+  it("round-trips ACL provenance and fences exact replacement with the GET ETag", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    const Client = new HttpFileBeltClient(Server.fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+
+    const Current = await Client.getAcl(FirstNodeId);
+    expect(Current).toMatchObject({
+      Etag: '"acl-7"',
+      Value: {
+        Entries: [
+          {
+            GroupId,
+            PrincipalKind: "group",
+            ReadOnly: true,
+            Source: "share",
+            VerifiedEmail: null,
+          },
+        ],
+      },
+    });
+    await Client.replaceAcl(
+      FirstNodeId,
+      Current.Etag,
+      { GroupId, Kind: "group", VerifiedEmail: null },
+      [{ Action: "TRAVERSE", Effect: "deny", Inheritance: "children" }],
+    );
+
+    const Request = FindRequest(
+      Server.Requests,
+      "PUT",
+      `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/acl`,
+    );
+    expect(Request.headers.get("if-match")).toBe('"acl-7"');
+    expect(Request.headers.get("x-filebelt-csrf")).toBe(Session.csrf_token);
+    expect(await Request.clone().json()).toEqual({
+      entries: [{ action: "TRAVERSE", effect: "deny", inheritance: "children" }],
+      principal: { group_id: GroupId, kind: "group", verified_email: null },
+    });
+  });
+
+  it("maps a stale ACL replacement to a draft-preserving conflict signal", async () => {
+    const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
+    const Fetch: typeof fetch = async (Input, Init) => {
+      const HttpRequest = Input instanceof Request ? Input : new Request(Input, Init);
+      if (
+        HttpRequest.method === "PUT" &&
+        new URL(HttpRequest.url).pathname === `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/acl`
+      )
+        return Json({ code: "acl.stale", status: 409, title: "ACL changed" }, 409);
+      return Server.fetch(HttpRequest);
+    };
+    const Client = new HttpFileBeltClient(Fetch, "https://filebelt.localhost");
+    await Client.getWorkspace();
+
+    await expect(
+      Client.replaceAcl(
+        FirstNodeId,
+        '"acl-6"',
+        { GroupId: null, Kind: "user", VerifiedEmail: "avery@example.test" },
+        [],
+      ),
+    ).rejects.toBeInstanceOf(AclConflictError);
+  });
+
   it("preserves the revision admission problem for retry guidance", async () => {
     const Server = new ContractServer([Node(FirstNodeId, "File one.txt")]);
     const Fetch: typeof fetch = async (Input, Init) => {
@@ -687,6 +869,53 @@ function FileVersion(NodeId: string, Id: string): components["schemas"]["FileVer
     restored_from_version_id: null,
     revision_backend: "git_sha256",
     size_bytes: 4,
+  };
+}
+
+function AclCollection(): components["schemas"]["AclCollection"] {
+  return {
+    entries: [
+      {
+        action: "TRAVERSE",
+        display_name: "Research",
+        effect: "allow",
+        group_id: GroupId,
+        inheritance: "self_and_descendants",
+        principal_id: PrincipalId,
+        principal_kind: "group",
+        read_only: true,
+        source: "share",
+        verified_email: null,
+      },
+    ],
+    supported_actions: [
+      "READ_METADATA",
+      "LIST_CHILDREN",
+      "READ_CONTENT",
+      "CREATE_CHILD",
+      "WRITE_CONTENT",
+      "CREATE_VERSION",
+      "RENAME",
+      "MOVE",
+      "DELETE",
+      "RESTORE",
+      "SET_ATTRIBUTES",
+      "SHARE",
+      "MANAGE_ACL",
+      "MANAGE_DRIVE",
+      "TRANSCODE",
+      "USE_EXTERNAL_EDITOR",
+      "COMMENT",
+      "REVIEW",
+      "USE_MCP",
+      "MOUNT",
+      "EXPORT",
+      "TRAVERSE",
+      "READ_REPOSITORY",
+      "WRITE_REPOSITORY",
+      "MANAGE_REPOSITORY",
+      "BYPASS_REPOSITORY_RULES",
+    ],
   };
 }
 

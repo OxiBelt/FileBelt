@@ -9,13 +9,18 @@ describe("Markdown collaboration transport", () => {
     const ServerDocument = new Y.Doc();
     ServerDocument.getText("source").insert(0, "# Durable source\n");
     const Snapshot = Y.encodeStateAsUpdate(ServerDocument);
+    let SessionReference: MarkdownRealtimeSession | undefined;
     const Socket = new FakeWebSocket((Payload) => {
       const FrameNumber = Math.floor((Payload[0] ?? 0) / 8);
       if (FrameNumber === 1)
         Socket.Receive(
           Frame(3, Message([Unsigned(2, 0), Unsigned(3, 1), Bytes(4, Snapshot), Unsigned(5, 1)])),
         );
-      if (FrameNumber === 11)
+      if (FrameNumber === 11) {
+        SessionReference?.Document.getText("source").insert(
+          SessionReference.CurrentText().length,
+          "later edit\n",
+        );
         Socket.Receive(
           Frame(
             7,
@@ -26,6 +31,7 @@ describe("Markdown collaboration transport", () => {
             ]),
           ),
         );
+      }
     });
     const Connected = MarkdownRealtimeSession.Connect({
       Grant: {
@@ -40,8 +46,15 @@ describe("Markdown collaboration transport", () => {
     });
     Socket.Open();
     const Session = await Connected;
+    SessionReference = Session;
     expect(Session.CurrentText()).toBe("# Durable source\n");
-    await expect(Session.RequestCheckpoint()).resolves.toBe("00000000-0000-4000-8000-000000000099");
+    const Checkpoint = await Session.RequestCheckpoint();
+    expect(Checkpoint).toMatchObject({
+      Id: "00000000-0000-4000-8000-000000000099",
+      Source: "# Durable source\n",
+    });
+    expect(Session.CurrentText()).toBe("# Durable source\nlater edit\n");
+    expect(Checkpoint.StateVector).not.toEqual(Session.CurrentStateVector());
     Session.Destroy();
     ServerDocument.destroy();
   });

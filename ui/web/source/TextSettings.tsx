@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Select, Spinner } from "@fluentui/react-components";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import type {
   EditTextLimitBytes,
@@ -9,6 +9,7 @@ import type {
   InlineTextLimitBytes,
   TextPreferences,
 } from "./client.js";
+import { ApiRequestError } from "./http-client.js";
 
 const MiB = 1024 * 1024;
 const EditOptions: readonly EditTextLimitBytes[] = [
@@ -23,23 +24,28 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
   const [Etag, SetEtag] = useState<string | null>(null);
   const [Value, SetValue] = useState<TextPreferences | null>(null);
   const [ErrorMessage, SetError] = useState<string | null>(null);
+  const [Loading, SetLoading] = useState(true);
   const [Saving, SetSaving] = useState(false);
-  useEffect(() => {
-    let Active = true;
-    void Client.getTextPreferences()
-      .then((Response) => {
-        if (!Active) return;
+  const Load = useCallback(
+    async (PreserveDraft = false): Promise<void> => {
+      SetLoading(true);
+      try {
+        const Response = await Client.getTextPreferences();
         SetEtag(Response.Etag);
-        SetValue(Response.Value);
-      })
-      .catch((Cause: unknown) => {
-        if (Active)
-          SetError(Cause instanceof Error ? Cause.message : "Text preferences are unavailable.");
-      });
-    return () => {
-      Active = false;
-    };
-  }, [Client]);
+        if (!PreserveDraft) SetValue(Response.Value);
+        SetError(null);
+      } catch (Cause) {
+        SetError(Cause instanceof Error ? Cause.message : "Text preferences are unavailable.");
+      } finally {
+        SetLoading(false);
+      }
+    },
+    [Client],
+  );
+
+  useEffect(() => {
+    void Load();
+  }, [Load]);
 
   const Save = async (): Promise<void> => {
     if (Etag === null || Value === null) return;
@@ -50,7 +56,12 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
       SetEtag(Response.Etag);
       SetValue(Response.Value);
     } catch (Cause) {
-      SetError(Cause instanceof Error ? Cause.message : "Text preferences could not be saved.");
+      if (Cause instanceof ApiRequestError && (Cause.Status === 409 || Cause.Status === 412)) {
+        await Load(true);
+        SetError("Text preferences changed elsewhere. Review your draft and save it again.");
+      } else {
+        SetError(Cause instanceof Error ? Cause.message : "Text preferences could not be saved.");
+      }
     } finally {
       SetSaving(false);
     }
@@ -68,7 +79,10 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
         </div>
       </header>
       {ErrorMessage === null ? null : <p role="alert">{ErrorMessage}</p>}
-      {Value === null ? <Spinner label="Loading text preferences" /> : null}
+      {Loading ? <Spinner label="Loading text preferences" /> : null}
+      {!Loading && Value === null ? (
+        <Button onClick={() => void Load()}>Retry loading text preferences</Button>
+      ) : null}
       {Value === null ? null : (
         <form
           onSubmit={(Event) => {

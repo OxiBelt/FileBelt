@@ -36,6 +36,18 @@ export class MountReauthenticationRequiredError extends Error {
   }
 }
 
+export class MountCredentialOutcomeUnknownError extends Error {
+  readonly CredentialId: string;
+
+  constructor(CredentialId: string) {
+    super(
+      "The credential creation result is unknown. FileBelt must revoke the operation identifier before another credential is created.",
+    );
+    this.name = "MountCredentialOutcomeUnknownError";
+    this.CredentialId = CredentialId;
+  }
+}
+
 export interface MountSettingsClient {
   createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential>;
   getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview>;
@@ -78,23 +90,36 @@ export class HttpMountSettingsClient implements MountSettingsClient {
   }
 
   async createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential> {
-    return RequireData<CreatedMountCredential>(
-      await this.#Api.POST("/api/v1/mounts/credentials", {
-        body: Input,
-        params: { header: await this.#mutationHeaders() },
-      }),
-    );
+    const Headers = await this.#mutationHeaders();
+    const Result = await (async () => {
+      try {
+        return await this.#Api.POST("/api/v1/mounts/credentials", {
+          body: Input,
+          params: { header: Headers },
+        });
+      } catch {
+        throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+      }
+    })();
+    if (Result.response.status >= 500)
+      throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+    if (Result.response.ok && Result.data === undefined)
+      throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+    return RequireData<CreatedMountCredential>(Result);
   }
 
   async revokeCredential(CredentialId: string): Promise<void> {
-    await RequireSuccess(
-      await this.#Api.DELETE("/api/v1/mounts/credentials/{credential_id}", {
-        params: {
-          header: await this.#mutationHeaders(),
-          path: { credential_id: CredentialId },
-        },
-      }),
-    );
+    const Result = await this.#Api.DELETE("/api/v1/mounts/credentials/{credential_id}", {
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { credential_id: CredentialId },
+      },
+    });
+    // Revocation is the recovery barrier for a caller-owned operation UUID.
+    // A definite 404 proves there is no active credential visible to that
+    // principal and is therefore already the desired terminal state.
+    if (Result.response.status === 404) return;
+    await RequireSuccess(Result);
   }
 
   async #mutationHeaders(): Promise<MutationHeaders> {

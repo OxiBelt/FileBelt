@@ -1,13 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, Checkbox, Input, Spinner } from "@fluentui/react-components";
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Input,
+  Spinner,
+} from "@fluentui/react-components";
 import { Copy, HardDrive, KeyRound, Laptop, Network, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
 
 import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
 
-import { MountReauthenticationRequiredError } from "./mount-http-client.js";
+import {
+  MountCredentialOutcomeUnknownError,
+  MountReauthenticationRequiredError,
+} from "./mount-http-client.js";
 import type {
   CreatedMountCredential,
   MountOverview,
@@ -32,6 +46,10 @@ interface PolicyDraft {
 
 const Protocols = ["smb", "ftps"] as const;
 
+export function MountCredentialCreationBlocked(UnresolvedCredentialId: string | null): boolean {
+  return UnresolvedCredentialId !== null;
+}
+
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the nested client props and this component only observes them.
 export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactNode {
   const [Snapshot, SetSnapshot] = useState<MountOverview | null>(null);
@@ -41,6 +59,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
   const [Announcement, SetAnnouncement] = useState("");
   const [Created, SetCreated] = useState<CreatedMountCredential | null>(null);
   const [ReauthenticationRequired, SetReauthenticationRequired] = useState(false);
+  const [PendingCredentialId, SetPendingCredentialId] = useState<string | null>(null);
 
   const Refresh = useCallback(
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
@@ -108,6 +127,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
       </section>
     );
   }
+  const PendingCredential = Snapshot.credentials.find(({ id: Id }) => Id === PendingCredentialId);
 
   return (
     <section aria-labelledby="mounts-heading" className="fb-mount-page">
@@ -235,13 +255,11 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
               {Credential.revoked_at === null ? (
                 <Button
                   appearance="secondary"
+                  aria-haspopup="dialog"
                   disabled={Busy}
-                  onClick={() =>
-                    void Mutate(
-                      async () => Client.revokeCredential(Credential.id),
-                      "Mount credential revoked.",
-                    )
-                  }
+                  onClick={() => {
+                    SetPendingCredentialId(Credential.id);
+                  }}
                 >
                   Revoke
                 </Button>
@@ -255,6 +273,51 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
           ) : null}
         </div>
       </section>
+
+      <Dialog
+        modalType="alert"
+        onOpenChange={(Ignored, Data) => {
+          if (!Data.open && !Busy) SetPendingCredentialId(null);
+        }}
+        open={PendingCredential !== undefined}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Revoke mount credential?</DialogTitle>
+            <DialogContent>
+              {PendingCredential === undefined
+                ? ""
+                : `Revoke ${PendingCredential.username}? Its active mount sessions will stop and its password cannot be recovered.`}
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                disabled={Busy}
+                onClick={() => {
+                  SetPendingCredentialId(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                appearance="primary"
+                disabled={Busy || PendingCredential === undefined}
+                onClick={() => {
+                  if (PendingCredential === undefined) return;
+                  const CredentialId = PendingCredential.id;
+                  SetPendingCredentialId(null);
+                  void Mutate(
+                    async () => Client.revokeCredential(CredentialId),
+                    "Mount credential revoked.",
+                  );
+                }}
+              >
+                Revoke
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       <div className="fb-mount-grid">
         <SummaryList
@@ -712,6 +775,7 @@ function CredentialCreator({
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Protocol, SetProtocol] = useState<MountProtocol>("smb");
   const [DeviceId, SetDeviceId] = useState("");
+  const [UnresolvedCredentialId, SetUnresolvedCredentialId] = useState<string | null>(null);
   const Policy = useMemo(
     () => Policies.find(({ protocol: Value }) => Value === Protocol),
     [Policies, Protocol],
@@ -720,6 +784,7 @@ function CredentialCreator({
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
   const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
+    if (MountCredentialCreationBlocked(UnresolvedCredentialId)) return;
     SetBusy(true);
     try {
       const ExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -728,12 +793,30 @@ function CredentialCreator({
           allowed_drive_ids: Allowed,
           bound_device_id: DeviceId.length === 0 ? null : DeviceId,
           expires_at: ExpiresAt,
+          operation_id: crypto.randomUUID(),
           protocol: Protocol,
           read_only: true,
         }),
       );
     } catch (Cause) {
-      OnError(Cause);
+      if (Cause instanceof MountCredentialOutcomeUnknownError) {
+        try {
+          await Client.revokeCredential(Cause.CredentialId);
+          SetUnresolvedCredentialId(null);
+          OnError(
+            new Error(
+              "The creation response was interrupted. Any credential from that operation was revoked; create a new credential to receive a new password.",
+            ),
+          );
+        } catch {
+          SetUnresolvedCredentialId(Cause.CredentialId);
+          OnError(
+            new Error(
+              `The creation result is unknown and automatic revocation failed. Revoke credential ${Cause.CredentialId} before creating another credential.`,
+            ),
+          );
+        }
+      } else OnError(Cause);
     } finally {
       SetBusy(false);
     }
@@ -750,6 +833,39 @@ function CredentialCreator({
         </div>
       </div>
       <form className="fb-mount-create-form" onSubmit={(Event) => void Submit(Event)}>
+        {UnresolvedCredentialId === null ? null : (
+          <div className="fb-error" role="alert">
+            <span>
+              Creation outcome {UnresolvedCredentialId} must be revoked before another credential
+              can be created.
+            </span>
+            <Button
+              appearance="secondary"
+              disabled={Busy}
+              onClick={() => {
+                SetBusy(true);
+                void Client.revokeCredential(UnresolvedCredentialId).then(
+                  () => {
+                    SetUnresolvedCredentialId(null);
+                    OnError(
+                      new Error(
+                        "The unresolved credential operation was revoked. You can now create a new one-time credential.",
+                      ),
+                    );
+                    SetBusy(false);
+                  },
+                  (Cause: unknown) => {
+                    OnError(Cause);
+                    SetBusy(false);
+                  },
+                );
+              }}
+              type="button"
+            >
+              Retry revocation
+            </Button>
+          </div>
+        )}
         <label>
           Protocol
           <select
@@ -786,7 +902,12 @@ function CredentialCreator({
         </p>
         <Button
           appearance="primary"
-          disabled={Busy || Policy?.enabled !== true || Allowed.length === 0}
+          disabled={
+            Busy ||
+            MountCredentialCreationBlocked(UnresolvedCredentialId) ||
+            Policy?.enabled !== true ||
+            Allowed.length === 0
+          }
           type="submit"
         >
           Create one-time credential
@@ -805,10 +926,22 @@ function OneTimeCredential({
   OnClose(): void;
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
-  const CopyValue = async (Value: string, Label: string): Promise<void> => {
-    await navigator.clipboard.writeText(Value);
+  const CopyValue = async (Value: string, Label: string, InputId: string): Promise<void> => {
     const Status = document.querySelector<HTMLElement>("#mount-copy-status");
-    if (Status !== null) Status.textContent = `${Label} copied.`;
+    const ClipboardApi = navigator.clipboard as Clipboard | undefined;
+    try {
+      if (ClipboardApi === undefined) throw new Error("Clipboard access is unavailable.");
+      await ClipboardApi.writeText(Value);
+      if (Status !== null) Status.textContent = `${Label} copied.`;
+    } catch {
+      const InputElement = document.querySelector<HTMLInputElement>(
+        `#${InputId} input, #${InputId}`,
+      );
+      InputElement?.focus();
+      InputElement?.select();
+      if (Status !== null)
+        Status.textContent = `${Label} could not be copied automatically. The value is selected for manual copying.`;
+    }
   };
   return (
     <section aria-labelledby="one-time-credential-heading" className="fb-mount-secret" role="alert">
@@ -830,22 +963,26 @@ function OneTimeCredential({
       <label>
         Username
         <div className="fb-mount-copy">
-          <Input readOnly value={Created.username} />
+          <Input id="mount-credential-username" readOnly value={Created.username} />
           <Button
             aria-label="Copy mount username"
             icon={<Copy aria-hidden="true" />}
-            onClick={() => void CopyValue(Created.username, "Username")}
+            onClick={() =>
+              void CopyValue(Created.username, "Username", "mount-credential-username")
+            }
           />
         </div>
       </label>
       <label>
         Password
         <div className="fb-mount-copy">
-          <Input readOnly type="text" value={Created.password} />
+          <Input id="mount-credential-password" readOnly type="text" value={Created.password} />
           <Button
             aria-label="Copy mount password"
             icon={<Copy aria-hidden="true" />}
-            onClick={() => void CopyValue(Created.password, "Password")}
+            onClick={() =>
+              void CopyValue(Created.password, "Password", "mount-credential-password")
+            }
           />
         </div>
       </label>

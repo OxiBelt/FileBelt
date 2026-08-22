@@ -33,11 +33,20 @@ export interface FileEntry {
   MediaType: string | null;
   Name: string;
   Owner: string;
+  /** Parent node used for navigation only; authorization remains server-side. */
+  ParentId?: string | null;
   Shared: boolean;
   Size: number | null;
   Status: EntryStatus;
   Trashed: boolean;
   Version: number;
+}
+
+export interface WorkspaceDrive {
+  Id: string;
+  Kind: "private" | "shared";
+  Name: string;
+  RootId: string;
 }
 
 export interface UploadRecord {
@@ -118,6 +127,7 @@ export interface WorkspaceSnapshot {
     Email: string;
     IsTenantAdmin: boolean;
   };
+  Drives: WorkspaceDrive[];
   Entries: FileEntry[];
   Privacy: PrivacyEvent[];
   Sessions: SessionRecord[];
@@ -131,4 +141,9 @@ export interface UploadCandidate {
   MediaType?: string;
   Name: string;
   Size: number;
+}
+
+export interface UploadTarget {
+  DriveId: string;
+  ParentId: string;
 }

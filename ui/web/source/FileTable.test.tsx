@@ -39,6 +39,8 @@ describe("FileTable", () => {
     expect(Markup).toContain('aria-multiselectable="true"');
     expect(Markup).toContain('aria-selected="true"');
     expect(Markup).toContain('<bdi dir="auto"');
+    expect(Markup).toContain('aria-label="Shared"');
+    expect(Markup).toMatch(/aria-label="Deselect [^"]+"[^>]*tabindex="-1"/);
   });
 
   it("labels logical symlinks without making them file-open candidates", () => {

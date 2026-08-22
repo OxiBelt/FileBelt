@@ -12,6 +12,7 @@ export default defineConfig({
   ],
   reporter: [["line"]],
   testDir: "browser",
+  testIgnore: "docker-integration.spec.mjs",
   tsconfig: "./playwright.tsconfig.json",
   use: {
     baseURL: "http://127.0.0.1:4173",

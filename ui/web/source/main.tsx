@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App.js";
+import { MockFileBeltClient } from "./client.js";
 import { HttpFileBeltClient } from "./http-client.js";
 import { HttpDocumentSessionClient } from "./document-http-client.js";
 import { HttpMcpSettingsClient } from "./mcp-http-client.js";
@@ -11,6 +12,7 @@ import { HttpMountSettingsClient } from "./mount-http-client.js";
 import { HttpNfsAdminClient } from "./nfs-admin-http-client.js";
 import { HttpNfsTargetClient } from "./nfs-target-http-client.js";
 import { PublicShareApp, TakePublicShareFragment } from "./PublicShareApp.js";
+import { HasDevelopmentMockMarker } from "./navigation.js";
 import "./styles.css";
 
 const Root = document.querySelector<HTMLElement>("#root");
@@ -19,7 +21,8 @@ if (Root === null) {
   throw new Error("FileBelt application root is missing");
 }
 
-const Client = new HttpFileBeltClient();
+const DevelopmentMock = import.meta.env.DEV && HasDevelopmentMockMarker(window.location.search);
+const Client = DevelopmentMock ? new MockFileBeltClient() : new HttpFileBeltClient();
 const DocumentClient = new HttpDocumentSessionClient();
 const McpClient = new HttpMcpSettingsClient();
 const MountClient = new HttpMountSettingsClient();
@@ -35,11 +38,16 @@ createRoot(Root).render(
     ) : (
       <App
         Client={Client}
-        DocumentClient={DocumentClient}
-        McpClient={McpClient}
-        MountClient={MountClient}
-        NfsClient={NfsClient}
-        NfsTargetClient={NfsTargetClient}
+        DevelopmentMode={DevelopmentMock}
+        {...(DevelopmentMock
+          ? {}
+          : {
+              DocumentClient,
+              McpClient,
+              MountClient,
+              NfsClient,
+              NfsTargetClient,
+            })}
       />
     )}
   </StrictMode>,

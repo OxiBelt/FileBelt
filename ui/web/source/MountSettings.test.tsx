@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FormatMountSessionDetail,
+  MountCredentialCreationBlocked,
   NfsActiveMappingCard,
   NfsProposalConsentCard,
 } from "./MountSettings.js";
@@ -53,6 +54,13 @@ const NfsSession = {
   source_address: "192.0.2.7",
   state: "active",
 } as const;
+
+describe("mount credential recovery", () => {
+  it("blocks a second credential while revocation of an unknown create remains unresolved", () => {
+    expect(MountCredentialCreationBlocked(null)).toBe(false);
+    expect(MountCredentialCreationBlocked("00000000-0000-4000-8000-000000000149")).toBe(true);
+  });
+});
 
 describe("NFS target approval controls", () => {
   it("labels NFS session addresses as a transport or relay peer", () => {

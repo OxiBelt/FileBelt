@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { components } from "./generated/openapi.js";
 import {
   HttpMountSettingsClient,
+  MountCredentialOutcomeUnknownError,
   MountReauthenticationRequiredError,
 } from "./mount-http-client.js";
 
@@ -24,7 +25,11 @@ const Session = {
 
 class ContractServer {
   readonly Requests: Request[] = [];
+  MalformedSuccess = false;
+  Rejected = false;
   ReauthenticationRequired = false;
+  TransportFailure = false;
+  Unavailable = false;
 
   // oxlint-disable-next-line filebelt/pascal-case, typescript/require-await -- Fetch's platform spelling and Promise contract are required by the injected transport fake.
   readonly fetch: typeof fetch = async (Input, Init) => {
@@ -33,6 +38,19 @@ class ContractServer {
     const Url = new URL(RequestValue.url);
     if (Url.pathname === "/api/v1/session") return Json(Session);
     if (Url.pathname === "/api/v1/mounts/credentials" && RequestValue.method === "POST") {
+      if (this.TransportFailure) throw new TypeError("Connection interrupted");
+      if (this.Unavailable) return new Response(null, { status: 503 });
+      if (this.MalformedSuccess) return new Response(null, { status: 201 });
+      if (this.Rejected)
+        return Json(
+          {
+            code: "mount.credential_invalid",
+            detail: "The requested expiry exceeds the permitted lifetime.",
+            status: 400,
+            title: "Invalid mount credential request",
+          },
+          400,
+        );
       if (this.ReauthenticationRequired) {
         return Json(
           {
@@ -74,6 +92,7 @@ describe("HttpMountSettingsClient", () => {
       allowed_drive_ids: [DriveId],
       bound_device_id: null,
       expires_at: "2026-08-15T10:00:00Z",
+      operation_id: CredentialId,
       protocol: "smb",
       read_only: true,
     });
@@ -86,6 +105,7 @@ describe("HttpMountSettingsClient", () => {
       allowed_drive_ids: [DriveId],
       bound_device_id: null,
       expires_at: "2026-08-15T10:00:00Z",
+      operation_id: CredentialId,
       protocol: "smb",
       read_only: true,
     });
@@ -101,9 +121,89 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
       }),
     ).rejects.toBeInstanceOf(MountReauthenticationRequiredError);
+  });
+
+  it("exposes the caller-known credential id instead of retrying an unknown creation", async () => {
+    const Server = new ContractServer();
+    Server.Unavailable = true;
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(
+      Client.createCredential({
+        allowed_drive_ids: [DriveId],
+        bound_device_id: null,
+        expires_at: "2026-08-15T10:00:00Z",
+        operation_id: CredentialId,
+        protocol: "smb",
+        read_only: true,
+      }),
+    ).rejects.toBeInstanceOf(MountCredentialOutcomeUnknownError);
+    expect(Server.Requests.filter(({ method: Method }) => Method === "POST")).toHaveLength(1);
+  });
+
+  it("treats a transport interruption as unknown without retrying credential creation", async () => {
+    const Server = new ContractServer();
+    Server.TransportFailure = true;
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(
+      Client.createCredential({
+        allowed_drive_ids: [DriveId],
+        bound_device_id: null,
+        expires_at: "2026-08-15T10:00:00Z",
+        operation_id: CredentialId,
+        protocol: "smb",
+        read_only: true,
+      }),
+    ).rejects.toMatchObject({ CredentialId });
+    expect(Server.Requests.filter(({ method: Method }) => Method === "POST")).toHaveLength(1);
+  });
+
+  it("treats a success without recoverable one-time material as an unknown outcome", async () => {
+    const Server = new ContractServer();
+    Server.MalformedSuccess = true;
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(
+      Client.createCredential({
+        allowed_drive_ids: [DriveId],
+        bound_device_id: null,
+        expires_at: "2026-08-15T10:00:00Z",
+        operation_id: CredentialId,
+        protocol: "smb",
+        read_only: true,
+      }),
+    ).rejects.toMatchObject({ CredentialId });
+  });
+
+  it("keeps a definite client rejection distinct from an unknown creation outcome", async () => {
+    const Server = new ContractServer();
+    Server.Rejected = true;
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(
+      Client.createCredential({
+        allowed_drive_ids: [DriveId],
+        bound_device_id: null,
+        expires_at: "2026-08-15T10:00:00Z",
+        operation_id: CredentialId,
+        protocol: "smb",
+        read_only: true,
+      }),
+    ).rejects.not.toBeInstanceOf(MountCredentialOutcomeUnknownError);
+    expect(Server.Requests.filter(({ method: Method }) => Method === "POST")).toHaveLength(1);
+  });
+
+  it("treats a definite missing credential as an already-complete revocation", async () => {
+    const Server = new ContractServer();
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(Client.revokeCredential(CredentialId)).resolves.toBeUndefined();
+    expect(Server.Requests.at(-1)?.method).toBe("DELETE");
   });
 });

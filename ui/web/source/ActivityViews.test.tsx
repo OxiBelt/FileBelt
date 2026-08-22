@@ -59,5 +59,7 @@ describe("SharesView", () => {
     expect(Markup).not.toContain("other@example.test");
     expect(Markup).not.toContain(En.anonymousLink);
     expect(Markup).not.toContain(En.groupShare);
+    expect(Markup).toContain('aria-haspopup="dialog"');
+    expect(Markup).not.toContain(En.shareRevokeHeading);
   });
 });

@@ -10,6 +10,7 @@ export type SelectionAction =
   | { readonly Id: string; readonly Type: "focus" }
   | { readonly Id: string; readonly OrderedIds: readonly string[]; readonly Type: "range" }
   | { readonly Id: string; readonly Type: "replace" }
+  | { readonly Ids: readonly string[]; readonly Type: "set" }
   | { readonly Id: string; readonly Type: "toggle" }
   | { readonly OrderedIds: readonly string[]; readonly Type: "all" }
   | { readonly Type: "clear" };
@@ -48,6 +49,10 @@ export function SelectionReducer(
     }
     case "replace":
       return { AnchorId: Action.Id, FocusedId: Action.Id, SelectedIds: new Set([Action.Id]) };
+    case "set": {
+      const First = Action.Ids[0] ?? null;
+      return { AnchorId: First, FocusedId: First, SelectedIds: new Set(Action.Ids) };
+    }
     case "toggle": {
       const SelectedIds = new Set(State.SelectedIds);
       if (SelectedIds.has(Action.Id)) SelectedIds.delete(Action.Id);

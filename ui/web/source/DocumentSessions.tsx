@@ -380,6 +380,7 @@ function SessionCard({
   Session: components["schemas"]["DocumentSessionSummary"];
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
+  const [ConfirmRevoke, SetConfirmRevoke] = useState(false);
   const LoadDetail = async (): Promise<void> => {
     try {
       OnDetail(await Client.getOwnSession(Session.id));
@@ -389,54 +390,92 @@ function SessionCard({
   };
   const IsConflict = Session.state === "conflicted";
   return (
-    <article className="fb-activity-card fb-document-session" role="listitem">
-      <FileBeltIcon Icon={IsConflict ? FileWarning : MonitorCog} />
-      <div className="fb-grow">
-        <strong>
-          {ModeLabel(Session.mode)} · {StatusLabel(Session.state)}
-        </strong>
-        <span className="fb-muted">
-          {En.documentParticipantCount(Session.participant_count)} ·{" "}
-          <time dateTime={Session.last_activity_at}>{FormatDate(Session.last_activity_at)}</time>
-        </span>
-        {IsConflict ? <span className="fb-document-conflict">{En.documentConflict}</span> : null}
-      </div>
-      <Button appearance="secondary" disabled={Busy} onClick={() => void LoadDetail()}>
-        {En.details}
-      </Button>
-      {IsConflict ? (
-        <Button
-          appearance="primary"
-          disabled={Busy}
-          onClick={() =>
-            void OnMutate(
-              async () =>
-                Client.createConflictCopy(
-                  Session.id,
-                  En.documentConflictCopyName(En.documentDefaultName),
-                ),
-              En.documentConflictCopy,
-              true,
-            )
-          }
-        >
-          {En.documentConflictCopy}
+    <>
+      <article className="fb-activity-card fb-document-session" role="listitem">
+        <FileBeltIcon Icon={IsConflict ? FileWarning : MonitorCog} />
+        <div className="fb-grow">
+          <strong>
+            {ModeLabel(Session.mode)} · {StatusLabel(Session.state)}
+          </strong>
+          <span className="fb-muted">
+            {En.documentParticipantCount(Session.participant_count)} ·{" "}
+            <time dateTime={Session.last_activity_at}>{FormatDate(Session.last_activity_at)}</time>
+          </span>
+          {IsConflict ? <span className="fb-document-conflict">{En.documentConflict}</span> : null}
+        </div>
+        <Button appearance="secondary" disabled={Busy} onClick={() => void LoadDetail()}>
+          {En.details}
         </Button>
-      ) : (
-        <Button
-          appearance="secondary"
-          disabled={Busy || Session.state !== "active"}
-          onClick={() =>
-            void OnMutate(
-              async () => Client.revokeOwnSession(Session.id),
-              En.documentSessionRevoked,
-            )
-          }
-        >
-          {En.revoke}
-        </Button>
-      )}
-    </article>
+        {IsConflict ? (
+          <Button
+            appearance="primary"
+            disabled={Busy}
+            onClick={() =>
+              void OnMutate(
+                async () =>
+                  Client.createConflictCopy(
+                    Session.id,
+                    En.documentConflictCopyName(En.documentDefaultName),
+                  ),
+                En.documentConflictCopy,
+                true,
+              )
+            }
+          >
+            {En.documentConflictCopy}
+          </Button>
+        ) : (
+          <Button
+            appearance="secondary"
+            aria-haspopup="dialog"
+            disabled={Busy || Session.state !== "active"}
+            onClick={() => {
+              SetConfirmRevoke(true);
+            }}
+          >
+            {En.revoke}
+          </Button>
+        )}
+      </article>
+      <Dialog
+        modalType="alert"
+        onOpenChange={(Ignored, Data) => {
+          if (!Data.open && !Busy) SetConfirmRevoke(false);
+        }}
+        open={ConfirmRevoke}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>{En.documentRevokeHeading}</DialogTitle>
+            <DialogContent>{En.documentRevokeConfirmation}</DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                disabled={Busy}
+                onClick={() => {
+                  SetConfirmRevoke(false);
+                }}
+              >
+                {En.cancel}
+              </Button>
+              <Button
+                appearance="primary"
+                disabled={Busy}
+                onClick={() => {
+                  SetConfirmRevoke(false);
+                  void OnMutate(
+                    async () => Client.revokeOwnSession(Session.id),
+                    En.documentSessionRevoked,
+                  );
+                }}
+              >
+                {En.revoke}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+    </>
   );
 }
 

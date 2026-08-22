@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ParentContentSecurityPolicy } from "./vite.config.js";
+import {
+  MarkdownPreviewDevelopmentAsset,
+  MarkdownPreviewContentSecurityPolicy,
+  ParentContentSecurityPolicy,
+} from "./vite.config.js";
 import { ResolveFluentIconsContextId } from "../vitest-fluent-icons-resolver.js";
 
 describe("ParentContentSecurityPolicy", () => {
@@ -49,5 +53,26 @@ describe("ResolveFluentIconsContextId", () => {
         "/workspace/node_modules/example/lib/providers.js",
       ),
     ).toBeNull();
+  });
+});
+
+describe("MarkdownPreviewDevelopmentAsset", () => {
+  it("serves only known preview artifacts below the built preview root", () => {
+    expect(MarkdownPreviewDevelopmentAsset("/markdown-preview/index.html")?.ContentType).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(
+      MarkdownPreviewDevelopmentAsset("/markdown-preview/assets/index-example.js")?.Path,
+    ).toMatch(/\/markdown\/dist\/preview\/assets\/index-example\.js$/);
+    expect(MarkdownPreviewDevelopmentAsset("/markdown-preview/../package.json")).toBeNull();
+    expect(MarkdownPreviewDevelopmentAsset("/markdown-preview/%2e%2e/package.json")).toBeNull();
+    expect(MarkdownPreviewDevelopmentAsset("/source/main.tsx")).toBeNull();
+  });
+});
+
+describe("MarkdownPreviewContentSecurityPolicy", () => {
+  it("admits packaged KaTeX data fonts without admitting network access", () => {
+    expect(MarkdownPreviewContentSecurityPolicy).toContain("font-src 'self' data:");
+    expect(MarkdownPreviewContentSecurityPolicy).toContain("connect-src 'none'");
   });
 });

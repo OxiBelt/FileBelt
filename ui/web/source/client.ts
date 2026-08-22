@@ -6,9 +6,45 @@ import type {
   FileEntry,
   ShareRecord,
   UploadCandidate,
+  UploadTarget,
   VersionRecord,
   WorkspaceSnapshot,
 } from "./model.js";
+import type { components } from "./generated/openapi.js";
+
+export type AclAction = components["schemas"]["AclEntryMutation"]["action"];
+export type AclEffect = components["schemas"]["AclEntryMutation"]["effect"];
+export type AclInheritance = components["schemas"]["AclEntryMutation"]["inheritance"];
+export type AclPrincipalKind = components["schemas"]["AclPrincipalSelector"]["kind"];
+export type AclSource = components["schemas"]["AclEntry"]["source"];
+
+export interface AclEntry {
+  Action: AclAction;
+  DisplayName: string;
+  Effect: AclEffect;
+  GroupId: string | null;
+  Inheritance: AclInheritance;
+  PrincipalId: string;
+  PrincipalKind: AclPrincipalKind;
+  ReadOnly: boolean;
+  Source: AclSource;
+  VerifiedEmail: string | null;
+}
+
+export interface AclCollection {
+  Entries: readonly Readonly<AclEntry>[];
+  SupportedActions: readonly AclAction[];
+}
+
+export interface AclEntryMutation {
+  Action: AclAction;
+  Effect: AclEffect;
+  Inheritance: AclInheritance;
+}
+
+export type AclPrincipalSelector =
+  | { GroupId: null; Kind: "user"; VerifiedEmail: string }
+  | { GroupId: string; Kind: "group"; VerifiedEmail: null };
 
 /** Transitional browser shape until the generated OpenAPI contract lands. */
 export type EditTextLimitBytes = 1_048_576 | 2_097_152 | 4_194_304 | 8_388_608 | 16_777_216;
@@ -88,10 +124,32 @@ export interface MarkdownHead {
   VersionId: string;
 }
 
+export interface EntryMutationError {
+  Code: string | null;
+  Detail: string | null;
+  Message: string;
+  Status: number | null;
+}
+
+export type WorkspaceLoadScope =
+  | Readonly<{ DriveId: string | null; Kind: "folder"; NodeId: string | null }>
+  | Readonly<{ Kind: "global" }>;
+
+export type EntryMutationOutcome =
+  | Readonly<{ EntryId: string; Kind: "success" }>
+  | Readonly<{ EntryId: string; Error: Readonly<EntryMutationError>; Kind: "failure" }>;
+
 export class VersionConflictError extends Error {
   constructor() {
     super("This file changed on the server. Your local edits are still available.");
     this.name = "VersionConflictError";
+  }
+}
+
+export class AclConflictError extends Error {
+  constructor() {
+    super("Access rules changed on the server. Your draft is still available.");
+    this.name = "AclConflictError";
   }
 }
 
@@ -123,15 +181,31 @@ export interface FileBeltClient {
   saveMarkdownCopy(
     Input: Readonly<Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">>,
   ): Promise<string>;
-  getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot>;
+  getWorkspace(
+    Signal?: Readonly<AbortSignal>,
+    Scope?: WorkspaceLoadScope,
+  ): Promise<WorkspaceSnapshot>;
+  getAcl(
+    EntryId: string,
+    Signal?: Readonly<AbortSignal>,
+  ): Promise<{ Etag: string; Value: AclCollection }>;
   markPrivacyRead(): Promise<void>;
-  restoreEntries(EntryIds: readonly string[]): Promise<void>;
+  restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>;
   restoreVersion(VersionId: string): Promise<void>;
+  replaceAcl(
+    EntryId: string,
+    ExpectedEtag: string,
+    Principal: Readonly<AclPrincipalSelector>,
+    Entries: readonly Readonly<AclEntryMutation>[],
+  ): Promise<{ Etag: string; Value: AclCollection }>;
   revokeSession(SessionId: string): Promise<void>;
   revokeShare(ShareId: string): Promise<void>;
   suspendUser(UserId: string): Promise<void>;
-  trashEntries(EntryIds: readonly string[]): Promise<void>;
-  upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void>;
+  trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>;
+  upload(
+    Files: readonly Readonly<UploadCandidate>[],
+    Target?: Readonly<UploadTarget>,
+  ): Promise<void>;
   compareTextVersions(
     EntryId: string,
     BaseVersionId: string,
@@ -152,14 +226,48 @@ function Uuid(Suffix: string): string {
   return `00000000-0000-4000-8000-${Suffix.padStart(12, "0")}`;
 }
 
+export const AllAclActions: readonly AclAction[] = [
+  "READ_METADATA",
+  "LIST_CHILDREN",
+  "READ_CONTENT",
+  "CREATE_CHILD",
+  "WRITE_CONTENT",
+  "CREATE_VERSION",
+  "RENAME",
+  "MOVE",
+  "DELETE",
+  "RESTORE",
+  "SET_ATTRIBUTES",
+  "SHARE",
+  "MANAGE_ACL",
+  "MANAGE_DRIVE",
+  "TRANSCODE",
+  "USE_EXTERNAL_EDITOR",
+  "COMMENT",
+  "REVIEW",
+  "USE_MCP",
+  "MOUNT",
+  "EXPORT",
+  "TRAVERSE",
+  "READ_REPOSITORY",
+  "WRITE_REPOSITORY",
+  "MANAGE_REPOSITORY",
+  "BYPASS_REPOSITORY_RULES",
+];
+
+const MockDriveId = Uuid("900");
+const MockRootId = Uuid("910");
+
 const InitialSnapshot: WorkspaceSnapshot = {
   CurrentUser: {
     DisplayName: "Avery Morgan",
     Email: "avery@example.test",
     IsTenantAdmin: true,
   },
+  Drives: [{ Id: MockDriveId, Kind: "private", Name: "My Drive", RootId: MockRootId }],
   Entries: [
     {
+      DriveId: MockDriveId,
       Id: Uuid("101"),
       HeadVersionId: null,
       Kind: "folder",
@@ -168,6 +276,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       ModifiedAt: "2026-08-06T09:24:00Z",
       Name: "Launch documents",
       Owner: "Avery Morgan",
+      ParentId: MockRootId,
       Shared: true,
       Size: null,
       Status: "ready",
@@ -175,6 +284,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Version: 1,
     },
     {
+      DriveId: MockDriveId,
       Id: Uuid("102"),
       HeadVersionId: Uuid("301"),
       Kind: "file",
@@ -183,6 +293,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       ModifiedAt: "2026-08-06T10:48:00Z",
       Name: "Q3 forecast.xlsx",
       Owner: "Avery Morgan",
+      ParentId: Uuid("101"),
       Shared: true,
       Size: 4_782_080,
       Status: "ready",
@@ -190,6 +301,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Version: 7,
     },
     {
+      DriveId: MockDriveId,
       Id: Uuid("103"),
       HeadVersionId: Uuid("302"),
       Kind: "file",
@@ -198,6 +310,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       ModifiedAt: "2026-08-05T16:12:00Z",
       Name: "Product brief.pdf",
       Owner: "Samir Haddad",
+      ParentId: MockRootId,
       Shared: false,
       Size: 1_843_200,
       Status: "ready",
@@ -205,6 +318,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Version: 3,
     },
     {
+      DriveId: MockDriveId,
       Id: Uuid("104"),
       HeadVersionId: Uuid("303"),
       Kind: "file",
@@ -213,6 +327,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       ModifiedAt: "2026-08-02T11:30:00Z",
       Name: "Archive notes.txt",
       Owner: "Avery Morgan",
+      ParentId: MockRootId,
       Shared: false,
       Size: 16_384,
       Status: "ready",
@@ -220,6 +335,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       Version: 2,
     },
     {
+      DriveId: MockDriveId,
       Id: Uuid("105"),
       HeadVersionId: Uuid("304"),
       Kind: "file",
@@ -228,6 +344,7 @@ const InitialSnapshot: WorkspaceSnapshot = {
       ModifiedAt: "2026-08-06T08:05:00Z",
       Name: "‫خطة المشروع‬.pdf",
       Owner: "Layla Hassan",
+      ParentId: MockRootId,
       Shared: true,
       Size: 942_080,
       Status: "ready",
@@ -373,10 +490,53 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   #Sequence = 1_000;
   #TextPreferences: TextPreferences = { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 };
   #TextPreferencesEtag = '"text-preferences-1"';
+  #AclEtag = '"acl-1"';
+  #AclEntries: AclEntry[] = [];
 
   // oxlint-disable typescript/require-await -- This in-memory adapter preserves the asynchronous production client contract without I/O.
   async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
     return { Etag: this.#TextPreferencesEtag, Value: { ...this.#TextPreferences } };
+  }
+
+  async getAcl(): Promise<{ Etag: string; Value: AclCollection }> {
+    return {
+      Etag: this.#AclEtag,
+      Value: { Entries: structuredClone(this.#AclEntries), SupportedActions: AllAclActions },
+    };
+  }
+
+  async replaceAcl(
+    IgnoredEntryId: string,
+    ExpectedEtag: string,
+    Principal: Readonly<AclPrincipalSelector>,
+    Entries: readonly Readonly<AclEntryMutation>[],
+  ): Promise<{ Etag: string; Value: AclCollection }> {
+    void IgnoredEntryId;
+    if (ExpectedEtag !== this.#AclEtag) throw new AclConflictError();
+    const PrincipalId =
+      Principal.Kind === "group" ? Principal.GroupId : Uuid(String(++this.#Sequence));
+    this.#AclEntries = [
+      ...this.#AclEntries.filter(
+        (Entry) =>
+          Entry.Source !== "core" ||
+          Entry.ReadOnly ||
+          (Principal.Kind === "group"
+            ? Entry.GroupId !== Principal.GroupId
+            : Entry.VerifiedEmail !== Principal.VerifiedEmail),
+      ),
+      ...Entries.map((Entry) => ({
+        ...Entry,
+        DisplayName: Principal.Kind === "group" ? Principal.GroupId : Principal.VerifiedEmail,
+        GroupId: Principal.GroupId,
+        PrincipalId,
+        PrincipalKind: Principal.Kind,
+        ReadOnly: false,
+        Source: "core" as const,
+        VerifiedEmail: Principal.VerifiedEmail,
+      })),
+    ];
+    this.#AclEtag = `"acl-${++this.#Sequence}"`;
+    return this.getAcl();
   }
 
   async updateTextPreferences(
@@ -438,17 +598,33 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType);
   }
 
-  async getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot> {
+  async getWorkspace(
+    Signal?: Readonly<AbortSignal>,
+    IgnoredScope?: WorkspaceLoadScope,
+  ): Promise<WorkspaceSnapshot> {
+    void IgnoredScope;
     if (Signal?.aborted === true) {
       throw new DOMException("Request was aborted", "AbortError");
     }
     return CloneSnapshot(this.#Snapshot);
   }
 
-  async upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void> {
+  async upload(
+    Files: readonly Readonly<UploadCandidate>[],
+    Target?: Readonly<UploadTarget>,
+  ): Promise<void> {
+    const ParentId = Target?.ParentId ?? MockRootId;
+    if (
+      Target !== undefined &&
+      (Target.DriveId !== MockDriveId ||
+        this.#Snapshot.Entries.find(({ Id, Kind }) => Id === ParentId && Kind === "folder") ===
+          undefined)
+    )
+      throw new Error("The upload folder is unavailable.");
     for (const File of Files) {
       const Id = Uuid(String(++this.#Sequence));
       this.#Snapshot.Entries.unshift({
+        DriveId: MockDriveId,
         Id,
         HeadVersionId: Uuid(String(++this.#Sequence)),
         Kind: "file",
@@ -457,6 +633,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         ModifiedAt: new Date().toISOString(),
         Name: File.Name,
         Owner: this.#Snapshot.CurrentUser.DisplayName,
+        ParentId,
         Shared: false,
         Size: File.Size,
         Status: "ready",
@@ -571,12 +748,12 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return new Blob(["FileBelt mock public-share download\n"], { type: "text/plain" });
   }
 
-  async trashEntries(EntryIds: readonly string[]): Promise<void> {
-    this.#updateEntries(EntryIds, (Entry) => ({ ...Entry, Trashed: true }));
+  async trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#mutateEntries(EntryIds, true);
   }
 
-  async restoreEntries(EntryIds: readonly string[]): Promise<void> {
-    this.#updateEntries(EntryIds, (Entry) => ({ ...Entry, Trashed: false }));
+  async restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#mutateEntries(EntryIds, false);
   }
 
   async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
@@ -658,14 +835,27 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#Snapshot.Admin.Drives.push(Drive);
   }
 
-  #updateEntries(
-    EntryIds: readonly string[],
-    Update: (Entry: Readonly<FileEntry>) => FileEntry,
-  ): void {
-    const Wanted = new Set(EntryIds);
-    this.#Snapshot.Entries = this.#Snapshot.Entries.map((Entry) =>
-      Wanted.has(Entry.Id) ? Update(Entry) : Entry,
-    );
+  #mutateEntries(EntryIds: readonly string[], Trashed: boolean): EntryMutationOutcome[] {
+    const Outcomes: EntryMutationOutcome[] = [];
+    for (const EntryId of EntryIds) {
+      const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId);
+      if (Entry === undefined) {
+        Outcomes.push({
+          EntryId,
+          Error: {
+            Code: "node.unavailable",
+            Detail: null,
+            Message: "The selected resource is unavailable.",
+            Status: 404,
+          },
+          Kind: "failure",
+        });
+        continue;
+      }
+      Entry.Trashed = Trashed;
+      Outcomes.push({ EntryId, Kind: "success" });
+    }
+    return Outcomes;
   }
   // oxlint-enable typescript/require-await
 }

@@ -62,11 +62,7 @@ export function FileTable({
     Index: number,
   ): void => {
     // oxlint-enable typescript/prefer-readonly-parameter-types
-    if (
-      Event.key === "Enter" &&
-      Entry.TextEligibility !== "ineligible" &&
-      Entry.TextEligibility !== "history-only"
-    ) {
+    if (Event.key === "Enter" && IsOpenable(Entry)) {
       Event.preventDefault();
       OnOpenEntry(Entry);
       return;
@@ -149,11 +145,7 @@ export function FileTable({
                   OnRowClick(Event, Entry);
                 }}
                 onDoubleClick={() => {
-                  if (
-                    Entry.TextEligibility !== "ineligible" &&
-                    Entry.TextEligibility !== "history-only"
-                  )
-                    OnOpenEntry(Entry);
+                  if (IsOpenable(Entry)) OnOpenEntry(Entry);
                 }}
                 onContextMenu={(Event) => {
                   Event.preventDefault();
@@ -181,6 +173,7 @@ export function FileTable({
                     onClick={(Event) => {
                       Event.stopPropagation();
                     }}
+                    tabIndex={-1}
                   />
                 </td>
                 <td role="gridcell">
@@ -190,7 +183,9 @@ export function FileTable({
                       {...(Entry.Kind === "symlink" ? { Label: Strings.symlink } : {})}
                     />
                     <BidiText>{Entry.Name}</BidiText>
-                    {Entry.Shared ? <FileBeltIcon Icon={Share2} size={16} /> : null}
+                    {Entry.Shared ? (
+                      <FileBeltIcon Icon={Share2} Label={Strings.sharedItem} size={16} />
+                    ) : null}
                   </span>
                 </td>
                 <td role="gridcell">
@@ -224,5 +219,14 @@ export function FileTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function IsOpenable(Entry: Readonly<FileEntry>): boolean {
+  return (
+    Entry.Kind === "folder" ||
+    (Entry.Kind === "file" &&
+      Entry.TextEligibility !== "ineligible" &&
+      Entry.TextEligibility !== "history-only")
   );
 }

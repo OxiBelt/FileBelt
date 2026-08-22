@@ -16,6 +16,7 @@ import {
   DecodeEditableText,
   DecodeViewableText,
   EncodeText,
+  MarkdownInputError,
   EnglishMarkdownStrings,
   MaximumEditableBytes,
   MarkdownRealtimeSession,
@@ -105,6 +106,7 @@ export function MarkdownFileView({
     let Session: MarkdownRealtimeSession | undefined;
     SetCollaboration(null);
     SetCollaborationState(CanEdit ? "connecting" : "fallback");
+    SetInvalidText(false);
     void Client.readMarkdown(Entry.Id, Entry.HeadVersionId)
       .then(async (Contents) => {
         const Bytes = new Uint8Array(await Contents.arrayBuffer());
@@ -139,7 +141,7 @@ export function MarkdownFileView({
       .catch((Cause: unknown) => {
         if (Active) {
           SetCollaborationState("disconnected");
-          SetInvalidText(true);
+          SetInvalidText(Cause instanceof MarkdownInputError);
           SetError(Cause instanceof Error ? Cause.message : En.markdownUnavailable);
         }
       });
@@ -219,17 +221,19 @@ export function MarkdownFileView({
     SetSaving(true);
     SetError(null);
     try {
-      const CurrentSource =
-        Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() };
-      const CheckpointId =
+      const Checkpoint =
         Collaboration === null ? undefined : await Collaboration.RequestCheckpoint();
+      const CurrentSource = {
+        ...Source,
+        Text: Checkpoint?.Source ?? Source.Text,
+      };
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit);
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- EncodeText returns an owned byte buffer; Blob rejects only the broader SharedArrayBuffer type possibility.
       const Contents = new Blob([Encoded.buffer as ArrayBuffer], {
         type: Entry.MediaType ?? "text/plain",
       });
       const VersionId = await Client.saveMarkdown({
-        ...(CheckpointId === undefined ? {} : { CheckpointId }),
+        ...(Checkpoint === undefined ? {} : { CheckpointId: Checkpoint.Id }),
         Contents,
         EntryId: Entry.Id,
         ExpectedHeadVersionId,
@@ -237,7 +241,15 @@ export function MarkdownFileView({
       });
       SetExpectedHeadVersionId(VersionId);
       SetSavedText(CurrentSource.Text);
-      SetDirty(false);
+      const LiveText = Collaboration?.CurrentText() ?? CurrentSource.Text;
+      const LiveStateVector = Collaboration?.CurrentStateVector();
+      SetSource((Current) => (Current === null ? Current : { ...Current, Text: LiveText }));
+      SetDirty(
+        LiveText !== CurrentSource.Text ||
+          (Checkpoint !== undefined &&
+            LiveStateVector !== undefined &&
+            !EqualBytes(Checkpoint.StateVector, LiveStateVector)),
+      );
       OnSaved();
     } catch (Cause) {
       if (Cause instanceof VersionConflictError) {
@@ -529,6 +541,11 @@ export function MarkdownFileView({
       </Dialog>
     </section>
   );
+}
+
+function EqualBytes(Left: Readonly<Uint8Array>, Right: Readonly<Uint8Array>): boolean {
+  if (Left.byteLength !== Right.byteLength) return false;
+  return Left.every((Value, Index) => Value === Right[Index]);
 }
 
 function ConflictCopyName(Name: string): string {

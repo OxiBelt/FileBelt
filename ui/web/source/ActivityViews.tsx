@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, Input, ProgressBar } from "@fluentui/react-components";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Input,
+  ProgressBar,
+} from "@fluentui/react-components";
 import { BellRing, Clock3, Link2, RotateCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
@@ -158,6 +168,7 @@ export function SharesView({
   const [Permission, SetPermission] = useState<ShareRecord["Permission"]>("Viewer");
   const [Target, SetTarget] = useState("");
   const [Busy, SetBusy] = useState(false);
+  const [PendingRevocation, SetPendingRevocation] = useState<ShareRecord | null>(null);
   const Matching =
     File === undefined ? Shares : Shares.filter(({ ResourceId }) => ResourceId === File.Id);
 
@@ -228,13 +239,48 @@ export function SharesView({
                 {Share.ExpiresAt === undefined ? "" : ` · expires ${FormatDate(Share.ExpiresAt)}`}
               </span>
             </div>
-            <Button appearance="secondary" onClick={() => void OnRevoke(Share.Id)}>
+            <Button
+              appearance="secondary"
+              aria-haspopup="dialog"
+              disabled={Busy}
+              onClick={() => {
+                SetPendingRevocation(Share);
+              }}
+            >
               {Strings.revoke}
             </Button>
           </article>
         ))}
         {Matching.length === 0 ? <p>{Strings.noShares}</p> : null}
       </div>
+      <RevocationDialog
+        Busy={Busy}
+        Description={
+          PendingRevocation === null
+            ? ""
+            : Strings.shareRevokeConfirmation(
+                PendingRevocation.ResourceName,
+                PendingRevocation.Target,
+              )
+        }
+        OnCancel={() => {
+          SetPendingRevocation(null);
+        }}
+        OnConfirm={async () => {
+          if (PendingRevocation === null) return;
+          const Id = PendingRevocation.Id;
+          SetPendingRevocation(null);
+          SetBusy(true);
+          try {
+            await OnRevoke(Id);
+          } finally {
+            SetBusy(false);
+          }
+        }}
+        Open={PendingRevocation !== null}
+        Strings={Strings}
+        Title={Strings.shareRevokeHeading}
+      />
     </section>
   );
 }
@@ -250,6 +296,8 @@ export function SessionsView({
   Strings: Strings;
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
+  const [PendingRevocation, SetPendingRevocation] = useState<SessionRecord | null>(null);
+  const [Busy, SetBusy] = useState(false);
   return (
     <section aria-labelledby="sessions-heading" className="fb-activity-view">
       <header className="fb-page-heading">
@@ -274,14 +322,89 @@ export function SessionsView({
             {Session.Current ? (
               <StatusPill Kind="success">{Strings.activeSession}</StatusPill>
             ) : (
-              <Button appearance="secondary" onClick={() => void OnRevoke(Session.Id)}>
+              <Button
+                appearance="secondary"
+                aria-haspopup="dialog"
+                disabled={Busy}
+                onClick={() => {
+                  SetPendingRevocation(Session);
+                }}
+              >
                 {Strings.revoke}
               </Button>
             )}
           </article>
         ))}
       </div>
+      <RevocationDialog
+        Busy={Busy}
+        Description={
+          PendingRevocation === null
+            ? ""
+            : Strings.sessionRevokeConfirmation(PendingRevocation.Device)
+        }
+        OnCancel={() => {
+          SetPendingRevocation(null);
+        }}
+        OnConfirm={async () => {
+          if (PendingRevocation === null) return;
+          const Id = PendingRevocation.Id;
+          SetPendingRevocation(null);
+          SetBusy(true);
+          try {
+            await OnRevoke(Id);
+          } finally {
+            SetBusy(false);
+          }
+        }}
+        Open={PendingRevocation !== null}
+        Strings={Strings}
+        Title={Strings.sessionRevokeHeading}
+      />
     </section>
+  );
+}
+
+function RevocationDialog({
+  Busy,
+  Description,
+  OnCancel,
+  OnConfirm,
+  Open,
+  Strings,
+  Title,
+}: Readonly<{
+  Busy: boolean;
+  Description: string;
+  OnCancel(): void;
+  OnConfirm(): Promise<void>;
+  Open: boolean;
+  Strings: Strings;
+  Title: string;
+}>): ReactNode {
+  return (
+    <Dialog
+      modalType="alert"
+      onOpenChange={(Ignored, Data) => {
+        if (!Data.open && !Busy) OnCancel();
+      }}
+      open={Open}
+    >
+      <DialogSurface>
+        <DialogBody>
+          <DialogTitle>{Title}</DialogTitle>
+          <DialogContent>{Description}</DialogContent>
+          <DialogActions>
+            <Button appearance="secondary" disabled={Busy} onClick={OnCancel}>
+              {Strings.cancel}
+            </Button>
+            <Button appearance="primary" disabled={Busy} onClick={() => void OnConfirm()}>
+              {Strings.revoke}
+            </Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
   );
 }
 

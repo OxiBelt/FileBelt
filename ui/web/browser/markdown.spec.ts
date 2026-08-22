@@ -410,6 +410,7 @@ test("retains the latest head when reconnect falls back after a frozen room", as
   await expect(Page.getByText("Live collaboration disconnected.")).toBeVisible();
   await Page.getByRole("button", { name: "Reconnect" }).click();
   await expect(Page.getByRole("button", { name: "Save local edits as a copy" })).toBeVisible();
+  await expect(Page.getByText("This file is not valid text.", { exact: false })).toHaveCount(0);
   await expect(Editor).toContainText("local dirty");
   await expect(Editor).toContainText("external head");
 });

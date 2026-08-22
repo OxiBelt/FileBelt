@@ -32,19 +32,25 @@ type AwarenessCursor = Record<"anchor", unknown> & Record<"head", unknown>;
 type AwarenessLocalState = Record<"cursor", AwarenessCursor>;
 
 export interface MarkdownCollaborationGrant {
-  Authorization: string;
-  ClientId: string;
-  EndpointUrl: string;
-  PresenceLabel: string;
-  RoomId: string;
+  readonly Authorization: string;
+  readonly ClientId: string;
+  readonly EndpointUrl: string;
+  readonly PresenceLabel: string;
+  readonly RoomId: string;
 }
 
 export type MarkdownCollaborationState = "connected" | "connecting" | "disconnected";
 
+export interface MarkdownCheckpointSnapshot {
+  readonly Id: string;
+  readonly Source: string;
+  readonly StateVector: Uint8Array;
+}
+
 export interface ConnectMarkdownCollaborationOptions {
-  Grant: MarkdownCollaborationGrant;
-  OnStateChange?: (State: MarkdownCollaborationState) => void;
-  WebSocketFactory?: (Url: string) => WebSocket;
+  readonly Grant: MarkdownCollaborationGrant;
+  readonly OnStateChange?: (State: MarkdownCollaborationState) => void;
+  readonly WebSocketFactory?: (Url: string) => WebSocket;
 }
 
 export class MarkdownRealtimeSession implements TextCollaboration {
@@ -54,7 +60,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   readonly #Grant: MarkdownCollaborationGrant;
   readonly #OnStateChange: ((State: MarkdownCollaborationState) => void) | undefined;
   readonly #RemoteClients = new Map<string, { AwarenessId: number; Clock: number }>();
-  readonly #Socket: WebSocket;
+  readonly #Socket: Readonly<WebSocket>;
   #AcknowledgedSequence = 0;
   #Destroyed = false;
   #Failed = false;
@@ -63,12 +69,20 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   #InFlight: { Id: string; McpInvocationId?: string; Update: Uint8Array } | undefined;
   readonly #PendingUpdates: { McpInvocationId?: string; Update: Uint8Array }[] = [];
   #PendingCheckpoint:
-    | { Reject: (Reason?: unknown) => void; Resolve: (Id: string) => void }
+    | {
+        Reject: (Reason?: unknown) => void;
+        // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The checkpoint contract deliberately returns a mutable Uint8Array for Yjs interoperability.
+        Resolve: (Checkpoint: Readonly<MarkdownCheckpointSnapshot>) => void;
+        Source: string;
+        StateVector: Uint8Array;
+      }
     | undefined;
   #Ready = false;
 
-  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Session construction preserves the mutable browser WebSocket contract.
-  private constructor(Options: ConnectMarkdownCollaborationOptions, Socket: WebSocket) {
+  private constructor(
+    Options: Readonly<ConnectMarkdownCollaborationOptions>,
+    Socket: Readonly<WebSocket>,
+  ) {
     this.#Grant = Options.Grant;
     this.#OnStateChange = Options.OnStateChange;
     this.#Socket = Socket;
@@ -77,7 +91,6 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   }
 
   static async Connect(
-    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This exported connection API preserves its public grant shape.
     Options: ConnectMarkdownCollaborationOptions,
   ): Promise<MarkdownRealtimeSession> {
     const Socket = (Options.WebSocketFactory ?? ((Url: string) => new WebSocket(Url)))(
@@ -98,6 +111,10 @@ export class MarkdownRealtimeSession implements TextCollaboration {
   CurrentText(): string {
     // oxlint-disable-next-line typescript/no-base-to-string -- Y.Text's documented content projection is its toString method.
     return this.Document.getText(this.TextName).toString();
+  }
+
+  CurrentStateVector(): Uint8Array {
+    return Y.encodeStateVector(this.Document);
   }
 
   ApplyMcpProposal(Markdown: string, InvocationId: string): void {
@@ -123,7 +140,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     });
   }
 
-  async RequestCheckpoint(): Promise<string> {
+  async RequestCheckpoint(): Promise<MarkdownCheckpointSnapshot> {
     if (
       !this.#Ready ||
       this.#Destroyed ||
@@ -133,8 +150,10 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     ) {
       throw new Error("Collaboration changes must be durable before saving.");
     }
-    return new Promise<string>((Resolve, Reject) => {
-      this.#PendingCheckpoint = { Reject, Resolve };
+    const Source = this.CurrentText();
+    const StateVector = this.CurrentStateVector();
+    return new Promise<MarkdownCheckpointSnapshot>((Resolve, Reject) => {
+      this.#PendingCheckpoint = { Reject, Resolve, Source, StateVector };
       this.#Send(Frame(11, Message([Unsigned(1, this.#AcknowledgedSequence)])));
     });
   }
@@ -397,7 +416,7 @@ export class MarkdownRealtimeSession implements TextCollaboration {
     }
     const Pending = this.#PendingCheckpoint;
     this.#PendingCheckpoint = undefined;
-    Pending.Resolve(Id);
+    Pending.Resolve({ Id, Source: Pending.Source, StateVector: Pending.StateVector });
   }
 
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The protobuf codec retains mutable typed-array field values.

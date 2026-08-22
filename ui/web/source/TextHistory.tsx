@@ -2,7 +2,7 @@
 
 import { Button, Select, Spinner } from "@fluentui/react-components";
 import { Copy, RotateCcw } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { BidiText, StatusPill } from "@filebelt/design-system";
 
@@ -30,27 +30,59 @@ export function TextHistory({
   const [TargetVersionId, SetTargetVersionId] = useState("");
   const [Comparison, SetComparison] = useState<TextComparison | null>(null);
   const [ErrorMessage, SetError] = useState<string | null>(null);
+  const [Loading, SetLoading] = useState(false);
+  const LoadingReference = useRef(false);
+  const RequestGeneration = useRef(0);
   const ComparisonTooLarge = ErrorMessage !== null && /too[ ._-]*large/i.test(ErrorMessage);
-  const Load = async (): Promise<void> => {
-    if (Cursor === null) return;
-    try {
-      const Page = await Client.listTextVersions(Entry.Id, Cursor ?? null);
-      SetVersions((Current) => [...Current, ...Page.Items]);
-      SetCursor(Page.NextCursor);
-      SetBaseVersionId((Current) =>
-        Current.length === 0 ? (Page.Items.at(-1)?.Id ?? "") : Current,
-      );
-      SetTargetVersionId((Current) =>
-        Current.length === 0 ? (Page.Items.at(0)?.Id ?? "") : Current,
-      );
-    } catch (Cause) {
-      SetError(Cause instanceof Error ? Cause.message : "History is unavailable.");
-    }
-  };
+  const LoadPage = useCallback(
+    async (PageCursor: string | null, Generation: number): Promise<void> => {
+      if (LoadingReference.current) return;
+      LoadingReference.current = true;
+      SetLoading(true);
+      try {
+        const Page = await Client.listTextVersions(Entry.Id, PageCursor);
+        if (Generation !== RequestGeneration.current) return;
+        SetVersions((Current) => {
+          const ById = new Map(Current.map((Version) => [Version.Id, Version]));
+          for (const Version of Page.Items) ById.set(Version.Id, Version);
+          return [...ById.values()];
+        });
+        SetCursor(Page.NextCursor);
+        SetError(null);
+        SetBaseVersionId((Current) =>
+          Current.length === 0 ? (Page.Items.at(-1)?.Id ?? "") : Current,
+        );
+        SetTargetVersionId((Current) =>
+          Current.length === 0 ? (Page.Items.at(0)?.Id ?? "") : Current,
+        );
+      } catch (Cause) {
+        if (Generation === RequestGeneration.current)
+          SetError(Cause instanceof Error ? Cause.message : "History is unavailable.");
+      } finally {
+        if (Generation === RequestGeneration.current) {
+          LoadingReference.current = false;
+          SetLoading(false);
+        }
+      }
+    },
+    [Client, Entry.Id],
+  );
 
   useEffect(() => {
-    void Load();
-  }, [Entry.Id]); // Changing file intentionally resets via its keyed route.
+    const Generation = RequestGeneration.current + 1;
+    RequestGeneration.current = Generation;
+    LoadingReference.current = false;
+    SetVersions([]);
+    SetCursor(undefined);
+    SetBaseVersionId("");
+    SetTargetVersionId("");
+    SetComparison(null);
+    SetError(null);
+    void LoadPage(null, Generation);
+    return () => {
+      RequestGeneration.current += 1;
+    };
+  }, [Entry.Id, LoadPage]);
 
   const Compare = async (): Promise<void> => {
     if (BaseVersionId.length === 0 || TargetVersionId.length === 0) return;
@@ -132,7 +164,11 @@ export function TextHistory({
         ))}
       </div>
       {Cursor === undefined ? <Spinner label="Loading history" /> : null}
-      {Cursor === null ? null : <Button onClick={() => void Load()}>Load more versions</Button>}
+      {typeof Cursor !== "string" ? null : (
+        <Button disabled={Loading} onClick={() => void LoadPage(Cursor, RequestGeneration.current)}>
+          Load more versions
+        </Button>
+      )}
       {Versions.length < 2 ? null : (
         <div className="fb-history-compare">
           <label htmlFor="history-base">

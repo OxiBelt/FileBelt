@@ -3,9 +3,13 @@
 import createClient from "openapi-fetch";
 import type { Client } from "openapi-fetch";
 
-import { AuthenticationRequiredError, VersionConflictError } from "./client.js";
+import { AclConflictError, AuthenticationRequiredError, VersionConflictError } from "./client.js";
 import type {
+  AclCollection,
+  AclEntryMutation,
+  AclPrincipalSelector,
   CreateShareInput,
+  EntryMutationOutcome,
   FileBeltClient,
   PublicShareClient,
   PublicShareGrant,
@@ -16,6 +20,7 @@ import type {
   TextComparison,
   TextPreferences,
   VersionPage as TextVersionPage,
+  WorkspaceLoadScope,
 } from "./client.js";
 import type { components, operations, paths } from "./generated/openapi.js";
 import type {
@@ -23,6 +28,7 @@ import type {
   SessionRecord,
   ShareRecord,
   UploadCandidate,
+  UploadTarget,
   VersionRecord,
   WorkspaceSnapshot,
 } from "./model.js";
@@ -44,6 +50,7 @@ type NodePage = components["schemas"]["NodePage"];
 type VersionPage = components["schemas"]["VersionPage"];
 type TextComparisonResponse = components["schemas"]["TextVersionComparison"];
 type TextPreferencesResponse = components["schemas"]["TextPreferences"];
+type AclCollectionResponse = components["schemas"]["AclCollection"];
 type UploadCommit = operations["commitUpload"]["responses"][201]["content"]["application/json"];
 
 interface NodeLocation {
@@ -106,12 +113,16 @@ type SignalInitShape = {
   signal?: AbortSignal;
 };
 
-class ApiRequestError extends Error {
+export class ApiRequestError extends Error {
+  readonly Code: string | null;
+  readonly Detail: string | null;
   readonly Status: number;
 
-  constructor(Status: number, Message: string) {
+  constructor(Status: number, Message: string, Code: string | null, Detail: string | null) {
     super(Message);
     this.name = "ApiRequestError";
+    this.Code = Code;
+    this.Detail = Detail;
     this.Status = Status;
   }
 }
@@ -145,7 +156,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     });
   }
 
-  async getWorkspace(Signal?: Readonly<AbortSignal>): Promise<WorkspaceSnapshot> {
+  async getWorkspace(
+    Signal?: Readonly<AbortSignal>,
+    Scope: WorkspaceLoadScope = { Kind: "global" },
+  ): Promise<WorkspaceSnapshot> {
     const RefreshGeneration = ++this.#WorkspaceRefreshGeneration;
     const Session = RequireData<SessionResponse>(
       await this.#Api.GET("/api/v1/session", SignalInit(Signal)),
@@ -178,19 +192,32 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     const Locations = new Map<string, NodeLocation>();
     const ShareLocations = new Map<string, DirectShareLocation>();
     const VersionLocations = new Map<string, { DriveId: string; NodeId: string }>();
+    const FolderDriveId =
+      Scope.Kind === "folder" ? (Scope.DriveId ?? PrivateDrive?.id ?? null) : null;
     for (const Drive of Drives) {
+      if (Scope.Kind === "folder" && Drive.id !== FolderDriveId) continue;
       const Nodes: NodeResponse[] = [];
-      const Directories = [Drive.root_id];
-      while (Directories.length > 0) {
-        const ParentId = Directories.shift();
-        if (ParentId === undefined) break;
-        const Children = await this.#listChildren(Drive.id, ParentId, Signal);
-        Nodes.push(...Children);
-        Directories.push(
-          ...Children.filter(({ kind: Kind }) => Kind === "directory").map(({ id: Id }) => Id),
-        );
+      if (Scope.Kind === "folder") {
+        const CurrentNodeId = Scope.NodeId ?? Drive.root_id;
+        if (Scope.NodeId !== null) {
+          const Current = await this.#getNode(Drive.id, CurrentNodeId, Signal);
+          if (Current.kind !== "directory") throw new Error("The selected folder is unavailable.");
+          Nodes.push(Current);
+        }
+        Nodes.push(...(await this.#listChildren(Drive.id, CurrentNodeId, Signal)));
+      } else {
+        const Directories = [Drive.root_id];
+        while (Directories.length > 0) {
+          const ParentId = Directories.shift();
+          if (ParentId === undefined) break;
+          const Children = await this.#listChildren(Drive.id, ParentId, Signal);
+          Nodes.push(...Children);
+          Directories.push(
+            ...Children.filter(({ kind: Kind }) => Kind === "directory").map(({ id: Id }) => Id),
+          );
+        }
+        Nodes.push(...(await this.#listTrash(Drive.id, Signal)));
       }
-      Nodes.push(...(await this.#listTrash(Drive.id, Signal)));
       for (const Node of Nodes) {
         Locations.set(Node.id, {
           DriveId: Drive.id,
@@ -200,7 +227,9 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           ParentId: Node.parent_id,
         });
         const NodeVersions =
-          Node.kind === "file" ? await this.#listVersions(Drive.id, Node.id, Signal) : [];
+          Scope.Kind === "global" && Node.kind === "file"
+            ? await this.#listVersions(Drive.id, Node.id, Signal)
+            : [];
         for (const Version of NodeVersions) {
           VersionLocations.set(Version.id, { DriveId: Drive.id, NodeId: Node.id });
           Versions.push(VersionRecord(Version));
@@ -233,14 +262,17 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     }
 
     const KnownEntries = new Set(Entries.map(({ Id }) => Id));
-    const SharedNodes = await this.#collectPages<NodeResponse>(async (Cursor) =>
-      RequireData<NodePage>(
-        await this.#Api.GET("/api/v1/shared", {
-          params: { query: PageQuery(Cursor) },
-          ...SignalInit(Signal),
-        }),
-      ),
-    );
+    const SharedNodes =
+      Scope.Kind === "global"
+        ? await this.#collectPages<NodeResponse>(async (Cursor) =>
+            RequireData<NodePage>(
+              await this.#Api.GET("/api/v1/shared", {
+                params: { query: PageQuery(Cursor) },
+                ...SignalInit(Signal),
+              }),
+            ),
+          )
+        : [];
     for (const Node of SharedNodes) {
       if (KnownEntries.has(Node.id)) continue;
       Locations.set(Node.id, {
@@ -287,6 +319,12 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
         Email: Session.verified_email ?? "",
         IsTenantAdmin: Session.tenant_admin,
       },
+      Drives: Drives.map((Drive) => ({
+        Id: Drive.id,
+        Kind: Drive.kind,
+        Name: Drive.display_name,
+        RootId: Drive.root_id,
+      })),
       Entries,
       Privacy: [],
       Sessions,
@@ -307,9 +345,27 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Snapshot;
   }
 
-  async upload(Files: readonly Readonly<UploadCandidate>[]): Promise<void> {
-    const Target = this.#Routing.UploadTarget;
-    if (Target === null) throw new Error("No writable private drive is available.");
+  async upload(
+    Files: readonly Readonly<UploadCandidate>[],
+    RequestedTarget?: Readonly<UploadTarget>,
+  ): Promise<void> {
+    const DefaultTarget = this.#Routing.UploadTarget;
+    if (RequestedTarget === undefined && DefaultTarget === null)
+      throw new Error("No writable private drive is available.");
+    const Target =
+      RequestedTarget === undefined
+        ? DefaultTarget
+        : {
+            DriveId: RequestedTarget.DriveId,
+            NamespaceGeneration: 0,
+            RootId: RequestedTarget.ParentId,
+          };
+    if (Target === null) throw new Error("No writable upload folder is available.");
+    if (RequestedTarget !== undefined) {
+      const Location = this.#location(RequestedTarget.ParentId);
+      if (Location.DriveId !== RequestedTarget.DriveId || Location.Kind !== "directory")
+        throw new Error("The upload folder is unavailable.");
+    }
     await this.#ensureSession();
     for (const Candidate of Files) {
       if (Candidate.Data === undefined || Candidate.Data.size !== Candidate.Size) {
@@ -423,6 +479,60 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Etag: RequireEtag(Result.response),
       Value: { EditLimitBytes: Value.edit_limit_bytes, InlineLimitBytes: Value.inline_limit_bytes },
     };
+  }
+
+  async getAcl(
+    EntryId: string,
+    Signal?: Readonly<AbortSignal>,
+  ): Promise<{ Etag: string; Value: AclCollection }> {
+    const Location = this.#location(EntryId);
+    const Result = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/acl", {
+      params: { path: { drive_id: Location.DriveId, node_id: EntryId } },
+      ...SignalInit(Signal),
+    });
+    const Value = RequireData<AclCollectionResponse>(Result);
+    return {
+      Etag: RequireEtag(Result.response),
+      Value: AclCollectionValue(Value),
+    };
+  }
+
+  async replaceAcl(
+    EntryId: string,
+    ExpectedEtag: string,
+    Principal: Readonly<AclPrincipalSelector>,
+    Entries: readonly Readonly<AclEntryMutation>[],
+  ): Promise<{ Etag: string; Value: AclCollection }> {
+    const Location = this.#location(EntryId);
+    await this.#ensureSession();
+    try {
+      const Result = await this.#Api.PUT("/api/v1/drives/{drive_id}/nodes/{node_id}/acl", {
+        body: {
+          entries: Entries.map((Entry) => ({
+            action: Entry.Action,
+            effect: Entry.Effect,
+            inheritance: Entry.Inheritance,
+          })),
+          principal: {
+            group_id: Principal.GroupId,
+            kind: Principal.Kind,
+            verified_email: Principal.VerifiedEmail,
+          },
+        },
+        params: {
+          header: { ...this.#mutationHeaders(), "If-Match": ExpectedEtag },
+          path: { drive_id: Location.DriveId, node_id: EntryId },
+        },
+      });
+      const Value = RequireData<AclCollectionResponse>(Result);
+      return {
+        Etag: RequireEtag(Result.response),
+        Value: AclCollectionValue(Value),
+      };
+    } catch (Cause) {
+      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new AclConflictError();
+      throw Cause;
+    }
   }
 
   async updateTextPreferences(
@@ -641,10 +751,8 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return this.#putUploadContents(Allocation, Input.Contents);
   }
 
-  async trashEntries(EntryIds: readonly string[]): Promise<void> {
-    await this.#ensureSession();
-    for (const EntryId of EntryIds) {
-      const Location = this.#location(EntryId);
+  async trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#batchEntryMutation(EntryIds, async (EntryId, Location) => {
       RequireSuccess(
         await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/trash", {
           body: { expected_namespace_generation: Location.NamespaceGeneration },
@@ -654,13 +762,11 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         }),
       );
-    }
+    });
   }
 
-  async restoreEntries(EntryIds: readonly string[]): Promise<void> {
-    await this.#ensureSession();
-    for (const EntryId of EntryIds) {
-      const Location = this.#location(EntryId);
+  async restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#batchEntryMutation(EntryIds, async (EntryId, Location) => {
       RequireSuccess(
         await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/restore", {
           body: { expected_namespace_generation: Location.NamespaceGeneration },
@@ -670,7 +776,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         }),
       );
-    }
+    });
   }
 
   async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
@@ -845,6 +951,28 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     return Items;
   }
 
+  async #batchEntryMutation(
+    EntryIds: readonly string[],
+    Operation: (EntryId: string, Location: Readonly<NodeLocation>) => Promise<void>,
+  ): Promise<readonly EntryMutationOutcome[]> {
+    if (EntryIds.length === 0) return [];
+    try {
+      await this.#ensureSession();
+    } catch (Cause) {
+      return EntryIds.map((EntryId) => FailedEntryMutation(EntryId, Cause));
+    }
+    const Outcomes: EntryMutationOutcome[] = [];
+    for (const EntryId of EntryIds) {
+      try {
+        await Operation(EntryId, this.#location(EntryId));
+        Outcomes.push({ EntryId, Kind: "success" });
+      } catch (Cause) {
+        Outcomes.push(FailedEntryMutation(EntryId, Cause));
+      }
+    }
+    return Outcomes;
+  }
+
   async #getNode(
     DriveId: string,
     NodeId: string,
@@ -986,6 +1114,7 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
     MediaType: IsFile ? Node.head_media_type : null,
     Name: Node.display_name,
     Owner,
+    ParentId: Node.parent_id,
     Shared,
     Size: IsFile ? Node.size_bytes : null,
     Status: "ready",
@@ -1009,6 +1138,24 @@ function TextEligibility(
   if (!IsText || Size === null) return "ineligible";
   if (Size > 100 * 1024 * 1024) return "history-only";
   return Size <= 16 * 1024 * 1024 ? "editable" : "viewable";
+}
+
+function AclCollectionValue(Value: Readonly<AclCollectionResponse>): AclCollection {
+  return {
+    Entries: Value.entries.map((Entry) => ({
+      Action: Entry.action,
+      DisplayName: Entry.display_name,
+      Effect: Entry.effect,
+      GroupId: Entry.group_id,
+      Inheritance: Entry.inheritance,
+      PrincipalId: Entry.principal_id,
+      PrincipalKind: Entry.principal_kind,
+      ReadOnly: Entry.read_only,
+      Source: Entry.source,
+      VerifiedEmail: Entry.verified_email,
+    })),
+    SupportedActions: Value.supported_actions,
+  };
 }
 
 function PageQuery(Cursor: string | null): PageQueryShape {
@@ -1038,12 +1185,58 @@ function RequestError(Response: Response, Error: unknown): Error {
   return new ApiRequestError(
     Response.status,
     ProblemTitle(Error) ?? `FileBelt request failed (${Response.status}).`,
+    ProblemString(Error, "code"),
+    ProblemString(Error, "detail"),
   );
 }
 
+function FailedEntryMutation(EntryId: string, Cause: unknown): EntryMutationOutcome {
+  if (Cause instanceof ApiRequestError) {
+    return {
+      EntryId,
+      Error: {
+        Code: Cause.Code,
+        Detail: Cause.Detail,
+        Message: Cause.message,
+        Status: Cause.Status,
+      },
+      Kind: "failure",
+    };
+  }
+  if (Cause instanceof AuthenticationRequiredError) {
+    return {
+      EntryId,
+      Error: { Code: null, Detail: null, Message: Cause.message, Status: 401 },
+      Kind: "failure",
+    };
+  }
+  return {
+    EntryId,
+    Error: {
+      Code: null,
+      Detail: null,
+      Message:
+        Cause instanceof Error ? Cause.message : "The selected resource could not be changed.",
+      Status: null,
+    },
+    Kind: "failure",
+  };
+}
+
 function ProblemTitle(Value: unknown): string | null {
-  if (typeof Value !== "object" || Value === null || !("title" in Value)) return null;
-  return typeof Value.title === "string" ? Value.title : null;
+  return ProblemString(Value, "title");
+}
+
+function ProblemString(Value: unknown, Key: "code" | "detail" | "title"): string | null {
+  if (!IsProblemObject(Value)) return null;
+  const Candidate = Value[Key];
+  return typeof Candidate === "string" ? Candidate : null;
+}
+
+function IsProblemObject(
+  Value: unknown,
+): Value is Partial<Record<"code" | "detail" | "title", unknown>> {
+  return typeof Value === "object" && Value !== null;
 }
 
 function UploadPartNumber(Path: string): number | null {

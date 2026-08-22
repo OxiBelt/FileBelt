@@ -2,6 +2,12 @@
 
 import {
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Input,
   Menu,
   MenuItem,
@@ -12,6 +18,8 @@ import {
   Tooltip,
 } from "@fluentui/react-components";
 import {
+  AlertTriangle,
+  ArrowLeft,
   Bell,
   Clock3,
   CloudUpload,
@@ -25,6 +33,7 @@ import {
   HardDrive,
   History,
   Link2,
+  LockKeyhole,
   Menu as MenuIcon,
   Moon,
   MoreHorizontal,
@@ -72,12 +81,15 @@ import {
   VersionsView,
 } from "./ActivityViews.js";
 import { AuthenticationRequiredError } from "./client.js";
-import type { FileBeltClient } from "./client.js";
+import type { EntryMutationOutcome, FileBeltClient, WorkspaceLoadScope } from "./client.js";
 import type { DocumentSessionClient } from "./document-http-client.js";
 import { IsOfficeDocumentCandidate } from "./document-eligibility.js";
 import { FileTable } from "./FileTable.js";
+import { EntryMutationErrorText, SummarizeEntryMutations } from "./entry-batch.js";
+import type { EntryMutationSummary } from "./entry-batch.js";
 import type { FileEntry, RouteId, WorkspaceSnapshot } from "./model.js";
 import type { MountSettingsClient } from "./mount-http-client.js";
+import { InternalNavigationHref } from "./navigation.js";
 import type { NfsTargetClient } from "./nfs-target-http-client.js";
 import { EmptySelection, SelectionReducer } from "./selection.js";
 import { En } from "./strings.js";
@@ -94,6 +106,7 @@ const TextSettings = lazy(async () => ({
   default: (await import("./TextSettings.js")).TextSettings,
 }));
 const TextHistory = lazy(async () => ({ default: (await import("./TextHistory.js")).TextHistory }));
+const AclEditor = lazy(async () => ({ default: (await import("./AclEditor.js")).AclEditor }));
 const LoadDocumentSessions = async () => import("./DocumentSessions.js");
 const DocumentSessions = lazy(async () => ({
   default: (await LoadDocumentSessions()).OwnDocumentSessions,
@@ -157,6 +170,7 @@ function RouteFromPath(Pathname: string): RouteId | "admin" {
   if (Pathname === "/settings/mounts") return "mounts";
   if (Pathname === "/settings/text") return "text";
   if (/^\/markdown\/[0-9a-f-]+$/i.test(Pathname)) return "markdown";
+  if (/^\/drive\/[0-9a-f-]+\/[0-9a-f-]+$/i.test(Pathname)) return "drive";
   return (
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Object.entries loses the exact keys of this closed RouteId mapping.
     (Object.entries(RoutePaths).find(([, Path]) => Pathname === Path)?.[0] as
@@ -167,15 +181,57 @@ function RouteFromPath(Pathname: string): RouteId | "admin" {
 
 export type NavigationGuard = (Continue: () => void) => void;
 
-function useRoute(): [
-  RouteId | "admin",
-  (Route: RouteId | "admin") => void,
-  (EntryId: string) => void,
-  (Guard: NavigationGuard | undefined) => void,
-] {
-  const [Route, SetRoute] = useState<RouteId | "admin">(() =>
-    RouteFromPath(window.location.pathname),
+interface RouteLocation {
+  Path: string;
+  Route: RouteId | "admin";
+}
+
+interface FolderLocation {
+  DriveId: string;
+  NodeId: string;
+}
+
+function ParseFolderLocation(Pathname: string): FolderLocation | null {
+  const Match = /^\/drive\/([0-9a-f-]+)\/([0-9a-f-]+)$/i.exec(Pathname);
+  return Match?.[1] === undefined || Match[2] === undefined
+    ? null
+    : { DriveId: Match[1], NodeId: Match[2] };
+}
+
+function MarkdownReturnPath(): string {
+  const State = window.history.state as unknown;
+  if (!IsNavigationState(State)) return RoutePaths.drive;
+  const Candidate = State.FileBeltReturnPath;
+  return typeof Candidate === "string" && IsWorkspacePath(Candidate) ? Candidate : RoutePaths.drive;
+}
+
+function IsNavigationState(Value: unknown): Value is { FileBeltReturnPath?: unknown } {
+  return typeof Value === "object" && Value !== null;
+}
+
+function IsWorkspacePath(Pathname: string): boolean {
+  return (
+    Pathname === "/admin" ||
+    Object.entries(RoutePaths).some(([Route, Path]) => Route !== "markdown" && Pathname === Path) ||
+    /^\/drive\/[0-9a-f-]+\/[0-9a-f-]+$/i.test(Pathname)
   );
+}
+
+function useRoute(
+  DevelopmentMock: boolean,
+): [
+  RouteId | "admin",
+  (Route: RouteId | "admin", OnNavigated?: () => void) => void,
+  (EntryId: string) => void,
+  (DriveId: string, NodeId: string) => void,
+  (Guard: NavigationGuard | undefined) => void,
+  string,
+  () => void,
+] {
+  const [Location, SetLocation] = useState<RouteLocation>(() => ({
+    Path: window.location.pathname,
+    Route: RouteFromPath(window.location.pathname),
+  }));
   const ActivePathReference = useRef(window.location.pathname);
   const GuardReference = useRef<NavigationGuard | undefined>(undefined);
   useEffect(() => {
@@ -185,51 +241,81 @@ function useRoute(): [
       const Guard = GuardReference.current;
       if (Guard === undefined) {
         ActivePathReference.current = NextPath;
-        SetRoute(NextRoute);
+        SetLocation({ Path: NextPath, Route: NextRoute });
         return;
       }
       // The browser already changed history. Restore the active route until the
       // user chooses how to handle its unsaved source.
-      window.history.pushState({}, "", ActivePathReference.current);
+      window.history.pushState(
+        {},
+        "",
+        InternalNavigationHref(ActivePathReference.current, DevelopmentMock),
+      );
       Guard(() => {
-        window.history.pushState({}, "", NextPath);
+        window.history.pushState({}, "", InternalNavigationHref(NextPath, DevelopmentMock));
         ActivePathReference.current = NextPath;
-        SetRoute(NextRoute);
+        SetLocation({ Path: NextPath, Route: NextRoute });
       });
     };
     window.addEventListener("popstate", OnPopState);
     return () => {
       window.removeEventListener("popstate", OnPopState);
     };
-  }, [Route]);
+  }, [DevelopmentMock]);
   const Guarded = (Continue: () => void): void => {
     const Guard = GuardReference.current;
     if (Guard === undefined) Continue();
     else Guard(Continue);
   };
-  const Navigate = (Next: RouteId | "admin"): void => {
+  const Navigate = (Next: RouteId | "admin", OnNavigated?: () => void): void => {
     Guarded(() => {
       const NextPath = Next === "admin" ? "/admin" : RoutePaths[Next];
-      window.history.pushState({}, "", NextPath);
+      window.history.pushState({}, "", InternalNavigationHref(NextPath, DevelopmentMock));
       ActivePathReference.current = NextPath;
-      SetRoute(Next);
+      SetLocation({ Path: NextPath, Route: Next });
+      OnNavigated?.();
     });
   };
   const OpenMarkdown = (EntryId: string): void => {
     Guarded(() => {
       const NextPath = `/markdown/${EntryId}`;
-      window.history.pushState({}, "", NextPath);
+      const ReturnPath =
+        Location.Route === "markdown" ? MarkdownReturnPath() : ActivePathReference.current;
+      window.history.pushState(
+        { FileBeltReturnPath: ReturnPath },
+        "",
+        InternalNavigationHref(NextPath, DevelopmentMock),
+      );
       ActivePathReference.current = NextPath;
-      SetRoute("markdown");
+      SetLocation({ Path: NextPath, Route: "markdown" });
+    });
+  };
+  const OpenFolder = (DriveId: string, NodeId: string): void => {
+    Guarded(() => {
+      const NextPath = `/drive/${DriveId}/${NodeId}`;
+      window.history.pushState({}, "", InternalNavigationHref(NextPath, DevelopmentMock));
+      ActivePathReference.current = NextPath;
+      SetLocation({ Path: NextPath, Route: "drive" });
+    });
+  };
+  const ReturnToWorkspace = (): void => {
+    Guarded(() => {
+      const NextPath = MarkdownReturnPath();
+      window.history.pushState({}, "", InternalNavigationHref(NextPath, DevelopmentMock));
+      ActivePathReference.current = NextPath;
+      SetLocation({ Path: NextPath, Route: RouteFromPath(NextPath) });
     });
   };
   return [
-    Route,
+    Location.Route,
     Navigate,
     OpenMarkdown,
+    OpenFolder,
     (Guard: NavigationGuard | undefined) => {
       GuardReference.current = Guard;
     },
+    Location.Path,
+    ReturnToWorkspace,
   ];
 }
 
@@ -266,6 +352,7 @@ function RouteTitle(Route: RouteId | "admin"): string {
 
 interface AppProps {
   Client: FileBeltClient;
+  DevelopmentMode?: boolean;
   DocumentClient?: DocumentSessionClient;
   McpClient?: McpSettingsClient;
   MountClient?: MountSettingsClient;
@@ -292,25 +379,47 @@ export function SignInPrompt(): ReactNode {
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the nested client props and this component only invokes their APIs.
 export function App({
   Client,
+  DevelopmentMode = false,
   DocumentClient,
   McpClient,
   MountClient,
   NfsClient,
   NfsTargetClient,
 }: AppProps): ReactNode {
-  const [Route, Navigate, OpenMarkdown, SetNavigationGuard] = useRoute();
+  const [
+    Route,
+    Navigate,
+    OpenMarkdown,
+    OpenFolder,
+    SetNavigationGuard,
+    RoutePath,
+    ReturnToWorkspace,
+  ] = useRoute(DevelopmentMode);
   const [Snapshot, SetSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [Selection, DispatchSelection] = useReducer(SelectionReducer, EmptySelection);
   const [Search, SetSearch] = useState("");
   const [Preferences, SetPreferences] = useState(LoadPreferences);
   const [Busy, SetBusy] = useState(false);
   const [ErrorMessage, SetError] = useState<string | null>(null);
+  const [EntryBatchSummary, SetEntryBatchSummary] = useState<EntryMutationSummary | null>(null);
   const [AuthenticationRequired, SetAuthenticationRequired] = useState(false);
   const [Announcement, SetAnnouncement] = useState("");
   const [ActionEntryId, SetActionEntryId] = useState<string | null>(null);
+  const [AclEntryId, SetAclEntryId] = useState<string | null>(null);
+  const [RouteEntryId, SetRouteEntryId] = useState<string | null>(null);
   const [NavigationOpen, SetNavigationOpen] = useState(false);
   const [DocumentEntry, SetDocumentEntry] = useState<FileEntry | null>(null);
   const FileInput = useRef<HTMLInputElement>(null);
+  const NavigationPanel = useRef<HTMLElement>(null);
+  const WorkspaceScope = useMemo<WorkspaceLoadScope>(() => {
+    if (Route !== "drive") return { Kind: "global" };
+    const Folder = ParseFolderLocation(RoutePath);
+    return {
+      DriveId: Folder?.DriveId ?? null,
+      Kind: "folder",
+      NodeId: Folder?.NodeId ?? null,
+    };
+  }, [Route, RoutePath]);
 
   const HandleFailure = useCallback((Cause: unknown): void => {
     if (Cause instanceof AuthenticationRequiredError) {
@@ -326,13 +435,13 @@ export function App({
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         SetError(null);
-        SetSnapshot(await Client.getWorkspace(Signal));
+        SetSnapshot(await Client.getWorkspace(Signal, WorkspaceScope));
         SetAuthenticationRequired(false);
       } catch (Cause) {
         if (!(Cause instanceof DOMException && Cause.name === "AbortError")) HandleFailure(Cause);
       }
     },
-    [Client, HandleFailure],
+    [Client, HandleFailure, WorkspaceScope],
   );
 
   useEffect(() => {
@@ -351,9 +460,33 @@ export function App({
     SetAnnouncement(En.selectedAnnouncement(Selection.SelectedIds.size));
   }, [Selection.SelectedIds]);
 
+  useEffect(() => {
+    if (!NavigationOpen) return undefined;
+    NavigationPanel.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The browser owns and dispatches this platform KeyboardEvent object.
+    const OnKeyDown = (Event: Readonly<KeyboardEvent>): void => {
+      if (Event.key !== "Escape") return;
+      Event.preventDefault();
+      SetNavigationOpen(false);
+      document.querySelector<HTMLButtonElement>("#main-navigation-trigger")?.focus();
+    };
+    document.addEventListener("keydown", OnKeyDown);
+    return () => {
+      document.removeEventListener("keydown", OnKeyDown);
+    };
+  }, [NavigationOpen]);
+
+  useEffect(() => {
+    DispatchSelection({ Type: "clear" });
+    SetActionEntryId(null);
+    SetAclEntryId(null);
+    SetEntryBatchSummary(null);
+  }, [Route, RoutePath]);
+
   const Mutate = async (Operation: () => Promise<void>, Message: string): Promise<void> => {
     SetBusy(true);
     SetError(null);
+    SetEntryBatchSummary(null);
     try {
       await Operation();
       await Refresh();
@@ -365,11 +498,53 @@ export function App({
     }
   };
 
+  const MutateEntries = async (
+    Operation: (EntryIds: readonly string[]) => Promise<readonly EntryMutationOutcome[]>,
+    Targets: readonly Readonly<FileEntry>[],
+    Action: "restore" | "trash",
+  ): Promise<void> => {
+    if (Targets.length === 0) return;
+    SetBusy(true);
+    SetError(null);
+    SetEntryBatchSummary(null);
+    try {
+      const Outcomes = await Operation(Targets.map(({ Id }) => Id));
+      const Summary = SummarizeEntryMutations(Targets, Outcomes);
+      SetEntryBatchSummary(Summary.Failures.length === 0 ? null : Summary);
+      DispatchSelection({ Ids: Summary.Failures.map(({ EntryId }) => EntryId), Type: "set" });
+      await Refresh();
+      SetAnnouncement(
+        Action === "restore"
+          ? En.restoreBatchOutcome(Summary.Succeeded, Summary.Failures.length)
+          : En.trashBatchOutcome(Summary.Succeeded, Summary.Failures.length),
+      );
+    } catch (Cause) {
+      await Refresh();
+      HandleFailure(Cause);
+    } finally {
+      SetBusy(false);
+    }
+  };
+
   const Entries = useMemo(() => {
     if (Snapshot === null) return [];
     let Result = Snapshot.Entries;
+    const Folder = ParseFolderLocation(RoutePath);
+    const Drive =
+      Folder === null
+        ? Snapshot.Drives.find(({ Kind }) => Kind === "private")
+        : Snapshot.Drives.find(({ Id }) => Id === Folder.DriveId);
     if (Route === "trash") Result = Result.filter(({ Trashed }) => Trashed);
-    else Result = Result.filter(({ Trashed }) => !Trashed);
+    else {
+      Result = Result.filter(({ Trashed }) => !Trashed);
+      if (Route === "drive" && Drive !== undefined) {
+        const ParentId = Folder?.NodeId ?? Drive.RootId;
+        Result = Result.filter(
+          ({ DriveId, ParentId: EntryParentId }) =>
+            DriveId === Drive.Id && EntryParentId === ParentId,
+        );
+      }
+    }
     if (Route === "shared")
       Result = Result.filter(({ Owner }) => Owner !== Snapshot.CurrentUser.DisplayName);
     if (Route === "shared-drives") Result = Result.filter(({ Shared }) => Shared);
@@ -379,17 +554,32 @@ export function App({
     if (NormalizedSearch.length > 0)
       Result = Result.filter(({ Name }) => Name.toLocaleLowerCase().includes(NormalizedSearch));
     return Result;
-  }, [Route, Search, Snapshot]);
+  }, [Route, RoutePath, Search, Snapshot]);
+
+  useEffect(() => {
+    const VisibleIds = new Set(Entries.map(({ Id }) => Id));
+    if ([...Selection.SelectedIds].some((Id) => !VisibleIds.has(Id)))
+      DispatchSelection({ Type: "clear" });
+  }, [Entries, Selection.SelectedIds]);
 
   const SelectedEntries = Snapshot?.Entries.filter(({ Id }) => Selection.SelectedIds.has(Id)) ?? [];
   const PrimarySelection = SelectedEntries.at(-1);
+  const RouteEntry = Snapshot?.Entries.find(({ Id }) => Id === RouteEntryId);
   const ActionEntry = Snapshot?.Entries.find(({ Id }) => Id === ActionEntryId);
+  const AclEntry = Snapshot?.Entries.find(({ Id }) => Id === AclEntryId);
   const PrimaryFileActionDescription =
     PrimarySelection?.Kind === "symlink" ? "symlink-actions-unavailable" : undefined;
   const ActionFileActionDescription =
     ActionEntry?.Kind === "symlink" ? "symlink-actions-unavailable" : undefined;
   const MarkdownEntryId = Route === "markdown" ? window.location.pathname.split("/")[2] : undefined;
   const MarkdownEntry = Snapshot?.Entries.find(({ Id }) => Id === MarkdownEntryId);
+  const FolderLocation = ParseFolderLocation(RoutePath);
+  const CurrentDrive =
+    Snapshot?.Drives.find(({ Id }) => Id === FolderLocation?.DriveId) ??
+    Snapshot?.Drives.find(({ Kind }) => Kind === "private");
+  const CurrentFolder = Snapshot?.Entries.find(
+    ({ DriveId, Id }) => DriveId === CurrentDrive?.Id && Id === FolderLocation?.NodeId,
+  );
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The markdown package owns this reference value and the callback only observes it.
   const OpenFileBeltReference = (Target: FileBeltReference): boolean => {
     // Snapshot membership is a UX hint only; the destination read still obtains
@@ -397,6 +587,7 @@ export function App({
     const Entry = Snapshot?.Entries.find(({ Id }) => Id === Target.NodeId);
     if (
       Entry?.Kind !== "file" ||
+      Entry.DriveId !== Target.DriveId ||
       Entry.TextEligibility === "ineligible" ||
       Entry.TextEligibility === "history-only"
     )
@@ -415,7 +606,16 @@ export function App({
     }));
     Event.currentTarget.value = "";
     if (Candidates.length > 0)
-      void Mutate(async () => Client.upload(Candidates), En.uploadCompleted(Candidates.length));
+      void Mutate(
+        async () =>
+          Client.upload(
+            Candidates,
+            CurrentDrive === undefined || CurrentFolder === undefined
+              ? undefined
+              : { DriveId: CurrentDrive.Id, ParentId: CurrentFolder.Id },
+          ),
+        En.uploadCompleted(Candidates.length),
+      );
   };
 
   const DownloadEntry = async (Entry: Readonly<FileEntry>): Promise<void> => {
@@ -483,15 +683,18 @@ export function App({
 
   return (
     <FileBeltProvider Density={Preferences.density} ThemeChoice={Preferences.theme}>
-      <div className="fb-app-shell">
+      <div className={DevelopmentMode ? "fb-app-shell is-development" : "fb-app-shell"}>
         <a className="fb-skip-link" href="#main-content">
           {En.skipToContent}
         </a>
         <header className="fb-topbar">
           <Button
+            aria-controls="main-navigation"
+            aria-expanded={NavigationOpen}
             aria-label={En.mainNavigation}
             appearance="subtle"
             className="fb-mobile-menu"
+            id="main-navigation-trigger"
             icon={<MenuIcon />}
             onClick={() => {
               SetNavigationOpen((Open) => !Open);
@@ -500,6 +703,7 @@ export function App({
           <button
             className="fb-brand"
             onClick={() => {
+              SetRouteEntryId(null);
               Navigate("drive");
             }}
             type="button"
@@ -575,9 +779,17 @@ export function App({
           </Menu>
         </header>
 
+        {DevelopmentMode ? (
+          <div className="fb-development-banner" role="status">
+            {En.developmentMock}
+          </div>
+        ) : null}
+
         <nav
           aria-label={En.mainNavigation}
           className={NavigationOpen ? "fb-navigation is-open" : "fb-navigation"}
+          id="main-navigation"
+          ref={NavigationPanel}
         >
           {Navigation.map((Item) => (
             <button
@@ -585,8 +797,13 @@ export function App({
               className={Route === Item.Id ? "fb-nav-item is-active" : "fb-nav-item"}
               key={Item.Id}
               onClick={() => {
-                Navigate(Item.Id);
-                SetNavigationOpen(false);
+                SetRouteEntryId(null);
+                Navigate(Item.Id, () => {
+                  SetNavigationOpen(false);
+                  requestAnimationFrame(() => {
+                    document.querySelector<HTMLElement>("#main-content")?.focus();
+                  });
+                });
               }}
               type="button"
             >
@@ -602,6 +819,28 @@ export function App({
               <span>{ErrorMessage}</span>
               <Button appearance="transparent" onClick={() => void Refresh()}>
                 {En.refresh}
+              </Button>
+            </div>
+          )}
+          {EntryBatchSummary === null ? null : (
+            <div className="fb-batch-error fb-error" role="alert">
+              <div>
+                <strong>{En.entryBatchFailures(EntryBatchSummary.Failures.length)}</strong>
+                <ul>
+                  {EntryBatchSummary.Failures.map((Failure) => (
+                    <li key={Failure.EntryId}>
+                      <BidiText>{Failure.Name}</BidiText>: {EntryMutationErrorText(Failure.Error)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <Button
+                appearance="transparent"
+                onClick={() => {
+                  SetEntryBatchSummary(null);
+                }}
+              >
+                {En.close}
               </Button>
             </div>
           )}
@@ -641,18 +880,18 @@ export function App({
                 </div>
               ) : null}
               {Route === "uploads" ? <UploadsView Strings={En} Uploads={Snapshot.Uploads} /> : null}
-              {Route === "versions" && PrimarySelection?.Kind === "file" ? (
+              {Route === "versions" && RouteEntry?.Kind === "file" ? (
                 <Suspense fallback={<Spinner label={En.loading} />}>
                   <TextHistory
                     Client={Client}
-                    Entry={PrimarySelection}
+                    Entry={RouteEntry}
                     OnRestore={async (Id) =>
                       Mutate(async () => Client.restoreVersion(Id), En.versionRestored)
                     }
                   />
                 </Suspense>
               ) : null}
-              {Route === "versions" && PrimarySelection?.Kind !== "file" ? (
+              {Route === "versions" && RouteEntry?.Kind !== "file" ? (
                 <VersionsView
                   File={undefined}
                   onRestore={async (Id) =>
@@ -664,7 +903,7 @@ export function App({
               ) : null}
               {Route === "shares" ? (
                 <SharesView
-                  File={PrimarySelection}
+                  File={RouteEntry}
                   onCreate={async (Input) =>
                     Mutate(async () => Client.createShare(Input), En.shareCreated)
                   }
@@ -741,7 +980,7 @@ export function App({
                     Entry={MarkdownEntry}
                     {...(McpClient === undefined ? {} : { McpClient })}
                     OnClose={() => {
-                      Navigate("drive");
+                      ReturnToWorkspace();
                     }}
                     OnFileBeltLink={OpenFileBeltReference}
                     OnNavigationGuardChange={SetNavigationGuard}
@@ -763,12 +1002,18 @@ export function App({
                   <header className="fb-page-heading">
                     <div>
                       <p className="fb-eyebrow">{En.files}</p>
-                      <h1 id="files-heading">{RouteTitle(Route)}</h1>
+                      <h1 id="files-heading">
+                        {Route === "drive"
+                          ? (CurrentFolder?.Name ?? CurrentDrive?.Name ?? RouteTitle(Route))
+                          : RouteTitle(Route)}
+                      </h1>
                     </div>
                     <div className="fb-heading-actions">
                       <Tooltip content={En.refresh} relationship="label">
                         <Button
+                          aria-label={En.refresh}
                           appearance="subtle"
+                          className="fb-interactive-button"
                           icon={<RefreshCw />}
                           onClick={() => void Refresh()}
                         />
@@ -791,6 +1036,25 @@ export function App({
                       />
                     </div>
                   </header>
+                  {Route === "drive" && CurrentFolder !== undefined ? (
+                    <Button
+                      appearance="subtle"
+                      icon={<ArrowLeft />}
+                      onClick={() => {
+                        if (CurrentDrive === undefined) return;
+                        const ParentId = CurrentFolder.ParentId;
+                        if (
+                          ParentId === undefined ||
+                          ParentId === null ||
+                          ParentId === CurrentDrive.RootId
+                        )
+                          Navigate("drive");
+                        else OpenFolder(CurrentDrive.Id, ParentId);
+                      }}
+                    >
+                      {En.folderBack}
+                    </Button>
+                  ) : null}
                   <div aria-label={En.fileCommands} className="fb-commandbar" role="toolbar">
                     <span>{En.selectedAnnouncement(Selection.SelectedIds.size)}</span>
                     <Button
@@ -808,15 +1072,16 @@ export function App({
                     <Button
                       disabled={SelectedEntries.length === 0 || Busy}
                       icon={Route === "trash" ? <FolderInput /> : <Trash2 />}
-                      onClick={() =>
-                        void Mutate(
-                          async () =>
-                            Route === "trash"
-                              ? Client.restoreEntries(SelectedEntries.map(({ Id }) => Id))
-                              : Client.trashEntries(SelectedEntries.map(({ Id }) => Id)),
-                          Route === "trash" ? En.itemsRestored : En.itemsTrashed,
-                        )
-                      }
+                      onClick={() => {
+                        const Restoring = Route === "trash";
+                        void MutateEntries(
+                          Restoring
+                            ? async (EntryIds) => Client.restoreEntries(EntryIds)
+                            : async (EntryIds) => Client.trashEntries(EntryIds),
+                          SelectedEntries,
+                          Restoring ? "restore" : "trash",
+                        );
+                      }}
                     >
                       {Route === "trash" ? En.restore : En.moveToTrash}
                     </Button>
@@ -825,6 +1090,7 @@ export function App({
                       disabled={PrimarySelection?.Kind !== "file"}
                       icon={<History />}
                       onClick={() => {
+                        if (PrimarySelection !== undefined) SetRouteEntryId(PrimarySelection.Id);
                         Navigate("versions");
                       }}
                     >
@@ -834,10 +1100,24 @@ export function App({
                       disabled={PrimarySelection === undefined}
                       icon={<Link2 />}
                       onClick={() => {
+                        if (PrimarySelection !== undefined) SetRouteEntryId(PrimarySelection.Id);
                         Navigate("shares");
                       }}
                     >
                       {En.shares}
+                    </Button>
+                    <Button
+                      disabled={
+                        SelectedEntries.length !== 1 ||
+                        PrimarySelection?.Kind === "symlink" ||
+                        PrimarySelection?.DriveId === undefined
+                      }
+                      icon={<ShieldCheck />}
+                      onClick={() => {
+                        if (PrimarySelection !== undefined) SetAclEntryId(PrimarySelection.Id);
+                      }}
+                    >
+                      {En.manageAccess}
                     </Button>
                     <Button
                       aria-describedby={PrimaryFileActionDescription}
@@ -897,7 +1177,15 @@ export function App({
                         SetActionEntryId(Entry.Id);
                       }}
                       onOpenEntry={(Entry) => {
-                        OpenMarkdown(Entry.Id);
+                        if (Entry.Kind === "folder" && Entry.DriveId !== undefined)
+                          OpenFolder(Entry.DriveId, Entry.Id);
+                        else if (
+                          Entry.Kind === "file" &&
+                          Entry.TextEligibility !== "ineligible" &&
+                          Entry.TextEligibility !== "history-only"
+                        )
+                          OpenMarkdown(Entry.Id);
+                        else SetActionEntryId(Entry.Id);
                       }}
                       Selection={Selection}
                       Strings={En}
@@ -941,7 +1229,22 @@ export function App({
                             <div>
                               <dt>{En.status}</dt>
                               <dd>
-                                <StatusPill Kind="success">{En.ready}</StatusPill>
+                                {PrimarySelection.Status === "ready" ? (
+                                  <StatusPill Kind="success">{En.ready}</StatusPill>
+                                ) : null}
+                                {PrimarySelection.Status === "uploading" ? (
+                                  <StatusPill Kind="informative">{En.uploading}</StatusPill>
+                                ) : null}
+                                {PrimarySelection.Status === "conflict" ? (
+                                  <StatusPill Kind="warning">
+                                    <FileBeltIcon Icon={AlertTriangle} size={16} /> {En.conflict}
+                                  </StatusPill>
+                                ) : null}
+                                {PrimarySelection.Status === "quarantined" ? (
+                                  <StatusPill Kind="danger">
+                                    <FileBeltIcon Icon={LockKeyhole} size={16} /> {En.quarantined}
+                                  </StatusPill>
+                                ) : null}
                               </dd>
                             </div>
                           </dl>
@@ -978,125 +1281,141 @@ export function App({
           {Announcement}
         </div>
         {ActionEntry === undefined ? null : (
-          <div
-            className="fb-action-backdrop"
-            onClick={() => {
-              SetActionEntryId(null);
+          <Dialog
+            modalType="modal"
+            onOpenChange={(IgnoredEvent, Data) => {
+              void IgnoredEvent;
+              if (!Data.open) SetActionEntryId(null);
             }}
-            role="presentation"
+            open
           >
-            <div
-              aria-label={En.selectionActions}
-              className="fb-action-menu"
-              onClick={(Event) => {
-                Event.stopPropagation();
+            <DialogSurface aria-describedby={undefined}>
+              <DialogBody>
+                <DialogTitle>
+                  <BidiText>{ActionEntry.Name}</BidiText>
+                </DialogTitle>
+                <DialogContent className="fb-action-menu">
+                  <Button
+                    appearance="subtle"
+                    aria-describedby={ActionFileActionDescription}
+                    disabled={
+                      ActionEntry.TextEligibility === "ineligible" ||
+                      ActionEntry.TextEligibility === "history-only"
+                    }
+                    icon={<FilePenLine />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      OpenMarkdown(ActionEntry.Id);
+                    }}
+                  >
+                    {En.openMarkdown}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    aria-describedby={ActionFileActionDescription}
+                    disabled={ActionEntry.Kind !== "file"}
+                    icon={<Download />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      void DownloadEntry(ActionEntry);
+                    }}
+                  >
+                    {En.download}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    aria-describedby={ActionFileActionDescription}
+                    disabled={!IsOfficeImportCandidate(ActionEntry) || Busy}
+                    icon={<FileOutput />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      void ImportOfficeEntry(ActionEntry);
+                    }}
+                  >
+                    {En.importMarkdown}
+                  </Button>
+                  {DocumentClient === undefined ? null : (
+                    <Button
+                      appearance="subtle"
+                      aria-describedby={ActionFileActionDescription}
+                      disabled={!IsOfficeDocumentCandidate(ActionEntry) || Busy}
+                      icon={<FilePenLine />}
+                      onFocus={PreloadDocuments}
+                      onMouseEnter={PreloadDocuments}
+                      onClick={() => {
+                        SetActionEntryId(null);
+                        SetDocumentEntry(ActionEntry);
+                      }}
+                    >
+                      {En.documentEditor}
+                    </Button>
+                  )}
+                  <Button
+                    appearance="subtle"
+                    icon={<Link2 />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      SetRouteEntryId(ActionEntry.Id);
+                      Navigate("shares");
+                    }}
+                  >
+                    {En.shares}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    disabled={ActionEntry.Kind === "symlink" || ActionEntry.DriveId === undefined}
+                    icon={<ShieldCheck />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      SetAclEntryId(ActionEntry.Id);
+                    }}
+                  >
+                    {En.manageAccess}
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />}
+                    onClick={() => {
+                      SetActionEntryId(null);
+                      void MutateEntries(
+                        ActionEntry.Trashed
+                          ? async (EntryIds) => Client.restoreEntries(EntryIds)
+                          : async (EntryIds) => Client.trashEntries(EntryIds),
+                        [ActionEntry],
+                        ActionEntry.Trashed ? "restore" : "trash",
+                      );
+                    }}
+                  >
+                    {ActionEntry.Trashed ? En.restore : En.moveToTrash}
+                  </Button>
+                </DialogContent>
+                <DialogActions>
+                  <Button
+                    appearance="secondary"
+                    onClick={() => {
+                      SetActionEntryId(null);
+                    }}
+                  >
+                    {En.close}
+                  </Button>
+                </DialogActions>
+              </DialogBody>
+            </DialogSurface>
+          </Dialog>
+        )}
+        {AclEntry === undefined ? null : (
+          <Suspense fallback={null}>
+            <AclEditor
+              Client={Client}
+              Entry={AclEntry}
+              OnClose={() => {
+                SetAclEntryId(null);
               }}
-              onKeyDown={(Event) => {
-                if (Event.key === "Escape") SetActionEntryId(null);
+              OnSaved={() => {
+                SetAnnouncement(En.aclSaved);
               }}
-              role="menu"
-            >
-              <strong>
-                <BidiText>{ActionEntry.Name}</BidiText>
-              </strong>
-              <Button
-                appearance="subtle"
-                aria-describedby={ActionFileActionDescription}
-                disabled={
-                  ActionEntry.TextEligibility === "ineligible" ||
-                  ActionEntry.TextEligibility === "history-only"
-                }
-                icon={<FilePenLine />}
-                onClick={() => {
-                  SetActionEntryId(null);
-                  OpenMarkdown(ActionEntry.Id);
-                }}
-                role="menuitem"
-              >
-                {En.openMarkdown}
-              </Button>
-              <Button
-                appearance="subtle"
-                aria-describedby={ActionFileActionDescription}
-                disabled={ActionEntry.Kind !== "file"}
-                icon={<Download />}
-                onClick={() => {
-                  SetActionEntryId(null);
-                  void DownloadEntry(ActionEntry);
-                }}
-                role="menuitem"
-              >
-                {En.download}
-              </Button>
-              <Button
-                appearance="subtle"
-                aria-describedby={ActionFileActionDescription}
-                disabled={!IsOfficeImportCandidate(ActionEntry) || Busy}
-                icon={<FileOutput />}
-                onClick={() => {
-                  SetActionEntryId(null);
-                  void ImportOfficeEntry(ActionEntry);
-                }}
-                role="menuitem"
-              >
-                {En.importMarkdown}
-              </Button>
-              {DocumentClient === undefined ? null : (
-                <Button
-                  appearance="subtle"
-                  aria-describedby={ActionFileActionDescription}
-                  disabled={!IsOfficeDocumentCandidate(ActionEntry) || Busy}
-                  icon={<FilePenLine />}
-                  onFocus={PreloadDocuments}
-                  onMouseEnter={PreloadDocuments}
-                  onClick={() => {
-                    SetActionEntryId(null);
-                    SetDocumentEntry(ActionEntry);
-                  }}
-                  role="menuitem"
-                >
-                  {En.documentEditor}
-                </Button>
-              )}
-              <Button
-                appearance="subtle"
-                icon={<Link2 />}
-                onClick={() => {
-                  SetActionEntryId(null);
-                  Navigate("shares");
-                }}
-                role="menuitem"
-              >
-                {En.shares}
-              </Button>
-              <Button
-                appearance="subtle"
-                icon={ActionEntry.Trashed ? <FolderInput /> : <Trash2 />}
-                onClick={() => {
-                  SetActionEntryId(null);
-                  void Mutate(
-                    async () =>
-                      ActionEntry.Trashed
-                        ? Client.restoreEntries([ActionEntry.Id])
-                        : Client.trashEntries([ActionEntry.Id]),
-                    ActionEntry.Trashed ? En.itemsRestored : En.itemsTrashed,
-                  );
-                }}
-                role="menuitem"
-              >
-                {ActionEntry.Trashed ? En.restore : En.moveToTrash}
-              </Button>
-              <Button
-                appearance="secondary"
-                onClick={() => {
-                  SetActionEntryId(null);
-                }}
-                role="menuitem"
-              >
-                {En.close}
-              </Button>
-            </div>
-          </div>
+            />
+          </Suspense>
         )}
         {DocumentClient === undefined || DocumentEntry === null ? null : (
           <Suspense fallback={null}>

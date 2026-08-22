@@ -26,6 +26,35 @@ interface Proposal {
   Text: string;
 }
 
+export interface PreparedRequestIdentity {
+  BaseVersionId: string;
+  Fingerprint: string;
+  NodeId: string;
+  RegistrationId: string;
+  SelectionEnd: number;
+  SelectionStart: number;
+  Source: string;
+}
+
+interface PreparedRequest extends PreparedRequestIdentity {
+  Invocation: McpPreparedInvocation;
+}
+
+export function IsPreparedRequestStale(
+  Prepared: Readonly<PreparedRequestIdentity>,
+  Current: Readonly<PreparedRequestIdentity>,
+): boolean {
+  return (
+    Prepared.BaseVersionId !== Current.BaseVersionId ||
+    Prepared.Fingerprint !== Current.Fingerprint ||
+    Prepared.NodeId !== Current.NodeId ||
+    Prepared.RegistrationId !== Current.RegistrationId ||
+    Prepared.SelectionEnd !== Current.SelectionEnd ||
+    Prepared.SelectionStart !== Current.SelectionStart ||
+    Prepared.Source !== Current.Source
+  );
+}
+
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and the apply callback is a receiver-free parent function.
 export function MarkdownMcpProposals({
   BaseVersionId,
@@ -40,7 +69,7 @@ export function MarkdownMcpProposals({
   const [RegistrationId, SetRegistrationId] = useState("");
   const [Review, SetReview] = useState<McpCapabilityReviewView | null>(null);
   const [Fingerprint, SetFingerprint] = useState("");
-  const [Prepared, SetPrepared] = useState<McpPreparedInvocation | null>(null);
+  const [Prepared, SetPrepared] = useState<PreparedRequest | null>(null);
   const [Proposal, SetProposal] = useState<Proposal | null>(null);
   const [Busy, SetBusy] = useState(false);
   const [ErrorMessage, SetError] = useState<string | null>(null);
@@ -52,6 +81,17 @@ export function MarkdownMcpProposals({
       ) ?? [],
     [Review],
   );
+  const PreparedIsStale =
+    Prepared !== null &&
+    IsPreparedRequestStale(Prepared, {
+      BaseVersionId,
+      Fingerprint,
+      NodeId,
+      RegistrationId,
+      SelectionEnd: Selection.End,
+      SelectionStart: Selection.Start,
+      Source,
+    });
 
   useEffect(() => {
     let Active = true;
@@ -101,19 +141,27 @@ export function MarkdownMcpProposals({
     SetError(null);
     SetProposal(null);
     try {
-      SetPrepared(
-        await Client.createInvocationIntent({
-          ApplicationId: "filebelt-web-markdown-proposal",
-          Arguments: { selection: { end: Selection.End, start: Selection.Start } },
-          Capability: {
-            Fingerprint: Capability.Fingerprint,
-            Kind: Capability.Kind,
-            Name: Capability.Name,
-          },
-          RegistrationId: Selected.Id,
-          SemanticInput: { BaseVersionId, Markdown: Source, NodeId },
-        }),
-      );
+      const Invocation = await Client.createInvocationIntent({
+        ApplicationId: "filebelt-web-markdown-proposal",
+        Arguments: { selection: { end: Selection.End, start: Selection.Start } },
+        Capability: {
+          Fingerprint: Capability.Fingerprint,
+          Kind: Capability.Kind,
+          Name: Capability.Name,
+        },
+        RegistrationId: Selected.Id,
+        SemanticInput: { BaseVersionId, Markdown: Source, NodeId },
+      });
+      SetPrepared({
+        BaseVersionId,
+        Fingerprint: Capability.Fingerprint,
+        Invocation,
+        NodeId,
+        RegistrationId: Selected.Id,
+        SelectionEnd: Selection.End,
+        SelectionStart: Selection.Start,
+        Source,
+      });
     } catch (Cause) {
       SetError(Cause instanceof Error ? Cause.message : En.markdownMcpUnavailable);
     } finally {
@@ -122,11 +170,11 @@ export function MarkdownMcpProposals({
   };
 
   const Confirm = async (): Promise<void> => {
-    if (Prepared === null) return;
+    if (Prepared === null || PreparedIsStale) return;
     SetBusy(true);
     SetError(null);
     SetPrepared(null);
-    const BaseText = Prepared.Input.SemanticInput?.Markdown;
+    const BaseText = Prepared.Invocation.Input.SemanticInput?.Markdown;
     if (BaseText === undefined) {
       SetBusy(false);
       SetError(En.markdownMcpUnavailable);
@@ -134,7 +182,7 @@ export function MarkdownMcpProposals({
     }
     try {
       await Client.approveAndInvoke(
-        Prepared,
+        Prepared.Invocation,
         // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The MCP client owns this discriminated event union and the callback only observes it.
         (Event: McpInvocationEventView) => {
           if (Event.Kind === "semanticMarkdown")
@@ -202,7 +250,16 @@ export function MarkdownMcpProposals({
       {Prepared === null ? null : (
         <div className="fb-markdown-proposal-confirm">
           <p>{En.markdownMcpConfirm}</p>
-          <Button appearance="primary" disabled={Busy} onClick={() => void Confirm()}>
+          {PreparedIsStale ? (
+            <p className="fb-error" role="alert">
+              {En.markdownMcpConfirmationStale}
+            </p>
+          ) : null}
+          <Button
+            appearance="primary"
+            disabled={Busy || PreparedIsStale}
+            onClick={() => void Confirm()}
+          >
             {En.markdownMcpConfirmButton}
           </Button>
           <Button

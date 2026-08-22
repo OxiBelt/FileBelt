@@ -102,3 +102,9 @@ permission-dependent actions, keyboard and screen-reader semantics, browser
 storage, Trusted Types, forced colors, and reduced motion. Browser behavior is
 covered in Chromium and Firefox where the artifact exists, and the production
 bundle is exercised through OxiBelt-compatible routing.
+
+`pnpm --filter @filebelt/web test:browser` starts the ordinary Vite preview and
+excludes `docker-integration.spec.mjs`. The Docker-only browser contract has an
+explicit `pnpm --filter @filebelt/web test:browser:docker` entry point and
+requires the prepared, running collaboration integration topology; the Docker
+unit runner remains the normal owner of that lifecycle and cleanup.

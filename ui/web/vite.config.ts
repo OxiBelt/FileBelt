@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { fileURLToPath } from "node:url";
-import { cp } from "node:fs/promises";
+import { cp, readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
@@ -35,8 +35,8 @@ function DocumentLaunchOrigin(Action: string): string {
 }
 
 const ParentCsp = ParentContentSecurityPolicy();
-const MarkdownPreviewContentSecurityPolicy =
-  "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'self'; form-action 'none'; frame-src 'none'; frame-ancestors 'self'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types filebelt-markdown-generated";
+export const MarkdownPreviewContentSecurityPolicy =
+  "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'self' data:; form-action 'none'; frame-src 'none'; frame-ancestors 'self'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; require-trusted-types-for 'script'; trusted-types filebelt-markdown-generated";
 
 function SetBrowserSecurityHeaders(
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Vite supplies Node request objects whose public contract is mutable.
@@ -85,6 +85,28 @@ function BrowserSecurityHeaders(): Plugin {
 function CopyMarkdownPreview(): Plugin {
   return {
     name: "filebelt-copy-markdown-preview",
+    configureServer(Server) {
+      Server.middlewares.use((Request, Response, Next) => {
+        const Asset = MarkdownPreviewDevelopmentAsset(Request.url);
+        if (Asset === null) {
+          Next();
+          return;
+        }
+        void readFile(Asset.Path)
+          .then((Contents) => {
+            Response.setHeader("Content-Type", Asset.ContentType);
+            Response.end(Contents);
+          })
+          .catch((Cause: unknown) => {
+            const Code =
+              typeof Cause === "object" && Cause !== null && "code" in Cause
+                ? Cause.code
+                : undefined;
+            if (Code === "ENOENT") Next();
+            else Next(Cause);
+          });
+      });
+    },
     async closeBundle() {
       await cp(
         fileURLToPath(new URL("../markdown/dist/preview", import.meta.url)),
@@ -92,6 +114,47 @@ function CopyMarkdownPreview(): Plugin {
         { recursive: true },
       );
     },
+  };
+}
+
+export function MarkdownPreviewDevelopmentAsset(
+  RequestUrl: string | undefined,
+): { ContentType: string; Path: string } | null {
+  if (RequestUrl === undefined) return null;
+  let Pathname: string;
+  try {
+    Pathname = new URL(RequestUrl, "http://filebelt.invalid").pathname;
+  } catch {
+    return null;
+  }
+  const Prefix = "/markdown-preview/";
+  if (!Pathname.startsWith(Prefix)) return null;
+  let Relative: string;
+  try {
+    Relative = decodeURIComponent(Pathname.slice(Prefix.length));
+  } catch {
+    return null;
+  }
+  if (
+    Relative.length === 0 ||
+    Relative.startsWith("/") ||
+    Relative.split("/").some((Segment) => Segment === "" || Segment === "." || Segment === "..")
+  )
+    return null;
+  const Extension = Relative.slice(Relative.lastIndexOf(".")).toLowerCase();
+  const ContentTypes: Readonly<Record<string, string>> = {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".ttf": "font/ttf",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+  };
+  const ContentType = ContentTypes[Extension];
+  if (ContentType === undefined) return null;
+  return {
+    ContentType,
+    Path: fileURLToPath(new URL(`../markdown/dist/preview/${Relative}`, import.meta.url)),
   };
 }
 

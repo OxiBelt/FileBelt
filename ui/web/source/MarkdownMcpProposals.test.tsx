@@ -2,7 +2,21 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MarkdownMcpProposals } from "./MarkdownMcpProposals.js";
+import {
+  IsPreparedRequestStale,
+  MarkdownMcpProposals,
+  type PreparedRequestIdentity,
+} from "./MarkdownMcpProposals.js";
+
+const Prepared: PreparedRequestIdentity = {
+  BaseVersionId: "00000000-0000-4000-8000-000000000002",
+  Fingerprint: "sha256:capability",
+  NodeId: "00000000-0000-4000-8000-000000000001",
+  RegistrationId: "00000000-0000-4000-8000-000000000003",
+  SelectionEnd: 4,
+  SelectionStart: 0,
+  Source: "# draft",
+};
 
 describe("Markdown MCP proposals", () => {
   it("renders proposal-only controls without a save action", () => {
@@ -36,5 +50,20 @@ describe("Markdown MCP proposals", () => {
     expect(Markup).toContain("MCP proposal");
     expect(Markup).toContain("Request proposal");
     expect(Markup).not.toContain("Save");
+  });
+
+  it("invalidates confirmation when any reviewed input changes", () => {
+    expect(IsPreparedRequestStale(Prepared, Prepared)).toBe(false);
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Source: "# changed" })).toBe(true);
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, SelectionEnd: 3 })).toBe(true);
+    expect(
+      IsPreparedRequestStale(Prepared, {
+        ...Prepared,
+        BaseVersionId: "00000000-0000-4000-8000-000000000004",
+      }),
+    ).toBe(true);
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Fingerprint: "sha256:other" })).toBe(
+      true,
+    );
   });
 });

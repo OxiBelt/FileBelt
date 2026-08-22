@@ -25,4 +25,11 @@ describe("selectionReducer", () => {
     expect(All.FocusedId).toBe("three");
     expect(All.SelectedIds.size).toBe(4);
   });
+
+  it("replaces a completed batch selection with only the failed item IDs", () => {
+    const Selected = SelectionReducer(EmptySelection, { Ids: ["two", "four"], Type: "set" });
+
+    expect(Selected).toMatchObject({ AnchorId: "two", FocusedId: "two" });
+    expect([...Selected.SelectedIds]).toEqual(["two", "four"]);
+  });
 });

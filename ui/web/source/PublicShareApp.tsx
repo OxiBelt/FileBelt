@@ -9,6 +9,7 @@ import { BidiText, BrandMark, FileBeltIcon, FileBeltProvider } from "@filebelt/d
 
 import type { PublicShareClient, PublicShareGrant } from "./client.js";
 import { En } from "./strings.js";
+import { HasDevelopmentMockMarker, InternalNavigationHref } from "./navigation.js";
 
 function FormatBytes(Value: number): string {
   return new Intl.NumberFormat(undefined, {
@@ -28,7 +29,12 @@ export function ParsePublicShareFragment(Fragment: string): string {
 
 export function TakePublicShareFragment(): string {
   const Fragment = window.location.hash;
-  window.history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
+  const DevelopmentMock = import.meta.env.DEV && HasDevelopmentMockMarker(window.location.search);
+  window.history.replaceState(
+    {},
+    "",
+    InternalNavigationHref(window.location.pathname, DevelopmentMock),
+  );
   return ParsePublicShareFragment(Fragment);
 }
 

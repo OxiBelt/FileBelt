@@ -180,6 +180,47 @@ coordinator, and returns a typed Git histogram line diff with three context
 lines. A comparison fails atomically after 5 seconds, 50,000 lines, or 8 MiB;
 partial output is never returned.
 
+### Directory Git repository contracts
+
+Directory Git has only compatibility-disabled OpenAPI endpoints in
+the current release; the revision Protobuf, Git adapter, HTTPS, SSH, and mount
+listeners remain unavailable. A later, explicitly enabled surface adds an
+opaque directory-repository resource keyed by its `directory_git` root node
+ID; no wire contract exposes a host path, bare-repository path, Git
+implementation type, PostgreSQL row, payload locator, or adapter credential.
+
+The public repository API will allocate/revoke HTTPS device tokens, register
+tailnet SSH keys, list repository state, and manage branches, tags, pull
+requests, rules, signatures, LFS, and retention. It applies the additive
+`READ_REPOSITORY`, `WRITE_REPOSITORY`, `MANAGE_REPOSITORY`, and
+`BYPASS_REPOSITORY_RULES` actions. Mutations use CSRF, idempotency, expected
+repository/root generations, and current Virtual ACL authorization. Bypass is
+one-operation scoped, reasoned, audited, recent-OIDC authenticated, and allowed
+only by the matching ruleset. Git HTTPS and tailnet SSH use independently
+scoped, revocable credentials and are not browser-session substitutes.
+
+An accepted receive-pack may contain at most 1 GiB of incoming pack data, 32
+newly admitted first-parent commits, 10,000 changed paths per commit, and
+100,000 entries per tree. Ordinary Git blobs are limited to 100 MiB. An LFS
+object may use the configured FileBelt max-file limit (default 1 TiB), but only
+after its bytes, digest, quota reservation, and PostgreSQL record are durable.
+The complete push is rejected before a partial FileBelt `main` projection is
+visible.
+
+Only `main` is FileBelt-projected. A validated accepted tree creates derived
+immutable per-file versions in one PostgreSQL transaction and rechecks ordinary
+per-path actions; other refs and Git metadata are Git-only. Git-side state
+never grants FileBelt authority or overrides namespace, ACL, retention, quota,
+current-head, or recovery state.
+
+Mount writes remain outside this contract. NFS, SMBv3, and FTPS writes stay
+disabled until independently reviewed protocol, replay, adapter, and
+qualification gates complete. When later enabled, their exact save boundaries
+are NFS successful `COMMIT` or final dirty `CLOSE`, SMB reviewed close/flush
+without durable handles, and completed non-resumable FTPS upload. No remote
+mutation makes a Git commit visible before expected-head, namespace, ACL, quota,
+and durable-receipt transaction success.
+
 After authentication, a comparison must acquire both the coordinator-wide and
 authenticated-`user_id` admission permits before any database or adapter work.
 The defaults are two comparisons globally and one per user; neither scope

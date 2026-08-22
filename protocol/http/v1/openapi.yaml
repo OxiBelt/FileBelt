@@ -515,6 +515,74 @@ paths:
                 $ref: "#/components/schemas/Node"
         default:
           $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/repository:
+    post:
+      operationId: createDirectoryRepository
+      description: Requires both MANAGE_REPOSITORY and SET_ATTRIBUTES before the compatibility-state fence. The API has no runtime grant to create or activate a directory-level Git repository.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDirectoryRepository"
+      responses:
+        "503":
+          description: Repository creation is compatibility-disabled.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter60"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: getDirectoryRepository
+      description: Requires READ_REPOSITORY before repository lookup. This compatibility-release route is deliberately unavailable until root-scoped repository reads are qualified.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "503":
+          description: Repository reads are compatibility-disabled.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter60"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/drives/{drive_id}/nodes/{node_id}/repository/refs:
+    get:
+      operationId: listDirectoryRepositoryRefs
+      description: Requires READ_REPOSITORY before repository lookup. This compatibility-release route is deliberately unavailable until deterministic root-scoped ref listing is qualified.
+      parameters:
+        - $ref: "#/components/parameters/DriveId"
+        - $ref: "#/components/parameters/NodeId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "503":
+          description: Repository ref reads are compatibility-disabled.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter60"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
   /api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy:
     patch:
       operationId: updateNodeContentClassPolicy
@@ -3389,6 +3457,71 @@ components:
           oneOf:
             - type: string
             - type: "null"
+    CreateDirectoryRepository:
+      type: object
+      additionalProperties: false
+      required: [object_format]
+      properties:
+        object_format:
+          type: string
+          enum: [sha1, sha256]
+    DirectoryRepository:
+      type: object
+      additionalProperties: false
+      required: [id, drive_id, root_node_id, object_format, state, generation]
+      properties:
+        id:
+          $ref: "#/components/schemas/UuidV4"
+        drive_id:
+          $ref: "#/components/schemas/UuidV4"
+        root_node_id:
+          $ref: "#/components/schemas/UuidV4"
+        object_format:
+          type: string
+          enum: [sha1, sha256]
+        state:
+          type: string
+          const: compatibility
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+    DirectoryRepositoryRef:
+      type: object
+      additionalProperties: false
+      required: [ref_name, oid, generation, namespace_projection, projected_snapshot_id]
+      properties:
+        ref_name:
+          type: string
+          pattern: "^refs/(heads|tags|pull)/.+$"
+        oid:
+          oneOf:
+            - type: string
+              pattern: "^[0-9a-f]{40}([0-9a-f]{24})?$"
+            - type: "null"
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+        namespace_projection:
+          type: boolean
+        projected_snapshot_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
+    DirectoryRepositoryRefPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DirectoryRepositoryRef"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
     CreateDocumentSession:
       type: object
       additionalProperties: false
@@ -4519,7 +4652,8 @@ components:
       properties:
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
+          description: BYPASS_REPOSITORY_RULES records standing eligibility only; it never replaces the matching ruleset allowlist, recent OIDC authentication, bounded reason, one-operation grant, or audit evidence.
         effect:
           type: string
           enum: [allow, deny]
@@ -4535,7 +4669,7 @@ components:
           $ref: "#/components/schemas/AclPrincipalSelector"
         entries:
           type: array
-          maxItems: 21
+          maxItems: 25
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AclEntryMutation"
@@ -4558,7 +4692,8 @@ components:
             - type: "null"
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
+          description: BYPASS_REPOSITORY_RULES records standing eligibility only; it never represents an operation-scoped bypass grant.
         effect:
           type: string
           enum: [allow, deny]

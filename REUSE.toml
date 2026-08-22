@@ -116,6 +116,12 @@ SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
+path = ["adapters/directory-repository/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
 path = ["adapters/git/GIT_COMPONENT.toml"]
 precedence = "override"
 SPDX-FileCopyrightText = "Git contributors"

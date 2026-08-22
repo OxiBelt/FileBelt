@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package filebelt.directory_repository.v1;
+
+// Private, provider-neutral process contract for one bare Git repository per
+// opaque FileBelt directory root. This contract carries no database row,
+// payload locator, host path, Git URL, browser credential, or adapter type.
+message DirectoryRepositoryExecuteRequest {
+  string request_id = 1;
+
+  oneof operation {
+    PrepareDirectoryRepository prepare = 2;
+    StageDirectoryRepository stage = 3;
+    VerifyDirectoryRepository verify = 4;
+    PromoteDirectoryRepository promote = 5;
+    RollbackDirectoryRepository rollback = 6;
+    AdvertiseDirectoryRepository advertise = 7;
+    FsckDirectoryRepository fsck = 8;
+    GcDirectoryRepository gc = 9;
+  }
+}
+
+message DirectoryRepositoryExecuteResponse {
+  string request_id = 1;
+
+  oneof result {
+    DirectoryRepositoryAccepted accepted = 2;
+    DirectoryRepositoryTreeInspection tree_inspection = 3;
+    DirectoryRepositoryAdvertisement advertisement = 4;
+    DirectoryRepositoryFsckResult fsck_result = 5;
+    DirectoryRepositoryGcResult gc_result = 6;
+    DirectoryRepositoryError error = 7;
+  }
+}
+
+// Every mutating operation is tied to an opaque FileBelt directory root,
+// operation, and monotonically checked fencing token. PostgreSQL owns the
+// authority and lifecycle of these values; the adapter only validates and
+// executes an already-admitted private request.
+message DirectoryRepositoryFence {
+  string tenant_id = 1;
+  string directory_root_id = 2;
+  string operation_id = 3;
+  uint64 fencing_token = 4;
+}
+
+// Git object identifiers are always tagged by their repository object format.
+// Their value is binary so no presentation spelling becomes authority input.
+enum GitObjectFormat {
+  GIT_OBJECT_FORMAT_UNSPECIFIED = 0;
+  GIT_OBJECT_FORMAT_SHA1 = 1;
+  GIT_OBJECT_FORMAT_SHA256 = 2;
+}
+
+message GitObjectId {
+  GitObjectFormat format = 1;
+  bytes value = 2;
+}
+
+enum GitTreeMode {
+  GIT_TREE_MODE_UNSPECIFIED = 0;
+  GIT_TREE_MODE_DIRECTORY = 1;
+  GIT_TREE_MODE_FILE = 2;
+}
+
+// A flattened, canonically sorted tree inspection entry. Every ancestor of a
+// nested entry must be present as a directory entry, so callers cannot hide a
+// file/tree collision in an omitted intermediate tree.
+message DirectoryRepositoryTreeEntry {
+  repeated string path_components = 1;
+  GitTreeMode mode = 2;
+  GitObjectId object_id = 3;
+  uint64 object_size_bytes = 4;
+}
+
+enum DirectoryRepositoryChangeKind {
+  DIRECTORY_REPOSITORY_CHANGE_KIND_UNSPECIFIED = 0;
+  DIRECTORY_REPOSITORY_CHANGE_KIND_UPSERT = 1;
+  DIRECTORY_REPOSITORY_CHANGE_KIND_DELETE = 2;
+}
+
+// One staged path change. The verified full tree is supplied separately by
+// VerifyDirectoryRepository; this keeps per-commit changed-path limits distinct
+// from the maximum inspectable tree size.
+message DirectoryRepositoryTreeChange {
+  repeated string path_components = 1;
+  DirectoryRepositoryChangeKind kind = 2;
+  GitTreeMode mode = 3;
+  GitObjectId object_id = 4;
+  uint64 object_size_bytes = 5;
+}
+
+message PrepareDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  GitObjectFormat object_format = 2;
+  GitObjectId expected_head = 3;
+}
+
+message StageDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  repeated DirectoryRepositoryTreeChange changes = 2;
+  GitObjectFormat object_format = 3;
+}
+
+// Verifies a bounded, canonical flattened tree and a bounded commit chain. The
+// adapter returns only an inspection projection; publishing remains Promote.
+message VerifyDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  GitObjectFormat object_format = 2;
+  repeated DirectoryRepositoryTreeEntry entries = 3;
+  repeated GitObjectId commits = 4;
+  uint64 pack_size_bytes = 5;
+}
+
+message PromoteDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  GitObjectId expected_head = 2;
+  GitObjectId new_head = 3;
+  repeated GitObjectId commits = 4;
+}
+
+message RollbackDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  GitObjectId expected_head = 2;
+  GitObjectId rollback_head = 3;
+}
+
+message AdvertiseDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  uint32 maximum_entries = 2;
+}
+
+message FsckDirectoryRepository { DirectoryRepositoryFence fence = 1; }
+
+message GcDirectoryRepository {
+  DirectoryRepositoryFence fence = 1;
+  uint64 maximum_reclaim_bytes = 2;
+}
+
+message DirectoryRepositoryAccepted {
+  GitObjectId head = 1;
+  GitObjectId tree = 2;
+}
+
+message DirectoryRepositoryTreeInspection {
+  GitObjectFormat object_format = 1;
+  repeated DirectoryRepositoryTreeEntry entries = 2;
+  uint32 commit_count = 3;
+  uint64 pack_size_bytes = 4;
+}
+
+message DirectoryRepositoryAdvertisement {
+  GitObjectFormat object_format = 1;
+  GitObjectId head = 2;
+  uint32 entry_count = 3;
+}
+
+message DirectoryRepositoryFsckResult {
+  uint64 checked_objects = 1;
+  uint64 checked_entries = 2;
+}
+
+message DirectoryRepositoryGcResult {
+  uint64 reclaimed_bytes = 1;
+  uint64 remaining_pack_bytes = 2;
+}
+
+enum DirectoryRepositoryErrorCode {
+  DIRECTORY_REPOSITORY_ERROR_CODE_UNSPECIFIED = 0;
+  DIRECTORY_REPOSITORY_ERROR_CODE_INVALID_REQUEST = 1;
+  DIRECTORY_REPOSITORY_ERROR_CODE_NOT_FOUND = 2;
+  DIRECTORY_REPOSITORY_ERROR_CODE_CONFLICT = 3;
+  DIRECTORY_REPOSITORY_ERROR_CODE_RESOURCE_EXHAUSTED = 4;
+  DIRECTORY_REPOSITORY_ERROR_CODE_UNAVAILABLE = 5;
+  DIRECTORY_REPOSITORY_ERROR_CODE_INTEGRITY_FAILURE = 6;
+  DIRECTORY_REPOSITORY_ERROR_CODE_INTERNAL = 7;
+}
+
+message DirectoryRepositoryError {
+  DirectoryRepositoryErrorCode code = 1;
+  string message = 2;
+}

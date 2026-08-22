@@ -20,6 +20,7 @@ ADAPTER_ROOTS = {
     "adapters/ftp-ftps": "GPL-3.0-or-later",
     "adapters/onlyoffice": "AGPL-3.0-only",
     "adapters/git": "Apache-2.0",
+    "adapters/directory-repository": "Apache-2.0",
     "adapters/nfs": "LGPL-3.0-or-later",
     "adapters/transcode": "GPL-3.0-or-later",
 }
@@ -50,6 +51,7 @@ EXPECTED_RUST_MEMBERS = {
     "source/crates/filebelt-vfs-protocol",
     "source/crates/filebelt-document-protocol",
     "source/crates/filebelt-revision-protocol",
+    "source/crates/filebelt-directory-repository-protocol",
     "source/crates/filebelt-collaboration-protocol",
     "source/crates/filebelt-mcp-policy",
     "source/crates/filebelt-mcp-protocol",

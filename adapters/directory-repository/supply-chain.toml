@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[first_party]
+package = "filebelt-directory-repository-adapter"
+license = "Apache-2.0"
+relationship = "application"
+image_path = "/usr/local/bin/filebelt-directory-repository-adapter"
+
+[git]
+version = "2.55.0"
+license = "GPL-2.0-only"
+boundary = "separate-executable"
+image_path = "/opt/filebelt-git/bin/git"
+
+[image]
+state = "not-introduced"
+reason = "private adapter scaffold has no image or deployment activation"

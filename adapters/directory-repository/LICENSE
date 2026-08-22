@@ -1,0 +1,5 @@
+FileBelt-authored work in this directory is licensed under Apache-2.0.
+The canonical license text is available at ../../LICENSES/Apache-2.0.txt.
+
+The separately built and invoked Git executable remains GPL-2.0-only. Its
+canonical license text is available at ../../LICENSES/GPL-2.0-only.txt.

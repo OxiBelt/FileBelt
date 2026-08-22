@@ -261,6 +261,7 @@ fn router(state: AppState, operations: OperationsState) -> Router {
                 .merge(crate::documents::router())
                 .merge(crate::media::router())
                 .merge(crate::mounts::router())
+                .merge(crate::repositories::router())
                 .merge(crate::revisions::router())
                 .merge(crate::resources::router()),
         )

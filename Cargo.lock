@@ -1926,6 +1926,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "filebelt-directory-repository-protocol"
+version = "0.1.0"
+dependencies = [
+ "filebelt-domain",
+ "prost",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "filebelt-document"
 version = "0.1.0"
 dependencies = [

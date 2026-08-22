@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "filebelt-directory-repository-adapter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+members = ["."]
+resolver = "3"
+
+[dependencies]
+filebelt-directory-repository-protocol = { version = "=0.1.0", path = "../../source/crates/filebelt-directory-repository-protocol" }
+thiserror = "=2.0.20"
+
+[dev-dependencies]
+uuid = { version = "=1.24.1", features = ["std"] }
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"

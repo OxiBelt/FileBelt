@@ -15,6 +15,8 @@ use filebelt_domain::{
     PrincipalId, ResourceId,
 };
 
+pub mod repository;
+
 /// Whether an ACL entry grants or rejects an action.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Effect {
@@ -387,7 +389,9 @@ pub struct AuthorizationRequest<'a> {
 /// exception is an implicit drive owner right, which ACL rows cannot remove.
 #[must_use]
 pub fn evaluate(request: AuthorizationRequest<'_>) -> AuthorizationDecision {
-    if let Some(reason) = implicit_owner_reason(request.principal, request.drive_owner) {
+    if let Some(reason) =
+        implicit_owner_reason(request.principal, request.drive_owner, request.action)
+    {
         return AuthorizationDecision {
             allowed: true,
             reason,
@@ -678,7 +682,7 @@ fn recursive_share_node(
     action: Action,
     request: &RecursiveShareAuthorizationRequest<'_>,
 ) -> RecursiveShareNode {
-    if let Some(reason) = implicit_owner_reason(subject.principal, request.drive_owner) {
+    if let Some(reason) = implicit_owner_reason(subject.principal, request.drive_owner, action) {
         return RecursiveShareNode {
             denied: None,
             independent: Some((reason, Vec::new())),
@@ -805,7 +809,11 @@ fn recursive_share_candidate_is_proven(
 fn implicit_owner_reason(
     principal: &PrincipalContext,
     drive_owner: DriveOwner,
+    action: Action,
 ) -> Option<DecisionReason> {
+    if action == Action::BypassRepositoryRules {
+        return None;
+    }
     match drive_owner {
         DriveOwner::User(owner) | DriveOwner::Organization(owner) | DriveOwner::Service(owner)
             if owner == principal.principal_id() =>
@@ -1496,7 +1504,7 @@ mod tests {
     }
 
     #[test]
-    fn permission_presets_are_monotonic_and_exclude_drive_management() {
+    fn permission_presets_are_monotonic_and_exclude_management_boundaries() {
         let viewer = PermissionPreset::Viewer.action_set();
         let contributor = PermissionPreset::Contributor.action_set();
         let manager = PermissionPreset::Manager.action_set();
@@ -1506,10 +1514,41 @@ mod tests {
         assert!(manager.contains(&Action::ManageAcl));
         assert!(!manager.contains(&Action::ManageDrive));
         assert!(!manager.contains(&Action::UseMcp));
+        assert!(!manager.contains(&Action::ReadRepository));
+        assert!(!manager.contains(&Action::WriteRepository));
+        assert!(!manager.contains(&Action::ManageRepository));
+        assert!(!manager.contains(&Action::BypassRepositoryRules));
         assert!(viewer.contains(&Action::UseExternalEditor));
         assert!(contributor.contains(&Action::UseExternalEditor));
         assert!(contributor.contains(&Action::Comment));
         assert!(contributor.contains(&Action::Review));
+    }
+
+    #[test]
+    fn repository_rule_bypass_is_not_an_implicit_owner_right() {
+        let actor = principal(1);
+        let principal = context(actor);
+        let decision = evaluate(AuthorizationRequest {
+            principal: &principal,
+            resource: node(1),
+            drive_owner: DriveOwner::User(actor),
+            action: Action::BypassRepositoryRules,
+            entries: &[],
+            generations: snapshot(),
+        });
+        assert!(!decision.allowed());
+        assert_eq!(decision.reason(), DecisionReason::NoMatchingGrant);
+
+        let management = evaluate(AuthorizationRequest {
+            principal: &principal,
+            resource: node(1),
+            drive_owner: DriveOwner::User(actor),
+            action: Action::ManageRepository,
+            entries: &[],
+            generations: snapshot(),
+        });
+        assert!(management.allowed());
+        assert_eq!(management.reason(), DecisionReason::Owner);
     }
 
     #[test]

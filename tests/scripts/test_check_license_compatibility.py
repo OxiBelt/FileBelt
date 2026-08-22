@@ -182,13 +182,22 @@ class LicenseCompatibilityTests(unittest.TestCase):
         self.assertEqual(POLICY.schema_version, 1)
         self.assertEqual(
             {workspace.id for workspace in POLICY.workspaces},
-            {"root", "smb", "ftp-ftps", "onlyoffice", "git", "nfs", "transcode"},
+            {
+                "root",
+                "smb",
+                "ftp-ftps",
+                "onlyoffice",
+                "git",
+                "directory-repository",
+                "nfs",
+                "transcode",
+            },
         )
         self.assertEqual(
             POLICY.relationship_types,
             {"linked", "copied", "separate-executable", "external", "build-only"},
         )
-        self.assertEqual(len(POLICY.artifacts), 6)
+        self.assertEqual(len(POLICY.artifacts), 7)
         CHECKER.validate_repository_layout(REPO_ROOT, POLICY)
 
     def test_rejects_unknown_workspace_relationship_and_missing_component(self) -> None:
@@ -196,7 +205,7 @@ class LicenseCompatibilityTests(unittest.TestCase):
         unknown_workspace = source.replace(
             'id = "transcode"\nmanifest = ', 'id = "unknown"\nmanifest = ', 1
         )
-        with self.assertRaisesRegex(CHECKER.CompatibilityError, "all six adapter workspaces"):
+        with self.assertRaisesRegex(CHECKER.CompatibilityError, "all seven adapter workspaces"):
             self.load_mutated_policy(unknown_workspace)
 
         unknown_relationship = source.replace(

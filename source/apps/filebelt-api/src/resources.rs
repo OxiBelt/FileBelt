@@ -2625,7 +2625,7 @@ fn generation_i64(value: u64) -> Result<i64, ApiError> {
     i64::try_from(value).map_err(|_| ApiError::internal())
 }
 
-fn require_same_generations(
+pub(crate) fn require_same_generations(
     first: AuthorizationGrant,
     second: AuthorizationGrant,
 ) -> Result<(), ApiError> {
@@ -2952,7 +2952,7 @@ fn shared_candidate_authorization(node: &NodeRecord) -> (Uuid, Uuid, Action) {
     (node.drive_id, node.id, Action::ReadMetadata)
 }
 
-fn parse_uuid_v4(value: &str) -> Result<Uuid, ApiError> {
+pub(crate) fn parse_uuid_v4(value: &str) -> Result<Uuid, ApiError> {
     let id = Uuid::parse_str(value).map_err(|_| {
         ApiError::bad_request("id.invalid", "The identifier is not a canonical UUIDv4")
     })?;

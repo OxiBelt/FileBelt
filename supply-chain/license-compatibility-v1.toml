@@ -58,6 +58,7 @@ filebelt-database = "Apache-2.0"
 filebelt-deployment-diagnostics = "Apache-2.0"
 filebelt-document = "Apache-2.0"
 filebelt-document-protocol = "Apache-2.0"
+filebelt-directory-repository-protocol = "Apache-2.0"
 filebelt-domain = "Apache-2.0"
 filebelt-events-protocol = "Apache-2.0"
 filebelt-fuzz = "Apache-2.0"
@@ -138,6 +139,21 @@ restricted_license_exceptions = []
 
 [workspaces.package_licenses]
 filebelt-git-adapter = "Apache-2.0"
+
+[[workspaces]]
+id = "directory-repository"
+manifest = "adapters/directory-repository/Cargo.toml"
+lockfile = "adapters/directory-repository/Cargo.lock"
+region = "adapter-apache"
+license = "Apache-2.0"
+allowed_local_dependencies = [
+  { package = "filebelt-domain", license = "Apache-2.0", relationship = "linked" },
+  { package = "filebelt-directory-repository-protocol", license = "Apache-2.0", relationship = "linked" },
+]
+restricted_license_exceptions = []
+
+[workspaces.package_licenses]
+filebelt-directory-repository-adapter = "Apache-2.0"
 
 [[workspaces]]
 id = "nfs"
@@ -294,6 +310,43 @@ id = "zlib-1.3.1"
 version = "1.3.1"
 relationship = "linked"
 license = "Zlib"
+path = "/opt/filebelt-git/bin/git"
+source_required = true
+
+[[artifacts]]
+id = "filebelt-directory-repository-adapter"
+workspace = "directory-repository"
+minimum_license_expression = "Apache-2.0 AND GPL-2.0-only"
+
+[[artifacts.components]]
+id = "filebelt-directory-repository-adapter"
+version = "0.1.0"
+relationship = "linked"
+license = "Apache-2.0"
+path = "/usr/local/bin/filebelt-directory-repository-adapter"
+source_required = true
+
+[[artifacts.components]]
+id = "filebelt-directory-repository-protocol"
+version = "0.1.0"
+relationship = "linked"
+license = "Apache-2.0"
+path = "/usr/local/bin/filebelt-directory-repository-adapter"
+source_required = true
+
+[[artifacts.components]]
+id = "filebelt-domain"
+version = "0.1.0"
+relationship = "linked"
+license = "Apache-2.0"
+path = "/usr/local/bin/filebelt-directory-repository-adapter"
+source_required = true
+
+[[artifacts.components]]
+id = "git-2.55.0"
+version = "2.55.0"
+relationship = "separate-executable"
+license = "GPL-2.0-only"
 path = "/opt/filebelt-git/bin/git"
 source_required = true
 

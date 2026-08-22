@@ -28,6 +28,7 @@ members = [
   "source/crates/filebelt-vfs-protocol",
   "source/crates/filebelt-document-protocol",
   "source/crates/filebelt-revision-protocol",
+  "source/crates/filebelt-directory-repository-protocol",
   "source/crates/filebelt-mcp-policy",
   "source/crates/filebelt-mcp-protocol",
   "source/crates/filebelt-mcp-vault",
@@ -47,6 +48,7 @@ exclude = [
   "adapters/nfs",
   "adapters/transcode",
   "adapters/git",
+  "adapters/directory-repository",
 ]
 resolver = "3"
 
@@ -75,6 +77,7 @@ filebelt-deployment-diagnostics = { version = "=0.1.0", path = "source/crates/fi
 filebelt-domain = { version = "=0.1.0", path = "source/crates/filebelt-domain" }
 filebelt-document-protocol = { version = "=0.1.0", path = "source/crates/filebelt-document-protocol" }
 filebelt-revision-protocol = { version = "=0.1.0", path = "source/crates/filebelt-revision-protocol" }
+filebelt-directory-repository-protocol = { version = "=0.1.0", path = "source/crates/filebelt-directory-repository-protocol" }
 filebelt-events-protocol = { version = "=0.1.0", path = "source/crates/filebelt-events-protocol" }
 filebelt-mcp-policy = { version = "=0.1.0", path = "source/crates/filebelt-mcp-policy" }
 filebelt-mcp-protocol = { version = "=0.1.0", path = "source/crates/filebelt-mcp-protocol" }

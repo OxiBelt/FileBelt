@@ -179,11 +179,15 @@ pub enum Action {
     Mount,
     Export,
     Traverse,
+    ReadRepository,
+    WriteRepository,
+    ManageRepository,
+    BypassRepositoryRules,
 }
 
 impl Action {
     /// Every action, in stable policy ordering.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 26] = [
         Self::ReadMetadata,
         Self::ListChildren,
         Self::ReadContent,
@@ -206,6 +210,10 @@ impl Action {
         Self::Mount,
         Self::Export,
         Self::Traverse,
+        Self::ReadRepository,
+        Self::WriteRepository,
+        Self::ManageRepository,
+        Self::BypassRepositoryRules,
     ];
 
     /// Stable uppercase name used by policy and audit contracts.
@@ -234,6 +242,10 @@ impl Action {
             Self::Mount => "MOUNT",
             Self::Export => "EXPORT",
             Self::Traverse => "TRAVERSE",
+            Self::ReadRepository => "READ_REPOSITORY",
+            Self::WriteRepository => "WRITE_REPOSITORY",
+            Self::ManageRepository => "MANAGE_REPOSITORY",
+            Self::BypassRepositoryRules => "BYPASS_REPOSITORY_RULES",
         }
     }
 }
@@ -982,5 +994,25 @@ mod tests {
         assert_eq!(Action::Traverse.as_str(), "TRAVERSE");
         assert!(Action::ALL.contains(&Action::Traverse));
         assert_ne!(Action::Traverse, Action::ListChildren);
+    }
+
+    #[test]
+    fn repository_actions_are_explicit_and_not_content_presets() {
+        assert_eq!(Action::ReadRepository.as_str(), "READ_REPOSITORY");
+        assert_eq!(Action::WriteRepository.as_str(), "WRITE_REPOSITORY");
+        assert_eq!(Action::ManageRepository.as_str(), "MANAGE_REPOSITORY");
+        assert_eq!(
+            Action::BypassRepositoryRules.as_str(),
+            "BYPASS_REPOSITORY_RULES"
+        );
+        assert_eq!(
+            &Action::ALL[22..],
+            &[
+                Action::ReadRepository,
+                Action::WriteRepository,
+                Action::ManageRepository,
+                Action::BypassRepositoryRules,
+            ]
+        );
     }
 }

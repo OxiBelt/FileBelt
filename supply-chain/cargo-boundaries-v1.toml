@@ -25,6 +25,7 @@ adapter_root = "adapters"
 registered_adapter_manifests = [
   "adapters/ftp-ftps/Cargo.toml",
   "adapters/git/Cargo.toml",
+  "adapters/directory-repository/Cargo.toml",
   "adapters/nfs/Cargo.toml",
   "adapters/onlyoffice/Cargo.toml",
   "adapters/smb/Cargo.toml",
@@ -219,6 +220,49 @@ forbidden_package_prefixes = []
 [graph_profiles.first_party_features]
 filebelt-git-adapter = []
 filebelt-revision-protocol = []
+
+[[graph_profiles]]
+label = "directory repository protocol"
+package = "filebelt-directory-repository-protocol"
+manifest = "source/crates/filebelt-directory-repository-protocol/Cargo.toml"
+feature_arguments = []
+forbidden_packages = [
+  "async-std",
+  "axum",
+  "diesel",
+  "http",
+  "hyper",
+  "iggy",
+  "k8s-openapi",
+  "kube",
+  "oauth2",
+  "openidconnect",
+  "postgres",
+  "reqwest",
+  "rusqlite",
+  "sqlx",
+  "tokio",
+  "tokio-postgres",
+  "tower",
+]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-directory-repository-protocol = []
+filebelt-domain = []
+
+[[graph_profiles]]
+label = "Apache directory repository wrapper"
+package = "filebelt-directory-repository-adapter"
+manifest = "adapters/directory-repository/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-directory-repository-adapter = []
+filebelt-directory-repository-protocol = []
+filebelt-domain = []
 
 [[graph_profiles]]
 label = "LGPL NFS bounded IPC bridge"
@@ -993,7 +1037,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-authz"
 crate_root = "source/crates/filebelt-authz/src/lib.rs"
-public_modules = []
+public_modules = ["repository"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -1053,7 +1097,7 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-database"
 crate_root = "source/crates/filebelt-database/src/lib.rs"
-public_modules = ["collaboration", "document", "mcp", "media", "mount", "revision"]
+public_modules = ["collaboration", "document", "mcp", "media", "mount", "repository", "revision"]
 wildcard_reexports = []
 
 [[public_surfaces]]
@@ -1095,6 +1139,24 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-git-adapter"
 crate_root = "adapters/git/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-directory-repository-protocol"
+crate_root = "source/crates/filebelt-directory-repository-protocol/src/lib.rs"
+public_modules = []
+wildcard_reexports = ["generated::*"]
+
+[[public_surfaces]]
+package = "filebelt-directory-repository-adapter"
+crate_root = "adapters/directory-repository/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-directory-repository-adapter"
+crate_root = "adapters/directory-repository/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

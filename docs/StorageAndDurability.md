@@ -263,6 +263,43 @@ only by advancing that PostgreSQL fence; rollback before activation keeps dual
 reads, while rollback after activation requires a v4 checkpoint and a binary
 that understands both backends.
 
+### Directory Git durability
+
+The compatibility release adds directory-repository metadata keyed by the
+immutable root node, its fencing/generation state, accepted `main` projection,
+derived per-file version relationships, Git/LFS intake state, retention
+deadlines, and durable reconciliation/repair holds. PostgreSQL is authoritative
+for repository admission, root membership, `main` projection, derived heads,
+quota, retention, recovery, and activation. Git repositories and LFS objects
+are replaceable byte planes; non-`main` refs and Git metadata cannot recreate a
+PostgreSQL state.
+
+A `main` change is accepted only after bounded validation and a fenced
+PostgreSQL operation reserve its complete outcome. It validates the 1 GiB pack,
+32 first-parent commits, 10,000 changed paths per commit, 100,000 tree entries,
+100 MiB ordinary blobs, and configured LFS max-file limit (default 1 TiB)
+before publishing a projected head. The durable transaction records every
+affected FileBelt node/version relationship, quota transition, audit/outbox
+record, expected root/head fence, and ordinary per-path authorization result.
+A crash before it leaves intake quarantined or replayable, never a partially
+advanced FileBelt tree; a crash after it reconciles against the recorded `main`
+OID and deterministic derived versions.
+
+Repository membership is a namespace invariant, not a Git directory scan. No
+root may nest, normal moves cannot cross its boundary, and a same-drive root
+move keeps its ID. `.git` is rejected before persistence. Empty directories use
+the canonical zero-byte `.filebeltkeep` projection. `main` and derived
+per-file history remain until repository purge. Committed unreachable Git/LFS
+objects are retained for 30 days; rejected or quarantined intake for 24 hours.
+
+Activation uses two releases. The first keeps directory writers/transports
+disabled while it creates compatible rows, inventories eligible roots, and
+validates recovery. The later release enables a root only after quiescence and
+`filebelt.recovery.checkpoint.v5` verification of PostgreSQL, payload, Git, and
+LFS state. Rollback before activation retains additive state with writers
+disabled; after activation it requires the matched v5 checkpoint and compatible
+binary and never infers a projected tree from Git.
+
 Markdown explicit save consumes a durable collaboration checkpoint through the
 ordinary expected-head upload/commit transaction and creates the same linear
 immutable version as any other content update. It records validated media type

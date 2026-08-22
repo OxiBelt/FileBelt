@@ -9,6 +9,7 @@ pub mod document;
 pub mod mcp;
 pub mod media;
 pub mod mount;
+pub mod repository;
 pub mod revision;
 
 mod idempotency;

@@ -81,6 +81,11 @@ license = "Apache-2.0"
 workspace = "adapter"
 
 [[regions]]
+path = "adapters/directory-repository"
+license = "Apache-2.0"
+workspace = "adapter"
+
+[[regions]]
 path = "adapters/git/GIT_COMPONENT.toml"
 license = "GPL-2.0-only"
 workspace = "none"

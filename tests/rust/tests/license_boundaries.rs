@@ -92,6 +92,7 @@ fn compatibility_policy_covers_all_adapter_artifacts_and_relationships() {
     assert_eq!(
         artifact_ids,
         std::collections::BTreeSet::from([
+            "filebelt-directory-repository-adapter",
             "filebelt-ftp-ftps-gateway",
             "filebelt-git-adapter",
             "filebelt-nfs-gateway",

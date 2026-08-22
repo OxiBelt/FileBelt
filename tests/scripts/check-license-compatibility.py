@@ -324,8 +324,17 @@ def load_policy(path: Path) -> CompatibilityPolicy:
     manifests = [workspace.manifest for workspace in workspaces]
     if len(workspace_ids) != len(set(workspace_ids)) or len(manifests) != len(set(manifests)):
         _fail("workspace ids and manifests must be unique")
-    if set(workspace_ids) != {"root", "smb", "ftp-ftps", "onlyoffice", "git", "nfs", "transcode"}:
-        _fail("policy must register the root and all six adapter workspaces")
+    if set(workspace_ids) != {
+        "root",
+        "smb",
+        "ftp-ftps",
+        "onlyoffice",
+        "git",
+        "directory-repository",
+        "nfs",
+        "transcode",
+    }:
+        _fail("policy must register the root and all seven adapter workspaces")
 
     raw_artifacts = document["artifacts"]
     if not isinstance(raw_artifacts, list) or not raw_artifacts:

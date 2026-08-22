@@ -46,6 +46,59 @@ the additive schema. After activation, do not run a binary that cannot read
 Git/shared-chunk content: restore the matched PostgreSQL, payload, Git PVC, and
 shared-chunk snapshot under quiescence, verify the v4 checkpoint, then resume.
 
+## Directory Git compatibility and activation
+
+Directory Git is a separate two-release, disabled-by-default compatibility
+unit. A repository root is an explicit `directory_git` directory node; roots
+cannot nest and ordinary moves cannot cross their boundary. The root ID stays
+stable on a same-drive root move. `.git` is rejected and empty directories
+project only as zero-byte `.filebeltkeep`. PostgreSQL, rather than Git or LFS,
+remains authoritative for root membership, `main` projection, derived per-file
+versions, quota, retention, activation, and recovery.
+
+1. In the compatibility release, apply the forward directory-repository
+   migration while leaving the reviewed runtime-grant allowlist unchanged and
+   all directory Git writers, HTTPS, SSH, LFS, and mount writes disabled.
+   Inventory candidate roots and existing
+   histories, take a quiesced checkpoint v5, and verify old binaries continue
+   to read their supported representations.
+   The compatibility schema and private DTO validators are not writer
+   authority. Before any runtime grant is added, the activation release must
+   add current `WRITE_REPOSITORY` and signer admission, ruleset/check
+   serialization, canonical snapshot-digest verification, idempotent
+   operation replay and expiry recovery, root move/trash integration, a
+   Git-derived `Verify`/`Promote` receipt, durable fencing-token high-water
+   enforcement, and pre-decode resource admission.
+2. Admit the isolated Git wrapper/PVC and its source, SBOM, provenance, GPL Git
+   executable, notices, mTLS, fsck, and restore evidence. The coordinator has
+   no Git or payload mount; no other FileBelt role mounts the Git PVC.
+3. Before enabling a root, verify the selected limits: 1 GiB incoming pack, 32
+   newly admitted first-parent commits/push, 10,000 changed paths/commit,
+   100,000 entries/tree, 100 MiB ordinary blobs, and configured LFS max-file
+   limit (default 1 TiB). Verify the 1--365-day HTTPS device-token ceiling
+   (30-day default), tailnet SSH fencing, `main`-only projection, retained
+   per-file history, 30-day committed-unreachable Git/LFS retention, and
+   24-hour rejected/quarantine retention.
+4. Enable only after quiesced checkpoint-v5 restore/reconciliation proves the
+   recorded PostgreSQL root and every accepted `main` OID agree. Existing
+   histories remain retained; new in-root versions do not acquire the old
+   per-file Git projection. Other Git refs remain Git-only.
+
+NFS, SMBv3, and FTPS write integration is not an activation prerequisite or a
+claimed capability. It stays disabled until independently qualified. A later
+mount qualification must prove NFS commits only on `COMMIT` or final dirty
+`CLOSE`, SMB uses no durable handles, and FTPS uses no resume; each must pass
+current ACL/generation, expected-head, quota, replay, reconnect, and
+cross-writer tests before it can project a directory commit.
+
+Rollback before directory activation leaves additive rows and all transports
+disabled. After activation, quiesce writers and restore the matched PostgreSQL,
+payload, Git, and LFS checkpoint-v5 set; verify grants, fsck, recorded `main`
+OIDs, derived versions, quota, retention deadlines, and two-user authorization
+before re-enabling traffic. Do not roll back to a binary unable to read retained
+directory-repository state, infer state from Git, or delete quarantine/holds to
+satisfy a check.
+
 ## Comparison admission
 
 The core chart projects `[revisions.limits]` with

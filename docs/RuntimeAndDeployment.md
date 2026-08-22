@@ -114,6 +114,25 @@ dispatch; an admitted comparison that cannot immediately acquire a Git-process
 permit returns the typed admission result. Non-comparison maintenance may wait
 for a Git-process permit only within its existing bounded request timeout.
 
+Directory Git is a future compatibility-gated extension of this same process
+boundary, not a new payload mount or a direct Apache-to-GPL link. Before its
+two-release activation, repository creation, Git HTTPS, tailnet SSH, LFS, and
+directory projection remain disabled. When admitted, the Apache coordinator
+continues to own PostgreSQL authority and speaks only a versioned private
+protocol to the Apache wrapper; the wrapper alone invokes the separate
+GPL-2.0-only Git executable and owns the Git-only RWX PVC. No API, web, VFS,
+SMB, FTPS, NFS, or I/O process mounts that PVC, receives a Git implementation
+credential, or infers a FileBelt principal from a Git path or ref.
+
+Directory-Git release evidence must cover the selected receive limits (1 GiB
+pack, 32 first-parent commits, 10,000 changed paths/commit, 100,000 tree
+entries, 100 MiB ordinary blobs, and configured LFS max-file limit), HTTPS
+device-token expiry, tailnet SSH fencing, `main` projection, Git/LFS retention,
+fsck/restore, and checkpoint-v5 recovery. This evidence is in addition to
+existing Git source/SBOM/provenance/license evidence. It does not qualify
+SMBv3, FTPS, or NFS writes; all remain disabled until independent adapter and
+live-protocol qualification completes.
+
 Other reserved adapter roles are future `filebelt-nfs-gateway` and
 `filebelt-transcoder`. Each has an independently truthful platform and license contract. Transcode implementation remains
 prohibited until its exact FFmpeg composition has been reviewed and the

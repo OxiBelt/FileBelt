@@ -19,6 +19,7 @@ mod mcp;
 mod media;
 mod mounts;
 mod policy;
+mod repositories;
 mod resources;
 mod revisions;
 

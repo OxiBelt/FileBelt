@@ -120,7 +120,9 @@ issuer, audience, nonce, or time validation fails closed.
 The stable action vocabulary independently represents metadata and child
 listing, content reads, child creation, content writes, version creation,
 rename, move, delete, restore, attribute changes, sharing, ACL management,
-drive management, transcode, external editing, MCP use, mounts, and export.
+drive management, transcode, external editing, MCP use, mounts, export, and
+the compatibility-gated directory-repository actions `READ_REPOSITORY`,
+`WRITE_REPOSITORY`, `MANAGE_REPOSITORY`, and `BYPASS_REPOSITORY_RULES`.
 `WRITE_CONTENT` does not imply `CREATE_VERSION`; `SHARE` does not imply
 `MANAGE_ACL`.
 
@@ -220,7 +222,7 @@ an adapter-local path or UUID cache.
 
 ## Text editing, history, and collaboration authorization
 
-Text editing and Git history introduce no Virtual ACL action. Reading an
+Text editing and current per-file Git history introduce no Virtual ACL action. Reading an
 authorized commit ID or comparing two immutable versions always reauthorizes
 the current node with `READ_CONTENT`; a commit ID is an identifier, never a
 capability. Saving requires `WRITE_CONTENT` and `CREATE_VERSION` with the same
@@ -228,6 +230,48 @@ expected-head and generation fences as other writers. Changing persistent
 `content_class_policy` requires `SET_ATTRIBUTES`, an exact attribute ETag, and
 freezes active incompatible collaboration state before returning. Per-user
 size preferences carry no resource authority.
+
+### Directory Git repositories
+
+Directory Git is a compatibility-gated, disabled feature in this revision. A
+selected directory becomes an explicit `directory_git` repository root. Its
+immutable node ID identifies the repository; it is not a physical path, Git
+URL, credential, or authority token.
+
+Repository-root creation or conversion requires both `MANAGE_REPOSITORY` and
+`SET_ATTRIBUTES` on the selected directory.
+The additive repository actions are `READ_REPOSITORY`, `WRITE_REPOSITORY`,
+`MANAGE_REPOSITORY`, and `BYPASS_REPOSITORY_RULES`. `READ_REPOSITORY` governs
+Git retrieval, `WRITE_REPOSITORY` governs receive/push, and
+`MANAGE_REPOSITORY` governs branches, tags, pull requests, rules, signatures,
+device-token issuance, LFS policy, and retention. A `main` projection still
+rechecks the ordinary per-path Virtual ACL actions. `BYPASS_REPOSITORY_RULES`
+is never an implicit drive-owner right and is never implied by another action.
+An explicit standing ACL allow is necessary but not sufficient: a bypass also
+requires a ruleset allowlist, recent OIDC authentication, a reason, a
+one-operation scoped grant, and audit evidence. A browser, HTTPS token,
+tailnet SSH key, Git commit ID, ref name, or
+pull-request ID is never a capability; each operation resolves its current
+internal principal and re-evaluates current ACL and generation fences.
+
+Directory Git roots cannot nest. A move cannot cross a repository-root
+boundary: a root may move only within its drive and retains its repository ID;
+a node may neither enter nor leave a root by ordinary move. Copy or export is
+the explicit way to leave the mode. Trash, restore, sharing, ACL inheritance,
+and purge retain ordinary logical-node behavior, with repository state fenced
+and retained by the durability contract. `.git` is invalid inside a repository
+root, and Git administrative state is never a FileBelt node or payload.
+Empty directories project only as zero-byte `.filebeltkeep`; it is derived
+metadata, not a user-created FileBelt node.
+
+The root permits full Git HTTPS and tailnet SSH only after their independent
+authentication and deployment gates qualify. HTTPS device-token lifetime is
+configurable from 1 through 365 days and defaults to 30 days. Branches, tags,
+pull requests, rules, signatures, and LFS are Git-visible, but only `main`
+projects into FileBelt. Other refs are Git-only and cannot change FileBelt
+namespace, payload authority, ACL, quota, or file head. Each accepted `main`
+commit derives immutable per-file versions; existing histories remain retained
+and new in-root versions do not receive the old per-file Git projection.
 
 Opening or participating in
 a collaboration room requires both `READ_CONTENT` and `WRITE_CONTENT`; there

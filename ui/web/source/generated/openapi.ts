@@ -761,6 +761,41 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/repository": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Requires READ_REPOSITORY before repository lookup. This compatibility-release route is deliberately unavailable until root-scoped repository reads are qualified. */
+        readonly get: operations["getDirectoryRepository"];
+        readonly put?: never;
+        /** @description Requires both MANAGE_REPOSITORY and SET_ATTRIBUTES before the compatibility-state fence. The API has no runtime grant to create or activate a directory-level Git repository. */
+        readonly post: operations["createDirectoryRepository"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/repository/refs": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** @description Requires READ_REPOSITORY before repository lookup. This compatibility-release route is deliberately unavailable until deterministic root-scoped ref listing is qualified. */
+        readonly get: operations["listDirectoryRepositoryRefs"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/drives/{drive_id}/nodes/{node_id}/restore": {
         readonly parameters: {
             readonly query?: never;
@@ -1568,8 +1603,11 @@ export interface components {
             readonly supported_actions: readonly string[];
         };
         readonly AclEntry: {
-            /** @enum {string} */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT";
+            /**
+             * @description BYPASS_REPOSITORY_RULES records standing eligibility only; it never represents an operation-scoped bypass grant.
+             * @enum {string}
+             */
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
             readonly display_name: string;
             /** @enum {string} */
             readonly effect: "allow" | "deny";
@@ -1583,8 +1621,11 @@ export interface components {
             readonly verified_email: string | null;
         };
         readonly AclEntryMutation: {
-            /** @enum {string} */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT";
+            /**
+             * @description BYPASS_REPOSITORY_RULES records standing eligibility only; it never replaces the matching ruleset allowlist, recent OIDC authentication, bounded reason, one-operation grant, or audit evidence.
+             * @enum {string}
+             */
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
             /** @enum {string} */
             readonly effect: "allow" | "deny";
             /** @enum {string} */
@@ -1808,6 +1849,10 @@ export interface components {
             readonly expected_parent_generation: number;
             readonly name: string;
         };
+        readonly CreateDirectoryRepository: {
+            /** @enum {string} */
+            readonly object_format: "sha1" | "sha256";
+        };
         readonly CreatedMountCredential: {
             readonly credential_id: components["schemas"]["UuidV4"];
             /** Format: date-time */
@@ -1899,6 +1944,29 @@ export interface components {
             /** @enum {string} */
             readonly preset: "viewer" | "contributor" | "manager";
             readonly verified_email: string | null;
+        };
+        readonly DirectoryRepository: {
+            readonly drive_id: components["schemas"]["UuidV4"];
+            /** Format: int64 */
+            readonly generation: number;
+            readonly id: components["schemas"]["UuidV4"];
+            /** @enum {string} */
+            readonly object_format: "sha1" | "sha256";
+            readonly root_node_id: components["schemas"]["UuidV4"];
+            /** @constant */
+            readonly state: "compatibility";
+        };
+        readonly DirectoryRepositoryRef: {
+            /** Format: int64 */
+            readonly generation: number;
+            readonly namespace_projection: boolean;
+            readonly oid: string | null;
+            readonly projected_snapshot_id: components["schemas"]["UuidV4"] | null;
+            readonly ref_name: string;
+        };
+        readonly DirectoryRepositoryRefPage: {
+            readonly items: readonly components["schemas"]["DirectoryRepositoryRef"][];
+            readonly next_cursor: string | null;
         };
         readonly DirectShare: {
             /** Format: date-time */
@@ -4667,6 +4735,93 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["MediaPreview"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly getDirectoryRepository: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Repository reads are compatibility-disabled. */
+            readonly 503: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter60"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly createDirectoryRepository: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateDirectoryRepository"];
+            };
+        };
+        readonly responses: {
+            /** @description Repository creation is compatibility-disabled. */
+            readonly 503: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter60"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly listDirectoryRepositoryRefs: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["parameters"]["Cursor"];
+                readonly limit?: components["parameters"]["Limit"];
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly drive_id: components["parameters"]["DriveId"];
+                readonly node_id: components["parameters"]["NodeId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Repository ref reads are compatibility-disabled. */
+            readonly 503: {
+                headers: {
+                    readonly "Retry-After": components["headers"]["RetryAfter60"];
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             readonly default: components["responses"]["Problem"];

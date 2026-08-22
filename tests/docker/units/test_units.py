@@ -52,12 +52,21 @@ ACCEPTANCE_SPEC.loader.exec_module(ACCEPTANCE)
 
 
 class CatalogTest(unittest.TestCase):
-    def test_catalog_defines_three_isolated_exact_artifact_units(self) -> None:
+    def test_catalog_defines_isolated_exact_artifact_units(self) -> None:
         units = load_catalog(ROOT, ROOT / "tests/docker/units.toml")
-        self.assertEqual(set(units), {"core", "collaboration", "mcp"})
+        self.assertEqual(
+            set(units), {"core", "collaboration", "mcp", "phase8-qualification"}
+        )
         self.assertTrue(all(unit.exact_artifacts for unit in units.values()))
         expected_tiers = ("pull_request", "push", "scheduled", "manual", "release")
-        self.assertTrue(all(unit.event_tiers == expected_tiers for unit in units.values()))
+        self.assertTrue(
+            all(
+                unit.event_tiers == expected_tiers
+                for name, unit in units.items()
+                if name != "phase8-qualification"
+            )
+        )
+        self.assertEqual(units["phase8-qualification"].event_tiers, ("manual",))
         self.assertEqual(units["collaboration"].browser_projects, ("chromium", "firefox"))
         self.assertIn("filebelt-mcp-broker", units["mcp"].roles)
         collaboration = (ROOT / "ui/web/browser/docker-integration.spec.mjs").read_text(
@@ -238,6 +247,26 @@ class LifecycleTest(unittest.TestCase):
         ):
             with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
                 RUN_UNIT.parse_published_edge(invalid)
+
+    def test_published_edge_waits_for_docker_port_metadata(self) -> None:
+        unavailable = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="port metadata unavailable"
+        )
+        available = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="127.0.0.1:49152\n", stderr=""
+        )
+        with (
+            mock.patch.object(
+                RUN_UNIT.subprocess, "run", side_effect=(unavailable, available)
+            ) as run,
+            mock.patch.object(RUN_UNIT.time, "sleep") as sleep,
+        ):
+            self.assertEqual(
+                RUN_UNIT.wait_published_edge("relay-container"),
+                ("127.0.0.1", 49152),
+            )
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(0.1)
 
     def test_tcp_proxy_forwards_synthetic_connection(self) -> None:
         try:

@@ -17,6 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.yaml"
 MCP_COMPOSE = ROOT / "deploy/compose/compose.mcp.yaml"
+EXTERNAL_OIDC_COMPOSE = ROOT / "deploy/compose/compose.external-oidc.yaml"
 PREPARE = ROOT / "deploy/compose/prepare-state.sh"
 POSTGRES_18_6 = (
     "docker.io/library/postgres@"
@@ -81,7 +82,23 @@ def main() -> int:
         environment = {**os.environ, "FILEBELT_STATE_DIR": str(state)}
         environment.pop("FILEBELT_HTTPS_BIND_ADDRESS", None)
         environment.pop("FILEBELT_HTTPS_PORT", None)
+        environment.update(
+            {
+                "FILEBELT_OIDC_FIXTURE_IMAGE": "filebelt-oidc-fixture:test",
+                "FILEBELT_PAYLOAD_INIT_IMAGE": "filebelt-payload-init:test",
+                "FILEBELT_ACCEPTANCE_RELAY_IMAGE": "filebelt-acceptance-relay:test",
+            }
+        )
         subprocess.run([str(PREPARE)], cwd=ROOT, env=environment, check=True)
+        retained = subprocess.run(
+            [str(PREPARE)],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert "validated retained development-only state" in retained.stdout
         purposes = {
             "api-storage": "api-storage",
             "api-collaboration-grant": "api-collaboration-grant",
@@ -153,11 +170,44 @@ def main() -> int:
             capture_output=True,
             text=True,
         )
+        external_oidc_rendered = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--file",
+                str(COMPOSE),
+                "--file",
+                str(EXTERNAL_OIDC_COMPOSE),
+                "--profile",
+                "core",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            env={**environment, "FILEBELT_OIDC_EGRESS_NETWORK": "filebelt-development-oidc"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (state / "tls" / "filebelt.crt").write_text("invalid\n", encoding="utf-8")
+        invalid_retained = subprocess.run(
+            [str(PREPARE)],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert invalid_retained.returncode != 0
+        assert "expires within 24 hours" in invalid_retained.stderr
+        assert "move" in invalid_retained.stderr
 
     base_model = json.loads(base_rendered.stdout)
     assert secret_sources(base_model["services"]["filebelt-api"]) == {
         "api-database-url",
         "oidc-client-secret",
+        "oidc-ca-certificate",
         "api-storage-capability-private-key",
         "api-storage-capability-public-keyset",
         "api-collaboration-grant-capability-private-key",
@@ -167,6 +217,15 @@ def main() -> int:
     model = json.loads(rendered.stdout)
     services = model["services"]
     outside_services = json.loads(outside_rendered.stdout)["services"]
+    external_oidc_model = json.loads(external_oidc_rendered.stdout)
+    assert set(external_oidc_model["services"]["filebelt-api"]["networks"]) == {
+        "control",
+        "edge",
+        "oidc-egress",
+    }
+    external_oidc_network = external_oidc_model["networks"]["oidc-egress"]
+    assert external_oidc_network["name"] == "filebelt-development-oidc"
+    assert external_oidc_network["external"] is True
     assert model["networks"]["acceptance-publication"].get("internal", False) is False
     assert model["networks"]["control"]["internal"] is True
     assert model["networks"]["edge"]["internal"] is True
@@ -224,8 +283,29 @@ def main() -> int:
     assert not relay.get("volumes"), "the acceptance relay must not mount storage"
     assert not relay.get("secrets"), "the acceptance relay must not mount secrets"
     assert not relay.get("configs"), "the acceptance relay must not mount configs"
-    assert relay["image"] == services["filebelt-oidc"]["image"]
-    assert relay["entrypoint"] == ["node", "/opt/filebelt-oidc/relay.mjs"]
+    assert services["filebelt-oidc"]["image"] == "filebelt-oidc-fixture:test"
+    assert services["filebelt-payload-init"]["image"] == "filebelt-payload-init:test"
+    assert relay["image"] == "filebelt-acceptance-relay:test"
+    assert relay["entrypoint"][:3] == ["node", "--input-type=module", "-e"]
+    assert "FILEBELT_UNSAFE_NON_LOOPBACK_ACK" in relay["entrypoint"][3]
+    assert relay["environment"] == {
+        "FILEBELT_HTTPS_BIND_ADDRESS": "127.0.0.1",
+        "FILEBELT_UNSAFE_NON_LOOPBACK_ACK": "",
+    }
+    unsafe_publication = subprocess.run(
+        relay["entrypoint"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "FILEBELT_HTTPS_BIND_ADDRESS": "0.0.0.0",
+            "FILEBELT_UNSAFE_NON_LOOPBACK_ACK": "",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert unsafe_publication.returncode != 0
+    assert "I_UNDERSTAND_PASSWORDLESS_OIDC_IS_PUBLIC" in unsafe_publication.stderr
     assert relay["depends_on"]["filebelt-web"]["condition"] == "service_started"
     assert gateway["environment"] == {"FILEBELT_MCP_INTEGRATION_HOST": ""}
     assert not web.get("volumes")
@@ -240,6 +320,7 @@ def main() -> int:
     assert secret_sources(api) == {
         "api-database-url",
         "oidc-client-secret",
+        "oidc-ca-certificate",
         "api-storage-capability-private-key",
         "api-storage-capability-public-keyset",
         "api-collaboration-grant-capability-private-key",

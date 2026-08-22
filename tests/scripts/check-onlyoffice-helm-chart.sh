@@ -114,6 +114,24 @@ if helm template onlyoffice-private-egress "${chart}" --kube-version 1.36.0 \
   die "private egress reused the public gateway client identity"
 fi
 
+if helm template onlyoffice "${chart}" --kube-version 1.36.0 \
+    --namespace filebelt-integrations "${qualified[@]}" \
+    --set-json 'networkPolicy.core.to=[{}]' >"${temporary}/empty-peer.log" 2>&1; then
+  die "chart admitted an empty NetworkPolicy peer"
+fi
+if helm template onlyoffice "${chart}" --kube-version 1.36.0 \
+    --namespace filebelt-integrations "${qualified[@]}" \
+    --set-json 'networkPolicy.core.to=[{"namespaceSelector":{"matchLabels":{}}}]' \
+    >"${temporary}/empty-selector.log" 2>&1; then
+  die "chart admitted an empty NetworkPolicy selector"
+fi
+if helm template onlyoffice "${chart}" --kube-version 1.36.0 \
+    --namespace filebelt-integrations "${qualified[@]}" \
+    --set-json 'networkPolicy.core.to=[{"ipBlock":{"cidr":"192.0.2.1/32"},"podSelector":{"matchLabels":{"app":"document"}}}]' \
+    >"${temporary}/mixed-peer.log" 2>&1; then
+  die "chart admitted an IP-and-selector NetworkPolicy peer"
+fi
+
 if helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-core \
     "${qualified[@]}" >"${temporary}/wrong-namespace.log" 2>&1; then
   die "chart rendered into the core namespace"

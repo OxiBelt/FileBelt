@@ -95,6 +95,19 @@ deployment:
   revisionHistoryLimit: 5
   minReadySeconds: 10
 
+# Numeric capability-key generations are cryptographic protocol values. They
+# are intentionally independent from the opaque Secret rollout generations
+# below, which only force workload replacement when mounted material changes.
+capabilityGenerations:
+  apiStorage: 1
+  apiCollaborationGrant: 1
+  apiMcpDelegation: 1
+  collaborationStorage: 1
+  documentStorage: 1
+  mountStorage: 1
+  mediaStorage: 1
+  revisionStorage: 1
+
 configuration:
   # The chart owns immutable, content-addressed ConfigMaps. Secret material is
   # never accepted here; only absolute paths to projected Secret keys appear.
@@ -135,7 +148,7 @@ configuration:
     [keys.api_storage]
     private_key_file = "/run/secrets/api-storage-capability-private-key"
     public_keyset_file = "/run/secrets/api-storage-capability-public-keyset"
-    current_generation = 1
+    current_generation = {{ .Values.capabilityGenerations.apiStorage }}
 
     [listeners]
     api = "0.0.0.0:8080"
@@ -192,7 +205,7 @@ configuration:
     [media.capability_signing]
     private_key_file = "/run/secrets/media-storage-capability-private-key"
     public_keyset_file = "/run/secrets/media-storage-capability-public-keyset"
-    current_generation = 1
+    current_generation = {{ .Values.capabilityGenerations.mediaStorage }}
 
     [mounts]
     database_url_file = "/run/secrets/mount-database-url"

@@ -92,7 +92,7 @@ monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 7. Confirm the API and I/O server certificates contain their exact Service DNS
    names, and the OxiBelt client certificates contain distinct configured URI
    SANs and `clientAuth` usage.
-8. Confirm `filebelt.toml` uses format 8. If MCP is enabled, validate the
+8. Confirm `filebelt.toml` uses format 9. If MCP is enabled, validate the
    broker/vault/gateway/trust-profile fields; if runners are enabled, also
    validate controller mTLS, catalog/root/bundles, runner digest, namespace,
    and quotas. The `[mcp.runners] namespace` must equal the Helm
@@ -231,8 +231,12 @@ window.
    `collaboration.webtransport.enabled` false. Apply migrations 000007 through
    000009 and the reviewed grants.
 2. Roll every long-running and administrative role to an image compatible with
-   the current configuration format and verify its fresh compatibility
-   advertisement.
+   the current configuration format. Run the executable Phase 8 qualification
+   harness and retain its schema `filebelt.phase8.qualification.v2` output.
+   For each exact role, run `filebeltctl phase8 advertise` with that evidence,
+   its recorded instance UUID and source revision, and verify the fresh
+   advertisement. A failed or prerequisite-bearing skipped result must use
+   `--incompatible` and blocks activation; it is never a compatibility pass.
 3. Quiesce writers and take the coordinated PostgreSQL/payload checkpoint.
 4. Run `filebeltctl phase8 activate` once. Retain its audit identifier and
    compatibility inventory with the change evidence.
@@ -241,6 +245,13 @@ window.
    client policy, and single-active fencing. WebTransport requires the
    operator-projected TLS identity and UDP policies. VAAPI remains disabled unless experimental
    use is explicitly accepted.
+
+The checked-in local Docker harness can exercise API, I/O, maintenance,
+collaboration WebSocket, and tools. It truthfully skips media-controller, VFS,
+NFS, media delivery, and WebTransport because the Compose topology lacks the
+documented provider, mTLS, KDC, Job/callback, UDP, and recovery prerequisites.
+Its `accepted: false` output is useful for local role evidence but cannot be
+used as release qualification or to advertise a skipped role as compatible.
 
 To roll back, disable new admissions, run `filebeltctl phase8 deactivate`,
 advance NFS/job/collaboration fences, drain clients, and restore the previous

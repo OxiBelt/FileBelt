@@ -25,13 +25,14 @@ SPEC.loader.exec_module(CHECKER)
 POLICY = CHECKER.load_policy(REPO_ROOT / CHECKER.POLICY_FILENAME)
 WORKSPACES = {workspace.id: workspace for workspace in POLICY.workspaces}
 CHECK_COMMAND = "python3 tests/scripts/check-license-compatibility.py"
-FETCH_LOOP = (
-    "for manifest in Cargo.toml "
-    "adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do"
+FETCH_LOOP = "while IFS= read -r manifest; do"
+FETCH_INVENTORY = (
+    "done < <(python3 tests/scripts/check-adapter-dependency-admission.py "
+    "--repo-root . --print-manifests)"
 )
 FETCH_COMMAND = 'cargo fetch --locked --manifest-path "$manifest"'
 ADAPTER_WORKSPACE_MATRIX = (
-    "adapter: [smb, ftp-ftps, onlyoffice, git, nfs, wireguard, transcode]"
+    "adapter: ${{ fromJSON(needs.adapter-inventory.outputs.adapters) }}"
 )
 
 
@@ -520,10 +521,15 @@ source_required = true
                 checked_jobs.add(identity)
                 with self.subTest(job=identity):
                     loops = [index for index, line in enumerate(lines) if line == FETCH_LOOP]
+                    inventories = [
+                        index for index, line in enumerate(lines) if line == FETCH_INVENTORY
+                    ]
                     fetches = [index for index, line in enumerate(lines) if line == FETCH_COMMAND]
                     self.assertTrue(loops, f"{identity} does not enumerate every Cargo graph")
+                    self.assertTrue(inventories, f"{identity} does not use the boundary inventory")
                     self.assertTrue(fetches, f"{identity} does not fetch locked Cargo sources")
                     self.assertLess(loops[0], fetches[0], f"{identity} fetches outside the loop")
+                    self.assertLess(fetches[0], inventories[0], f"{identity} closes the inventory loop too early")
                     self.assertLess(fetches[0], checks[0], f"{identity} primes Cargo sources too late")
         self.assertTrue(
             {
@@ -534,9 +540,11 @@ source_required = true
             <= checked_jobs
         )
 
-    def test_adapter_workspace_matrix_explicitly_includes_wireguard(self) -> None:
+    def test_adapter_workspace_matrix_comes_from_the_reviewed_boundary(self) -> None:
         workflow = REPO_ROOT / ".github/workflows/adapter-license-qualification.yml"
-        self.assertIn(ADAPTER_WORKSPACE_MATRIX, workflow.read_text(encoding="utf-8"))
+        source = workflow.read_text(encoding="utf-8")
+        self.assertIn(ADAPTER_WORKSPACE_MATRIX, source)
+        self.assertIn("--print-adapters-json", source)
 
     def test_workflow_run_parser_ignores_names_and_comments(self) -> None:
         jobs = workflow_job_run_lines(

@@ -988,6 +988,14 @@ expect_failure recovery_without_checkpoint \
   --set-string operation.operationId="${OPERATION_ID}"
 expect_failure unrestricted_egress --skip-schema-validation \
   --set-json 'networkPolicy.postgres.to=[{"ipBlock":{"cidr":"0.0.0.0/0"}}]'
+expect_failure empty_network_policy_peer \
+  --set-json 'networkPolicy.postgres.to=[{}]'
+expect_failure empty_network_policy_selector \
+  --set-json 'networkPolicy.postgres.to=[{"namespaceSelector":{"matchLabels":{}}}]'
+expect_failure mixed_network_policy_peer \
+  --set-json 'networkPolicy.postgres.to=[{"ipBlock":{"cidr":"192.0.2.1/32"},"podSelector":{"matchLabels":{"app":"postgres"}}}]'
+expect_failure zero_capability_generation \
+  --set capabilityGenerations.apiStorage=0
 expect_failure old_config --skip-schema-validation \
   --set-string 'configuration.filebelt=version = 1'
 expect_failure monitoring_crd_absent --set monitoring.serviceMonitor.enabled=true

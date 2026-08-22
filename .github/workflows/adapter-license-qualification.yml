@@ -22,6 +22,21 @@ permissions:
   contents: read
 
 jobs:
+  adapter-inventory:
+    name: Registered adapter inventory
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      adapters: ${{ steps.inventory.outputs.adapters }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Derive the matrix from the reviewed Cargo boundary
+        id: inventory
+        run: |
+          adapters="$(python3 tests/scripts/check-adapter-dependency-admission.py --repo-root . --print-adapters-json)"
+          echo "adapters=${adapters}" >> "${GITHUB_OUTPUT}"
+
   source-and-policy:
     name: Source and directional-license policy
     runs-on: ubuntu-26.04
@@ -44,9 +59,10 @@ jobs:
             tests.scripts.test_validate_adapter_source_bundle
       - name: Prime exact locked dependency sources
         run: |
-          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do
+          cargo fetch --locked --manifest-path Cargo.toml
+          while IFS= read -r manifest; do
             cargo fetch --locked --manifest-path "$manifest"
-          done
+          done < <(python3 tests/scripts/check-adapter-dependency-admission.py --repo-root . --print-manifests)
       - name: Check every independent locked dependency graph
         run: python3 tests/scripts/check-license-compatibility.py --repo-root .
       - name: Check adapter dependency advisories and licenses
@@ -54,12 +70,13 @@ jobs:
 
   adapter-workspaces:
     name: ${{ matrix.adapter }} locked workspace
+    needs: adapter-inventory
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        adapter: [smb, ftp-ftps, onlyoffice, git, nfs, wireguard, transcode]
+        adapter: ${{ fromJSON(needs.adapter-inventory.outputs.adapters) }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,9 +124,10 @@ jobs:
         run: tests/scripts/prepare-adapter-image-plan.sh --channel build --output artifacts/adapter-image-plan.json
       - name: Prime exact locked dependency sources
         run: |
-          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do
+          cargo fetch --locked --manifest-path Cargo.toml
+          while IFS= read -r manifest; do
             cargo fetch --locked --manifest-path "$manifest"
-          done
+          done < <(python3 tests/scripts/check-adapter-dependency-admission.py --repo-root . --print-manifests)
       - name: Verify blocked roles emitted no image evidence
         run: |
           mkdir -p artifacts/evidence

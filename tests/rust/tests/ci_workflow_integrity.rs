@@ -437,10 +437,14 @@ fn protocol_job_provisions_pinned_node_dependencies_before_generation() {
         .find("pnpm install --frozen-lockfile --ignore-scripts")
         .expect("frozen dependency install");
     let generation = protocol
-        .find("python3 tests/scripts/check-generated.py --repo-root .")
+        .find("python3 tests/scripts/check-generated.py --repo-root . \"${breaking_args[@]}\"")
         .expect("generated-client check");
 
     assert!(protocol.contains("node-version: \"24.19.0\""));
+    assert!(protocol.contains("fetch-depth: 0"));
+    assert!(protocol.contains("github.event.pull_request.base.sha"));
+    assert!(protocol.contains("git tag --merged HEAD"));
+    assert_eq!(protocol.matches("--breaking-against").count(), 2);
     assert!(setup < activation);
     assert!(activation < install);
     assert!(install < generation);

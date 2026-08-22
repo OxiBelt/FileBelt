@@ -226,6 +226,24 @@ def parse_published_edge(value: str) -> tuple[str, int]:
     return host, port
 
 
+def wait_published_edge(container: str) -> tuple[str, int]:
+    """Wait for Docker's allocated host port to become inspectable."""
+    deadline = time.monotonic() + 10
+    last_error = "no published port reported"
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "port", container, f"{EDGE_PORT}/tcp"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return parse_published_edge(result.stdout)
+        last_error = proxy_error_detail(result.stderr.strip() or last_error)
+        time.sleep(0.1)
+    raise RuntimeError(f"Docker acceptance relay publication is unavailable: {last_error}")
+
+
 def run_driver(
     command: tuple[str, ...],
     environment: dict[str, str],
@@ -273,8 +291,9 @@ def retain_transport_diagnostics(
 
 
 def main() -> int:
+    catalog = load_catalog(ROOT, CATALOG)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--unit", choices=("core", "collaboration", "mcp"), required=True)
+    parser.add_argument("--unit", choices=tuple(catalog), required=True)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--image-dir", type=Path)
     source.add_argument("--build", action="store_true")
@@ -282,6 +301,15 @@ def main() -> int:
     parser.add_argument("--image-channel", choices=("build", "release"))
     parser.add_argument("--diagnostics-dir", type=Path)
     parser.add_argument("--project-name")
+    parser.add_argument("--qualification-output", type=Path)
+    parser.add_argument(
+        "--phase8-mode", choices=("contract", "qualification"), default="contract"
+    )
+    parser.add_argument(
+        "--phase8-cadence",
+        choices=("change-smoke", "nightly", "weekly", "pre-release"),
+        default="change-smoke",
+    )
     parser.add_argument(
         "--docker-topology",
         choices=("auto", "host", "outside"),
@@ -291,11 +319,17 @@ def main() -> int:
     arguments = parser.parse_args()
     if (arguments.image_dir is None) != (arguments.image_channel is None):
         parser.error("--image-dir and --image-channel must be supplied together")
+    if arguments.unit == "phase8-qualification" and arguments.qualification_output is None:
+        parser.error("--qualification-output is required for phase8-qualification")
+    if arguments.unit != "phase8-qualification" and arguments.qualification_output is not None:
+        parser.error("--qualification-output is only valid for phase8-qualification")
+    if arguments.qualification_output is not None and arguments.qualification_output.exists():
+        parser.error("--qualification-output must not already exist")
     for command in ("docker", "openssl", "python3"):
         if shutil.which(command) is None:
             raise SystemExit(f"required command is unavailable: {command}")
 
-    unit = load_catalog(ROOT, CATALOG)[arguments.unit]
+    unit = catalog[arguments.unit]
     if unit.status != "ready":
         raise SystemExit(f"Docker integration unit {unit.name} is blocked: {unit.blocker}")
     project = arguments.project_name or f"filebelt-{unit.name}-{uuid.uuid4().hex[:12]}"
@@ -338,12 +372,23 @@ def main() -> int:
         "FILEBELT_ACCEPTANCE_PROJECT": project,
         "FILEBELT_ACCEPTANCE_COMPOSE_FILES": os.pathsep.join(str(path) for path in unit.compose_files),
         "FILEBELT_ACCEPTANCE_PROFILES": os.pathsep.join(unit.profiles),
+        "FILEBELT_ACCEPTANCE_CA_FILE": str(local_state / "tls/filebelt.crt"),
         "FILEBELT_UNIT_TEMP": str(unit_temp),
         "FILEBELT_DOCKER_DIAGNOSTICS_DIR": str(diagnostics),
         "FILEBELT_MCP_INTEGRATION_HOST": "filebelt-mcp-integration.example.test" if unit.name == "mcp" else "",
         "FILEBELT_OIDC_FIXTURE_IMAGE": fixture_tag("oidc", project),
         "FILEBELT_MCP_EGRESS_FIXTURE_IMAGE": fixture_tag("mcp-egress", project),
     })
+    if arguments.qualification_output is not None:
+        environment.update({
+            "FILEBELT_PHASE8_QUALIFICATION_OUTPUT": str(
+                arguments.qualification_output.resolve()
+            ),
+            "FILEBELT_PHASE8_QUALIFICATION_MODE": arguments.phase8_mode,
+            "FILEBELT_PHASE8_QUALIFICATION_CADENCE": arguments.phase8_cadence,
+        })
+    environment["FILEBELT_PAYLOAD_INIT_IMAGE"] = environment["FILEBELT_OIDC_FIXTURE_IMAGE"]
+    environment["FILEBELT_ACCEPTANCE_RELAY_IMAGE"] = environment["FILEBELT_OIDC_FIXTURE_IMAGE"]
     configure_topology_environment(environment, topology)
 
     loaded_images: list[str] = []
@@ -425,13 +470,7 @@ def main() -> int:
             ).stdout.strip()
             if not relay_container or "\n" in relay_container:
                 raise RuntimeError("Docker acceptance relay identity is unavailable")
-            publication = subprocess.run(
-                ["docker", "port", relay_container, f"{EDGE_PORT}/tcp"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-            published_target = parse_published_edge(publication)
+            published_target = wait_published_edge(relay_container)
             transport["published_edge"] = (
                 f"{published_target[0]}:{published_target[1]}"
             )

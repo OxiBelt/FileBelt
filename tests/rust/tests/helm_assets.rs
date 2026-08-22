@@ -153,6 +153,37 @@ fn production_chart_has_the_role_and_disabled_document_contract() {
         schema["properties"]["global"]["properties"]["runAsUser"]["const"],
         10001
     );
+    let generations = &schema["properties"]["capabilityGenerations"];
+    assert_eq!(generations["additionalProperties"], false);
+    assert_eq!(generations["required"].as_array().map(Vec::len), Some(8));
+    for generation in [
+        "apiStorage",
+        "apiCollaborationGrant",
+        "apiMcpDelegation",
+        "collaborationStorage",
+        "documentStorage",
+        "mountStorage",
+        "mediaStorage",
+        "revisionStorage",
+    ] {
+        assert_eq!(
+            generations["properties"][generation]["$ref"],
+            "#/definitions/capabilityGeneration"
+        );
+        assert!(values.contains(&format!("  {generation}: 1")));
+    }
+    let helpers = fs::read_to_string(chart.join("templates/_helpers.tpl")).expect("chart helpers");
+    assert!(!helpers.contains("current_generation = 1"));
+    for generation in [
+        "apiCollaborationGrant",
+        "apiMcpDelegation",
+        "collaborationStorage",
+        "documentStorage",
+        "mountStorage",
+        "revisionStorage",
+    ] {
+        assert!(helpers.contains(&format!(".Values.capabilityGenerations.{generation}")));
+    }
     assert!(
         schema["properties"]["operation"]["properties"]["type"]["enum"]
             .as_array()
@@ -218,6 +249,26 @@ fn adapter_charts_keep_release_evidence_in_annotations() {
         "filebelt-git",
         7,
     );
+}
+
+#[test]
+fn configuration_format_is_synchronized_with_operator_preflight() {
+    let root = repository_root();
+    let values =
+        fs::read_to_string(root.join("deploy/helm/filebelt/values.yaml")).expect("chart values");
+    let helpers = fs::read_to_string(root.join("deploy/helm/filebelt/templates/_helpers.tpl"))
+        .expect("chart helpers");
+    let interfaces = fs::read_to_string(root.join("docs/InterfacesAndCapabilities.md"))
+        .expect("interfaces specification");
+    let operations = fs::read_to_string(root.join("docs/operations/kubernetes.md"))
+        .expect("Kubernetes operations");
+
+    assert!(values.contains("    version = 9\n"));
+    assert!(helpers.contains("configuration.filebelt must begin with version = 9"));
+    assert!(interfaces.contains("Configuration format 9 scopes signing material"));
+    assert!(operations.contains("Confirm `filebelt.toml` uses format 9"));
+    assert!(!interfaces.contains("Configuration format 8"));
+    assert!(!operations.contains("uses format 8"));
 }
 
 #[test]

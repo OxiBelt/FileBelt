@@ -47,6 +47,23 @@ class AdapterDependencyAdmissionTests(unittest.TestCase):
                     commands,
                 )
 
+    def test_registered_adapter_names_are_complete_and_deterministic(self) -> None:
+        manifests = CHECKER.registered_adapters(REPO_ROOT)
+        CHECKER.validate_admission_artifacts(manifests)
+        self.assertEqual(
+            CHECKER.adapter_names(REPO_ROOT, manifests),
+            (
+                "directory-repository",
+                "ftp-ftps",
+                "git",
+                "nfs",
+                "onlyoffice",
+                "smb",
+                "transcode",
+                "wireguard",
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

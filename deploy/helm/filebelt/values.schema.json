@@ -3,7 +3,7 @@
   "title": "FileBelt Phase 9 Kubernetes deployment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["global", "images", "deployment", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "documents", "revisions", "mounts", "networkPolicy", "monitoring", "operation"],
+  "required": ["global", "images", "deployment", "capabilityGenerations", "configuration", "workloads", "storage", "secrets", "mcp", "collaboration", "documents", "revisions", "mounts", "networkPolicy", "monitoring", "operation"],
   "properties": {
     "global": {
       "type": "object",
@@ -56,6 +56,20 @@
         "quiesced": {"type": "boolean"},
         "revisionHistoryLimit": {"type": "integer", "minimum": 1, "maximum": 20},
         "minReadySeconds": {"type": "integer", "minimum": 0, "maximum": 300}
+      }
+    },
+    "capabilityGenerations": {
+      "type": "object", "additionalProperties": false,
+      "required": ["apiStorage", "apiCollaborationGrant", "apiMcpDelegation", "collaborationStorage", "documentStorage", "mountStorage", "mediaStorage", "revisionStorage"],
+      "properties": {
+        "apiStorage": {"$ref": "#/definitions/capabilityGeneration"},
+        "apiCollaborationGrant": {"$ref": "#/definitions/capabilityGeneration"},
+        "apiMcpDelegation": {"$ref": "#/definitions/capabilityGeneration"},
+        "collaborationStorage": {"$ref": "#/definitions/capabilityGeneration"},
+        "documentStorage": {"$ref": "#/definitions/capabilityGeneration"},
+        "mountStorage": {"$ref": "#/definitions/capabilityGeneration"},
+        "mediaStorage": {"$ref": "#/definitions/capabilityGeneration"},
+        "revisionStorage": {"$ref": "#/definitions/capabilityGeneration"}
       }
     },
     "configuration": {
@@ -440,6 +454,7 @@
       "properties": {"command": {"$ref": "#/definitions/argv"}, "args": {"$ref": "#/definitions/argv"}, "healthCommand": {"$ref": "#/definitions/argv"}, "preStopCommand": {"$ref": "#/definitions/argv"}, "configMap": {"$ref": "#/definitions/configMapRef"}, "resources": {"$ref": "#/definitions/resources"}}
     },
     "generation": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "capabilityGeneration": {"type": "integer", "minimum": 1, "maximum": 4294967295},
     "secretKey": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9._-]+$"},
     "singleKeySecret": {
       "type": "object", "additionalProperties": false, "required": ["name", "key", "generation"],
@@ -454,9 +469,10 @@
       "properties": {"name": {"$ref": "#/definitions/dnsLabel"}, "certificateKey": {"$ref": "#/definitions/secretKey"}, "privateKeyKey": {"$ref": "#/definitions/secretKey"}, "caKey": {"$ref": "#/definitions/secretKey"}, "generation": {"$ref": "#/definitions/generation"}}
     },
     "labels": {"type": "object", "propertyNames": {"type": "string", "maxLength": 253}, "additionalProperties": {"type": "string", "maxLength": 63}},
+    "selectorLabels": {"type": "object", "minProperties": 1, "propertyNames": {"type": "string", "minLength": 1, "maxLength": 253}, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 63}},
     "selector": {
-      "type": "object", "additionalProperties": false, "minProperties": 1,
-      "properties": {"matchLabels": {"$ref": "#/definitions/labels"}}
+      "type": "object", "additionalProperties": false, "required": ["matchLabels"],
+      "properties": {"matchLabels": {"$ref": "#/definitions/selectorLabels"}}
     },
     "peer": {
       "type": "object", "additionalProperties": false, "minProperties": 1,
@@ -470,7 +486,13 @@
             "except": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 3, "maxLength": 49}}
           }
         }
-      }
+      },
+      "oneOf": [
+        {"required": ["ipBlock"]},
+        {"required": ["namespaceSelector"], "not": {"required": ["podSelector"]}},
+        {"required": ["podSelector"], "not": {"required": ["namespaceSelector"]}},
+        {"required": ["namespaceSelector", "podSelector"]}
+      ]
     },
     "peers": {"type": "array", "maxItems": 16, "items": {"$ref": "#/definitions/peer"}},
     "fromList": {

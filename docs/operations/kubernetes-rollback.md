@@ -22,6 +22,9 @@
 - Mount policy/vault schemas are forward-only. Keep gateways disabled, retain
   every admitted `mount-storage` public key and every referenced mount KEK, and never use
   tailstate or adapter caches to reconstruct PostgreSQL state.
+- Generic payload cleanup must remain upload-authority-aware. Never run a
+  maintenance image that lacks the final PostgreSQL deletion fence while a
+  mount writer, retained conflict, or mount cleanup job exists.
 - Descendant-share repair state is forward-only and fail-closed. A Helm rollback,
   older API image, or Job deletion never reopens its tenant admission gate;
   retain the repair receipts, fence, audit, and outbox evidence.
@@ -134,6 +137,13 @@ restoring the co-located Ganesha/bridge/`tailscaled` Pod with NFS enabled would
 reopen the DNS and Headscale egress boundary. Relay-only rollback does not
 advance the gateway epoch. A backend rollback uses the normal drain/fence path
 and only a previously qualified digest within the split topology.
+
+An NFS-disabled rollback still must not start an older generic maintenance
+worker against retained mount rows. Stop payload-delete job consumption, keep
+the authority-aware maintenance image available to process exact fenced mount
+cleanup, and inspect any pre-existing `orphan:<payload-id>` jobs. Roll forward
+before resuming generic orphan collection; deleting a PostgreSQL job or
+shortening conflict retention is not a recovery action.
 
 ## Incompatible schema or inconsistent state
 

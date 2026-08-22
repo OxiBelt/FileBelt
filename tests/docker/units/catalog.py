@@ -50,8 +50,11 @@ def load_catalog(root: Path, catalog_path: Path) -> dict[str, Unit]:
     if set(document) != {"schema_version", "units"} or document["schema_version"] != 1:
         raise ValueError("Docker unit catalog must use schema version 1")
     raw_units = document["units"]
-    if not isinstance(raw_units, dict) or set(raw_units) != {"core", "collaboration", "mcp"}:
-        raise ValueError("Docker unit catalog must define exactly core, collaboration, and mcp")
+    required_units = {"core", "collaboration", "mcp", "phase8-qualification"}
+    if not isinstance(raw_units, dict) or set(raw_units) != required_units:
+        raise ValueError(
+            "Docker unit catalog must define exactly core, collaboration, mcp, and phase8-qualification"
+        )
     units: dict[str, Unit] = {}
     allowed = {
         "description", "compose_files", "profiles", "driver", "roles",
@@ -111,4 +114,7 @@ def load_catalog(root: Path, catalog_path: Path) -> dict[str, Unit]:
         raise ValueError("core must not require a browser")
     if units["collaboration"].browser_projects != ("chromium", "firefox"):
         raise ValueError("collaboration must run Chromium and Firefox")
+    phase8 = units["phase8-qualification"]
+    if phase8.event_tiers != ("manual",) or phase8.browser_projects:
+        raise ValueError("phase8-qualification must remain a manual, browser-free harness")
     return units

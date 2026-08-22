@@ -53,7 +53,7 @@ export function createRelay({ targetHost, targetPort, maximumConnections = MAXIM
   return server;
 }
 
-function main() {
+export function main() {
   const relay = createRelay({
     targetHost: TARGET_HOST,
     targetPort: TARGET_PORT,

@@ -206,7 +206,10 @@ rkyv serialization, or changing the Iggy client invalidates this exception.
 
 OpenAPI 3.1 and Protobuf schemas are committed inputs. Generated Rust and
 TypeScript clients record source, exact generator, regeneration command, and
-license, and `check-generated.py` fails a drifted tree. Browser packages use
+license, and `check-generated.py` fails a drifted tree. Stable Protobuf v1
+schemas additionally run Buf file-level breaking checks against the exact pull
+request base and the latest reachable release tag; later branch and scheduled
+runs retain the release baseline. Browser packages use
 frozen pnpm installation with lifecycle scripts disabled; a required script is
 an explicit, narrowly reviewed exception rather than an install default. The
 Node allowlist admits `0BSD` specifically for Fluent UI's resolved
@@ -674,6 +677,16 @@ percent against the accepted same-host baseline, WebTransport improvement below
 15 percent against WebSocket in the specified loss/latency scenario, any
 acknowledged loss or orphan, sustained memory growth above one percent per hour,
 or settled descriptor/task growth above five percent.
+
+Schema `filebelt.phase8.qualification.v2` requires one source-revision-bound
+result for every compatibility role and feature, an executed endpoint with
+positive samples and exact success/failure assertions, the observed cadence,
+and completed or unnecessary cleanup. The local Compose harness executes the
+API, I/O, maintenance, collaboration, and tools boundaries. It records
+media-controller, VFS, NFS, media delivery, and WebTransport only as
+prerequisite-bearing non-accepted skips; no checked-in example or version-only
+sentinel can become accepted evidence. A compatible role advertisement must
+match the executed role result's exact instance and revision.
 
 Tag-only promotion consumes already validated artifacts, publishes distinct
 role repositories and a digest-pinned chart, and never rebuilds in a

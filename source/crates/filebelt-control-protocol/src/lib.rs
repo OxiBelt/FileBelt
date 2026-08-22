@@ -3875,8 +3875,13 @@ mod tests {
             }
         }
         assert!(!source.is_empty(), "Helm FileBelt config block is absent");
+        let source = source
+            .replace("{{ .Values.capabilityGenerations.apiStorage }}", "1")
+            .replace("{{ .Values.capabilityGenerations.mediaStorage }}", "2");
         let configuration: Config = toml::from_str(&source).unwrap();
         configuration.validate().unwrap();
         assert_eq!(configuration.deployment.mode, DeploymentMode::Kubernetes);
+        assert_eq!(configuration.keys.api_storage.current_generation, 1);
+        assert_eq!(configuration.media.capability_signing.current_generation, 2);
     }
 }

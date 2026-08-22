@@ -69,7 +69,10 @@ pair and API storage/grant public sets; broker receives API-MCP-delegation
 public material only; document and VFS receive their own pairs. No runtime Pod
 mounts media signing material; recovery/admin Jobs receive the media public
 keyset. Helm values name every Secret separately and exact Secret generations
-are included in the relevant immutable-Secret rollout checksum. Before any
+are included in the relevant immutable-Secret rollout checksum. Independent
+typed `capabilityGenerations` values select the numeric signing generation for
+each purpose; an opaque Secret rollout generation never substitutes for that
+protocol fence. Before any
 format-9 admission, the public-only `keys-audit` Job must load the complete
 configured inventory and prove that current generations are present and public
 key bytes are globally disjoint across purposes.
@@ -571,7 +574,14 @@ includes absolute collaboration paths only for typed validation; the API does
 not mount the collaboration database or signing key. Operators exercise the
 functional path with the `core` profile. Compose never publishes backend ports
 or a UDP/WebTransport port. The development-only acceptance relay is the sole
-host-published service and does not carry application secrets or storage.
+host-published service and does not carry application secrets or storage. It
+binds loopback by default and refuses a non-loopback bind unless the operator
+sets the exact development-only acknowledgement documented in `deploy/README.md`.
+The passwordless OIDC fixture, payload initializer, and relay use independent
+image override variables. External development OIDC requires explicit format-9
+role configurations, edge routing, client-secret/CA inputs, and the optional
+operator-created OIDC egress network; substituting the fixture image alone is
+not supported.
 
 ## Phase 8 deployment and rollout
 
@@ -654,6 +664,25 @@ drains workloads, and restores previous compatible image digests. It preserves
 Phase 8 schemas, conflict data, recovery claims, key generations, and cache
 metadata. A binary downgrade uses the recorded pre-activation restore.
 
+A role compatibility advertisement is not a version-only operator assertion.
+`filebeltctl phase8 advertise` requires schema
+`filebelt.phase8.qualification.v2` evidence covering the exact API, I/O,
+maintenance, collaboration, media-controller, VFS, and tools role set. A
+compatible advertisement binds the requested instance UUID and source revision
+to an executed endpoint, a positive latency sample, exact success and failure
+assertions, and completed or unnecessary cleanup. Failed and
+prerequisite-bearing skipped results may only advertise `--incompatible`.
+Activation still requires fresh compatible evidence for every role.
+
+The provider-neutral local harness exercises API, I/O, and maintenance
+operations endpoints, real one-use collaboration WebSocket admission, and the
+tools executable boundary in an isolated Compose lifecycle. The development
+topology has no media-controller or VFS service and cannot qualify native NFS,
+media delivery, or the Kubernetes WebTransport route. Those entries remain
+explicit non-accepted skips with their prerequisites and no fabricated
+measurements. Completing the harness successfully therefore does not qualify a
+Phase 8 release while any skip remains.
+
 An existing NFS gateway upgrades only through a quiesced outage. First drain
 and fence NFS, set `deployment.quiesced=true`, and wait for the old Pod and RWO
 tailstate attachment to terminate. Record the existing VFS Service ClusterIP,
@@ -704,7 +733,10 @@ for review; never
 acknowledge an update from an event or in-memory replica state.
 
 Phase 6 mount rollout remains gated. Apply the forward migration series through
-`000015` with reviewed VFS, Headscale, and NFS-approval grants first. Provision
+`000023` with reviewed VFS, Headscale, and NFS-approval grants first. Keep
+credential creation and revocation quiesced until every API replica uses the
+transaction-bound credential cancellation fence; an older API can report an
+unsafe absence before an in-flight create commits. Provision
 `mount-storage` signing and mount-vault secrets, render the chart with all
 protocol flags false, and verify that API/I/O have no new payload or database
 authority. Verify the NFS legacy-mapping quarantine and approved-active
@@ -722,6 +754,9 @@ present) Headscale sync to zero. Keep the additive schemas, KEKs, and every admi
 `mount-storage` public key while retained state or recovery evidence references
 them. Keep proposal and approval history and the database approval gate;
 rollback never restores direct mapping activation.
+The additive credential-operation fence and insert trigger also remain in
+place. Do not re-enable credential routes on a rolled-back API that cannot
+establish a durable missing-credential cancellation barrier.
 
 Phase 7 document rollout is also staged and disabled by default. First apply
 migration `000006`, expand built-in ACL presets under the statement-scoped

@@ -146,6 +146,8 @@ enum Phase8Command {
         #[arg(long, default_value = "/etc/filebelt/filebelt.toml")]
         config: PathBuf,
         #[arg(long)]
+        qualification_evidence: PathBuf,
+        #[arg(long)]
         role: String,
         #[arg(long)]
         instance_id: Uuid,
@@ -752,6 +754,7 @@ async fn execute(command: Command) -> Result<String, String> {
             command:
                 Phase8Command::Advertise {
                     config,
+                    qualification_evidence,
                     role,
                     instance_id,
                     source_revision,
@@ -762,6 +765,7 @@ async fn execute(command: Command) -> Result<String, String> {
             phase8::advertise(
                 &database,
                 &configuration.tenant.slug,
+                &qualification_evidence,
                 &role,
                 instance_id,
                 &source_revision,

@@ -19,8 +19,40 @@ for command in base64 openssl tail tr; do
 done
 
 if [ -e "${state_dir}/prepared" ]; then
-  echo "state is already prepared: ${state_dir}" >&2
-  exit 1
+  required_files="
+secrets/postgres-owner-password
+secrets/api-database-url
+secrets/io-database-url
+secrets/maintenance-database-url
+secrets/oidc-client-secret
+secrets/api-storage-capability-private-key
+secrets/api-storage-capability-public-keyset
+tls/filebelt.crt
+tls/filebelt.key
+tls/mcp-egress-ca.crt
+tls/mcp-egress-server.crt
+tls/mcp-egress-client.crt
+"
+  invalid=""
+  for relative_path in ${required_files}; do
+    if [ ! -s "${state_dir}/${relative_path}" ]; then
+      echo "prepared state is missing ${relative_path}" >&2
+      invalid=1
+    fi
+  done
+  for certificate in filebelt.crt mcp-egress-ca.crt mcp-egress-server.crt mcp-egress-client.crt; do
+    certificate_path="${state_dir}/tls/${certificate}"
+    if [ -s "${certificate_path}" ] && ! openssl x509 -checkend 86400 -noout -in "${certificate_path}" >/dev/null 2>&1; then
+      echo "prepared certificate is invalid, expired, or expires within 24 hours: tls/${certificate}" >&2
+      invalid=1
+    fi
+  done
+  if [ -n "${invalid}" ]; then
+    echo "stop the Compose project, remove its named volumes, move ${state_dir} aside, and rerun prepare-state.sh" >&2
+    exit 1
+  fi
+  echo "validated retained development-only state in ${state_dir}"
+  exit 0
 fi
 
 umask 077

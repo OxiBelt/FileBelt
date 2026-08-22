@@ -149,6 +149,14 @@ Secret value objects have `name`, key fields, and a non-secret `generation`.
 The Secret must already exist. Increment only the affected generation when its
 contents change; the relevant Deployment then performs a controlled rollout.
 
+`capabilityGenerations` separately selects the numeric protocol generation for
+each capability signer. It is not a Secret checksum: rotate a signer by adding
+the new generation to its public keyset, updating that purpose's private key,
+advancing only its `capabilityGenerations` value, and updating the corresponding
+Secret rollout generations. Keep the retiring public generation for the
+documented capability overlap. Never reuse a numeric generation for new key
+bytes.
+
 | Value | Projected keys | Consumer |
 |---|---|---|
 | `apiDatabase` | `database-url` | API |
@@ -197,6 +205,9 @@ TCP infrastructure so OxiBelt remains the public TLS endpoint; do not terminate
 or reinterpret FileBelt HTTP routes in an ingress resource. Set
 `networkPolicy.publicIngress.from` to that infrastructure's exact namespace
 and Pod labels.
+Every configured peer must contain a nonempty namespace selector, a nonempty
+Pod selector, their intentional intersection, or one IP block. Empty peers,
+empty label maps, and peers that mix an IP block with selectors are rejected.
 
 The chart permits only these application paths:
 

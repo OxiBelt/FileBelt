@@ -163,7 +163,7 @@ services:
     build:
       context: ../../tests/docker/oidc
       dockerfile: Dockerfile
-    image: ${FILEBELT_OIDC_FIXTURE_IMAGE:-filebelt-oidc-fixture:phase2}
+    image: ${FILEBELT_PAYLOAD_INIT_IMAGE:-filebelt-oidc-fixture:phase2}
     profiles: [core, fault]
     entrypoint:
       - node
@@ -214,6 +214,7 @@ services:
     secrets:
       - api-database-url
       - oidc-client-secret
+      - oidc-ca-certificate
       - api-storage-capability-private-key
       - api-storage-capability-public-keyset
       - api-collaboration-grant-capability-private-key
@@ -422,9 +423,23 @@ services:
     build:
       context: ../../tests/docker/oidc
       dockerfile: Dockerfile
-    image: ${FILEBELT_OIDC_FIXTURE_IMAGE:-filebelt-oidc-fixture:phase2}
+    image: ${FILEBELT_ACCEPTANCE_RELAY_IMAGE:-filebelt-oidc-fixture:phase2}
     profiles: *filebelt-profiles
-    entrypoint: [node, /opt/filebelt-oidc/relay.mjs]
+    entrypoint:
+      - node
+      - --input-type=module
+      - -e
+      - >-
+        const BindAddress = process.env.FILEBELT_HTTPS_BIND_ADDRESS ?? "127.0.0.1";
+        const LoopbackAddresses = new Set(["127.0.0.1", "::1", "localhost"]);
+        if (!LoopbackAddresses.has(BindAddress) && process.env.FILEBELT_UNSAFE_NON_LOOPBACK_ACK !== "I_UNDERSTAND_PASSWORDLESS_OIDC_IS_PUBLIC") {
+          throw new Error("non-loopback publication requires FILEBELT_UNSAFE_NON_LOOPBACK_ACK=I_UNDERSTAND_PASSWORDLESS_OIDC_IS_PUBLIC");
+        }
+        const { main } = await import("/opt/filebelt-oidc/relay.mjs");
+        main();
+    environment:
+      FILEBELT_HTTPS_BIND_ADDRESS: ${FILEBELT_HTTPS_BIND_ADDRESS:-127.0.0.1}
+      FILEBELT_UNSAFE_NON_LOOPBACK_ACK: ${FILEBELT_UNSAFE_NON_LOOPBACK_ACK:-}
     networks: [edge, acceptance-publication]
     depends_on:
       filebelt-web: {condition: service_started}
@@ -546,7 +561,9 @@ secrets:
   mcp-vault-keyring:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/mcp-vault-keyring.json
   oidc-client-secret:
-    file: ${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret
+    file: ${FILEBELT_OIDC_CLIENT_SECRET_FILE:-${FILEBELT_STATE_DIR:-./.state}/secrets/oidc-client-secret}
+  oidc-ca-certificate:
+    file: ${FILEBELT_OIDC_CA_FILE:-${FILEBELT_STATE_DIR:-./.state}/tls/filebelt.crt}
   api-storage-capability-private-key:
     file: ${FILEBELT_STATE_DIR:-./.state}/secrets/api-storage-capability-private-key
   api-storage-capability-public-keyset:

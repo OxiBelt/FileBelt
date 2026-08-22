@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Optional development override for an OIDC provider reachable on an
+# operator-created Docker network. FileBelt configuration and edge routing stay
+# explicit inputs; this file does not embed or provision any provider.
+services:
+  filebelt-api:
+    networks: [control, edge, oidc-egress]
+
+networks:
+  oidc-egress:
+    name: ${FILEBELT_OIDC_EGRESS_NETWORK:?set FILEBELT_OIDC_EGRESS_NETWORK to a pre-created development network}
+    external: true

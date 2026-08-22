@@ -16,6 +16,12 @@ if "${HELM_BIN}" template private "${chart}" --namespace filebelt-private-egress
   --set-string 'instances[0].gateway.relayIdentity.name=mcp-private-client' >/dev/null 2>&1; then exit 1; fi
 if "${HELM_BIN}" template private "${chart}" --namespace filebelt-private-egress -f "${fixture}" \
   --set-string 'instances[0].name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >/dev/null 2>&1; then exit 1; fi
+if "${HELM_BIN}" template private "${chart}" --namespace filebelt-private-egress -f "${fixture}" \
+  --set-json 'instances[0].transports[0].tailscale.dns.to=[{}]' >/dev/null 2>&1; then exit 1; fi
+if "${HELM_BIN}" template private "${chart}" --namespace filebelt-private-egress -f "${fixture}" \
+  --set-json 'instances[0].transports[0].tailscale.dns.to=[{"namespaceSelector":{"matchLabels":{}}}]' >/dev/null 2>&1; then exit 1; fi
+if "${HELM_BIN}" template private "${chart}" --namespace filebelt-private-egress -f "${fixture}" \
+  --set-json 'instances[0].transports[0].tailscale.dns.to=[{"ipBlock":{"cidr":"192.0.2.1/32"},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]' >/dev/null 2>&1; then exit 1; fi
 grep -q 'socks5_proxy = "127.0.0.1:1055"' "${rendered}"
 grep -q 'name: wireguard-init' "${rendered}"
 grep -q 'add: \["NET_ADMIN"\]' "${rendered}"

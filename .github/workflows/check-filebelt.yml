@@ -44,6 +44,7 @@ jobs:
         run: |
           tests/scripts/check-onlyoffice-helm-chart.sh
           tests/scripts/check-git-helm-chart.sh
+          tests/scripts/check-private-egress-helm-chart.sh
       - name: Check Kubernetes acceptance contracts
         run: tests/kubernetes/check-acceptance-contract.sh
       - name: Check fail-closed NFS qualification contract
@@ -209,6 +210,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -223,8 +226,27 @@ jobs:
             GOBIN="$RUNNER_TEMP/bin" go install github.com/bufbuild/buf/cmd/buf@v1.72.0
             echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           fi
-      - name: Check generated protocol clients
-        run: python3 tests/scripts/check-generated.py --repo-root .
+      - name: Check generated protocol clients and stable v1 compatibility
+        env:
+          FILEBELT_PROTOCOL_PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          breaking_args=()
+          if [[ -n "${FILEBELT_PROTOCOL_PR_BASE}" ]]; then
+            breaking_args+=(--breaking-against "../.git#ref=${FILEBELT_PROTOCOL_PR_BASE},subdir=protocol")
+          fi
+          previous_release=""
+          while IFS= read -r candidate; do
+            if [[ "${candidate}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              previous_release="${candidate}"
+              break
+            fi
+          done < <(git tag --merged HEAD --sort=-version:refname)
+          if [[ -n "${previous_release}" ]]; then
+            breaking_args+=(--breaking-against "../.git#ref=${previous_release},subdir=protocol")
+          else
+            echo "No prior release tag exists; only an available pull-request base can be checked"
+          fi
+          python3 tests/scripts/check-generated.py --repo-root . "${breaking_args[@]}"
 
   dco:
     name: DCO

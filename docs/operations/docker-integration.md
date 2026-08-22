@@ -3,7 +3,8 @@
 # Docker integration units
 
 `tests/docker/units.toml` is the versioned catalog for the isolated `core`,
-`collaboration`, and `mcp` Docker integration units. Docker Compose remains a
+`collaboration`, `mcp`, and manual `phase8-qualification` Docker integration
+units. Docker Compose remains a
 development and integration topology. These units do not qualify Kubernetes,
 Helm rollout, CNI enforcement, NFS/Ganesha/Kerberos behavior, a provider, public
 DNS, or a public MCP server's second-hop TLS.
@@ -21,7 +22,17 @@ python3 tests/docker/units/run-unit.py --unit core --build
 python3 tests/docker/units/run-unit.py --unit core --image-dir artifacts/phase1 --image-channel build --diagnostics-dir artifacts/docker/core
 python3 tests/docker/units/run-unit.py --unit collaboration --image-dir artifacts/phase3 --image-channel release --diagnostics-dir artifacts/docker/collaboration
 python3 tests/docker/units/run-unit.py --unit mcp --image-dir artifacts/phase3 --image-channel release --diagnostics-dir artifacts/docker/mcp
+python3 tests/docker/units/run-unit.py --unit phase8-qualification --build --qualification-output artifacts/phase8-local-contract.json
 ```
+
+The Phase 8 unit runs real operations, collaboration WebSocket, and tools
+endpoints and records exact success/failure assertions and cleanup. Its default
+`contract` mode is deliberately non-accepted. Add
+`--phase8-mode qualification --phase8-cadence change-smoke` for the real
+five-minute load window. Media-controller, VFS, NFS, media delivery, and
+WebTransport remain prerequisite-bearing skips in this developer topology, so
+even that result remains non-accepted until separate qualified fixtures replace
+every skip. The output path must not already exist.
 
 The runner's `--docker-topology` option controls how the acceptance client
 reaches the real Compose TLS edge. `auto`, the local default, selects `host`

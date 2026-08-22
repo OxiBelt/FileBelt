@@ -32,9 +32,10 @@ jobs:
         run: tests/scripts/prepare-adapter-image-plan.sh --channel release --output artifacts/adapter-image-plan.json
       - name: Prime exact locked dependency sources
         run: |
-          for manifest in Cargo.toml adapters/{smb,ftp-ftps,onlyoffice,git,nfs,wireguard,transcode}/Cargo.toml; do
+          cargo fetch --locked --manifest-path Cargo.toml
+          while IFS= read -r manifest; do
             cargo fetch --locked --manifest-path "$manifest"
-          done
+          done < <(python3 tests/scripts/check-adapter-dependency-admission.py --repo-root . --print-manifests)
       - name: Enforce pre-image gates without publishing
         run: |
           mkdir -p artifacts/evidence

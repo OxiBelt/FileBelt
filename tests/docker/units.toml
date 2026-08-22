@@ -56,3 +56,20 @@ event_tiers = ["pull_request", "push", "scheduled", "manual", "release"]
 browser_projects = []
 exact_artifacts = true
 status = "ready"
+
+[units.phase8-qualification]
+description = "Executable local Phase 8 role evidence with explicit non-accepted feature prerequisites"
+compose_files = ["deploy/compose/compose.yaml"]
+profiles = ["core"]
+driver = ["python3", "tests/performance/phase8/run_local_qualification.py"]
+roles = [
+  "filebelt-api",
+  "filebelt-collaboration",
+  "filebelt-tools",
+  "filebelt-worker-io",
+  "filebelt-worker-maintenance",
+]
+event_tiers = ["manual"]
+browser_projects = []
+exact_artifacts = true
+status = "ready"

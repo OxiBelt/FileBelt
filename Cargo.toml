@@ -94,7 +94,7 @@ http-body-util = "=0.1.4"
 h3 = "=0.0.8"
 h3-quinn = { version = "=0.0.10", default-features = false, features = ["datagram"] }
 h3-webtransport = "=0.1.2"
-iggy = "=0.8.0"
+iggy = "=0.10.0"
 jiff = "=0.2.35"
 libfuzzer-sys = "=0.4.13"
 md4 = { version = "=0.11.0", default-features = false }

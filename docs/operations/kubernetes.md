@@ -54,6 +54,31 @@ The chart always renders default-deny network policy. Configure exact
 namespace/pod/IPBlock peers for public ingress, PostgreSQL, DNS, Iggy,
 monitoring, and OTLP. Catch-all IPv4 or IPv6 egress is unsupported.
 
+### Manual Minikube development helper
+
+`tests/development/run.py` can create a named, helper-owned Minikube preview
+for local diagnosis. It is not a production installation, a CI live-deployment
+lane, or Kubernetes/CNI/provider/release/security qualification. The helper
+defaults to Kubernetes `v1.36.1` and Calico, permits only the current
+repository-supported Kubernetes versions and Calico/Cilium, and uses verified
+bootstrap on Linux `amd64` and `arm64` with Helm `v4.2.4`.
+
+The helper enforces `deployment.quiesced=true` and `operation.type=none` after
+all caller values. It supports source-built core images on local `amd64` and
+`arm64`, or exact validated AMD64 artifacts. This proves neither running
+workloads nor a browser endpoint; use the Compose helper for a serving local
+web/API development stack.
+
+This broader preview does not make operator dependencies implicit. Every
+optional chart image (digest plus caller evidence), Secret key file, PVC,
+ConfigMap, and Helm values file is an explicit caller-qualified input. The
+chart still does not create PostgreSQL, OIDC, Iggy, certificates, provider services,
+production Secrets, PVCs, or ConfigMaps. Allowed prerequisite manifests and
+private Secret copies exist only inside the isolated helper-owned profile.
+Deleting that profile removes its release, namespaces, and copied objects, but
+never mutates or deletes caller source files, an external kubeconfig or
+cluster, or an external dependency.
+
 ## Preflight
 
 1. Confirm the Kubernetes and Helm versions and enforce the restricted Pod

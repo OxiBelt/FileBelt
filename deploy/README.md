@@ -9,6 +9,16 @@ render retains the core Phase 3 boundary, while enabled runners add only
 namespace-scoped controller RBAC and one restricted Pod per invocation.
 Everything under `deploy/` remains in the Apache-2.0 license region.
 
+For a named, detached local Compose or Minikube development session, use
+[`tests/development/README.md`](../tests/development/README.md). The helper is
+manual-only and development-only: it keeps listeners on loopback, writes only
+failure-only scrubbed diagnostics, and reports `accepted: false`. It does not
+provision or qualify production dependencies, a provider, a release, CNI
+enforcement, or security behavior. Its Minikube preview accepts only explicit
+caller-qualified image evidence, Secret files, PVCs, ConfigMaps, values, and
+restricted prerequisite manifests. It leaves the chart quiesced and never
+turns local inspection into serving-deployment evidence.
+
 The bundled OIDC service is a deterministic, passwordless test issuer. Anyone
 who can reach the development edge can choose its administrator identity. The
 edge therefore binds to `127.0.0.1` by default. A non-loopback

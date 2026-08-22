@@ -132,3 +132,21 @@ while preserving the three-unit outside matrix. Removing the relay also
 requires replacing the host-executor route; attaching a FileBelt application
 service to the publication network is not an equivalent rollback. This change
 does not require a migration or production deployment change.
+
+## Manual development helper
+
+[`tests/development/run.py`](../../tests/development/run.py) can create a
+named detached `compose` session for local diagnosis. It is separate from the
+cataloged CI units: contract tests may validate its input and cleanup behavior,
+but CI does not start a live helper deployment. It accepts only existing
+checked-in Compose profiles, defaults to source images, and accepts an exact
+artifact directory only when the caller selects its `build` or `release`
+channel. Listeners and port-forwarding stay on loopback.
+
+Failure diagnostics are private, bounded, and scrubbed; success diagnostics are
+discarded. `down` removes only the session's Compose project, disposable state,
+and owned fixture and role tags. In artifact mode the archive tag exists only
+long enough to create the session tag. Cleanup must never remove
+caller-supplied artifact files, configuration, credentials, or Docker resources
+outside that session. The helper's successful output is `accepted: false` and
+does not extend this document's Docker qualification boundary.

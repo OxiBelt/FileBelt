@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Strict local-development helper configuration. This file contains no secrets.
+schema_version = 1
+
+[images]
+# Source images are the default. To use validated artifacts instead, replace
+# this table with the commented artifact alternative below.
+mode = "source"
+
+# [images]
+# # Both topologies accept this validated AMD64 artifact form.
+# mode = "artifacts"
+# directory = "/absolute/path/to/validated-filebelt-artifacts"
+# channel = "build" # or "release" for signed-tag archives
+
+[compose]
+# Only checked-in Compose profiles are accepted, and `core` must be first.
+profiles = ["core"]
+# Change the Docker-host publication when another stack owns host port 8443.
+# The browser-facing development origin remains https://filebelt.localhost:8443.
+published_port = 8443
+
+# An external development OIDC provider is caller-owned and must name every
+# explicit file. Do not put secret bytes in this configuration.
+# [compose.external_oidc]
+# network = "filebelt-development-oidc"
+# filebelt_config = "/absolute/path/to/filebelt.toml"
+# collaboration_config = "/absolute/path/to/filebelt-collaboration.toml"
+# mcp_config = "/absolute/path/to/filebelt-mcp.toml"
+# edge_config = "/absolute/path/to/oxibelt.toml"
+# client_secret = "/absolute/path/to/oidc-client-secret"
+# ca_certificate = "/absolute/path/to/oidc-ca.crt"
+
+[minikube]
+kubernetes_version = "v1.36.1"
+cni = "calico"
+cpus = 4
+memory_mb = 8192
+# values_files = ["/absolute/path/to/development-values.yaml"]
+# prerequisite_manifests = ["/absolute/path/to/run-owned-preview-prerequisites.yaml"]
+# helm_binary = "/absolute/path/to/helm-v4.2.4"
+
+# Preview features are opt-in and Minikube-only. Each feature must list every
+# required non-core chart image with an exact digest and review evidence.
+[preview]
+features = []
+
+# [[preview.images]]
+# role = "filebelt-document"
+# digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+# source = "caller-reviewed source and provenance reference"
+# license = "Apache-2.0"
+
+# [[preview.secrets]]
+# namespace = "core" # or an explicit filebelt-* preview namespace
+# name = "filebelt-document-client-tls"
+# key = "tls-crt"
+# path = "/absolute/path/to/document-client-tls.crt"
+
+# The helper rejects Secret and every cluster-scoped kind except a restricted
+# Namespace in prerequisite manifests. Use filebelt-* namespaces,
+# cluster-internal Services, and label every object with:
+# filebelt.dev/development-session: <the --name value>
+
+# [[preview.claims]]
+# namespace = "filebelt-development"
+# name = "filebelt-development-payload"
+
+# [[preview.config_maps]]
+# namespace = "filebelt-development"
+# name = "filebelt-development-configuration"

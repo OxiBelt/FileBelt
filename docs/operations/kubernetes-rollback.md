@@ -28,6 +28,22 @@
 - Descendant-share repair state is forward-only and fail-closed. A Helm rollback,
   older API image, or Job deletion never reopens its tenant admission gate;
   retain the repair receipts, fence, audit, and outbox evidence.
+- A local helper preview is not rollback authority. It deletes only its
+  helper-owned Minikube profile, including its release, namespaces, and copied
+  prerequisite objects. It never deletes caller source files, external images,
+  artifact directories, external kubeconfigs or clusters, external
+  dependencies, or PostgreSQL/payload state.
+
+## Local helper cleanup
+
+For a failed manual development session, first use the helper's `down` command
+for the exact recorded session name. Preserve its bounded scrubbed diagnostics
+for diagnosis, then confirm the helper-owned resources are absent. Do not use
+prefix or broad namespace deletion to compensate for a failed cleanup. If a
+preview was configured against any forward-only database state, leave that
+state intact and follow the relevant production-compatible rollback or
+fresh-target recovery procedure; deleting the isolated Minikube profile does
+not reverse a migration against an external database.
 
 ## Failure before workload rollout
 

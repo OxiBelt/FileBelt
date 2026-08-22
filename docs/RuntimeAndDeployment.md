@@ -347,6 +347,25 @@ for 7 days on pull requests and 30 days otherwise; browser traces are disabled.
 The catalog and exact operator commands are documented in
 [Docker integration units](operations/docker-integration.md).
 
+The manual local development helper at
+[`tests/development/README.md`](../tests/development/README.md) creates named,
+detached Compose or helper-owned Minikube sessions for diagnosis. Its strict
+schema defaults to source images and accepts validated artifact archives only
+as an explicit alternative. Minikube source mode builds the core chart images
+for local `amd64` or `arm64`; its artifact mode requires the validated AMD64
+evidence catalog. The preview uses the repository-pinned Helm `v4.2.4`,
+defaults to Kubernetes `v1.36.1`/Calico, and accepts only the current
+repository-supported Kubernetes/CNI choices. It installs the chart only with
+`deployment.quiesced=true` and `operation.type=none`; it is chart and policy
+inspection, not serving-deployment evidence. Every optional chart image,
+Secret file, PVC, ConfigMap, values file, and prerequisite manifest remains
+caller-qualified. Sessions and Compose port-forwards are loopback-only,
+retained diagnostics are failure-only and scrubbed, and session/status JSON is
+always `accepted: false`.
+
+The helper does not qualify production, release, provider, Kubernetes/CNI, or
+security behavior and is not a CI live deployment lane.
+
 Docker evidence proves the cataloged development topology only. It is not live
 Kubernetes, Helm rollout, CNI, NFS/Kerberos/Ganesha, public DNS, provider, or
 external MCP TLS qualification. Kubernetes compatibility and Calico/Cilium

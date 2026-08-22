@@ -22,6 +22,18 @@ closure ancestry, trash snapshots, ACLs and generations, sessions and OIDC
 attempts, immutable versions and payload manifests, uploads and parts, quota
 reservations, jobs and leases, outbox and publication deduplication, audit,
 notification state, preferences, and idempotency records.
+
+An HTTP resource-mutation idempotency row is transaction-local authority, not
+a post-commit cache. PostgreSQL locks or creates the principal/route/key row,
+performs the content-policy, collaboration grant/intent/discard, upload
+allocation/commit, restore, or share write, serializes the public response, and
+finalizes the receipt before the same commit. A failed mutation or response
+serialization rolls back the reservation; a committed authoritative mutation
+therefore cannot exist without its exact replay receipt. Concurrent matching
+requests serialize on the row, while a distinct fingerprint never reaches the
+mutation. Collaboration room creation, bootstrap-payload selection, join-grant
+creation, and receipt finalization share this boundary without moving core
+payload authority into the collaboration schema.
 Migration `000002_phase4_mcp.sql` additionally creates tenant-scoped MCP
 service principals and SPIFFE bindings, managed templates and assignments,
 registrations, capability snapshots/reviews, exact approvals and data grants,
@@ -109,6 +121,22 @@ SQLx migrations are forward-only files named `NNNNNN_description.sql` under
 their versions and checksums. Once released, a migration is immutable; every
 correction is a new migration.
 
+Forward migration `000020_acl_children_scope.sql` adds the immediate-children
+ACL persistence value and updates the live NFS traversal projection to apply it
+at exactly ancestry depth one. Existing `self`, `descendants`, and
+`self_and_descendants` rows are not rewritten. Rollback keeps the additive
+constraint and data in place: first reject advanced ACL PUTs and stop binaries
+that cannot parse `children`, then roll forward to a compatible binary rather
+than editing migration history or coercing stored policy.
+
+Forward migration `000023_mount_credential_cancellation_fence.sql` backfills a
+per-credential operation fence and installs the insert-side reservation trigger
+before the API can treat missing revocation as terminal. Credential creation
+and revocation must remain quiesced until the release-matched API and grants are
+deployed. Rollback keeps the additive fence and trigger; an older API may run
+only with credential routes disabled because it cannot commit the missing-
+credential cancellation barrier.
+
 Production migration is an explicit `filebeltctl database migrate` operation
 using the migrator credential. API replicas check compatibility and never race
 to apply migrations. After each migration, the database owner applies the
@@ -184,6 +212,41 @@ matching retries replay the exact stored status/body; key reuse with a distinct
 canonical request fingerprint fails closed, and a failed authority insert rolls
 back the key reservation.
 
+The same transaction-local receipt rule applies to all PostgreSQL-local MCP
+control-plane writes: registration creation and lifecycle state, capability
+review, approval revocation, invocation-intent creation and cancellation,
+data-grant revocation, and administrator template, assignment, service
+identity, service-grant revocation, and block-rule mutation. The reservation is
+never independently committed: generation checks and all component rows finish
+before the exact status/body receipt, and only then does one commit make both
+visible. Dropping the transaction rolls back both mutation and reservation;
+concurrent matching attempts serialize on the receipt row and cannot observe a
+`102` placeholder.
+
+Migration `000024_mcp_broker_operation_receipts.sql` extends the guarantee over
+the synchronous API-to-broker boundary without changing Protobuf. For the seven
+broker-mediated configuration, credential, OAuth-start, test, and discovery
+routes, the API derives a keyed operation UUID from tenant, principal, route,
+and public idempotency key. The signed request binds that UUID and a keyed exact
+request fingerprint; the broker admits replay before rate charging and mutable
+registration-generation checks, then rechecks the exact expected revision only
+for a new operation. Broker-local configuration, vault, erasure, and OAuth
+attempt writes commit with the safe result journal in one transaction.
+
+The journal never stores a raw idempotency key, credential, OAuth state,
+verifier, challenge, authorization URL, code, or token, nor an unkeyed digest
+of secret-bearing arguments. OAuth state, verifier, challenge, and attempt UUID
+are replay-stable keyed derivations; only the verifier encrypted in the OAuth
+attempt envelope, its state digest, and issuer/endpoint/client/resource/expiry
+metadata are durable. The authorization URL is reconstructed in memory.
+Delete-registration resumes from the exact journaled post-erasure revision;
+test and discovery apply the exact journaled sanitized probe result. The API
+marks that continuation complete in the same transaction as its local mutation
+and public response receipt. Tenant-scoped maintenance deletes at most 1,000
+expired journal rows per sweep only after both broker result finalization and
+API completion, so an incomplete delete or probe continuation remains
+recoverable.
+
 ## Mount state, verifier vault, and recovery
 
 `filebelt_mount` owns the policy and runtime state used by both protocol
@@ -210,6 +273,15 @@ SMB stores an NTLM verifier for the future Samba authentication bridge. The
 plaintext random password exists only during create response construction and
 is zeroized after use. Deleting or replacing authority makes the old envelope
 unusable even before later physical cleanup.
+
+The public credential-create operation supplies its credential UUID before the
+internal call. A lost or indeterminate response is therefore resolved by
+revoking that UUID; the create call is never replayed because no later response
+may disclose the original plaintext. The credential-operation fence is locked
+by both the credential insert and revocation transaction. Revoking an absent
+UUID durably records cancellation before returning not found; an in-flight
+insert either commits first and is then revoked or observes the cancelled fence
+and fails. Re-creation uses a fresh UUID and fresh secret material.
 
 The Headscale synchronizer treats one successful API response as a full
 snapshot. It validates the entire bounded response, rejects duplicate node IDs
@@ -315,6 +387,12 @@ turn extracted attachments, OCR, or remote assets into payload reads. A concurre
 head change outside a room freezes its dirty state rather than creating a
 sibling version or silently applying a CRDT merge.
 
+A frozen epoch is never silently discarded. When its persisted `dirty` flag
+is false, grant creation may atomically close that epoch and open the next one
+against the current immutable head. A dirty frozen epoch remains blocked until
+an explicitly authorized save, copy, or discard resolution preserves or
+removes its durable edits.
+
 ## Collaboration durability and recovery
 
 The collaboration role is a dedicated Rust process using Yrs `0.27.3`; the
@@ -411,10 +489,22 @@ for 24 hours; a newer checkpoint makes the older one reclaimable. Expired
 checkpoint/conflict outputs become payload deletion intent and release their
 drive reservation only while still unreferenced; committed and conflict-copy
 payloads remain referenced and are never retention-deleted. Session events are
-purged after 30 days, launch grants after consumption or expiry, and API
-create-operation receipts after their fixed 24-hour replay window. Normal
-audit retention remains unchanged. Maintenance performs each transition in
-bounded locked batches.
+purged after 30 days, launch grants after consumption or expiry, and coordinator
+create/copy/revoke/force-close operation receipts after their fixed 24-hour
+replay window. The four receipt kinds are written in the same transaction as
+their authoritative session, conflict-copy, participant, or session-close
+mutation, so neither state nor a successful coordinator result can commit
+alone. Normal audit retention remains unchanged. Maintenance performs each
+transition in bounded locked batches.
+
+Forward migration `000022_document_close_idempotency.sql` extends only the
+document operation-receipt command-kind constraint for own-session revoke and
+manager force-close. It preserves existing receipts and does not make one-use
+launch handoffs replayable. Keep document close routes quiesced until the
+migration and release-matched API and coordinator are active; an old
+coordinator would ignore the additive fields and omit the receipt. Rollback
+retains the expanded constraint and keeps those routes quiesced until
+roll-forward.
 
 The migration also expands built-in ACL presets with `COMMENT` and `REVIEW`.
 It replaces row-level ACL capability invalidation with statement-level
@@ -509,6 +599,13 @@ disabled manifest independently of the global compatibility state. Downgrading
 to a binary that cannot understand the expanded schema requires restoring the
 coordinated pre-activation checkpoint into fresh targets.
 
+Compatibility rows remain short-lived PostgreSQL activation inputs rather than
+the qualification artifact itself. `filebeltctl phase8 advertise` validates a
+schema-v2 artifact and binds the selected role's executed endpoint result to
+the exact instance UUID and source revision before calling the authoritative
+database function. The database freshness and exact-role checks still fence
+activation; an incompatible or skipped latest advertisement blocks it.
+
 The NFS target requires write sessions to durably bind tenant, principal,
 API-independent NFS session, authenticated export manifest, drive, node, base
 version, expected head, gateway epoch, owner/state identity, quota reservation,
@@ -545,6 +642,19 @@ reservation exactly once, and records the new node/version, audit, outbox, and
 HTTP idempotency response in one transaction. Discard retains the inventory row
 through its fixed deadline while atomically fencing the payload into cleanup
 and releasing reservation only through the cleanup authority.
+
+Generic finalized-orphan collection is upload-authority-only: PostgreSQL
+requires a finalized upload and active reservation and excludes every payload
+owned by a mount write session. Immediately before physical deletion, the
+maintenance worker takes a second PostgreSQL fence that locks the payload,
+upload, and reservation and rechecks that no file version, document revision,
+or mount writer has acquired authority. A stale generic delete job naming a
+live writer or retained conflict is retired without byte deletion and restores
+an incorrectly recorded delete intent to its mount-owned state. An eligible
+expired or aborted writer is dispatched through its exact
+`nfs_staging_cleanup_jobs` lease; generic payload deletion never substitutes
+for the mount COW deletion, physical marker, lock removal, or terminal quota
+transition.
 
 The NFS gateway is single active. Restart advances its epoch and opens a
 90-second reclaim-only grace period, configurable from 30 through 300 seconds.
@@ -682,6 +792,10 @@ state transitions. One attempt may renew for no more than six hours. Retryable
 failures use exponential full-jitter backoff for at most eight attempts,
 capped at five minutes. Terminal and operator-blocked state remains in
 PostgreSQL and requires explicit inspection before an operator retry.
+Finalized generic orphan jobs are admitted only for upload-owned objects and
+must pass their PostgreSQL authority recheck before the worker resolves or
+unlinks a physical locator. Mount cleanup is always selected and completed by
+the mount-specific fenced job machine.
 
 Every authoritative transaction that needs an event writes a transactional
 outbox row. The publisher uses one `filebelt` Iggy stream with 16 partitions,
@@ -734,6 +848,13 @@ synchronization, and only then admit new credentials and sessions. Rollback of
 the approval migration is forward-only: disable NFS admission and gateways and
 retain the expanded schema. Never restore a binary that can bypass the database
 approval gate while NFS state is present.
+Do not roll a maintenance worker back to a build whose generic orphan collector
+does not require upload ownership and the final PostgreSQL deletion fence while
+any mount write session, retained conflict, or mount cleanup job exists. For a
+failed rollout, stop generic payload-job processing and mount write admission,
+retain the current authority-aware maintenance worker to drain only fenced
+mount cleanup, and roll forward. Re-enabling an older generic collector is not
+a supported recovery mechanism.
 
 FileBelt does not currently promise online backup, PITR, high availability, or
 numeric RPO/RTO. The detailed procedures are

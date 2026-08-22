@@ -123,6 +123,7 @@ rename, move, delete, restore, attribute changes, sharing, ACL management,
 drive management, transcode, external editing, MCP use, mounts, export, and
 the compatibility-gated directory-repository actions `READ_REPOSITORY`,
 `WRITE_REPOSITORY`, `MANAGE_REPOSITORY`, and `BYPASS_REPOSITORY_RULES`.
+The same vocabulary includes `TRAVERSE` for exact path-component admission.
 `WRITE_CONTENT` does not imply `CREATE_VERSION`; `SHARE` does not imply
 `MANAGE_ACL`.
 
@@ -134,7 +135,11 @@ all other evaluations:
 1. Resolve authenticated input to a tenant-scoped internal principal.
 2. Collect applicable direct, group, and inherited entries along authoritative
    resource ancestry.
-3. Apply inheritance as `this resource`, `children`, or `descendants`.
+3. Apply inheritance as `this resource`, `children`, or `descendants`. Every
+   direct row applies at its owning resource; `children` additionally reaches
+   exactly ancestry depth one, while `descendants` reaches every positive
+   depth. The persisted legacy direct-share spelling `self_and_descendants`
+   has the same effective depth as `descendants` plus its direct resource.
 4. Make any applicable deny override every applicable allow; a child allow
    cannot override an inherited deny.
 5. Default to deny when no grant applies.
@@ -147,17 +152,24 @@ all other evaluations:
 
 The permission presets expand before persistence:
 
-- Viewer: `READ_METADATA`, `LIST_CHILDREN`, and `READ_CONTENT`.
+- Viewer: `READ_METADATA`, `LIST_CHILDREN`, `READ_CONTENT`, and
+  `USE_EXTERNAL_EDITOR`.
 - Contributor: Viewer plus `CREATE_CHILD`, `WRITE_CONTENT`, `CREATE_VERSION`,
-  `RENAME`, `MOVE`, `DELETE`, `RESTORE`, and `SET_ATTRIBUTES`.
+  `RENAME`, `MOVE`, `DELETE`, `RESTORE`, `SET_ATTRIBUTES`, `COMMENT`, and
+  `REVIEW`.
 - Manager: Contributor plus `SHARE` and `MANAGE_ACL`.
 
 `MANAGE_DRIVE` is not part of the Manager preset. Advanced per-action editing
 requires `MANAGE_ACL` and remains subject to strict attenuation. An exact
 advanced-ACL replacement requires the actor to hold `MANAGE_ACL` and every
-action in both its submitted rows and any existing non-share advanced rows it
-removes by omission, regardless of effect or inheritance. An empty replacement
-therefore clears advanced rows only when the actor holds every removed action.
+action in both its submitted rows and any existing mutable `core` rows it
+removes by omission, regardless of effect or inheritance. Owner authority,
+direct-share rows, and source-owned rows such as `nfs` are read-only projections
+and are never replaced. An empty replacement therefore clears mutable `core`
+rows only when the actor holds every removed action. The route resolves its
+subject only after resource-scoped `MANAGE_ACL` authorization and rechecks the
+exact client ETag plus authorization generations inside the PostgreSQL
+replacement transaction.
 
 ACL, membership, namespace, resource, and session generations qualify an
 authorization result. Relevant changes advance generations in the same

@@ -336,7 +336,7 @@ pub(super) async fn insert_service_grant(
     Ok(())
 }
 
-fn template_from_row(row: &sqlx::postgres::PgRow) -> McpManagedTemplateRecord {
+pub(super) fn template_from_row(row: &sqlx::postgres::PgRow) -> McpManagedTemplateRecord {
     McpManagedTemplateRecord {
         tenant_id: row.get("tenant_id"),
         id: row.get("id"),
@@ -355,11 +355,11 @@ fn template_from_row(row: &sqlx::postgres::PgRow) -> McpManagedTemplateRecord {
     }
 }
 
-fn valid_spiffe_uri(value: &str) -> bool {
+pub(super) fn valid_spiffe_uri(value: &str) -> bool {
     value.starts_with("spiffe://") && value.len() <= 2048 && !value.chars().any(char::is_whitespace)
 }
 
-async fn service_row(
+pub(super) async fn service_row(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     service_id: Uuid,
@@ -372,7 +372,7 @@ async fn service_row(
         .map_err(DatabaseError::from)
 }
 
-fn service_from_row(row: &sqlx::postgres::PgRow) -> McpServicePrincipalRecord {
+pub(super) fn service_from_row(row: &sqlx::postgres::PgRow) -> McpServicePrincipalRecord {
     McpServicePrincipalRecord {
         tenant_id: row.get("tenant_id"),
         service_id: row.get("id"),

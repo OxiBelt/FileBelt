@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use aws_lc_rs::rand::{SecureRandom as _, SystemRandom};
@@ -28,7 +28,8 @@ use filebelt_control_protocol::{
     read_secret_string,
 };
 use filebelt_database::mcp::{
-    McpAuthoritySnapshot, McpRegistrationRecord, McpSecretEnvelope, NewMcpOAuthAttempt,
+    McpAuthoritySnapshot, McpBrokerOperationIdempotency, McpBrokerOperationStart,
+    McpBrokerOperationTransaction, McpRegistrationRecord, McpSecretEnvelope, NewMcpOAuthAttempt,
     NewMcpRunnerSlotReservation, RegistrationConfigurationUpdate,
 };
 use filebelt_database::{Database, DatabaseError};
@@ -745,9 +746,52 @@ async fn invoke(
         .mcp_revocation_generations(tenant_id, principal_id, registration_id)
         .await
         .map_err(|_| BrokerError::forbidden("mcp.authority.unavailable"))?;
-    if claims.membership_generation != generations.principal as u64
-        || claims.policy_generation != generations.registration as u64
-    {
+    if claims.membership_generation != generations.principal as u64 {
+        return Err(BrokerError::forbidden("mcp.authority.stale"));
+    }
+    let mut broker_operation = if let Some(operation_name) = journal_operation_name(operation) {
+        if claims.capability_id != request.request_id || claims.nonce.len() != 32 {
+            return Err(BrokerError::forbidden("mcp.idempotency.identity_invalid"));
+        }
+        let operation_id = parse_uuid(&request.request_id)?;
+        let request_fingerprint: [u8; 32] = claims
+            .nonce
+            .as_slice()
+            .try_into()
+            .map_err(|_| BrokerError::forbidden("mcp.idempotency.identity_invalid"))?;
+        match state
+            .database
+            .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+                tenant_id,
+                principal_id,
+                registration_id,
+                operation: operation_name,
+                operation_id,
+                request_fingerprint: &request_fingerprint,
+            })
+            .await
+            .map_err(|_| BrokerError::unavailable("mcp.idempotency.unavailable"))?
+        {
+            McpBrokerOperationStart::Started(transaction) => Some(transaction),
+            McpBrokerOperationStart::Replayed(result) => {
+                let result = materialize_journal_result(operation, &request, result)?;
+                return broker_result_response(
+                    &request.request_id,
+                    result,
+                    state.limits.result_bytes as usize,
+                );
+            }
+            McpBrokerOperationStart::KeyReused => {
+                return Err(BrokerError::conflict("idempotency.key_reused"));
+            }
+        }
+    } else {
+        None
+    };
+    if broker_operation.is_some() {
+        validate_journal_expected_revision(&registration, &request)?;
+    }
+    if claims.policy_generation != generations.registration as u64 {
         return Err(BrokerError::forbidden("mcp.authority.stale"));
     }
     validate_registration(&registration, &claims, &request, operation)?;
@@ -825,6 +869,7 @@ async fn invoke(
         } else {
             None
         };
+    let execution_started = Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(state.limits.absolute_timeout_seconds),
         async {
@@ -844,6 +889,7 @@ async fn invoke(
                         &request,
                         operation,
                         &claims,
+                        broker_operation.as_mut(),
                     )
                     .await;
                 }
@@ -896,27 +942,30 @@ async fn invoke(
     )
     .await
     .map_err(|_| BrokerError::gateway_timeout("mcp.remote.deadline"))??;
-    let frames = result_frames(
+    let safe_result = match operation {
+        McpOperation::Test => json!({
+            "protocol_version": request.protocol_version,
+            "checked_at": unix_time()?,
+            "duration_ms": execution_started.elapsed().as_millis().min(120_000) as u64,
+        }),
+        McpOperation::Discover => json!({
+            "protocol_version": request.protocol_version,
+            "document": result,
+        }),
+        _ => result,
+    };
+    if let Some(transaction) = broker_operation {
+        transaction
+            .finalize(&safe_result)
+            .await
+            .map_err(|_| BrokerError::unavailable("mcp.idempotency.finalize_failed"))?;
+    }
+    let result = materialize_journal_result(operation, &request, safe_result)?;
+    broker_result_response(
         &request.request_id,
         result,
         state.limits.result_bytes as usize,
-    )?;
-    let mut encoded = Vec::new();
-    for frame in &frames {
-        encoded.extend_from_slice(
-            &encode_frame(frame)
-                .map_err(|_| BrokerError::bad_gateway("mcp.remote.result_too_large"))?,
-        );
-    }
-    Ok((
-        StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(INTERNAL_CONTENT_TYPE),
-        )],
-        encoded,
     )
-        .into_response())
 }
 
 async fn wait_for_invocation_cancellation(
@@ -1232,6 +1281,113 @@ fn parse_array_index(value: &str) -> Result<usize, BrokerError> {
         .map_err(|_| BrokerError::bad_request("mcp.attachment.target_invalid"))
 }
 
+fn journal_operation_name(operation: McpOperation) -> Option<&'static str> {
+    match operation {
+        McpOperation::RegistrationConfigure => Some("registration_configure"),
+        McpOperation::CredentialReplace => Some("credential_replace"),
+        McpOperation::CredentialErase => Some("credential_erase"),
+        McpOperation::OauthBegin => Some("oauth_begin"),
+        McpOperation::Test => Some("test"),
+        McpOperation::Discover => Some("discover"),
+        _ => None,
+    }
+}
+
+fn validate_journal_expected_revision(
+    registration: &McpRegistrationRecord,
+    request: &InvocationRequest,
+) -> Result<(), BrokerError> {
+    let expected_revision = serde_json::from_slice::<Value>(&request.arguments_json)
+        .ok()
+        .and_then(|arguments| arguments.get("expected_revision").and_then(Value::as_i64));
+    if expected_revision != Some(registration.revision) {
+        return Err(BrokerError::conflict("generation.stale"));
+    }
+    Ok(())
+}
+
+fn materialize_journal_result(
+    operation: McpOperation,
+    request: &InvocationRequest,
+    mut safe_result: Value,
+) -> Result<Value, BrokerError> {
+    if operation != McpOperation::OauthBegin {
+        return Ok(safe_result);
+    }
+    let arguments: Value = serde_json::from_slice(&request.arguments_json)
+        .map_err(|_| BrokerError::bad_request("mcp.oauth.attempt_invalid"))?;
+    let endpoint = safe_result
+        .get("authorization_endpoint")
+        .and_then(Value::as_str)
+        .and_then(|value| Url::parse(value).ok())
+        .filter(|value| value.scheme() == "https" && value.host_str().is_some())
+        .ok_or_else(|| BrokerError::unavailable("mcp.oauth.discovery_invalid"))?;
+    let state_value = arguments
+        .get("state")
+        .and_then(Value::as_str)
+        .filter(|value| (32..=256).contains(&value.len()))
+        .ok_or_else(|| BrokerError::bad_request("mcp.oauth.attempt_invalid"))?;
+    let challenge = arguments
+        .get("challenge")
+        .and_then(Value::as_str)
+        .filter(|value| (43..=128).contains(&value.len()))
+        .ok_or_else(|| BrokerError::bad_request("mcp.oauth.attempt_invalid"))?;
+    let redirect_uri = arguments
+        .get("redirect_uri")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BrokerError::bad_request("mcp.oauth.attempt_invalid"))?;
+    let client_id = safe_result
+        .get("client_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BrokerError::unavailable("mcp.oauth.discovery_invalid"))?;
+    let resource = safe_result
+        .get("resource")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BrokerError::unavailable("mcp.oauth.discovery_invalid"))?;
+    let mut authorization_url = endpoint;
+    authorization_url
+        .query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("state", state_value)
+        .append_pair("resource", resource)
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256");
+    safe_result
+        .as_object_mut()
+        .ok_or_else(|| BrokerError::unavailable("mcp.oauth.discovery_invalid"))?
+        .insert(
+            "authorization_url".into(),
+            Value::String(authorization_url.into()),
+        );
+    Ok(safe_result)
+}
+
+fn broker_result_response(
+    request_id: &str,
+    result: Value,
+    result_limit: usize,
+) -> Result<Response, BrokerError> {
+    let frames = result_frames(request_id, result, result_limit)?;
+    let mut encoded = Vec::new();
+    for frame in &frames {
+        encoded.extend_from_slice(
+            &encode_frame(frame)
+                .map_err(|_| BrokerError::bad_gateway("mcp.remote.result_too_large"))?,
+        );
+    }
+    Ok((
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static(INTERNAL_CONTENT_TYPE),
+        )],
+        encoded,
+    )
+        .into_response())
+}
+
 async fn enforce_rate_limits(
     state: &BrokerState,
     registration: &McpRegistrationRecord,
@@ -1536,7 +1692,15 @@ async fn oauth_credential(
     .await?;
     let token_bytes = serde_json::to_vec(&rotated)
         .map_err(|_| BrokerError::unavailable("mcp.oauth.token_invalid"))?;
-    store_registration_secret(state, registration, issuer, "oauth_access", &token_bytes).await?;
+    store_registration_secret(
+        state,
+        registration,
+        issuer,
+        "oauth_access",
+        &token_bytes,
+        None,
+    )
+    .await?;
     let access_token = rotated
         .get("access_token")
         .and_then(Value::as_str)
@@ -1653,16 +1817,39 @@ async fn broker_management_operation(
     request: &InvocationRequest,
     operation: McpOperation,
     claims: &filebelt_mcp_protocol::DelegationClaims,
+    broker_operation: Option<&mut McpBrokerOperationTransaction>,
 ) -> Result<Value, BrokerError> {
     let arguments: Value = serde_json::from_slice(&request.arguments_json)
         .map_err(|_| BrokerError::bad_request("mcp.management.invalid"))?;
     match operation {
         McpOperation::CredentialReplace => {
-            replace_credential(state, registration, &arguments).await
+            replace_credential(
+                state,
+                registration,
+                &arguments,
+                broker_operation
+                    .ok_or_else(|| BrokerError::unavailable("mcp.idempotency.unavailable"))?,
+            )
+            .await
         }
-        McpOperation::CredentialErase => erase_credential(state, registration, &arguments).await,
+        McpOperation::CredentialErase => {
+            erase_credential(
+                registration,
+                &arguments,
+                broker_operation
+                    .ok_or_else(|| BrokerError::unavailable("mcp.idempotency.unavailable"))?,
+            )
+            .await
+        }
         McpOperation::RegistrationConfigure => {
-            configure_registration(state, registration, &arguments).await
+            configure_registration(
+                state,
+                registration,
+                &arguments,
+                broker_operation
+                    .ok_or_else(|| BrokerError::unavailable("mcp.idempotency.unavailable"))?,
+            )
+            .await
         }
         McpOperation::OauthDiscover => {
             ensure_oauth_gateway(state, registration)?;
@@ -1670,7 +1857,15 @@ async fn broker_management_operation(
         }
         McpOperation::OauthBegin => {
             ensure_oauth_gateway(state, registration)?;
-            begin_oauth(state, registration, claims, &arguments).await
+            begin_oauth(
+                state,
+                registration,
+                claims,
+                &arguments,
+                broker_operation
+                    .ok_or_else(|| BrokerError::unavailable("mcp.idempotency.unavailable"))?,
+            )
+            .await
         }
         McpOperation::OauthComplete => {
             ensure_oauth_gateway(state, registration)?;
@@ -1684,6 +1879,7 @@ async fn configure_registration(
     state: &BrokerState,
     registration: &McpRegistrationRecord,
     arguments: &Value,
+    broker_operation: &mut McpBrokerOperationTransaction,
 ) -> Result<Value, BrokerError> {
     let object = arguments
         .as_object()
@@ -1756,9 +1952,8 @@ async fn configure_registration(
         }
         _ => return Err(BrokerError::forbidden("mcp.registration.not_authorized")),
     }
-    state
-        .database
-        .mcp_replace_registration_configuration_and_erase(&RegistrationConfigurationUpdate {
+    let updated = broker_operation
+        .configure_registration(&RegistrationConfigurationUpdate {
             tenant_id: registration.tenant_id,
             registration_id: registration.id,
             owner_principal_id: registration.owner_principal_id,
@@ -1772,7 +1967,7 @@ async fn configure_registration(
         })
         .await
         .map_err(|_| BrokerError::forbidden("mcp.registration.stale"))?;
-    Ok(json!({}))
+    serde_json::to_value(updated).map_err(|_| BrokerError::unavailable("mcp.registration.invalid"))
 }
 
 fn optional_string(value: Option<&Value>) -> Result<Option<&str>, BrokerError> {
@@ -1787,6 +1982,7 @@ async fn replace_credential(
     state: &BrokerState,
     registration: &McpRegistrationRecord,
     arguments: &Value,
+    broker_operation: &mut McpBrokerOperationTransaction,
 ) -> Result<Value, BrokerError> {
     let kind = arguments
         .get("kind")
@@ -1811,14 +2007,25 @@ async fn replace_credential(
         .endpoint_uri
         .as_deref()
         .unwrap_or("stdio-catalog");
-    store_registration_secret(state, registration, issuer, kind, secret.as_bytes()).await?;
-    Ok(json!({}))
+    let metadata = store_registration_secret(
+        state,
+        registration,
+        issuer,
+        kind,
+        secret.as_bytes(),
+        Some(broker_operation),
+    )
+    .await?;
+    Ok(json!({
+        "revision": expected_revision.saturating_add(1),
+        "credential_generation": metadata.credential_generation,
+    }))
 }
 
 async fn erase_credential(
-    state: &BrokerState,
     registration: &McpRegistrationRecord,
     arguments: &Value,
+    broker_operation: &mut McpBrokerOperationTransaction,
 ) -> Result<Value, BrokerError> {
     let expected_revision = arguments
         .get("expected_revision")
@@ -1827,17 +2034,12 @@ async fn erase_credential(
     if expected_revision != registration.revision {
         return Err(BrokerError::forbidden("mcp.credential.stale"));
     }
-    state
-        .database
-        .mcp_cryptographically_erase_registration_at_revision(
-            registration.tenant_id,
-            registration.id,
-            registration.owner_principal_id,
-            expected_revision,
-        )
+    let erased = broker_operation
+        .erase_registration_at_revision(expected_revision)
         .await
         .map_err(|_| BrokerError::unavailable("mcp.credential.store_failed"))?;
-    Ok(json!({}))
+    serde_json::to_value(erased)
+        .map_err(|_| BrokerError::unavailable("mcp.credential.store_failed"))
 }
 
 async fn store_registration_secret(
@@ -1846,7 +2048,8 @@ async fn store_registration_secret(
     issuer: &str,
     kind: &str,
     secret: &[u8],
-) -> Result<(), BrokerError> {
+    broker_operation: Option<&mut McpBrokerOperationTransaction>,
+) -> Result<filebelt_database::mcp::McpCredentialMetadata, BrokerError> {
     let credential_generation = registration
         .credential_generation
         .checked_add(1)
@@ -1863,25 +2066,31 @@ async fn store_registration_secret(
         .keyring
         .encrypt(state.current_kek_generation, &context, secret)
         .map_err(|_| BrokerError::unavailable("mcp.credential.encrypt_failed"))?;
-    state
-        .database
-        .mcp_replace_registration_secret(&McpSecretEnvelope {
-            tenant_id: registration.tenant_id,
-            registration_id: registration.id,
-            owner_principal_id: registration.owner_principal_id,
-            issuer: issuer.to_owned(),
-            secret_kind: kind.to_owned(),
-            credential_generation,
-            ciphertext: encrypted.ciphertext,
-            nonce: encrypted.nonce.to_vec(),
-            wrapped_dek: encrypted.wrapped_dek,
-            wrap_nonce: encrypted.wrap_nonce.to_vec(),
-            kek_generation: encrypted.kek_generation as i32,
-            aad_version: encrypted.aad_version as i32,
-        })
-        .await
-        .map_err(|_| BrokerError::unavailable("mcp.credential.store_failed"))?;
-    Ok(())
+    let envelope = McpSecretEnvelope {
+        tenant_id: registration.tenant_id,
+        registration_id: registration.id,
+        owner_principal_id: registration.owner_principal_id,
+        issuer: issuer.to_owned(),
+        secret_kind: kind.to_owned(),
+        credential_generation,
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce.to_vec(),
+        wrapped_dek: encrypted.wrapped_dek,
+        wrap_nonce: encrypted.wrap_nonce.to_vec(),
+        kek_generation: encrypted.kek_generation as i32,
+        aad_version: encrypted.aad_version as i32,
+    };
+    if let Some(broker_operation) = broker_operation {
+        broker_operation
+            .replace_registration_secret(&envelope)
+            .await
+    } else {
+        state
+            .database
+            .mcp_replace_registration_secret(&envelope)
+            .await
+    }
+    .map_err(|_| BrokerError::unavailable("mcp.credential.store_failed"))
 }
 
 async fn oauth_discover(
@@ -1957,6 +2166,7 @@ async fn begin_oauth(
     registration: &McpRegistrationRecord,
     claims: &filebelt_mcp_protocol::DelegationClaims,
     arguments: &Value,
+    broker_operation: &mut McpBrokerOperationTransaction,
 ) -> Result<Value, BrokerError> {
     let discovery = oauth_discover(state, registration, arguments).await?;
     let issuer = discovery["issuer"].as_str().unwrap_or_default();
@@ -2027,9 +2237,8 @@ async fn begin_oauth(
         .keyring
         .encrypt(state.current_kek_generation, &context, &attempt_secret)
         .map_err(|_| BrokerError::unavailable("mcp.oauth.attempt_store_failed"))?;
-    state
-        .database
-        .mcp_begin_oauth_attempt(&NewMcpOAuthAttempt {
+    let expires_at = broker_operation
+        .begin_oauth_attempt(&NewMcpOAuthAttempt {
             tenant_id: registration.tenant_id,
             id: attempt_id,
             registration_id: registration.id,
@@ -2047,28 +2256,13 @@ async fn begin_oauth(
         })
         .await
         .map_err(|_| BrokerError::unavailable("mcp.oauth.attempt_store_failed"))?;
-    let mut authorization_url = Url::parse(
-        discovery["authorization_endpoint"]
-            .as_str()
-            .unwrap_or_default(),
-    )
-    .map_err(|_| BrokerError::unavailable("mcp.oauth.discovery_invalid"))?;
-    authorization_url
-        .query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair(
-            "client_id",
-            discovery["client_id"].as_str().unwrap_or_default(),
-        )
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("state", state_value)
-        .append_pair(
-            "resource",
-            discovery["resource"].as_str().unwrap_or_default(),
-        )
-        .append_pair("code_challenge", challenge)
-        .append_pair("code_challenge_method", "S256");
-    Ok(json!({"authorization_url": authorization_url.as_str()}))
+    Ok(json!({
+        "issuer": discovery["issuer"],
+        "authorization_endpoint": discovery["authorization_endpoint"],
+        "client_id": discovery["client_id"],
+        "resource": discovery["resource"],
+        "expires_at": expires_at,
+    }))
 }
 
 async fn complete_oauth(
@@ -2174,6 +2368,7 @@ async fn complete_oauth(
         discovery["issuer"].as_str().unwrap_or_default(),
         "oauth_access",
         &token_bytes,
+        None,
     )
     .await?;
     Ok(json!({"return_path": attempt.redirect_path, "authorized": true}))
@@ -3800,6 +3995,12 @@ impl BrokerError {
             code,
         }
     }
+    const fn conflict(code: &'static str) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code,
+        }
+    }
     const fn too_many_requests(code: &'static str) -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
@@ -4346,6 +4547,59 @@ mod tests {
         assert_eq!(
             oauth_well_known_url(&resource, "oauth-protected-resource").as_str(),
             "https://mcp.example/.well-known/oauth-protected-resource/service"
+        );
+    }
+
+    #[test]
+    fn oauth_journal_replay_reconstructs_without_mutating_safe_metadata() {
+        let safe = json!({
+            "issuer": "https://authorization.example",
+            "authorization_endpoint": "https://authorization.example/authorize",
+            "client_id": "client",
+            "resource": "https://mcp.example/rpc",
+            "expires_at": 1_800_000_000_i64,
+        });
+        let request = InvocationRequest {
+            arguments_json: serde_json::to_vec(&json!({
+                "state": "s".repeat(43),
+                "challenge": "c".repeat(43),
+                "redirect_uri": "https://filebelt.example/api/v1/mcp/oauth/callback",
+                "expected_revision": 1,
+            }))
+            .unwrap(),
+            ..Default::default()
+        };
+        let first =
+            materialize_journal_result(McpOperation::OauthBegin, &request, safe.clone()).unwrap();
+        let second =
+            materialize_journal_result(McpOperation::OauthBegin, &request, safe.clone()).unwrap();
+        assert_eq!(first, second);
+        assert!(safe.get("authorization_url").is_none());
+        let url = first["authorization_url"].as_str().unwrap();
+        assert!(url.contains("state=ssss"));
+        assert!(url.contains("code_challenge=cccc"));
+    }
+
+    #[test]
+    fn journal_started_path_requires_the_exact_expected_revision() {
+        let registration = test_registration();
+        let request = InvocationRequest {
+            arguments_json: serde_json::to_vec(&json!({
+                "expected_revision": registration.revision,
+            }))
+            .unwrap(),
+            ..Default::default()
+        };
+        assert!(validate_journal_expected_revision(&registration, &request).is_ok());
+        let stale = InvocationRequest {
+            arguments_json: serde_json::to_vec(&json!({"expected_revision": 0})).unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_journal_expected_revision(&registration, &stale)
+                .unwrap_err()
+                .code,
+            "generation.stale"
         );
     }
 }

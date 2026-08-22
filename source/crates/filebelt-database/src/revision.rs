@@ -5,13 +5,93 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
-use sqlx::Row as _;
+use serde_json::Value;
+use sqlx::{Postgres, Row as _, Transaction};
 use uuid::Uuid;
 
-use super::{Database, DatabaseError, lock_authorization_fence};
+use super::{
+    Database, DatabaseError, NodeRecord, ResourceMutationIdempotency, ResourceMutationWrite,
+    lock_authorization_fence, node_from_row,
+};
+use crate::idempotency::{IdempotencyReservation, finalize, reserve};
 
 pub const EDIT_LIMITS: [i64; 5] = [1_048_576, 2_097_152, 4_194_304, 8_388_608, 16_777_216];
 pub const INLINE_LIMITS: [i64; 5] = [8_388_608, 16_777_216, 33_554_432, 67_108_864, 104_857_600];
+
+#[allow(clippy::too_many_arguments)]
+async fn update_content_class_policy_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    actor: Uuid,
+    session_id: Uuid,
+    drive_id: Uuid,
+    node_id: Uuid,
+    expected_attribute_generation: i64,
+    policy: &str,
+    membership_generation: i64,
+    drive_acl_generation: i64,
+    namespace_generation: i64,
+    resource_acl_generation: i64,
+) -> Result<NodeRecord, DatabaseError> {
+    if !matches!(policy, "auto" | "binary") {
+        return Err(DatabaseError::InvalidPersistedValue);
+    }
+    lock_authorization_fence(
+        transaction,
+        tenant_id,
+        actor,
+        session_id,
+        drive_id,
+        node_id,
+        [
+            membership_generation,
+            drive_acl_generation,
+            namespace_generation,
+            resource_acl_generation,
+        ],
+    )
+    .await?;
+    let updated = sqlx::query(
+        "UPDATE nodes SET content_class_policy=$4,attribute_generation=attribute_generation+1, \
+         updated_at=clock_timestamp() WHERE tenant_id=$1 AND drive_id=$2 AND id=$3 \
+         AND kind='file' AND attribute_generation=$5",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(node_id)
+    .bind(policy)
+    .bind(expected_attribute_generation)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    if updated != 1 {
+        return Err(DatabaseError::StaleGeneration);
+    }
+    sqlx::query(
+        "UPDATE filebelt_collaboration.epochs e SET state='frozen', \
+         freeze_reason='content_class_policy',fencing_token=fencing_token+1 \
+         FROM filebelt_collaboration.rooms r WHERE r.tenant_id=$1 AND r.drive_id=$2 \
+         AND r.node_id=$3 AND e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.state='active'",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(node_id)
+    .execute(&mut **transaction)
+    .await?;
+    let row = sqlx::query(
+        "SELECT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,\
+                v.ordinal AS version_ordinal,v.media_type AS head_media_type \
+         FROM nodes n LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id \
+           AND v.node_id=n.id AND v.id=n.head_version_id \
+         WHERE n.tenant_id=$1 AND n.drive_id=$2 AND n.id=$3",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(node_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(node_from_row(&row))
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TextPreferencesRecord {
@@ -452,54 +532,87 @@ impl Database {
         namespace_generation: i64,
         resource_acl_generation: i64,
     ) -> Result<(), DatabaseError> {
-        if !matches!(policy, "auto" | "binary") {
-            return Err(DatabaseError::InvalidPersistedValue);
-        }
         let mut transaction = self.pool.begin().await?;
-        lock_authorization_fence(
+        update_content_class_policy_tx(
             &mut transaction,
             tenant_id,
             actor,
             session_id,
             drive_id,
             node_id,
-            [
-                membership_generation,
-                drive_acl_generation,
-                namespace_generation,
-                resource_acl_generation,
-            ],
+            expected_attribute_generation,
+            policy,
+            membership_generation,
+            drive_acl_generation,
+            namespace_generation,
+            resource_acl_generation,
         )
-        .await?;
-        let updated = sqlx::query(
-            "UPDATE nodes SET content_class_policy=$4,attribute_generation=attribute_generation+1, \
-             updated_at=clock_timestamp() WHERE tenant_id=$1 AND drive_id=$2 AND id=$3 \
-             AND kind='file' AND attribute_generation=$5",
-        )
-        .bind(tenant_id)
-        .bind(drive_id)
-        .bind(node_id)
-        .bind(policy)
-        .bind(expected_attribute_generation)
-        .execute(&mut *transaction)
-        .await?
-        .rows_affected();
-        if updated != 1 {
-            return Err(DatabaseError::StaleGeneration);
-        }
-        sqlx::query(
-            "UPDATE filebelt_collaboration.epochs e SET state='frozen', \
-             freeze_reason='content_class_policy',fencing_token=fencing_token+1 \
-             FROM filebelt_collaboration.rooms r WHERE r.tenant_id=$1 AND r.drive_id=$2 \
-             AND r.node_id=$3 AND e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.state='active'",
-        )
-        .bind(tenant_id)
-        .bind(drive_id)
-        .bind(node_id)
-        .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_content_class_policy_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        expected_attribute_generation: i64,
+        policy: &str,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(&NodeRecord) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(actor)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let node = update_content_class_policy_tx(
+                    &mut transaction,
+                    tenant_id,
+                    actor,
+                    session_id,
+                    drive_id,
+                    node_id,
+                    expected_attribute_generation,
+                    policy,
+                    membership_generation,
+                    drive_acl_generation,
+                    namespace_generation,
+                    resource_acl_generation,
+                )
+                .await?;
+                let response = render_response(&node)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
 
     pub async fn revision_comparison(
@@ -569,5 +682,26 @@ mod tests {
         assert_eq!(EDIT_LIMITS[1], 2 * 1024 * 1024);
         assert_eq!(INLINE_LIMITS[0], 8 * 1024 * 1024);
         assert!(INLINE_LIMITS.iter().all(|value| *value >= EDIT_LIMITS[0]));
+    }
+
+    #[test]
+    fn content_policy_receipt_is_finalized_in_the_mutation_transaction() {
+        let source = include_str!("revision.rs");
+        let implementation = source
+            .split_once("pub async fn update_content_class_policy_idempotent")
+            .expect("idempotent content-policy mutation exists")
+            .1;
+        let reserve = implementation.find("reserve(&mut transaction").unwrap();
+        let mutate = implementation
+            .find("update_content_class_policy_tx(")
+            .unwrap();
+        let finalize = implementation.find("finalize(").unwrap();
+        let commit = finalize
+            + implementation[finalize..]
+                .find("transaction.commit().await?")
+                .unwrap();
+        assert!(reserve < mutate);
+        assert!(mutate < finalize);
+        assert!(finalize < commit);
     }
 }

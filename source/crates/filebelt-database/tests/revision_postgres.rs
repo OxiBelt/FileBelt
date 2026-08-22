@@ -2,8 +2,12 @@
 
 //! PostgreSQL-backed revision migration, compatibility, and authority checks.
 
-use filebelt_database::{Database, DatabaseError};
+use filebelt_database::{
+    Database, DatabaseError, ResourceMutationIdempotency, ResourceMutationWrite,
+};
+use serde_json::json;
 use sqlx::Row as _;
+use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL database in FILEBELT_REVISION_TEST_DATABASE_URL"]
@@ -45,6 +49,15 @@ async fn revision_schema_preserves_legacy_writers_and_narrows_role_authority() {
         INSERT INTO user_preferences(tenant_id,user_id)
         VALUES ('10000000-0000-4000-8000-000000000001',
                 '10000000-0000-4000-8000-000000000003');
+        INSERT INTO api_sessions
+          (tenant_id,id,user_id,principal_id,token_key_generation,token_digest,csrf_digest,
+           idle_expires_at,absolute_expires_at)
+        VALUES ('10000000-0000-4000-8000-000000000001',
+                '10000000-0000-4000-8000-00000000000b',
+                '10000000-0000-4000-8000-000000000003',
+                '10000000-0000-4000-8000-000000000002',1,
+                decode(repeat('21',32),'hex'),decode(repeat('22',32),'hex'),
+                clock_timestamp()+interval '1 hour',clock_timestamp()+interval '2 hours');
         INSERT INTO drives(tenant_id,id,owner_principal_id,kind,display_name,quota_bytes)
         VALUES ('10000000-0000-4000-8000-000000000001',
                 '10000000-0000-4000-8000-000000000004',
@@ -84,6 +97,8 @@ async fn revision_schema_preserves_legacy_writers_and_narrows_role_authority() {
     .execute(database.pool())
     .await
     .expect("seed a post-migration legacy write");
+
+    verify_atomic_resource_idempotency(&database).await;
 
     let row = sqlx::query(
         "SELECT v.content_id,c.backend,c.state,c.legacy_payload_id \
@@ -300,6 +315,149 @@ async fn revision_schema_preserves_legacy_writers_and_narrows_role_authority() {
             );
         }
     }
+}
+
+async fn verify_atomic_resource_idempotency(database: &Database) {
+    let tenant_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+    let principal_id = Uuid::parse_str("10000000-0000-4000-8000-000000000002").unwrap();
+    let drive_id = Uuid::parse_str("10000000-0000-4000-8000-000000000004").unwrap();
+    let node_id = Uuid::parse_str("10000000-0000-4000-8000-000000000005").unwrap();
+    let session_id = Uuid::parse_str("10000000-0000-4000-8000-00000000000b").unwrap();
+    let route = "PATCH /api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy";
+    let fingerprint = [0x31_u8; 32];
+    let idempotency = ResourceMutationIdempotency {
+        principal_id,
+        route,
+        key: "resource-atomic-success",
+        request_fingerprint: &fingerprint,
+        legacy_request_fingerprint: None,
+        response_status: 200,
+    };
+
+    let created = database
+        .update_content_class_policy_idempotent(
+            tenant_id,
+            principal_id,
+            session_id,
+            drive_id,
+            node_id,
+            1,
+            "binary",
+            1,
+            1,
+            1,
+            1,
+            &idempotency,
+            |node| Ok(json!({"node_id":node.id,"generation":node.attribute_generation})),
+        )
+        .await
+        .expect("create content policy and receipt atomically");
+    let created_body = match created {
+        ResourceMutationWrite::Created(record) => record.response_body,
+        other => panic!("expected created receipt, got {other:?}"),
+    };
+
+    let replayed = database
+        .update_content_class_policy_idempotent(
+            tenant_id,
+            principal_id,
+            session_id,
+            drive_id,
+            node_id,
+            1,
+            "binary",
+            1,
+            1,
+            1,
+            1,
+            &idempotency,
+            |_| panic!("replay must not execute the mutation renderer"),
+        )
+        .await
+        .expect("replay atomic receipt");
+    match replayed {
+        ResourceMutationWrite::Replayed(record) => assert_eq!(record.response_body, created_body),
+        other => panic!("expected replayed receipt, got {other:?}"),
+    }
+    let generation: i64 = sqlx::query_scalar(
+        "SELECT attribute_generation FROM nodes WHERE tenant_id=$1 AND drive_id=$2 AND id=$3",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(node_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read content-policy generation");
+    assert_eq!(generation, 2, "replay must not repeat the mutation");
+
+    let reused_fingerprint = [0x32_u8; 32];
+    let reused = ResourceMutationIdempotency {
+        request_fingerprint: &reused_fingerprint,
+        ..idempotency.clone()
+    };
+    assert!(matches!(
+        database
+            .update_content_class_policy_idempotent(
+                tenant_id,
+                principal_id,
+                session_id,
+                drive_id,
+                node_id,
+                generation,
+                "auto",
+                1,
+                1,
+                1,
+                1,
+                &reused,
+                |_| Ok(json!(null)),
+            )
+            .await
+            .expect("classify key reuse"),
+        ResourceMutationWrite::KeyReused
+    ));
+
+    let failed_fingerprint = [0x33_u8; 32];
+    let failed = ResourceMutationIdempotency {
+        key: "resource-atomic-rollback",
+        request_fingerprint: &failed_fingerprint,
+        ..idempotency
+    };
+    assert!(matches!(
+        database
+            .update_content_class_policy_idempotent(
+                tenant_id,
+                principal_id,
+                session_id,
+                drive_id,
+                node_id,
+                1,
+                "auto",
+                1,
+                1,
+                1,
+                1,
+                &failed,
+                |_| Ok(json!(null)),
+            )
+            .await,
+        Err(DatabaseError::StaleGeneration)
+    ));
+    let failed_receipts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM idempotency_records WHERE tenant_id=$1 AND principal_id=$2 \
+         AND route=$3 AND key=$4",
+    )
+    .bind(tenant_id)
+    .bind(principal_id)
+    .bind(route)
+    .bind(failed.key)
+    .fetch_one(database.pool())
+    .await
+    .expect("count rolled-back receipt");
+    assert_eq!(
+        failed_receipts, 0,
+        "failed mutation must roll back its reservation"
+    );
 }
 
 async fn schema_privilege(database: &Database, role: &str, schema: &str, privilege: &str) -> bool {

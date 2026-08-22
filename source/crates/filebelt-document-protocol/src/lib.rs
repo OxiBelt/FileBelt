@@ -109,4 +109,42 @@ mod tests {
             "odt"
         );
     }
+
+    #[test]
+    fn close_commands_preserve_coordinator_operation_bindings() {
+        let revoke = RevokeDocumentSessionCommand {
+            tenant_id: "tenant".into(),
+            actor_principal_id: "actor".into(),
+            participant_id: "participant".into(),
+            reason: "owner_revoke".into(),
+            operation_digest: vec![7; 32],
+            request_fingerprint: vec![8; 32],
+        };
+        let revoke = RevokeDocumentSessionCommand::decode(revoke.encode_to_vec().as_slice())
+            .expect("decode revoke command");
+        assert_eq!(revoke.operation_digest, vec![7; 32]);
+        assert_eq!(revoke.request_fingerprint, vec![8; 32]);
+
+        let close = ForceCloseDocumentSessionCommand {
+            tenant_id: "tenant".into(),
+            actor_principal_id: "actor".into(),
+            document_session_id: "document-session".into(),
+            reason: "manager_force_close".into(),
+            api_session_id: "api-session".into(),
+            drive_id: "drive".into(),
+            node_id: "node".into(),
+            generations: Some(DocumentAuthorizationGenerations {
+                membership_generation: 1,
+                drive_acl_generation: 2,
+                namespace_generation: 3,
+                resource_acl_generation: 4,
+            }),
+            operation_digest: vec![9; 32],
+            request_fingerprint: vec![10; 32],
+        };
+        let close = ForceCloseDocumentSessionCommand::decode(close.encode_to_vec().as_slice())
+            .expect("decode force-close command");
+        assert_eq!(close.operation_digest, vec![9; 32]);
+        assert_eq!(close.request_fingerprint, vec![10; 32]);
+    }
 }

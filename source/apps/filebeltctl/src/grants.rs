@@ -1026,6 +1026,15 @@ fn expected_column_privilege(
                     | "generation"
                     | "revoked_at"
             ),
+            ("filebelt_recovery", "credential_operation_fences", "SELECT") => matches!(
+                column,
+                "tenant_id"
+                    | "credential_id"
+                    | "principal_id"
+                    | "state"
+                    | "created_at"
+                    | "cancelled_at"
+            ),
             _ => false,
         };
     }
@@ -1551,6 +1560,8 @@ fn expected_function_privilege(role: &str, function: &str) -> bool {
             && role == "filebelt_document")
         || (function == "filebelt_mount.create_session_principal(uuid,uuid)"
             && role == "filebelt_vfs")
+        || (function == "filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)"
+            && role == "filebelt_api")
         || (function == "filebelt_mount.fence_nfs_mapping_sessions(uuid,uuid,uuid,bigint,text)"
             && role == "filebelt_api")
         || (function

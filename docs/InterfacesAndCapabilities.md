@@ -39,6 +39,16 @@ integer byte counts, opaque keyset cursors, and generation ETags. Pages default
 to 50 items and accept 1 through 200. Mutations carry an expected namespace,
 resource, or head generation as applicable.
 
+`GET|PUT /api/v1/drives/{drive_id}/nodes/{node_id}/acl` is resource-scoped by
+`MANAGE_ACL` before node or subject disclosure. GET returns the exact 26-action
+stable vocabulary and direct rows with user email or group ID, source, and
+read-only provenance. PUT accepts at most one row per action, supports the
+exact `self`, `children`, `descendants`, and legacy `self_and_descendants`
+scopes, and replaces only mutable `core` rows for one subject. Its `If-Match`
+and authorization generations are rechecked under the PostgreSQL resource lock;
+stale state is `409`, while unauthorized and missing resources remain the same
+`404`.
+
 While a tenant's descendant-share admission gate is blocked,
 `POST /api/v1/drives/{drive_id}/nodes/{node_id}/shares` returns `503` Problem
 code `share.remediation_in_progress`, and
@@ -49,11 +59,28 @@ an authorization disclosure; clients must not retry earlier. The OpenAPI source
 defines these explicit responses and the generated TypeScript contract remains
 derived from it.
 
-Allocation and commit operations identified in OpenAPI require an
-`Idempotency-Key`. The key is bound to tenant, principal, route, request
-fingerprint, response status, and response body for 24 hours. Repeating the same
-request returns the stored result; reusing a key for a different request returns
-`idempotency.key_reused` without performing the new mutation.
+Resource mutations identified in OpenAPI require an `Idempotency-Key`. Content
+policy changes, collaboration grant/intent/discard operations, upload
+allocation and commit, version restore, and direct-share creation reserve the
+key, perform the authoritative write, and finalize the exact response in one
+PostgreSQL transaction. The key is bound to tenant, principal, route, concrete
+drive/node/upload/parent/version identifiers, request fingerprint, response
+status, and response body for 24 hours. Repeating the same request returns the
+stored result; reusing a key for a different request returns
+`idempotency.key_reused` without performing the new mutation. During the
+24-hour fingerprint cutover, pre-cutover upload allocation/commit receipts may
+replay by their exact legacy request-only digest, but every new reservation
+stores the identifier-complete digest.
+
+Document create-session, conflict-copy, own-session revoke, and manager
+force-close requests cross a separate coordinator process. For those commands,
+the API derives an opaque operation digest from the authenticated browser
+session, route, and public idempotency key, and the coordinator binds that
+digest plus the request fingerprint to a successful result in the same
+PostgreSQL transaction as its authoritative mutation. A retry after an
+uncertain coordinator response therefore replays the committed result and lets
+the API finalize the public HTTP receipt. The one-use launch handoff remains a
+separate non-idempotent operation and is not covered by these receipts.
 
 The generated TypeScript contract under `ui/web/source/generated/` is derived
 from OpenAPI and consumed by the browser client. UI route guards, hidden
@@ -155,7 +182,16 @@ mutations use the ordinary CSRF/origin/fetch-site rules; credential create and
 revoke additionally require recent OIDC authentication, and credential
 lifetimes are capped at seven days. A plaintext credential appears only in the
 create response and is absent from every later list, activity, log, audit, and
-error contract.
+error contract. Creation requires a fresh caller-generated operation UUID that
+becomes the credential identifier. Clients never retry an interrupted create
+to recover plaintext; they revoke that exact UUID and start a new operation.
+A definite not-found revocation response is the same safe terminal state as a
+successful revocation for that caller-owned UUID because PostgreSQL commits a
+durable cancellation fence before either response. Create and revoke serialize
+on that exact tenant/UUID fence, so a create cannot commit after the revocation
+barrier. A transport-unknown
+revocation keeps new credential creation blocked and exposes the UUID plus a
+retry control until the barrier completes.
 
 ## Text revision, editing, and collaboration contracts
 
@@ -320,6 +356,12 @@ callback receipt, revision allocation, and commit commands. Independent
 certificate and client-identity allowlists prevent either peer from invoking
 the other peer's commands.
 
+The revoke and force-close commands require exact 32-byte API-derived operation
+digests and request fingerprints. The coordinator accepts a replay only when
+both values and the command kind match the stored transaction-bound receipt;
+key reuse for a different close target or effect fails without another state
+transition, audit row, or fencing-token advance.
+
 Document byte access extends `fbcap1` with three operations whose signing key
 generation is 4: exact immutable document-version read, one whole-payload
 revision write, and revision finalization. Claims bind tenant, initiating
@@ -442,12 +484,37 @@ MCP mutation routes require the normal CSRF, exact Origin, Fetch Metadata,
 idempotency, and generation ETag controls shown in OpenAPI. Problems use stable
 `mcp.*` codes. Registration export contains configuration only, never a
 credential, OAuth token, capability decision, approval, grant, or activity.
+PostgreSQL-local MCP mutations bind the key to the authenticated principal,
+normalized route, concrete route identifiers, exact request body, and
+`If-Match` value where present. Registration creation and lifecycle changes,
+capability review, approval revocation, invocation-intent creation and
+cancellation, data-grant revocation, and tenant-administrator template,
+assignment, service-identity, service-grant-revocation, and block-rule writes
+commit their authoritative state and exact response receipt in one transaction.
+Matching concurrent requests return one stored result; a mismatched fingerprint
+returns `idempotency.key_reused`; a failed or abandoned transaction exposes no
+pending receipt.
+
+Broker-mediated registration configuration/deletion, static credential
+replacement/deletion, OAuth start, connection test, and capability discovery
+use the existing Protobuf `request_id` as a stable, API-keyed operation UUID.
+The signed `capability_id` must equal that UUID and the signed nonce carries the
+exact keyed public request fingerprint, including registration ID, request
+body, and `If-Match`. The broker rejects any scope/fingerprint reuse, returns a
+completed journal result before consuming rate or concurrency capacity, and
+rechecks the expected revision only for a newly admitted operation. Its
+transaction commits broker-local writes with the safe replay result. The API
+then commits any local continuation, the broker-completion marker, and the
+exact public receipt together; delete resumes from the journaled post-erasure
+revision, while test/discovery reuse the journaled probe result.
 Session-scope approval is unavailable for `tool_call` even when the hostile MCP
 descriptor claims `readOnlyHint=true`; tool calls always consume a one-shot
 approval. Reusable approval remains limited to reviewed low-risk non-tool
 operations and one hour.
-OAuth start stores PKCE verifier, state, issuer, registration, principal,
-session, and return path on the server for at most ten minutes. The callback is
+OAuth start stores the PKCE verifier only in its encrypted attempt envelope and
+stores a keyed state digest, issuer, registration, principal, session, and
+return path on the server for at most ten minutes. Raw state, challenge, and
+authorization URL are reconstructed in memory and never journaled. The callback is
 the single allowlisted `/api/v1/mcp/oauth/callback`; it consumes the attempt,
 binds tokens to the exact resource/audience, and redirects only to the stored
 local settings path. Authorization-code and refresh exchanges send the exact
@@ -468,7 +535,10 @@ argument digests, attachment versions/disclosures/generations, policy and
 membership generations, nonce, and a maximum 120-second lifetime. The broker
 accepts no browser cookie or unsigned authority. Internal invocation frames are
 limited to 4 MiB and carry a request ID, ordered sequence, bounded payload, and
-terminal state.
+terminal state. For the seven idempotent broker operations, request-ID equality
+is accepted only with the exact signed tenant, principal, registration,
+operation, and keyed request fingerprint stored by the broker. Other operations
+retain ordinary random request IDs and receive no implied replay semantics.
 
 Remote Streamable HTTP sessions are opened by the broker through the
 operator-managed mTLS egress gateway using an exact target origin and trust
@@ -649,7 +719,7 @@ the current editor continues to request WebSocket unless it explicitly opts in.
 
 ## Key rotation and configuration
 
-Configuration format 8 scopes signing material by purpose. `[keys]` contains
+Configuration format 9 scopes signing material by purpose. `[keys]` contains
 only `digest_key_file` and `digest_key_generation`; every signer has
 `private_key_file`, `public_keyset_file`, and `current_generation`. API storage
 is always `[keys.api_storage]`; API collaboration-grant and MCP-delegation are

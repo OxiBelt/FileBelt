@@ -26,6 +26,8 @@ use sqlx::{Postgres, Row, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::idempotency::{IdempotencyInput, IdempotencyReservation, finalize, reserve};
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/postgres");
 
 pub const PRIVATE_DRIVE_QUOTA_BYTES: i64 = 1_099_511_627_776;
@@ -100,6 +102,45 @@ pub struct IdempotencyRecord {
     pub request_fingerprint: Vec<u8>,
     pub response_status: i32,
     pub response_body: Value,
+}
+
+/// Transaction-local identity for an HTTP resource mutation. The optional
+/// legacy fingerprint is accepted only for replaying an unexpired receipt;
+/// every new reservation persists the current identifier-complete digest.
+#[derive(Clone, Debug)]
+pub struct ResourceMutationIdempotency<'a> {
+    pub principal_id: Uuid,
+    pub route: &'a str,
+    pub key: &'a str,
+    pub request_fingerprint: &'a [u8; 32],
+    pub legacy_request_fingerprint: Option<&'a [u8; 32]>,
+    pub response_status: i32,
+}
+
+#[derive(Clone, Debug)]
+pub enum ResourceMutationWrite {
+    Created(IdempotencyRecord),
+    Replayed(IdempotencyRecord),
+    KeyReused,
+}
+
+impl ResourceMutationIdempotency<'_> {
+    pub(crate) fn validate_actor(&self, actor: Uuid) -> Result<(), DatabaseError> {
+        if self.principal_id != actor || !(100..=599).contains(&self.response_status) {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reservation_input(&self) -> IdempotencyInput<'_> {
+        IdempotencyInput {
+            principal_id: self.principal_id,
+            route: self.route,
+            key: self.key,
+            request_fingerprint: self.request_fingerprint,
+            legacy_request_fingerprint: self.legacy_request_fingerprint,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -179,12 +220,14 @@ pub struct DirectShareRecord {
 pub struct AdvancedAclEntryRecord {
     pub principal_id: Uuid,
     pub principal_kind: String,
+    pub group_id: Option<Uuid>,
     pub display_name: String,
     pub verified_email: Option<String>,
     pub action: String,
     pub effect: String,
     pub inheritance: String,
     pub source: String,
+    pub read_only: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -198,6 +241,13 @@ pub struct AdvancedAclEntryInput<'a> {
 pub struct AdvancedAclReplacementPreflight {
     pub target_principal_id: Uuid,
     pub actions: BTreeSet<Action>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AdvancedAclReplacementEtag {
+    pub namespace_generation: i64,
+    pub acl_generation: i64,
+    pub attribute_generation: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -836,7 +886,7 @@ impl Database {
         tenant_id: Uuid,
         principal_id: Uuid,
     ) -> Result<Vec<NodeRecord>, DatabaseError> {
-        let rows = sqlx::query("SELECT DISTINCT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n JOIN node_ancestry na ON na.tenant_id=n.tenant_id AND na.drive_id=n.drive_id AND na.descendant_id=n.id JOIN acl_entries a ON a.tenant_id=na.tenant_id AND a.drive_id=na.drive_id AND a.resource_id=na.ancestor_id LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.trash_root_id IS NULL AND a.effect='allow' AND a.action='READ_METADATA' AND (a.principal_id=$2 OR a.principal_id IN (SELECT g.principal_id FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2)) AND ((na.depth=0 AND a.inheritance IN ('self','self_and_descendants')) OR (na.depth>0 AND a.inheritance IN ('descendants','self_and_descendants'))) ORDER BY n.kind DESC,n.name_key,n.id")
+        let rows = sqlx::query("SELECT DISTINCT n.*,n.updated_at::text AS updated_at_text,v.size_bytes,v.ordinal AS version_ordinal,v.media_type AS head_media_type FROM nodes n JOIN node_ancestry na ON na.tenant_id=n.tenant_id AND na.drive_id=n.drive_id AND na.descendant_id=n.id JOIN acl_entries a ON a.tenant_id=na.tenant_id AND a.drive_id=na.drive_id AND a.resource_id=na.ancestor_id LEFT JOIN file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=n.head_version_id WHERE n.tenant_id=$1 AND n.trash_root_id IS NULL AND a.effect='allow' AND a.action='READ_METADATA' AND (a.principal_id=$2 OR a.principal_id IN (SELECT g.principal_id FROM group_memberships m JOIN groups g ON g.tenant_id=m.tenant_id AND g.id=m.group_id WHERE m.tenant_id=$1 AND m.user_principal_id=$2)) AND (na.depth=0 OR (na.depth=1 AND a.inheritance IN ('children','descendants','self_and_descendants')) OR (na.depth>1 AND a.inheritance IN ('descendants','self_and_descendants'))) ORDER BY n.kind DESC,n.name_key,n.id")
             .bind(tenant_id)
             .bind(principal_id)
             .fetch_all(&self.pool)
@@ -891,10 +941,11 @@ impl Database {
         resource_id: Uuid,
     ) -> Result<Vec<AdvancedAclEntryRecord>, DatabaseError> {
         let rows = sqlx::query(
-            "SELECT a.principal_id,p.kind AS principal_kind, \
+            "SELECT a.principal_id,p.kind AS principal_kind,g.id AS group_id, \
                     COALESCE(u.display_name,g.display_name,a.principal_id::text) AS display_name, \
                     u.verified_email,a.action,a.effect,a.inheritance, \
-                    CASE WHEN a.direct_share_id IS NULL THEN 'advanced' ELSE 'share' END AS source \
+                    CASE WHEN a.direct_share_id IS NULL THEN a.source ELSE 'share' END AS source, \
+                    (a.direct_share_id IS NOT NULL OR a.source<>'core') AS read_only \
              FROM acl_entries a \
              JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.principal_id \
              LEFT JOIN users u ON u.tenant_id=p.tenant_id AND u.principal_id=p.id \
@@ -913,12 +964,14 @@ impl Database {
             .map(|row| AdvancedAclEntryRecord {
                 principal_id: row.get("principal_id"),
                 principal_kind: row.get("principal_kind"),
+                group_id: row.get("group_id"),
                 display_name: row.get("display_name"),
                 verified_email: row.get("verified_email"),
                 action: row.get("action"),
                 effect: row.get("effect"),
                 inheritance: row.get("inheritance"),
                 source: row.get("source"),
+                read_only: row.get("read_only"),
             })
             .collect())
     }
@@ -936,6 +989,8 @@ impl Database {
         let target_principal_id = resolve_advanced_acl_target(
             &mut transaction,
             tenant_id,
+            drive_id,
+            resource_id,
             target_kind,
             verified_email,
             group_id,
@@ -970,6 +1025,7 @@ impl Database {
         expected_target_principal_id: Uuid,
         entries: &[AdvancedAclEntryInput<'_>],
         covered_actions: &BTreeSet<Action>,
+        expected_etag: AdvancedAclReplacementEtag,
         membership_generation: i64,
         drive_acl_generation: i64,
         namespace_generation: i64,
@@ -983,7 +1039,7 @@ impl Database {
                     || !matches!(entry.effect, "allow" | "deny")
                     || !matches!(
                         entry.inheritance,
-                        "self" | "descendants" | "self_and_descendants"
+                        "self" | "children" | "descendants" | "self_and_descendants"
                     )
             })
         {
@@ -1009,9 +1065,19 @@ impl Database {
             ],
         )
         .await?;
+        lock_advanced_acl_etag(
+            &mut transaction,
+            tenant_id,
+            drive_id,
+            resource_id,
+            expected_etag,
+        )
+        .await?;
         let target_principal_id = resolve_advanced_acl_target(
             &mut transaction,
             tenant_id,
+            drive_id,
+            resource_id,
             target_kind,
             verified_email,
             group_id,
@@ -1043,7 +1109,7 @@ impl Database {
         }
         sqlx::query(
             "DELETE FROM acl_entries WHERE tenant_id=$1 AND drive_id=$2 AND resource_id=$3 \
-             AND principal_id=$4 AND direct_share_id IS NULL",
+             AND principal_id=$4 AND source='core' AND direct_share_id IS NULL",
         )
         .bind(tenant_id)
         .bind(drive_id)
@@ -1105,8 +1171,9 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn restore_file_version(
+    async fn restore_file_version_tx(
         &self,
+        transaction: &mut Transaction<'_, Postgres>,
         tenant_id: Uuid,
         actor_principal_id: Uuid,
         session_id: Uuid,
@@ -1119,9 +1186,8 @@ impl Database {
         namespace_generation: i64,
         resource_acl_generation: i64,
     ) -> Result<FileVersionRecord, DatabaseError> {
-        let mut transaction = self.pool.begin().await?;
         lock_authorization_fence(
-            &mut transaction,
+            transaction,
             tenant_id,
             actor_principal_id,
             session_id,
@@ -1140,7 +1206,7 @@ impl Database {
             .bind(drive_id)
             .bind(node_id)
             .bind(source_version_id)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(&mut **transaction)
             .await?
             .ok_or(DatabaseError::NotFound)?;
         if source.get::<Option<Uuid>, _>("head_version_id") != expected_head_version_id {
@@ -1149,7 +1215,7 @@ impl Database {
         let ordinal: i64 = sqlx::query("SELECT COALESCE(max(ordinal),0)+1 FROM file_versions WHERE tenant_id=$1 AND node_id=$2")
             .bind(tenant_id)
             .bind(node_id)
-            .fetch_one(&mut *transaction)
+            .fetch_one(&mut **transaction)
             .await?
             .get(0);
         let id = Uuid::new_v4();
@@ -1165,7 +1231,7 @@ impl Database {
             .bind(actor_principal_id)
             .bind(source_version_id)
             .bind(session_id)
-            .fetch_one(&mut *transaction)
+            .fetch_one(&mut **transaction)
             .await?;
         let created_at: String = created.get("created_at");
         let creator_display_name: Option<String> = created.get("creator_display_name");
@@ -1174,7 +1240,7 @@ impl Database {
             .bind(drive_id)
             .bind(node_id)
             .bind(id)
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await?;
         sqlx::query(
             "UPDATE filebelt_collaboration.epochs e SET state='frozen', \
@@ -1186,10 +1252,10 @@ impl Database {
         .bind(tenant_id)
         .bind(drive_id)
         .bind(node_id)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await?;
         insert_audit(
-            &mut transaction,
+            transaction,
             tenant_id,
             Some(actor_principal_id),
             None,
@@ -1202,7 +1268,7 @@ impl Database {
         )
         .await?;
         insert_outbox(
-            &mut transaction,
+            transaction,
             tenant_id,
             "filebelt.v1.version.created",
             "node",
@@ -1210,7 +1276,6 @@ impl Database {
             ordinal,
         )
         .await?;
-        transaction.commit().await?;
         Ok(FileVersionRecord {
             id,
             node_id,
@@ -1232,8 +1297,109 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn create_direct_share(
+    pub async fn restore_file_version(
         &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        source_version_id: Uuid,
+        expected_head_version_id: Option<Uuid>,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+    ) -> Result<FileVersionRecord, DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        let result = self
+            .restore_file_version_tx(
+                &mut transaction,
+                tenant_id,
+                actor_principal_id,
+                session_id,
+                drive_id,
+                node_id,
+                source_version_id,
+                expected_head_version_id,
+                membership_generation,
+                drive_acl_generation,
+                namespace_generation,
+                resource_acl_generation,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn restore_file_version_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        source_version_id: Uuid,
+        expected_head_version_id: Option<Uuid>,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(&FileVersionRecord) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(actor_principal_id)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let version = self
+                    .restore_file_version_tx(
+                        &mut transaction,
+                        tenant_id,
+                        actor_principal_id,
+                        session_id,
+                        drive_id,
+                        node_id,
+                        source_version_id,
+                        expected_head_version_id,
+                        membership_generation,
+                        drive_acl_generation,
+                        namespace_generation,
+                        resource_acl_generation,
+                    )
+                    .await?;
+                let response = render_response(&version)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_direct_share_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
         tenant_id: Uuid,
         actor_principal_id: Uuid,
         session_id: Uuid,
@@ -1255,9 +1421,8 @@ impl Database {
         if normalized_email.is_empty() || normalized_email.len() > 320 {
             return Err(DatabaseError::NotFound);
         }
-        let mut transaction = self.pool.begin().await?;
         lock_authorization_fence(
-            &mut transaction,
+            transaction,
             tenant_id,
             actor_principal_id,
             session_id,
@@ -1274,7 +1439,7 @@ impl Database {
         let target = sqlx::query("SELECT u.principal_id,u.display_name,u.verified_email FROM users u JOIN principals p ON p.tenant_id=u.tenant_id AND p.id=u.principal_id WHERE u.tenant_id=$1 AND lower(u.verified_email)=$2 AND u.status='active' AND p.disabled_at IS NULL FOR SHARE OF u,p")
             .bind(tenant_id)
             .bind(&normalized_email)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(&mut **transaction)
             .await?
             .ok_or(DatabaseError::NotFound)?;
         let target_principal_id: Uuid = target.get("principal_id");
@@ -1291,7 +1456,7 @@ impl Database {
             .bind(preset)
             .bind(inheritance)
             .bind(actor_principal_id)
-            .fetch_one(&mut *transaction)
+            .fetch_one(&mut **transaction)
             .await
             .map_err(map_security_admission)?
             .get(0);
@@ -1306,7 +1471,7 @@ impl Database {
                 .bind(inheritance)
                 .bind(actor_principal_id)
                 .bind(share_id)
-                .execute(&mut *transaction)
+                .execute(&mut **transaction)
                 .await
                 .map_err(map_conflict)?;
         }
@@ -1316,11 +1481,11 @@ impl Database {
         .bind(tenant_id)
         .bind(drive_id)
         .bind(resource_id)
-        .fetch_one(&mut *transaction)
+        .fetch_one(&mut **transaction)
         .await?
         .get(0);
         insert_audit(
-            &mut transaction,
+            transaction,
             tenant_id,
             Some(actor_principal_id),
             Some(target_principal_id),
@@ -1333,7 +1498,7 @@ impl Database {
         )
         .await?;
         insert_outbox(
-            &mut transaction,
+            transaction,
             tenant_id,
             "filebelt.v1.acl.changed",
             "node",
@@ -1341,7 +1506,6 @@ impl Database {
             generation,
         )
         .await?;
-        transaction.commit().await?;
         Ok(DirectShareRecord {
             principal_id: target_principal_id,
             display_name: target.get("display_name"),
@@ -1350,6 +1514,110 @@ impl Database {
             inheritance: inheritance.into(),
             created_at,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_direct_share(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        resource_id: Uuid,
+        verified_email: &str,
+        preset: &str,
+        inheritance: &str,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+    ) -> Result<DirectShareRecord, DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        let result = self
+            .create_direct_share_tx(
+                &mut transaction,
+                tenant_id,
+                actor_principal_id,
+                session_id,
+                drive_id,
+                resource_id,
+                verified_email,
+                preset,
+                inheritance,
+                membership_generation,
+                drive_acl_generation,
+                namespace_generation,
+                resource_acl_generation,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_direct_share_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor_principal_id: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        resource_id: Uuid,
+        verified_email: &str,
+        preset: &str,
+        inheritance: &str,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(&DirectShareRecord) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(actor_principal_id)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let share = self
+                    .create_direct_share_tx(
+                        &mut transaction,
+                        tenant_id,
+                        actor_principal_id,
+                        session_id,
+                        drive_id,
+                        resource_id,
+                        verified_email,
+                        preset,
+                        inheritance,
+                        membership_generation,
+                        drive_acl_generation,
+                        namespace_generation,
+                        resource_acl_generation,
+                    )
+                    .await?;
+                let response = render_response(&share)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
 
     pub async fn descendant_share_admission_open(
@@ -1881,8 +2149,9 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn begin_upload(
+    async fn begin_upload_tx<'a>(
         &self,
+        mut transaction: Transaction<'a, Postgres>,
         tenant_id: Uuid,
         actor: Uuid,
         session_id: Uuid,
@@ -1905,7 +2174,7 @@ impl Database {
         drive_acl_generation: i64,
         namespace_generation: i64,
         resource_acl_generation: i64,
-    ) -> Result<UploadRecord, DatabaseError> {
+    ) -> Result<(Transaction<'a, Postgres>, UploadRecord), DatabaseError> {
         validate_upload_expectation_shape(node_id, expected_parent_generation, expected_head)?;
         if !matches!(layout, "whole" | "chunked")
             || (layout == "whole" && part_count != 1)
@@ -1919,7 +2188,6 @@ impl Database {
         {
             return Err(DatabaseError::InvalidPersistedValue);
         }
-        let mut transaction = self.pool.begin().await?;
         let authorization_resource_id = node_id.unwrap_or(parent_id);
         lock_authorization_fence(
             &mut transaction,
@@ -2065,29 +2333,175 @@ impl Database {
             json!({"upload_id":upload_id,"bytes":declared_size}),
         )
         .await?;
+        Ok((
+            transaction,
+            UploadRecord {
+                tenant_id,
+                upload_id,
+                drive_id,
+                node_id,
+                parent_id,
+                owner_principal_id: actor,
+                payload_id,
+                backend_id,
+                payload_locator: locator,
+                expected_head_version_id: expected_head,
+                target_display_name: display_name.into(),
+                target_name_key: name_key.into(),
+                declared_size_bytes: declared_size,
+                chunk_size_bytes: chunk_size,
+                part_count,
+                fencing_token: 1,
+                state: "open".into(),
+                declared_media_type: declared_media_type.map(str::to_owned),
+                collaboration_checkpoint_id,
+                import_intent_id,
+            },
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn begin_upload(
+        &self,
+        tenant_id: Uuid,
+        actor: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        parent_id: Uuid,
+        node_id: Option<Uuid>,
+        expected_parent_generation: Option<i64>,
+        expected_head: Option<Uuid>,
+        display_name: &str,
+        name_key: &str,
+        declared_size: i64,
+        chunk_size: i32,
+        part_count: i32,
+        layout: &str,
+        declared_media_type: Option<&str>,
+        collaboration_checkpoint_id: Option<Uuid>,
+        import_intent_id: Option<Uuid>,
+        ttl_seconds: i64,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+    ) -> Result<UploadRecord, DatabaseError> {
+        let transaction = self.pool.begin().await?;
+        let (transaction, result) = self
+            .begin_upload_tx(
+                transaction,
+                tenant_id,
+                actor,
+                session_id,
+                drive_id,
+                parent_id,
+                node_id,
+                expected_parent_generation,
+                expected_head,
+                display_name,
+                name_key,
+                declared_size,
+                chunk_size,
+                part_count,
+                layout,
+                declared_media_type,
+                collaboration_checkpoint_id,
+                import_intent_id,
+                ttl_seconds,
+                membership_generation,
+                drive_acl_generation,
+                namespace_generation,
+                resource_acl_generation,
+            )
+            .await?;
         transaction.commit().await?;
-        Ok(UploadRecord {
-            tenant_id,
-            upload_id,
-            drive_id,
-            node_id,
-            parent_id,
-            owner_principal_id: actor,
-            payload_id,
-            backend_id,
-            payload_locator: locator,
-            expected_head_version_id: expected_head,
-            target_display_name: display_name.into(),
-            target_name_key: name_key.into(),
-            declared_size_bytes: declared_size,
-            chunk_size_bytes: chunk_size,
-            part_count,
-            fencing_token: 1,
-            state: "open".into(),
-            declared_media_type: declared_media_type.map(str::to_owned),
-            collaboration_checkpoint_id,
-            import_intent_id,
-        })
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn begin_upload_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor: Uuid,
+        session_id: Uuid,
+        drive_id: Uuid,
+        parent_id: Uuid,
+        node_id: Option<Uuid>,
+        expected_parent_generation: Option<i64>,
+        expected_head: Option<Uuid>,
+        display_name: &str,
+        name_key: &str,
+        declared_size: i64,
+        chunk_size: i32,
+        part_count: i32,
+        layout: &str,
+        declared_media_type: Option<&str>,
+        collaboration_checkpoint_id: Option<Uuid>,
+        import_intent_id: Option<Uuid>,
+        ttl_seconds: i64,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(&UploadRecord) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(actor)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let (mut transaction, upload) = self
+                    .begin_upload_tx(
+                        transaction,
+                        tenant_id,
+                        actor,
+                        session_id,
+                        drive_id,
+                        parent_id,
+                        node_id,
+                        expected_parent_generation,
+                        expected_head,
+                        display_name,
+                        name_key,
+                        declared_size,
+                        chunk_size,
+                        part_count,
+                        layout,
+                        declared_media_type,
+                        collaboration_checkpoint_id,
+                        import_intent_id,
+                        ttl_seconds,
+                        membership_generation,
+                        drive_acl_generation,
+                        namespace_generation,
+                        resource_acl_generation,
+                    )
+                    .await?;
+                let response = render_response(&upload)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
 
     pub async fn upload(
@@ -2354,8 +2768,9 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn commit_upload(
+    async fn commit_upload_tx<'a>(
         &self,
+        mut transaction: Transaction<'a, Postgres>,
         tenant_id: Uuid,
         actor: Uuid,
         session_id: Uuid,
@@ -2365,8 +2780,7 @@ impl Database {
         drive_acl_generation: i64,
         namespace_generation: i64,
         resource_acl_generation: i64,
-    ) -> Result<(Uuid, Uuid), DatabaseError> {
-        let mut transaction = self.pool.begin().await?;
+    ) -> Result<(Transaction<'a, Postgres>, Uuid, Uuid), DatabaseError> {
         let row=sqlx::query("SELECT u.*,p.blake3 FROM upload_sessions u JOIN payload_objects p ON p.tenant_id=u.tenant_id AND p.id=u.payload_id WHERE u.tenant_id=$1 AND u.id=$2 AND u.owner_principal_id=$3 AND u.fencing_token=$4 AND u.state='finalized' AND p.state='finalized' FOR UPDATE OF u,p")
             .bind(tenant_id).bind(upload_id).bind(actor).bind(expected_fencing_token).fetch_optional(&mut *transaction).await?.ok_or(DatabaseError::StaleGeneration)?;
         let drive_id: Uuid = row.get("drive_id");
@@ -2598,8 +3012,99 @@ impl Database {
             ordinal,
         )
         .await?;
+        Ok((transaction, node_id, version_id))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn commit_upload(
+        &self,
+        tenant_id: Uuid,
+        actor: Uuid,
+        session_id: Uuid,
+        upload_id: Uuid,
+        expected_fencing_token: i64,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+    ) -> Result<(Uuid, Uuid), DatabaseError> {
+        let transaction = self.pool.begin().await?;
+        let (transaction, node_id, version_id) = self
+            .commit_upload_tx(
+                transaction,
+                tenant_id,
+                actor,
+                session_id,
+                upload_id,
+                expected_fencing_token,
+                membership_generation,
+                drive_acl_generation,
+                namespace_generation,
+                resource_acl_generation,
+            )
+            .await?;
         transaction.commit().await?;
         Ok((node_id, version_id))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn commit_upload_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        actor: Uuid,
+        session_id: Uuid,
+        upload_id: Uuid,
+        expected_fencing_token: i64,
+        membership_generation: i64,
+        drive_acl_generation: i64,
+        namespace_generation: i64,
+        resource_acl_generation: i64,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(Uuid, Uuid) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(actor)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let (mut transaction, node_id, version_id) = self
+                    .commit_upload_tx(
+                        transaction,
+                        tenant_id,
+                        actor,
+                        session_id,
+                        upload_id,
+                        expected_fencing_token,
+                        membership_generation,
+                        drive_acl_generation,
+                        namespace_generation,
+                        resource_acl_generation,
+                    )
+                    .await?;
+                let response = render_response(node_id, version_id)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
 
     pub async fn payload_for_node(
@@ -2715,6 +3220,144 @@ impl Database {
             || drive_updated != 1
         {
             return Err(DatabaseError::StaleGeneration);
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Atomically select finalized upload-owned payloads that have no durable
+    /// consumer and enqueue their generic deletion jobs.
+    ///
+    /// Mount staging payloads are deliberately ineligible even when finalized:
+    /// their writer/conflict rows and mount cleanup jobs are the sole deletion
+    /// authority.
+    pub async fn enqueue_finalized_upload_orphans(
+        &self,
+        tenant_id: Uuid,
+        backend_id: Uuid,
+        grace_seconds: i64,
+        limit: i64,
+    ) -> Result<u64, DatabaseError> {
+        if tenant_id.is_nil()
+            || backend_id.is_nil()
+            || grace_seconds < 0
+            || !(1..=1_000).contains(&limit)
+        {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "UPDATE public.payload_objects SET state='delete_intent',\
+                    deletion_intent_at=clock_timestamp() \
+             WHERE (tenant_id,id) IN (\
+               SELECT payload.tenant_id,payload.id \
+               FROM public.payload_objects AS payload \
+               JOIN public.upload_sessions AS upload \
+                 ON upload.tenant_id=payload.tenant_id \
+                AND upload.payload_id=payload.id \
+               JOIN public.quota_reservations AS reservation \
+                 ON reservation.tenant_id=upload.tenant_id \
+                AND reservation.upload_id=upload.id \
+               WHERE payload.tenant_id=$2 AND payload.backend_id=$3 \
+                 AND payload.authority_kind='file' \
+                 AND payload.state='finalized' \
+                 AND payload.finalized_at<=clock_timestamp()-make_interval(secs=>$1) \
+                 AND upload.state='finalized' AND reservation.state='active' \
+                 AND NOT EXISTS (SELECT 1 FROM public.file_versions AS version \
+                   WHERE version.tenant_id=payload.tenant_id \
+                     AND version.payload_id=payload.id) \
+                 AND NOT EXISTS (SELECT 1 FROM filebelt_document.revisions AS revision \
+                   WHERE revision.tenant_id=payload.tenant_id \
+                     AND revision.payload_id=payload.id) \
+                 AND NOT EXISTS (SELECT 1 FROM filebelt_mount.write_sessions AS writer \
+                   WHERE writer.tenant_id=payload.tenant_id \
+                     AND writer.staging_payload_id=payload.id) \
+               ORDER BY payload.finalized_at,payload.id \
+               FOR UPDATE OF payload,upload,reservation SKIP LOCKED LIMIT $4\
+             ) RETURNING tenant_id,id",
+        )
+        .bind(grace_seconds)
+        .bind(tenant_id)
+        .bind(backend_id)
+        .bind(limit)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in &rows {
+            let row_tenant_id: Uuid = row.get("tenant_id");
+            let payload_id: Uuid = row.get("id");
+            sqlx::query(
+                "INSERT INTO public.jobs \
+                   (tenant_id,id,kind,state,priority,aggregate_id,idempotency_key,payload) \
+                 VALUES ($1,$2,'payload_delete','queued',80,$3,$4,$5) \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(row_tenant_id)
+            .bind(Uuid::new_v4())
+            .bind(payload_id)
+            .bind(format!("orphan:{payload_id}"))
+            .bind(json!({"payload_id": payload_id}))
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        u64::try_from(rows.len()).map_err(|_| DatabaseError::InvalidPersistedValue)
+    }
+
+    /// Final PostgreSQL fence immediately before an upload-orphan physical
+    /// delete. Transitioning to `deleting` closes all ordinary publish paths;
+    /// the negative authority checks keep document and mount payloads out even
+    /// if a stale or forged generic job names their UUID.
+    pub async fn admit_finalized_upload_orphan_deletion(
+        &self,
+        tenant_id: Uuid,
+        payload_id: Uuid,
+    ) -> Result<(), DatabaseError> {
+        if tenant_id.is_nil() || payload_id.is_nil() {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool.begin().await?;
+        let eligible = sqlx::query_scalar::<_, Uuid>(
+            "SELECT payload.id \
+             FROM public.payload_objects AS payload \
+             JOIN public.upload_sessions AS upload \
+               ON upload.tenant_id=payload.tenant_id \
+              AND upload.payload_id=payload.id \
+             JOIN public.quota_reservations AS reservation \
+               ON reservation.tenant_id=upload.tenant_id \
+              AND reservation.upload_id=upload.id \
+             WHERE payload.tenant_id=$1 AND payload.id=$2 \
+               AND payload.authority_kind='file' \
+               AND payload.state IN ('delete_intent','deleting') \
+               AND upload.state='finalized' AND reservation.state='active' \
+               AND NOT EXISTS (SELECT 1 FROM public.file_versions AS version \
+                 WHERE version.tenant_id=payload.tenant_id \
+                   AND version.payload_id=payload.id) \
+               AND NOT EXISTS (SELECT 1 FROM filebelt_document.revisions AS revision \
+                 WHERE revision.tenant_id=payload.tenant_id \
+                   AND revision.payload_id=payload.id) \
+               AND NOT EXISTS (SELECT 1 FROM filebelt_mount.write_sessions AS writer \
+                 WHERE writer.tenant_id=payload.tenant_id \
+                   AND writer.staging_payload_id=payload.id) \
+             FOR UPDATE OF payload,upload,reservation",
+        )
+        .bind(tenant_id)
+        .bind(payload_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if eligible.is_none() {
+            return Err(DatabaseError::StaleGeneration);
+        }
+        let changed = sqlx::query(
+            "UPDATE public.payload_objects SET state='deleting' \
+             WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'",
+        )
+        .bind(tenant_id)
+        .bind(payload_id)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if changed > 1 {
+            return Err(DatabaseError::InvalidPersistedValue);
         }
         transaction.commit().await?;
         Ok(())
@@ -2871,9 +3514,39 @@ fn validate_upload_expectation_shape(
     Ok(())
 }
 
+pub(crate) async fn payload_for_node_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    drive_id: Uuid,
+    node_id: Uuid,
+    version_id: Uuid,
+) -> Result<PayloadRecord, DatabaseError> {
+    let row=sqlx::query("SELECT p.tenant_id,p.id AS payload_id,p.drive_id,p.backend_id,p.locator,p.layout,p.state,p.size_bytes,p.blake3 FROM file_versions v JOIN nodes n ON n.tenant_id=v.tenant_id AND n.id=v.node_id JOIN payload_objects p ON p.tenant_id=v.tenant_id AND p.id=v.payload_id WHERE v.tenant_id=$1 AND v.node_id=$2 AND v.id=$3 AND n.drive_id=$4 AND p.state='referenced'")
+        .bind(tenant_id)
+        .bind(node_id)
+        .bind(version_id)
+        .bind(drive_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(DatabaseError::NotFound)?;
+    Ok(PayloadRecord {
+        tenant_id: row.get("tenant_id"),
+        payload_id: row.get("payload_id"),
+        drive_id: row.get("drive_id"),
+        backend_id: row.get("backend_id"),
+        locator: row.get("locator"),
+        layout: row.get("layout"),
+        state: row.get("state"),
+        size_bytes: row.get("size_bytes"),
+        blake3: row.get("blake3"),
+    })
+}
+
 async fn resolve_advanced_acl_target(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: Uuid,
+    drive_id: Uuid,
+    resource_id: Uuid,
     target_kind: &str,
     verified_email: Option<&str>,
     group_id: Option<Uuid>,
@@ -2885,12 +3558,16 @@ async fn resolve_advanced_acl_target(
                 .filter(|email| !email.is_empty() && email.len() <= 320)
                 .ok_or(DatabaseError::InvalidPersistedValue)?;
             sqlx::query_scalar(
-                "SELECT u.principal_id FROM users u \
+                "SELECT u.principal_id FROM nodes resource \
+                 JOIN users u ON u.tenant_id=resource.tenant_id \
                  JOIN principals p ON p.tenant_id=u.tenant_id AND p.id=u.principal_id \
-                 WHERE u.tenant_id=$1 AND lower(u.verified_email)=lower($2) \
+                 WHERE resource.tenant_id=$1 AND resource.drive_id=$2 AND resource.id=$3 \
+                   AND lower(u.verified_email)=lower($4) \
                    AND u.status='active' AND p.disabled_at IS NULL FOR SHARE OF u,p",
             )
             .bind(tenant_id)
+            .bind(drive_id)
+            .bind(resource_id)
             .bind(email)
             .fetch_optional(&mut **transaction)
             .await?
@@ -2899,12 +3576,16 @@ async fn resolve_advanced_acl_target(
         "group" => {
             let id = group_id.ok_or(DatabaseError::InvalidPersistedValue)?;
             sqlx::query_scalar(
-                "SELECT g.principal_id FROM groups g \
+                "SELECT g.principal_id FROM nodes resource \
+                 JOIN groups g ON g.tenant_id=resource.tenant_id \
                  JOIN principals p ON p.tenant_id=g.tenant_id AND p.id=g.principal_id \
-                 WHERE g.tenant_id=$1 AND g.id=$2 AND p.disabled_at IS NULL \
+                 WHERE resource.tenant_id=$1 AND resource.drive_id=$2 AND resource.id=$3 \
+                   AND g.id=$4 AND p.disabled_at IS NULL \
                  FOR SHARE OF g,p",
             )
             .bind(tenant_id)
+            .bind(drive_id)
+            .bind(resource_id)
             .bind(id)
             .fetch_optional(&mut **transaction)
             .await?
@@ -2923,7 +3604,7 @@ async fn advanced_acl_actions_for_target(
 ) -> Result<BTreeSet<Action>, DatabaseError> {
     let actions: Vec<String> = sqlx::query_scalar(
         "SELECT action FROM acl_entries WHERE tenant_id=$1 AND drive_id=$2 AND resource_id=$3 \
-         AND principal_id=$4 AND direct_share_id IS NULL FOR SHARE",
+         AND principal_id=$4 AND source='core' AND direct_share_id IS NULL FOR SHARE",
     )
     .bind(tenant_id)
     .bind(drive_id)
@@ -2980,6 +3661,32 @@ fn stale_advanced_acl_target_drift(error: DatabaseError) -> DatabaseError {
         DatabaseError::NotFound => DatabaseError::StaleGeneration,
         error => error,
     }
+}
+
+async fn lock_advanced_acl_etag(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    drive_id: Uuid,
+    resource_id: Uuid,
+    expected: AdvancedAclReplacementEtag,
+) -> Result<(), DatabaseError> {
+    let current = sqlx::query(
+        "SELECT namespace_generation,acl_generation,attribute_generation \
+         FROM nodes WHERE tenant_id=$1 AND drive_id=$2 AND id=$3 FOR UPDATE",
+    )
+    .bind(tenant_id)
+    .bind(drive_id)
+    .bind(resource_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(DatabaseError::StaleGeneration)?;
+    if current.get::<i64, _>("namespace_generation") != expected.namespace_generation
+        || current.get::<i64, _>("acl_generation") != expected.acl_generation
+        || current.get::<i64, _>("attribute_generation") != expected.attribute_generation
+    {
+        return Err(DatabaseError::StaleGeneration);
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3271,27 +3978,59 @@ mod tests {
     fn upload_mutations_are_transactionally_authorization_fenced() {
         let source = include_str!("lib.rs");
         let begin_upload = source
-            .split_once("pub async fn begin_upload")
+            .split_once("async fn begin_upload_tx")
             .expect("begin_upload exists")
             .1
-            .split_once("pub async fn upload(")
-            .expect("upload follows begin_upload")
+            .split_once("pub async fn begin_upload(")
+            .expect("begin_upload wrapper follows transaction body")
             .0;
         assert!(begin_upload.contains("lock_authorization_fence("));
         assert!(begin_upload.contains("expected_parent_generation"));
         assert!(begin_upload.contains("expected_head"));
 
         let commit_upload = source
-            .split_once("pub async fn commit_upload")
+            .split_once("async fn commit_upload_tx")
             .expect("commit_upload exists")
             .1
-            .split_once("pub async fn payload_for_node")
-            .expect("payload_for_node follows commit_upload")
+            .split_once("pub async fn commit_upload(")
+            .expect("commit_upload wrapper follows transaction body")
             .0;
         assert!(commit_upload.contains("lock_authorization_fence("));
         assert!(commit_upload.contains("expected_fencing_token"));
         assert!(commit_upload.contains("u.owner_principal_id=$3"));
         assert!(commit_upload.contains("u.fencing_token=$4"));
+    }
+
+    #[test]
+    fn resource_receipts_finalize_after_the_authoritative_write_and_before_commit() {
+        let source = include_str!("lib.rs");
+        for (method, mutation) in [
+            (
+                "pub async fn restore_file_version_idempotent",
+                ".restore_file_version_tx(",
+            ),
+            (
+                "pub async fn create_direct_share_idempotent",
+                ".create_direct_share_tx(",
+            ),
+            ("pub async fn begin_upload_idempotent", ".begin_upload_tx("),
+            (
+                "pub async fn commit_upload_idempotent",
+                ".commit_upload_tx(",
+            ),
+        ] {
+            let implementation = source.split_once(method).expect("method exists").1;
+            let reserve = implementation.find("reserve(&mut transaction").unwrap();
+            let mutate = implementation.find(mutation).unwrap();
+            let finalize = implementation.find("finalize(").unwrap();
+            let commit = finalize
+                + implementation[finalize..]
+                    .find("transaction.commit().await?")
+                    .unwrap();
+            assert!(reserve < mutate, "{method} mutates before reserving");
+            assert!(mutate < finalize, "{method} finalizes before mutation");
+            assert!(finalize < commit, "{method} commits before finalizing");
+        }
     }
 
     #[test]
@@ -3301,7 +4040,7 @@ mod tests {
             .split_once("pub async fn create_directory")
             .expect("create_directory exists")
             .1
-            .split_once("pub async fn begin_upload")
+            .split_once("async fn begin_upload_tx")
             .expect("begin_upload follows create_directory")
             .0;
         assert!(create_directory.contains("session_id: Uuid"));
@@ -3316,15 +4055,35 @@ mod tests {
             .split_once("pub async fn replace_advanced_acl_entries")
             .expect("advanced ACL replacement exists")
             .1
-            .split_once("pub async fn restore_file_version")
+            .split_once("async fn restore_file_version_tx")
             .expect("restore follows ACL replacement")
             .0;
         assert!(replacement.contains("lock_authorization_fence("));
-        assert!(replacement.contains("direct_share_id IS NULL"));
+        assert!(replacement.contains("lock_advanced_acl_etag("));
+        assert!(replacement.contains("source='core' AND direct_share_id IS NULL"));
         assert!(replacement.contains("target_principal_id == owner_principal_id"));
         assert!(replacement.contains("filebelt.v1.acl.changed"));
         assert!(replacement.contains("require_exact_advanced_acl_target"));
         assert!(replacement.contains("replacement_actions_are_covered"));
+    }
+
+    #[test]
+    fn acl_children_scope_is_exact_and_forward_migrated() {
+        let source = include_str!("lib.rs");
+        let shared_nodes = source
+            .split_once("pub async fn list_shared_nodes")
+            .expect("shared-node listing exists")
+            .1
+            .split_once("pub async fn list_file_versions")
+            .expect("file-version listing follows shared nodes")
+            .0;
+        assert!(shared_nodes.contains("na.depth=1 AND a.inheritance IN ('children'"));
+        assert!(shared_nodes.contains("na.depth>1 AND a.inheritance IN ('descendants'"));
+
+        let migration = include_str!("../../../migrations/postgres/000020_acl_children_scope.sql");
+        assert!(migration.contains("'self','children','descendants','self_and_descendants'"));
+        assert!(migration.contains("covered.depth=1 AND acl.inheritance IN"));
+        assert!(migration.contains("covered.depth>1 AND acl.inheritance IN"));
     }
 
     #[test]
@@ -3472,11 +4231,11 @@ mod tests {
     fn backend_capacity_reservations_lock_before_drive_updates() {
         let source = include_str!("lib.rs");
         let begin_upload = source
-            .split_once("pub async fn begin_upload")
+            .split_once("async fn begin_upload_tx")
             .expect("begin_upload exists")
             .1
-            .split_once("pub async fn upload(")
-            .expect("upload follows begin_upload")
+            .split_once("pub async fn begin_upload(")
+            .expect("begin_upload wrapper follows transaction body")
             .0;
         let backend_lock = begin_upload
             .find("storage_backends WHERE tenant_id=$1 AND kind='posix' FOR UPDATE")
@@ -3491,20 +4250,20 @@ mod tests {
     fn direct_uploads_cannot_claim_mcp_provenance() {
         let source = include_str!("lib.rs");
         let begin_upload = source
-            .split_once("pub async fn begin_upload")
+            .split_once("async fn begin_upload_tx")
             .expect("begin upload exists")
             .1
-            .split_once("pub async fn upload(")
-            .expect("upload follows begin upload")
+            .split_once("pub async fn begin_upload(")
+            .expect("begin upload wrapper follows transaction body")
             .0;
         assert!(!begin_upload.contains("mcp_invocation_id"));
 
         let commit = source
-            .split_once("pub async fn commit_upload")
+            .split_once("async fn commit_upload_tx")
             .expect("commit exists")
             .1
-            .split_once("pub async fn payload_for_node")
-            .expect("payload lookup follows commit")
+            .split_once("pub async fn commit_upload(")
+            .expect("commit wrapper follows transaction body")
             .0;
         assert!(!commit.contains("mcp_invocation_id"));
     }
@@ -3537,7 +4296,7 @@ mod tests {
             .split_once("pub async fn reopen_expired_upload_finalizations")
             .expect("recovery method exists")
             .1
-            .split_once("pub async fn commit_upload")
+            .split_once("async fn commit_upload_tx")
             .expect("commit follows recovery")
             .0;
         assert!(recovery.contains("fencing_token=fencing_token+1"));

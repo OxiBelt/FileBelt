@@ -45,6 +45,23 @@ one path:
 
 ## Component procedures
 
+### MCP broker idempotency
+
+- Quiesce the seven broker-mediated mutation/probe routes before mixing an API,
+  broker, grants, or schema version that does not implement migration `000024`.
+- Preserve `filebelt_mcp.broker_operation_receipts` during rollback. Rows with
+  no `api_completed_at` are recovery state for a broker-complete continuation,
+  including registration deletion after credential erasure; never purge or
+  synthesize their public response manually.
+- A release-matched API may resume the exact signed operation and commit the
+  local continuation, broker completion marker, and public receipt together.
+  OAuth replay reconstructs its URL from keyed derived values and safe metadata;
+  no operator procedure may export raw state, verifier, URL, credential, or
+  token material from the vault or logs.
+- Maintenance cleanup is tenant-scoped and bounded to 1,000 rows, and admits
+  only expired rows with a finalized broker result and API completion marker.
+  Rollback retains the additive table and grants and proceeds by roll-forward.
+
 ### OIDC, sessions, and ACL
 
 - Disable new callbacks and unsafe mutations, but do not reinterpret existing
@@ -69,6 +86,11 @@ one path:
   re-enable it. The checked-in OxiBelt WAF is disabled and must not be enabled
   or edited for this cutover. If method-aware ingress is unavailable, use
   `deployment.quiesced=true` while draining, replacing, and verifying replicas.
+- After migration `000020_acl_children_scope.sql`, do not start an older API,
+  VFS, or maintenance binary that cannot parse the `children` inheritance
+  value. Keep advanced ACL PUTs quiesced and roll forward to a compatible
+  binary; do not drop the additive constraint, rewrite ACL rows, or alter the
+  recorded migration checksum.
 - Preserve generation values and audit events. Never decrement a generation or
   delete a deny to make an old binary accept the data.
 

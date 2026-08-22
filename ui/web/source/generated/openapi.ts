@@ -549,9 +549,9 @@ export interface paths {
             readonly path?: never;
             readonly cookie?: never;
         };
-        /** @description Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived rows are included as read-only projections. */
+        /** @description Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived and non-core rows are included as read-only projections with exact principal and source provenance. */
         readonly get: operations["listAdvancedAcl"];
-        /** @description Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and non-share advanced rows removed by omission, regardless of effect or inheritance. An empty entries array clears advanced rows only when every removed action is held. Authorization denial remains existence-hiding 404; stale concurrent authorization or ACL state is 409. */
+        /** @description Atomically replaces only mutable core rows for one exact verified user or local group. Owner grants, share-derived rows, and rows owned by another source cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and mutable core rows removed by omission, regardless of effect or inheritance. An empty entries array clears mutable core rows only when every removed action is held. Authorization denial remains existence-hiding 404; the exact If-Match value and authorization generations are rechecked while the PostgreSQL mutation transaction holds the resource fence, and stale concurrent state is 409. */
         readonly put: operations["replaceAdvancedAcl"];
         readonly post?: never;
         readonly delete?: never;
@@ -1274,7 +1274,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        /** @description Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected. */
+        /** @description Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The caller supplies a fresh operation UUID that becomes the credential identifier so an unknown response can be revoked without replaying creation. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected. */
         readonly post: operations["createMountCredential"];
         readonly delete?: never;
         readonly options?: never;
@@ -1600,24 +1600,26 @@ export interface components {
     schemas: {
         readonly AclCollection: {
             readonly entries: readonly components["schemas"]["AclEntry"][];
-            readonly supported_actions: readonly string[];
+            readonly supported_actions: readonly ("READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "TRAVERSE" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES")[];
         };
         readonly AclEntry: {
             /**
              * @description BYPASS_REPOSITORY_RULES records standing eligibility only; it never represents an operation-scoped bypass grant.
              * @enum {string}
              */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "TRAVERSE" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
             readonly display_name: string;
             /** @enum {string} */
             readonly effect: "allow" | "deny";
+            readonly group_id: components["schemas"]["UuidV4"] | null;
             /** @enum {string} */
-            readonly inheritance: "self" | "descendants" | "self_and_descendants";
+            readonly inheritance: "self" | "children" | "descendants" | "self_and_descendants";
             readonly principal_id: components["schemas"]["UuidV4"];
             /** @enum {string} */
             readonly principal_kind: "user" | "group";
+            readonly read_only: boolean;
             /** @enum {string} */
-            readonly source: "advanced" | "share";
+            readonly source: "core" | "share" | "nfs";
             readonly verified_email: string | null;
         };
         readonly AclEntryMutation: {
@@ -1625,11 +1627,11 @@ export interface components {
              * @description BYPASS_REPOSITORY_RULES records standing eligibility only; it never replaces the matching ruleset allowlist, recent OIDC authentication, bounded reason, one-operation grant, or audit evidence.
              * @enum {string}
              */
-            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
+            readonly action: "READ_METADATA" | "LIST_CHILDREN" | "READ_CONTENT" | "CREATE_CHILD" | "WRITE_CONTENT" | "CREATE_VERSION" | "RENAME" | "MOVE" | "DELETE" | "RESTORE" | "SET_ATTRIBUTES" | "SHARE" | "MANAGE_ACL" | "MANAGE_DRIVE" | "TRANSCODE" | "USE_EXTERNAL_EDITOR" | "COMMENT" | "REVIEW" | "USE_MCP" | "MOUNT" | "EXPORT" | "TRAVERSE" | "READ_REPOSITORY" | "WRITE_REPOSITORY" | "MANAGE_REPOSITORY" | "BYPASS_REPOSITORY_RULES";
             /** @enum {string} */
             readonly effect: "allow" | "deny";
             /** @enum {string} */
-            readonly inheritance: "self" | "descendants" | "self_and_descendants";
+            readonly inheritance: "self" | "children" | "descendants" | "self_and_descendants";
         };
         readonly AclPrincipalSelector: {
             readonly group_id: components["schemas"]["UuidV4"] | null;
@@ -1918,6 +1920,8 @@ export interface components {
             readonly bound_device_id: components["schemas"]["UuidV4"] | null;
             /** Format: date-time */
             readonly expires_at: string;
+            /** @description Fresh caller-generated operation identifier. It becomes the credential ID and must never be reused to retry secret creation. */
+            readonly operation_id: components["schemas"]["UuidV4"];
             /** @enum {string} */
             readonly protocol: "smb" | "ftps";
             /** @constant */

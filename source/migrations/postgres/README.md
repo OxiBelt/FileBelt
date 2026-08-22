@@ -49,6 +49,44 @@ files. The Phase 6 mount vault envelope is completed by
 metadata and policy state are authoritative; migrations never infer state from
 the payload volume or an event stream.
 
+`000020_acl_children_scope.sql` admits the stable `children` ACL scope and
+updates the live NFS traversal projection so it reaches exactly immediate
+children. It preserves existing ACL rows and source tags. Older binaries that
+cannot parse `children` must remain stopped after the migration; rollback is a
+route quiesce followed by roll-forward, never a constraint or checksum edit.
+
+`000021_collaboration_checkpoint_limit.sql` aligns durable checkpoint admission
+with the existing configurable 16 MiB Markdown edit ceiling. It changes no
+stored bytes; older binaries remain compatible with rows below their own
+runtime limit, while rollback is a route quiesce and roll-forward because a
+smaller constraint cannot be restored after larger checkpoints are admitted.
+
+`000022_document_close_idempotency.sql` admits transaction-bound coordinator
+receipts for own-session revoke and manager force-close. Keep document close
+routes quiesced until the migration and release-matched API and coordinator are
+active; response-loss retries then replay the committed close result before the
+API finalizes its public receipt. Rollback retains the expanded constraint and
+keeps the close routes quiesced until roll-forward. The migration does not add
+replay semantics to one-use launch handoffs.
+
+`000023_mount_credential_cancellation_fence.sql` serializes caller-chosen mount
+credential UUID creation and recovery revocation. Missing revocation commits a
+durable cancellation row before returning not found, and the credential insert
+trigger rejects any later create for that UUID. Keep credential routes quiesced
+until the release-matched API and grants are active; rollback retains the
+additive fence and requires those routes to remain disabled on older APIs.
+
+`000024_mcp_broker_operation_receipts.sql` adds the digest-only, 24-hour broker
+journal for signed management/probe operation UUIDs. Keep the seven affected
+MCP routes quiesced until the migration, grants, API, and broker are all
+release-matched. Rollback retains the additive journal and requires those
+routes to stay quiesced on older binaries; rows contain no credential, OAuth
+state/verifier, authorization URL, or token material.
+Maintenance removes at most 1,000 expired rows per tenant sweep and only when a
+safe broker result and the transaction-bound API completion marker are both
+present. A broker-complete/API-incomplete delete or probe saga is deliberately
+retained for exact resumption; do not manually purge it during rollback.
+
 `000010_onlyoffice_origin_isolation.sql` is a forward-only security cutover.
 Apply it only while document admission and every old launch-capable binary are
 stopped. It preserves revisions and reconciliation state while revoking

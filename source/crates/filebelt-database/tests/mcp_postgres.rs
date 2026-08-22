@@ -3,9 +3,10 @@
 //! PostgreSQL-backed MCP schema and least-privilege contract checks.
 
 use filebelt_database::mcp::{
-    McpIdempotency, McpIdempotentWrite, McpSecretEnvelope, NewCapabilitySnapshot,
+    McpBrokerOperationIdempotency, McpBrokerOperationStart, McpIdempotency, McpIdempotentWrite,
+    McpMutationIdempotency, McpMutationStart, McpSecretEnvelope, NewCapabilitySnapshot,
     NewMcpApprovalRule, NewMcpDataGrant, NewMcpInvocation, NewMcpOAuthAttempt, NewMcpRegistration,
-    NewMcpRunnerSlotReservation,
+    NewMcpRunnerSlotReservation, RegistrationConfigurationUpdate,
 };
 use filebelt_database::{Database, DatabaseError};
 use serde_json::json;
@@ -455,6 +456,39 @@ async fn mcp_schema_enforces_tenant_isolation_and_secret_privileges() {
         &capability_fingerprint,
     )
     .await;
+    verify_local_mutation_idempotency(&database, tenant_id, user_principal_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL in FILEBELT_MCP_TEST_DATABASE_URL"]
+async fn mcp_local_mutations_commit_receipts_atomically() {
+    let database_url = std::env::var("FILEBELT_MCP_TEST_DATABASE_URL")
+        .expect("FILEBELT_MCP_TEST_DATABASE_URL is required");
+    let database = Database::connect(&database_url, 4)
+        .await
+        .expect("connect test database");
+    sqlx::raw_sql(include_str!("../../../migrations/postgres/roles.sql"))
+        .execute(database.pool())
+        .await
+        .expect("apply roles");
+    database.migrate().await.expect("apply migrations");
+    let tenant_id = Uuid::new_v4();
+    let principal_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO public.tenants (id,slug) VALUES ($1,$2)")
+        .bind(tenant_id)
+        .bind(format!("mcp-idempotency-{tenant_id}"))
+        .execute(database.pool())
+        .await
+        .expect("tenant");
+    sqlx::query("INSERT INTO public.principals (tenant_id,id,kind) VALUES ($1,$2,'user')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .execute(database.pool())
+        .await
+        .expect("principal");
+
+    verify_local_mutation_idempotency(&database, tenant_id, principal_id).await;
+    verify_broker_operation_idempotency(&database, tenant_id, principal_id).await;
 }
 
 async fn verify_broker_config_erasure_boundary(
@@ -672,6 +706,444 @@ async fn verify_atomic_approval_idempotency(
         McpIdempotentWrite::KeyReused => panic!("matching request was rejected"),
     });
     assert_eq!(bodies[0], bodies[1]);
+}
+
+async fn verify_local_mutation_idempotency(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+) {
+    let route = "POST /api/v1/mcp/registrations";
+    let request_fingerprint = [31; 32];
+    let first_id = Uuid::new_v4();
+    let second_id = Uuid::new_v4();
+    let (left, right) = tokio::join!(
+        create_registration_idempotently(
+            database,
+            tenant_id,
+            principal_id,
+            route,
+            "local-concurrent",
+            &request_fingerprint,
+            first_id,
+        ),
+        create_registration_idempotently(
+            database,
+            tenant_id,
+            principal_id,
+            route,
+            "local-concurrent",
+            &request_fingerprint,
+            second_id,
+        ),
+    );
+    let bodies = [
+        left.expect("first local mutation"),
+        right.expect("second local mutation"),
+    ]
+    .map(|outcome| match outcome {
+        McpIdempotentWrite::Created(record) | McpIdempotentWrite::Replayed(record) => {
+            record.response_body
+        }
+        McpIdempotentWrite::KeyReused => panic!("matching local mutation was rejected"),
+    });
+    assert_eq!(bodies[0], bodies[1]);
+    let created_id = bodies[0]["id"].as_str().expect("created identifier");
+    let registration_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM filebelt_mcp.registrations WHERE tenant_id=$1 AND id IN ($2,$3)",
+    )
+    .bind(tenant_id)
+    .bind(first_id)
+    .bind(second_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("registration count");
+    assert_eq!(registration_count, 1);
+    assert!(created_id == first_id.to_string() || created_id == second_id.to_string());
+
+    assert!(matches!(
+        database
+            .mcp_begin_mutation(&McpMutationIdempotency {
+                tenant_id,
+                principal_id,
+                route,
+                key: "local-concurrent",
+                request_fingerprint: &[32; 32],
+                legacy_request_fingerprint: None,
+            })
+            .await
+            .expect("mismatched mutation admission"),
+        McpMutationStart::KeyReused
+    ));
+
+    let rolled_back_id = Uuid::new_v4();
+    let rollback_fingerprint = [33; 32];
+    let mut pending = match database
+        .mcp_begin_mutation(&McpMutationIdempotency {
+            tenant_id,
+            principal_id,
+            route,
+            key: "local-rollback",
+            request_fingerprint: &rollback_fingerprint,
+            legacy_request_fingerprint: None,
+        })
+        .await
+        .expect("rollback mutation admission")
+    {
+        McpMutationStart::Started(transaction) => transaction,
+        _ => panic!("fresh rollback key did not start"),
+    };
+    let rollback_policy = json!({});
+    pending
+        .create_registration(&test_registration_input(
+            tenant_id,
+            principal_id,
+            rolled_back_id,
+            "Rolled back",
+            &rollback_policy,
+        ))
+        .await
+        .expect("uncommitted registration");
+    drop(pending);
+    assert!(matches!(
+        database
+            .mcp_registration(tenant_id, principal_id, rolled_back_id)
+            .await,
+        Err(DatabaseError::NotFound)
+    ));
+    let replacement_id = Uuid::new_v4();
+    let replacement = create_registration_idempotently(
+        database,
+        tenant_id,
+        principal_id,
+        route,
+        "local-rollback",
+        &rollback_fingerprint,
+        replacement_id,
+    )
+    .await
+    .expect("replacement after rollback");
+    assert!(matches!(replacement, McpIdempotentWrite::Created(_)));
+    let pending_receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM public.idempotency_records WHERE tenant_id=$1 AND principal_id=$2 AND route=$3 AND key IN ('local-concurrent','local-rollback') AND response_status=102")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(route)
+        .fetch_one(database.pool())
+        .await
+        .expect("pending receipt count");
+    assert_eq!(pending_receipts, 0);
+}
+
+async fn verify_broker_operation_idempotency(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+) {
+    let registration_id = Uuid::new_v4();
+    let policy = json!({});
+    database
+        .mcp_create_registration(&test_registration_input(
+            tenant_id,
+            principal_id,
+            registration_id,
+            "Broker operation",
+            &policy,
+        ))
+        .await
+        .expect("broker operation registration");
+    let rollback_id = Uuid::new_v4();
+    database
+        .mcp_create_registration(&test_registration_input(
+            tenant_id,
+            principal_id,
+            rollback_id,
+            "Broker rollback",
+            &policy,
+        ))
+        .await
+        .expect("broker rollback registration");
+    let rollback_operation_id = Uuid::new_v4();
+    let mut pending = match database
+        .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+            tenant_id,
+            principal_id,
+            registration_id: rollback_id,
+            operation: "registration_configure",
+            operation_id: rollback_operation_id,
+            request_fingerprint: &[40; 32],
+        })
+        .await
+        .expect("rollback broker admission")
+    {
+        McpBrokerOperationStart::Started(transaction) => transaction,
+        _ => panic!("fresh rollback broker operation did not start"),
+    };
+    pending
+        .configure_registration(&RegistrationConfigurationUpdate {
+            tenant_id,
+            registration_id: rollback_id,
+            owner_principal_id: principal_id,
+            expected_revision: 1,
+            display_name: "Must roll back",
+            description: "Uncommitted",
+            endpoint_uri: Some("https://mcp.example.test/idempotency"),
+            trust_profile: Some("public"),
+            catalog_entry: None,
+            policy: &policy,
+        })
+        .await
+        .expect("uncommitted broker mutation");
+    drop(pending);
+    assert_eq!(
+        database
+            .mcp_registration(tenant_id, principal_id, rollback_id)
+            .await
+            .expect("rolled back broker registration")
+            .revision,
+        1
+    );
+    let rollback_receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND operation_id=$2")
+        .bind(tenant_id)
+        .bind(rollback_operation_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("rolled back broker receipt count");
+    assert_eq!(rollback_receipts, 0);
+    let operation_id = Uuid::new_v4();
+    let request_fingerprint = [41; 32];
+    let (left, right) = tokio::join!(
+        configure_broker_operation(
+            database,
+            tenant_id,
+            principal_id,
+            registration_id,
+            operation_id,
+            &request_fingerprint,
+        ),
+        configure_broker_operation(
+            database,
+            tenant_id,
+            principal_id,
+            registration_id,
+            operation_id,
+            &request_fingerprint,
+        ),
+    );
+    assert_eq!(
+        left.expect("first broker operation"),
+        right.expect("broker replay")
+    );
+    let changed = database
+        .mcp_registration(tenant_id, principal_id, registration_id)
+        .await
+        .expect("configured registration");
+    assert_eq!(changed.revision, 2);
+    assert!(matches!(
+        database
+            .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+                tenant_id,
+                principal_id,
+                registration_id,
+                operation: "registration_configure",
+                operation_id,
+                request_fingerprint: &[42; 32],
+            })
+            .await
+            .expect("mismatch admission"),
+        McpBrokerOperationStart::KeyReused
+    ));
+    assert!(matches!(
+        database
+            .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+                tenant_id,
+                principal_id,
+                registration_id: Uuid::new_v4(),
+                operation: "credential_erase",
+                operation_id,
+                request_fingerprint: &request_fingerprint,
+            })
+            .await
+            .expect("cross-scope mismatch admission"),
+        McpBrokerOperationStart::KeyReused
+    ));
+
+    let public_fingerprint = [43; 32];
+    let mut local = match database
+        .mcp_begin_mutation(&McpMutationIdempotency {
+            tenant_id,
+            principal_id,
+            route: "PATCH /api/v1/mcp/registrations/{registration_id}",
+            key: "broker-operation",
+            request_fingerprint: &public_fingerprint,
+            legacy_request_fingerprint: None,
+        })
+        .await
+        .expect("local continuation")
+    {
+        McpMutationStart::Started(transaction) => transaction,
+        _ => panic!("fresh local continuation did not start"),
+    };
+    local
+        .mark_broker_operation_applied(operation_id)
+        .await
+        .expect("mark API continuation");
+    local
+        .finalize(200, &json!({"id":registration_id}))
+        .await
+        .expect("finalize public receipt");
+    sqlx::query("UPDATE filebelt_mcp.broker_operation_receipts SET created_at=clock_timestamp()-interval '2 days',expires_at=clock_timestamp()-interval '1 day' WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(operation_id)
+        .execute(database.pool())
+        .await
+        .expect("expire completed broker receipt");
+
+    let incomplete_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint,result,created_at,expires_at) VALUES ($1,$2,$3,'credential_erase',$4,$5,$6,clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(incomplete_id)
+        .bind([44_u8; 32].as_slice())
+        .bind(serde_json::to_value(&changed).expect("safe erased result"))
+        .execute(database.pool())
+        .await
+        .expect("incomplete delete receipt");
+    assert_eq!(
+        database
+            .purge_mcp_broker_operation_receipts(tenant_id, 1)
+            .await
+            .expect("bounded broker receipt cleanup"),
+        1
+    );
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND operation_id=$2 AND api_completed_at IS NULL")
+        .bind(tenant_id)
+        .bind(incomplete_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("incomplete receipt count");
+    assert_eq!(remaining, 1);
+    assert!(matches!(
+        database
+            .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+                tenant_id,
+                principal_id,
+                registration_id,
+                operation: "credential_erase",
+                operation_id: incomplete_id,
+                request_fingerprint: &[44; 32],
+            })
+            .await
+            .expect("expired incomplete delete replay"),
+        McpBrokerOperationStart::Replayed(_)
+    ));
+}
+
+async fn configure_broker_operation(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+    registration_id: Uuid,
+    operation_id: Uuid,
+    request_fingerprint: &[u8; 32],
+) -> Result<serde_json::Value, DatabaseError> {
+    match database
+        .mcp_begin_broker_operation(&McpBrokerOperationIdempotency {
+            tenant_id,
+            principal_id,
+            registration_id,
+            operation: "registration_configure",
+            operation_id,
+            request_fingerprint,
+        })
+        .await?
+    {
+        McpBrokerOperationStart::Replayed(result) => Ok(result),
+        McpBrokerOperationStart::KeyReused => Err(DatabaseError::Conflict),
+        McpBrokerOperationStart::Started(mut transaction) => {
+            let policy = json!({});
+            let updated = transaction
+                .configure_registration(&RegistrationConfigurationUpdate {
+                    tenant_id,
+                    registration_id,
+                    owner_principal_id: principal_id,
+                    expected_revision: 1,
+                    display_name: "Broker operation configured",
+                    description: "Atomic broker result",
+                    endpoint_uri: Some("https://mcp.example.test/idempotency"),
+                    trust_profile: Some("public"),
+                    catalog_entry: None,
+                    policy: &policy,
+                })
+                .await?;
+            let result =
+                serde_json::to_value(updated).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+            transaction.finalize(&result).await?;
+            Ok(result)
+        }
+    }
+}
+
+async fn create_registration_idempotently(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+    route: &str,
+    key: &str,
+    request_fingerprint: &[u8; 32],
+    registration_id: Uuid,
+) -> Result<McpIdempotentWrite, DatabaseError> {
+    let mut mutation = match database
+        .mcp_begin_mutation(&McpMutationIdempotency {
+            tenant_id,
+            principal_id,
+            route,
+            key,
+            request_fingerprint,
+            legacy_request_fingerprint: None,
+        })
+        .await?
+    {
+        McpMutationStart::Started(transaction) => transaction,
+        McpMutationStart::Replayed(record) => return Ok(McpIdempotentWrite::Replayed(record)),
+        McpMutationStart::KeyReused => return Ok(McpIdempotentWrite::KeyReused),
+    };
+    let policy = json!({});
+    let record = mutation
+        .create_registration(&test_registration_input(
+            tenant_id,
+            principal_id,
+            registration_id,
+            "Atomic registration",
+            &policy,
+        ))
+        .await?;
+    mutation.finalize(201, &json!({"id":record.id})).await
+}
+
+fn test_registration_input<'a>(
+    tenant_id: Uuid,
+    principal_id: Uuid,
+    registration_id: Uuid,
+    display_name: &'a str,
+    policy: &'a serde_json::Value,
+) -> NewMcpRegistration<'a> {
+    NewMcpRegistration {
+        tenant_id,
+        id: registration_id,
+        owner_principal_id: principal_id,
+        owner_kind: "user",
+        source_kind: "personal",
+        template_id: None,
+        display_name,
+        description: "Idempotency test",
+        transport: "streamable_http",
+        endpoint_uri: Some("https://mcp.example.test/idempotency"),
+        trust_profile: Some("public"),
+        catalog_entry: None,
+        policy,
+    }
 }
 
 async fn schema_privilege(database: &Database, role: &str, schema: &str, privilege: &str) -> bool {

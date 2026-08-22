@@ -18,7 +18,8 @@ use filebelt_collaboration_protocol::normalized_markdown_source_digest;
 use filebelt_control_protocol::{Config, DeploymentMode};
 use filebelt_database::DatabaseError;
 use filebelt_database::mcp::{
-    McpIdempotency, McpIdempotentWrite, McpRegistrationRecord, NewCapabilitySnapshot,
+    McpCapabilityDecision, McpIdempotency, McpIdempotentWrite, McpMutationIdempotency,
+    McpMutationStart, McpMutationTransaction, McpRegistrationRecord, NewCapabilitySnapshot,
     NewMcpApprovalRule, NewMcpDataGrant, NewMcpInvocation, NewMcpManagedTemplate,
     NewMcpRegistration, NewMcpServiceGrant, NewMcpServicePrincipal, TemplateConfigurationUpdate,
 };
@@ -90,7 +91,7 @@ struct RegistrationInput {
     attachment_policy: AttachmentPolicy,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ChangeState {
     action: String,
@@ -103,7 +104,7 @@ struct StaticCredential {
     secret: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct StartOauthInput {
     return_path: String,
@@ -118,7 +119,7 @@ struct OauthCallbackQuery {
     error: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CapabilityReviewInput {
     snapshot_id: Uuid,
@@ -126,7 +127,7 @@ struct CapabilityReviewInput {
     decisions: Vec<CapabilityDecision>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CapabilityDecision {
     capability_fingerprint: String,
@@ -152,13 +153,13 @@ struct CreateTemplateInput {
     trust_profile: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct AssignmentInput {
     principal_kind: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CreateServiceInput {
     display_name: String,
@@ -457,15 +458,37 @@ async fn create_registration(
     headers: HeaderMap,
     Json(input): Json<RegistrationInput>,
 ) -> Result<Response, ApiError> {
+    create_registration_inner(state, headers, input, "POST /api/v1/mcp/registrations").await
+}
+
+async fn create_registration_inner(
+    state: AppState,
+    headers: HeaderMap,
+    input: RegistrationInput,
+    route: &'static str,
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(route, &json!({"request":input}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     validate_registration_input(&state, &input)?;
     let id = Uuid::new_v4();
     let policy = registration_policy(&input, "none", false);
-    let record = state
-        .database
-        .mcp_create_registration(&NewMcpRegistration {
+    let record = mutation
+        .create_registration(&NewMcpRegistration {
             tenant_id: state.tenant_id,
             id,
             owner_principal_id: session.record.principal_id,
@@ -481,7 +504,11 @@ async fn create_registration(
             policy: &policy,
         })
         .await?;
-    registration_response(StatusCode::CREATED, &record)
+    let response_body = registration_json(&record)?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::CREATED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn import_registration(
@@ -505,7 +532,13 @@ async fn import_registration(
             "The MCP registration export is invalid",
         )
     })?;
-    create_registration(State(state), headers, Json(input)).await
+    create_registration_inner(
+        state,
+        headers,
+        input,
+        "POST /api/v1/mcp/registrations/import",
+    )
+    .await
 }
 
 async fn get_registration(
@@ -556,10 +589,33 @@ async fn update_registration(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "PATCH /api/v1/mcp/registrations/{registration_id}";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+            "request": value,
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let current = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &current)?;
+    let expected_revision = required_registration_revision(&headers, id)?;
     if current.source_kind == "managed" {
         return Err(ApiError::forbidden(
             "mcp.registration.managed_locked",
@@ -637,7 +693,7 @@ async fn update_registration(
     };
     validate_registration_input(&state, &candidate)?;
     let arguments = serde_json::to_vec(&json!({
-        "expected_revision": current.revision,
+        "expected_revision": expected_revision,
         "display_name": display_name,
         "description": candidate.description,
         "endpoint_uri": endpoint_uri,
@@ -646,7 +702,7 @@ async fn update_registration(
         "policy": policy,
     }))
     .map_err(|_| ApiError::internal())?;
-    call_broker(
+    let result = call_broker(
         &state,
         &session.record,
         &current,
@@ -658,12 +714,41 @@ async fn update_registration(
         &arguments,
         None,
         &[0; 32],
+        Some(BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        }),
         None,
         Vec::new(),
     )
     .await?;
-    let updated = owned_registration(&state, session.record.principal_id, id).await?;
-    registration_response(StatusCode::OK, &updated)
+    let updated: McpRegistrationRecord =
+        serde_json::from_value(result.value).map_err(|_| ApiError::internal())?;
+    if updated.tenant_id != state.tenant_id
+        || updated.owner_principal_id != session.record.principal_id
+        || updated.id != id
+    {
+        return Err(ApiError::internal());
+    }
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    let response_body = registration_json(&updated)?;
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn delete_registration(
@@ -673,11 +758,33 @@ async fn delete_registration(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "DELETE /api/v1/mcp/registrations/{registration_id}";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let record = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &record)?;
-    call_broker(
+    let expected_revision = required_registration_revision(&headers, id)?;
+    let broker_result = call_broker(
         &state,
         &session.record,
         &record,
@@ -686,28 +793,60 @@ async fn delete_registration(
         "$credential_erase",
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
-        &serde_json::to_vec(&json!({"expected_revision": record.revision}))
+        &serde_json::to_vec(&json!({"expected_revision": expected_revision}))
             .map_err(|_| ApiError::internal())?,
         None,
         &[0; 32],
+        Some(BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        }),
         None,
         Vec::new(),
     )
     .await?;
-    let erased = owned_registration(&state, session.record.principal_id, id).await?;
-    state
-        .database
-        .mcp_delete_registration(state.tenant_id, id, erased.revision, Uuid::new_v4())
-        .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({
-            "id": id,
-            "state": "erased",
-            "destroy_after": rfc3339(unix_time()?),
-        })),
+    let erased: McpRegistrationRecord =
+        serde_json::from_value(broker_result.value).map_err(|_| ApiError::internal())?;
+    if erased.tenant_id != state.tenant_id
+        || erased.owner_principal_id != session.record.principal_id
+        || erased.id != id
+    {
+        return Err(ApiError::internal());
+    }
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
     )
-        .into_response())
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation
+        .delete_registration(
+            id,
+            erased.revision,
+            derived_operation_uuid(
+                &state,
+                b"filebelt.mcp.registration-tombstone.v1\0",
+                operation_id,
+            ),
+        )
+        .await?;
+    let response_body = json!({
+        "id": id,
+        "state": "erased",
+        "destroy_after": rfc3339(unix_time()?),
+    });
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::ACCEPTED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn change_registration_state(
@@ -718,40 +857,60 @@ async fn change_registration_state(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "POST /api/v1/mcp/registrations/{registration_id}/state";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "registration_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+            "request":input,
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let record = owned_registration(&state, session.record.principal_id, id).await?;
     require_revision(&headers, &record)?;
-    if input.action == "revoke" {
-        state
-            .database
-            .mcp_revoke_registration(state.tenant_id, id, record.revision)
-            .await?;
-        let changed = owned_registration(&state, session.record.principal_id, id).await?;
-        return registration_response(StatusCode::OK, &changed);
-    }
-    let mut policy = record.state;
-    match input.action.as_str() {
-        "enable" => policy.enabled = true,
-        "disable" => policy.enabled = false,
-        _ => {
-            return Err(ApiError::bad_request(
-                "mcp.state.invalid",
-                "The MCP lifecycle action is invalid",
-            ));
+    let changed = if input.action == "revoke" {
+        mutation.revoke_registration(id, record.revision).await?
+    } else {
+        let mut policy = record.state;
+        match input.action.as_str() {
+            "enable" => policy.enabled = true,
+            "disable" => policy.enabled = false,
+            _ => {
+                return Err(ApiError::bad_request(
+                    "mcp.state.invalid",
+                    "The MCP lifecycle action is invalid",
+                ));
+            }
         }
-    }
-    let changed = state
-        .database
-        .mcp_update_registration_state(
-            state.tenant_id,
-            id,
-            record.revision,
-            policy,
-            record.protocol_version.as_deref(),
-        )
+        mutation
+            .update_registration_state(
+                id,
+                record.revision,
+                policy,
+                record.protocol_version.as_deref(),
+            )
+            .await?
+    };
+    let response_body = registration_json(&changed)?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
         .await?;
-    registration_response(StatusCode::OK, &changed)
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn put_credential(
@@ -759,10 +918,10 @@ async fn put_credential(
     headers: HeaderMap,
     Path(registration_id): Path<String>,
     Json(input): Json<StaticCredential>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     if !matches!(input.kind.as_str(), "bearer" | "api_key")
         || input.secret.is_empty()
         || input.secret.len() > 8_192
@@ -773,12 +932,36 @@ async fn put_credential(
         ));
     }
     let id = parse_uuid(&registration_id)?;
+    let route = "PUT /api/v1/mcp/registrations/{registration_id}/credential";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+            "kind": input.kind,
+            "secret": input.secret,
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let record = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &record)?;
+    let expected_revision = required_registration_revision(&headers, id)?;
     let arguments = serde_json::to_vec(&json!({
         "kind": input.kind,
         "secret": input.secret,
-        "expected_revision": record.revision,
+        "expected_revision": expected_revision,
     }))
     .map_err(|_| ApiError::internal())?;
     call_broker(
@@ -793,24 +976,67 @@ async fn put_credential(
         &arguments,
         None,
         &[0; 32],
+        Some(BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        }),
         None,
         Vec::new(),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn delete_credential(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(registration_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "DELETE /api/v1/mcp/registrations/{registration_id}/credential";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let record = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &record)?;
+    let expected_revision = required_registration_revision(&headers, id)?;
     call_broker(
         &state,
         &session.record,
@@ -820,15 +1046,36 @@ async fn delete_credential(
         "$credential_erase",
         "filebelt.settings.mcp",
         CURRENT_PROTOCOL,
-        &serde_json::to_vec(&json!({"expected_revision": record.revision}))
+        &serde_json::to_vec(&json!({"expected_revision": expected_revision}))
             .map_err(|_| ApiError::internal())?,
         None,
         &[0; 32],
+        Some(BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        }),
         None,
         Vec::new(),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn start_oauth(
@@ -839,7 +1086,7 @@ async fn start_oauth(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     if !valid_mcp_return_path(&input.return_path) {
         return Err(ApiError::bad_request(
             "mcp.oauth.return_path_invalid",
@@ -847,8 +1094,53 @@ async fn start_oauth(
         ));
     }
     let id = parse_uuid(&registration_id)?;
+    let route = "POST /api/v1/mcp/registrations/{registration_id}/oauth";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "session_id": session.record.session_id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+            "request": input,
+        }),
+    )?;
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
+    let state_bytes = state.digest(
+        b"filebelt.mcp.oauth-operation-state.v1\0",
+        operation_id.as_bytes(),
+    );
+    let verifier_bytes = state.digest(
+        b"filebelt.mcp.oauth-operation-verifier.v1\0",
+        operation_id.as_bytes(),
+    );
+    let state_value = URL_SAFE_NO_PAD.encode(state_bytes);
+    let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+    let challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, verifier.as_bytes()).as_ref());
+    if let Some(record) = state
+        .database
+        .idempotency_record(
+            state.tenant_id,
+            session.record.principal_id,
+            route,
+            &idempotency_key,
+        )
+        .await?
+    {
+        if record.request_fingerprint.as_slice() != idempotency_fingerprint {
+            return Err(ApiError::conflict(
+                "idempotency.key_reused",
+                "The idempotency key was used for a different request",
+            ));
+        }
+        if record.response_status != i32::from(StatusCode::OK.as_u16()) {
+            return Err(ApiError::internal());
+        }
+        return oauth_begin_response(&record.response_body, &state_value, &challenge, &state);
+    }
     let registration = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &registration)?;
+    let expected_revision = required_registration_revision(&headers, id)?;
     if registration.transport != "streamable_http" {
         return Err(ApiError::bad_request(
             "mcp.oauth.transport_invalid",
@@ -856,13 +1148,6 @@ async fn start_oauth(
         ));
     }
     let issuer = select_oauth_issuer(&state, input.issuer.as_deref())?;
-    let mut state_bytes = [0_u8; 32];
-    let mut verifier_bytes = [0_u8; 32];
-    getrandom::fill(&mut state_bytes).map_err(|_| ApiError::internal())?;
-    getrandom::fill(&mut verifier_bytes).map_err(|_| ApiError::internal())?;
-    let state_value = URL_SAFE_NO_PAD.encode(state_bytes);
-    let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
-    let challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, verifier.as_bytes()).as_ref());
     let state_digest = state.digest(b"filebelt.mcp.oauth-state.v1\0", state_value.as_bytes());
     let redirect_uri = state
         .config
@@ -877,7 +1162,12 @@ async fn start_oauth(
         "challenge": challenge,
         "redirect_uri": redirect_uri,
         "return_path": input.return_path,
-        "attempt_id": Uuid::new_v4(),
+        "expected_revision": expected_revision,
+        "attempt_id": derived_operation_uuid(
+            &state,
+            b"filebelt.mcp.oauth-attempt.v1\0",
+            operation_id,
+        ),
     }))
     .map_err(|_| ApiError::internal())?;
     let result = call_broker(
@@ -892,22 +1182,92 @@ async fn start_oauth(
         &arguments,
         None,
         &[0; 32],
+        Some(BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        }),
         None,
         Vec::new(),
     )
     .await?;
-    let authorization_url = result
-        .value
-        .get("authorization_url")
+    let mut safe_result = result.value;
+    safe_result
+        .as_object_mut()
+        .ok_or_else(ApiError::internal)?
+        .remove("authorization_url");
+    let mut mutation = match state
+        .database
+        .mcp_begin_mutation(&McpMutationIdempotency {
+            tenant_id: state.tenant_id,
+            principal_id: session.record.principal_id,
+            route,
+            key: &idempotency_key,
+            request_fingerprint: &idempotency_fingerprint,
+            legacy_request_fingerprint: None,
+        })
+        .await?
+    {
+        McpMutationStart::Started(transaction) => transaction,
+        McpMutationStart::Replayed(record) => {
+            return oauth_begin_response(&record.response_body, &state_value, &challenge, &state);
+        }
+        McpMutationStart::KeyReused => {
+            return Err(ApiError::conflict(
+                "idempotency.key_reused",
+                "The idempotency key was used for a different request",
+            ));
+        }
+    };
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &safe_result)
+        .await?;
+    oauth_begin_response(&safe_result, &state_value, &challenge, &state)
+}
+
+fn oauth_begin_response(
+    safe_result: &Value,
+    state_value: &str,
+    challenge: &str,
+    state: &AppState,
+) -> Result<Response, ApiError> {
+    let mut authorization_url = safe_result
+        .get("authorization_endpoint")
         .and_then(Value::as_str)
         .and_then(|value| Url::parse(value).ok())
         .filter(|url| url.scheme() == "https" && url.host_str().is_some())
         .ok_or_else(ApiError::internal)?;
+    let client_id = safe_result
+        .get("client_id")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let resource = safe_result
+        .get("resource")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let expires_at = safe_result
+        .get("expires_at")
+        .and_then(Value::as_i64)
+        .ok_or_else(ApiError::internal)?;
+    let redirect_uri = state
+        .config
+        .public_origin
+        .join(state.config.mcp.callback_path.trim_start_matches('/'))
+        .map_err(|_| ApiError::internal())?;
+    authorization_url
+        .query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", redirect_uri.as_str())
+        .append_pair("state", state_value)
+        .append_pair("resource", resource)
+        .append_pair("code_challenge", challenge)
+        .append_pair("code_challenge_method", "S256");
     Ok((
         StatusCode::OK,
         Json(json!({
             "authorization_url": authorization_url,
-            "expires_at": rfc3339(unix_time()?.saturating_add(600)),
+            "expires_at": rfc3339(expires_at),
         })),
     )
         .into_response())
@@ -970,6 +1330,7 @@ async fn complete_oauth(
         None,
         &[0; 32],
         None,
+        None,
         Vec::new(),
     )
     .await?;
@@ -990,53 +1351,101 @@ async fn test_registration(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "POST /api/v1/mcp/registrations/{registration_id}/test";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let record = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &record)?;
-    let started = std::time::Instant::now();
-    let (protocol, _result) = broker_probe(
+    let expected_revision = required_registration_revision(&headers, id)?;
+    let (_protocol, result) = broker_probe(
         &state,
         &session.record,
         &record,
         McpOperation::Test,
         "$test",
+        expected_revision,
+        BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        },
     )
     .await?;
-    let duration_ms = started.elapsed().as_millis().min(120_000) as u64;
+    let protocol = result
+        .get("protocol_version")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let duration_ms = result
+        .get("duration_ms")
+        .and_then(Value::as_u64)
+        .ok_or_else(ApiError::internal)?;
+    let checked_at = result
+        .get("checked_at")
+        .and_then(Value::as_i64)
+        .ok_or_else(ApiError::internal)?;
     let authentication = if record.state.authentication == AuthenticationState::Required {
         AuthenticationState::Authorized
     } else {
         record.state.authentication
     };
-    let changed = state
-        .database
-        .mcp_update_registration_state(
-            state.tenant_id,
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    let changed = mutation
+        .update_registration_state(
             id,
-            record.revision,
+            expected_revision,
             RegistrationPolicyState {
                 validation: ValidationState::Valid,
                 authentication,
                 ..record.state
             },
-            Some(&protocol),
+            Some(protocol),
         )
         .await?;
-    let mut response = (
-        StatusCode::OK,
-        Json(json!({
-            "succeeded": true,
-            "protocol_version": protocol,
-            "authentication_state": authentication_state(changed.state.authentication),
-            "duration_ms": duration_ms,
-            "checked_at": rfc3339(unix_time()?),
-            "problem_code": null,
-        })),
-    )
-        .into_response();
-    insert_etag(&mut response, &changed)?;
-    Ok(response)
+    let response_body = json!({
+        "succeeded": true,
+        "protocol_version": protocol,
+        "authentication_state": authentication_state(changed.state.authentication),
+        "duration_ms": duration_ms,
+        "checked_at": rfc3339(checked_at),
+        "problem_code": null,
+        "etag": registration_etag(&changed),
+    });
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn discover_registration(
@@ -1046,54 +1455,108 @@ async fn discover_registration(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "POST /api/v1/mcp/registrations/{registration_id}/discover";
+    let idempotency_fingerprint = mcp_broker_idempotency_fingerprint(
+        &state,
+        route,
+        &json!({
+            "registration_id": id,
+            "if_match": headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+        }),
+    )?;
+    if let Some(response) = replay_mcp_broker_receipt(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+    )
+    .await?
+    {
+        return Ok(response);
+    }
+    let operation_id =
+        mcp_broker_operation_id(&state, session.record.principal_id, route, &idempotency_key)?;
     let record = owned_registration(&state, session.record.principal_id, id).await?;
-    require_revision(&headers, &record)?;
-    let (protocol, document) = broker_probe(
+    let expected_revision = required_registration_revision(&headers, id)?;
+    let (_protocol, broker_result) = broker_probe(
         &state,
         &session.record,
         &record,
         McpOperation::Discover,
         "$discover",
+        expected_revision,
+        BrokerOperationIdentity {
+            operation_id,
+            request_fingerprint: &idempotency_fingerprint,
+        },
     )
     .await?;
+    let protocol = broker_result
+        .get("protocol_version")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let document = broker_result
+        .get("document")
+        .ok_or_else(ApiError::internal)?;
     let canonical =
-        filebelt_mcp_policy::canonical_json(&document).map_err(|_| ApiError::internal())?;
+        filebelt_mcp_policy::canonical_json(document).map_err(|_| ApiError::internal())?;
     if canonical.len() > state.config.mcp.limits.result_bytes as usize {
         return Err(ApiError::bad_request(
             "mcp.discovery.too_large",
             "The MCP capability document is too large",
         ));
     }
-    let fingerprint = filebelt_mcp_policy::policy_json_digest(b"capability-snapshot", &document)
+    let fingerprint = filebelt_mcp_policy::policy_json_digest(b"capability-snapshot", document)
         .map_err(|_| ApiError::internal())?;
-    let snapshot_id = Uuid::new_v4();
-    state
-        .database
-        .mcp_store_capability_snapshot(&NewCapabilitySnapshot {
-            tenant_id: state.tenant_id,
-            id: snapshot_id,
-            registration_id: id,
-            credential_generation: record.credential_generation,
-            fingerprint: &fingerprint,
-            protocol_version: &protocol,
-            document: &document,
-        })
-        .await?;
-    let capabilities = normalize_capabilities(&document)?;
-    Ok((
-        StatusCode::OK,
-        Json(json!({
-            "id": snapshot_id,
-            "registration_id": id,
-            "protocol_version": protocol,
-            "fingerprint": hex(&fingerprint),
-            "capabilities": capabilities,
-            "created_at": rfc3339(unix_time()?),
-        })),
+    let snapshot_id = derived_operation_uuid(
+        &state,
+        b"filebelt.mcp.capability-snapshot.v1\0",
+        operation_id,
+    );
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
     )
-        .into_response())
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    let snapshot = mutation
+        .store_capability_snapshot(
+            &NewCapabilitySnapshot {
+                tenant_id: state.tenant_id,
+                id: snapshot_id,
+                registration_id: id,
+                credential_generation: record.credential_generation,
+                fingerprint: &fingerprint,
+                protocol_version: protocol,
+                document,
+            },
+            expected_revision,
+        )
+        .await?;
+    let capabilities = normalize_capabilities(document)?;
+    let response_body = json!({
+        "id": snapshot.id,
+        "registration_id": id,
+        "protocol_version": protocol,
+        "fingerprint": hex(&fingerprint),
+        "capabilities": capabilities,
+        "created_at": snapshot.discovered_at,
+    });
+    mutation.mark_broker_operation_applied(operation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn get_capability_review(
@@ -1115,8 +1578,31 @@ async fn put_capability_review(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&registration_id)?;
+    let route = "PUT /api/v1/mcp/registrations/{registration_id}/capability-review";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "registration_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+            "request":input,
+        }),
+    )?;
+    let replay_etag = increment_registration_etag(&headers, id)?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        replay_etag.as_deref(),
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let registration = owned_registration(&state, session.record.principal_id, id).await?;
     require_revision(&headers, &registration)?;
     let snapshot = state
@@ -1160,31 +1646,32 @@ async fn put_capability_review(
             "The MCP capability review is invalid",
         ));
     }
-    for decision in &input.decisions {
-        let fingerprint = decode_hash(&decision.capability_fingerprint)?;
-        state
-            .database
-            .mcp_review_capability(
-                state.tenant_id,
-                id,
-                snapshot.id,
-                &fingerprint,
-                session.record.principal_id,
-                if decision.decision == "approved" {
-                    "approved"
-                } else {
-                    "denied"
-                },
-                &json!({}),
-            )
-            .await?;
-    }
-    let updated = state
-        .database
-        .mcp_update_registration_state(
-            state.tenant_id,
+    let decoded_decisions = input
+        .decisions
+        .iter()
+        .map(|decision| decode_hash(&decision.capability_fingerprint))
+        .collect::<Result<Vec<_>, _>>()?;
+    let empty_constraints = json!({});
+    let decisions = input
+        .decisions
+        .iter()
+        .zip(&decoded_decisions)
+        .map(|(decision, fingerprint)| McpCapabilityDecision {
+            fingerprint,
+            decision: if decision.decision == "approved" {
+                "approved"
+            } else {
+                "denied"
+            },
+            constraints: &empty_constraints,
+        })
+        .collect::<Vec<_>>();
+    let (updated, reviews) = mutation
+        .review_capabilities(
             id,
             registration.revision,
+            snapshot.id,
+            &decisions,
             RegistrationPolicyState {
                 capabilities: CapabilityState::Approved,
                 enabled: false,
@@ -1193,13 +1680,12 @@ async fn put_capability_review(
             registration.protocol_version.as_deref(),
         )
         .await?;
-    let mut response = (
-        StatusCode::OK,
-        Json(capability_review_json(&state, id).await?),
-    )
-        .into_response();
-    insert_etag(&mut response, &updated)?;
-    Ok(response)
+    let response_body = capability_review_value(&snapshot, &reviews)?;
+    let etag = registration_etag(&updated);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, Some(&etag))
 }
 
 async fn capability_review_json(
@@ -1210,11 +1696,19 @@ async fn capability_review_json(
         .database
         .mcp_current_capability_snapshot(state.tenant_id, registration_id)
         .await?;
-    let decisions = state
+    let reviews = state
         .database
         .mcp_capability_reviews(state.tenant_id, registration_id)
-        .await?
-        .into_iter()
+        .await?;
+    capability_review_value(&snapshot, &reviews)
+}
+
+fn capability_review_value(
+    snapshot: &filebelt_database::mcp::McpCapabilitySnapshotRecord,
+    reviews: &[filebelt_database::mcp::McpCapabilityReviewRecord],
+) -> Result<Value, ApiError> {
+    let decisions = reviews
+        .iter()
         .filter(|review| !review.revoked)
         .map(|review| {
             json!({
@@ -1223,13 +1717,10 @@ async fn capability_review_json(
             })
         })
         .collect::<Vec<_>>();
-    let reviewed_at = state
-        .database
-        .mcp_capability_reviews(state.tenant_id, registration_id)
-        .await?
-        .into_iter()
+    let reviewed_at = reviews
+        .iter()
         .filter(|review| !review.revoked)
-        .map(|review| review.reviewed_at)
+        .map(|review| review.reviewed_at.clone())
         .max();
     Ok(json!({
         "snapshot": {
@@ -1445,19 +1936,32 @@ async fn revoke_approval(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(approval_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
-    state
-        .database
-        .mcp_revoke_approval_rule(
-            state.tenant_id,
-            session.record.principal_id,
-            parse_uuid(&approval_id)?,
-        )
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let approval_id = parse_uuid(&approval_id)?;
+    let route = "DELETE /api/v1/mcp/approvals/{approval_id}";
+    let idempotency_fingerprint =
+        mcp_idempotency_fingerprint(route, &json!({"approval_id":approval_id}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation.revoke_approval(approval_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_activity(
@@ -1503,7 +2007,25 @@ async fn create_intent(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let route = "POST /api/v1/mcp/invocation-intents";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({"registration_id":request.registration_id,"request":request}),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     validate_invocation_request(&state, &request)?;
     owned_registration(&state, session.record.principal_id, request.registration_id).await?;
     let request_value = serde_json::to_value(&request).map_err(|_| ApiError::internal())?;
@@ -1536,13 +2058,10 @@ async fn create_intent(
             |_| ApiError::bad_request("mcp.attachments.invalid", "The MCP attachments are invalid"),
         )?;
     let id = Uuid::new_v4();
-    state
-        .database
-        .mcp_create_invocation_intent(
-            state.tenant_id,
+    let expires_at = mutation
+        .create_invocation_intent(
             id,
             request.registration_id,
-            session.record.principal_id,
             session.record.session_id,
             &request.application_id,
             primitive,
@@ -1552,16 +2071,16 @@ async fn create_intent(
             &digest,
         )
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({
-            "id": id,
-            "request_digest": hex(&digest),
-            "expires_at": rfc3339(unix_time()?.saturating_add(300)),
-            "approval_required": true,
-        })),
-    )
-        .into_response())
+    let response_body = json!({
+        "id": id,
+        "request_digest": hex(&digest),
+        "expires_at": rfc3339(expires_at),
+        "approval_required": true,
+    });
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::CREATED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn stream_invocation(
@@ -1754,6 +2273,7 @@ async fn stream_invocation(
         &arguments,
         semantic_input.as_deref(),
         &capability_fingerprint,
+        None,
         Some(invocation_id),
         attachment_claims,
     )
@@ -1856,19 +2376,32 @@ async fn cancel_invocation(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(invocation_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
-    state
-        .database
-        .mcp_cancel_invocation(
-            state.tenant_id,
-            session.record.principal_id,
-            parse_uuid(&invocation_id)?,
-        )
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let invocation_id = parse_uuid(&invocation_id)?;
+    let route = "DELETE /api/v1/mcp/invocations/{invocation_id}";
+    let idempotency_fingerprint =
+        mcp_idempotency_fingerprint(route, &json!({"invocation_id":invocation_id}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation.cancel_invocation(invocation_id).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_data_grants(
@@ -2095,12 +2628,13 @@ async fn revoke_data_grant(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((drive_id, node_id, grant_id)): Path<(String, String, String)>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = authenticate_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let drive_id = parse_uuid(&drive_id)?;
     let node_id = parse_uuid(&node_id)?;
+    let grant_id = parse_uuid(&grant_id)?;
     authorize(
         &state.database,
         state.tenant_id,
@@ -2115,17 +2649,42 @@ async fn revoke_data_grant(
         .node(state.tenant_id, drive_id, node_id)
         .await?;
     require_etag(&headers, &mcp_node_etag(&node))?;
-    state
-        .database
-        .mcp_revoke_data_grant(
-            state.tenant_id,
-            session.record.principal_id,
+    let route = "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/mcp-grants/{grant_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "drive_id":drive_id,
+            "node_id":node_id,
+            "grant_id":grant_id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|value| value.to_str().ok()),
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    mutation
+        .revoke_data_grant(
             drive_id,
             node_id,
-            parse_uuid(&grant_id)?,
+            grant_id,
+            node.namespace_generation,
+            node.acl_generation,
         )
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_admin_templates(
@@ -2163,11 +2722,25 @@ async fn create_admin_template(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let route = "POST /api/v1/admin/mcp/templates";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(route, &json!({"request":input}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let policy = json!({"description": input.description});
-    let record = state
-        .database
-        .mcp_create_managed_template(&NewMcpManagedTemplate {
+    let record = mutation
+        .create_managed_template(&NewMcpManagedTemplate {
             tenant_id: state.tenant_id,
             id: Uuid::new_v4(),
             display_name: &input.display_name,
@@ -2180,7 +2753,11 @@ async fn create_admin_template(
             created_by: session.record.principal_id,
         })
         .await?;
-    template_response(StatusCode::CREATED, &record, 0)
+    let response_body = template_json(&record, 0);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::CREATED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn get_admin_template(
@@ -2207,9 +2784,31 @@ async fn update_admin_template(
     Json(value): Json<Value>,
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&template_id)?;
+    let route = "PATCH /api/v1/admin/mcp/templates/{template_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "template_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+            "request":value,
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let current = state
         .database
         .mcp_managed_template(state.tenant_id, id)
@@ -2252,9 +2851,8 @@ async fn update_admin_template(
     if let Some(description) = object.get("description") {
         policy["description"] = description.clone();
     }
-    let updated = state
-        .database
-        .mcp_update_managed_template(&TemplateConfigurationUpdate {
+    let updated = mutation
+        .update_managed_template(&TemplateConfigurationUpdate {
             tenant_id: state.tenant_id,
             template_id: id,
             expected_revision: current.revision,
@@ -2270,11 +2868,12 @@ async fn update_admin_template(
             enabled,
         })
         .await?;
-    let count = state
-        .database
-        .mcp_template_assignment_count(state.tenant_id, updated.id)
+    let count = mutation.template_assignment_count(updated.id).await?;
+    let response_body = template_json(&updated, count);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
         .await?;
-    template_response(StatusCode::OK, &updated, count)
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn delete_admin_template(
@@ -2283,27 +2882,47 @@ async fn delete_admin_template(
     Path(template_id): Path<String>,
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&template_id)?;
+    let route = "DELETE /api/v1/admin/mcp/templates/{template_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "template_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let current = state
         .database
         .mcp_managed_template(state.tenant_id, id)
         .await?;
     require_etag(&headers, &template_etag(&current))?;
-    state
-        .database
-        .mcp_delete_managed_template(state.tenant_id, id, current.revision)
+    mutation
+        .delete_managed_template(id, current.revision)
         .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({
-            "id": id,
-            "state": "erased",
-            "destroy_after": rfc3339(unix_time()?),
-        })),
-    )
-        .into_response())
+    let response_body = json!({
+        "id": id,
+        "state": "erased",
+        "destroy_after": rfc3339(unix_time()?),
+    });
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::ACCEPTED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn put_admin_assignment(
@@ -2314,60 +2933,105 @@ async fn put_admin_assignment(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let template_id = parse_uuid(&template_id)?;
     let principal_id = parse_uuid(&principal_id)?;
+    let route = "PUT /api/v1/admin/mcp/templates/{template_id}/assignments/{principal_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "template_id":template_id,
+            "principal_id":principal_id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+            "request":input,
+        }),
+    )?;
+    let replay_etag = headers
+        .get(header::IF_MATCH)
+        .and_then(|header| header.to_str().ok());
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        replay_etag,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let template = state
         .database
         .mcp_managed_template(state.tenant_id, template_id)
         .await?;
     require_etag(&headers, &template_etag(&template))?;
-    state
-        .database
-        .mcp_assign_template(
-            state.tenant_id,
+    let created_at = mutation
+        .assign_template(
             template_id,
             principal_id,
             &input.principal_kind,
-            session.record.principal_id,
+            template.revision,
         )
         .await?;
-    let mut response = (
-        StatusCode::OK,
-        Json(json!({
-            "template_id": template_id,
-            "principal_id": principal_id,
-            "principal_kind": input.principal_kind,
-            "created_at": rfc3339(unix_time()?),
-        })),
-    )
-        .into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&template_etag(&template)).map_err(|_| ApiError::internal())?,
-    );
-    Ok(response)
+    let response_body = json!({
+        "template_id": template_id,
+        "principal_id": principal_id,
+        "principal_kind": input.principal_kind,
+        "created_at": rfc3339(created_at),
+    });
+    let etag = template_etag(&template);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, Some(&etag))
 }
 
 async fn delete_admin_assignment(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((template_id, principal_id)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let template_id = parse_uuid(&template_id)?;
+    let principal_id = parse_uuid(&principal_id)?;
+    let route = "DELETE /api/v1/admin/mcp/templates/{template_id}/assignments/{principal_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "template_id":template_id,
+            "principal_id":principal_id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let template = state
         .database
         .mcp_managed_template(state.tenant_id, template_id)
         .await?;
     require_etag(&headers, &template_etag(&template))?;
-    state
-        .database
-        .mcp_revoke_template_assignment(state.tenant_id, template_id, parse_uuid(&principal_id)?)
+    mutation
+        .revoke_template_assignment(template_id, principal_id, template.revision)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_admin_services(
@@ -2400,12 +3064,26 @@ async fn create_admin_service(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let route = "POST /api/v1/admin/mcp/service-identities";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(route, &json!({"request":input}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     validate_spiffe(&state, &input.spiffe_uri)?;
     let service_id = Uuid::new_v4();
-    let record = state
-        .database
-        .mcp_create_service_principal(&NewMcpServicePrincipal {
+    let record = mutation
+        .create_service_principal(&NewMcpServicePrincipal {
             tenant_id: state.tenant_id,
             service_id,
             principal_id: Uuid::new_v4(),
@@ -2415,7 +3093,11 @@ async fn create_admin_service(
             created_by: session.record.principal_id,
         })
         .await?;
-    service_response(StatusCode::CREATED, &record)
+    let response_body = service_json(&record);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::CREATED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn update_admin_service(
@@ -2425,9 +3107,31 @@ async fn update_admin_service(
     Json(value): Json<Value>,
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&service_id)?;
+    let route = "PATCH /api/v1/admin/mcp/service-identities/{service_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "service_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+            "request":value,
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let current = state
         .database
         .mcp_service_principal(state.tenant_id, id)
@@ -2441,18 +3145,27 @@ async fn update_admin_service(
         .get("state")
         .and_then(Value::as_str)
         .unwrap_or(&current.status);
-    let mut updated = state
-        .database
-        .mcp_update_service_principal(state.tenant_id, id, display_name, status)
+    let replacement_identity =
+        if let Some(spiffe_uri) = value.get("spiffe_uri").and_then(Value::as_str) {
+            validate_spiffe(&state, spiffe_uri)?;
+            Some((Uuid::new_v4(), spiffe_uri))
+        } else {
+            None
+        };
+    let updated = mutation
+        .update_service_principal(
+            id,
+            current.revocation_generation,
+            display_name,
+            status,
+            replacement_identity,
+        )
         .await?;
-    if let Some(spiffe_uri) = value.get("spiffe_uri").and_then(Value::as_str) {
-        validate_spiffe(&state, spiffe_uri)?;
-        updated = state
-            .database
-            .mcp_replace_service_identity(state.tenant_id, id, Uuid::new_v4(), spiffe_uri)
-            .await?;
-    }
-    service_response(StatusCode::OK, &updated)
+    let response_body = service_json(&updated);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::OK.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn delete_admin_service(
@@ -2461,23 +3174,43 @@ async fn delete_admin_service(
     Path(service_id): Path<String>,
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&service_id)?;
+    let route = "DELETE /api/v1/admin/mcp/service-identities/{service_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "service_id":id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let current = state
         .database
         .mcp_service_principal(state.tenant_id, id)
         .await?;
     require_etag(&headers, &service_etag(&current))?;
-    state
-        .database
-        .mcp_delete_service_principal(state.tenant_id, id)
+    mutation
+        .delete_service_principal(id, current.revocation_generation)
         .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({"id":id,"state":"erased","destroy_after":rfc3339(unix_time()?)})),
-    )
-        .into_response())
+    let response_body = json!({"id":id,"state":"erased","destroy_after":rfc3339(unix_time()?)});
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::ACCEPTED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_admin_service_grants(
@@ -2583,21 +3316,46 @@ async fn revoke_admin_service_grant(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((service_id, grant_id)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let service_id = parse_uuid(&service_id)?;
+    let grant_id = parse_uuid(&grant_id)?;
+    let route = "DELETE /api/v1/admin/mcp/service-identities/{service_id}/invocation-grants/{service_grant_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(
+        route,
+        &json!({
+            "service_id":service_id,
+            "service_grant_id":grant_id,
+            "if_match":headers.get(header::IF_MATCH).and_then(|header| header.to_str().ok()),
+        }),
+    )?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let service = state
         .database
         .mcp_service_principal(state.tenant_id, service_id)
         .await?;
     require_etag(&headers, &service_etag(&service))?;
-    state
-        .database
-        .mcp_revoke_service_grant(state.tenant_id, service_id, parse_uuid(&grant_id)?)
+    mutation
+        .revoke_service_grant(service_id, grant_id, service.revocation_generation)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn list_admin_block_rules(
@@ -2624,30 +3382,56 @@ async fn create_admin_block_rule(
 ) -> Result<Response, ApiError> {
     require_enabled(&state)?;
     let session = require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
-    let rule = state
-        .database
-        .mcp_create_admin_block_rule(
-            state.tenant_id,
-            Uuid::new_v4(),
-            &input.kind,
-            &input.value,
-            &input.reason,
-            session.record.principal_id,
-        )
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
+    let route = "POST /api/v1/admin/mcp/block-rules";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(route, &json!({"request":input}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
+    let rule = mutation
+        .create_admin_block_rule(Uuid::new_v4(), &input.kind, &input.value, &input.reason)
         .await?;
-    Ok((StatusCode::CREATED, Json(block_rule_json(&rule))).into_response())
+    let response_body = block_rule_json(&rule);
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::CREATED.as_u16()), &response_body)
+        .await?;
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn delete_admin_block_rule(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(block_rule_id): Path<String>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Response, ApiError> {
     require_enabled(&state)?;
-    require_admin_mutation(&state, &headers).await?;
-    require_idempotency(&headers)?;
+    let session = require_admin_mutation(&state, &headers).await?;
+    let idempotency_key = require_idempotency(&headers)?.to_owned();
     let id = parse_uuid(&block_rule_id)?;
+    let route = "DELETE /api/v1/admin/mcp/block-rules/{block_rule_id}";
+    let idempotency_fingerprint = mcp_idempotency_fingerprint(route, &json!({"block_rule_id":id}))?;
+    let mut mutation = match admit_mcp_mutation(
+        &state,
+        session.record.principal_id,
+        route,
+        &idempotency_key,
+        &idempotency_fingerprint,
+        None,
+    )
+    .await?
+    {
+        McpMutationAdmission::Started(transaction) => transaction,
+        McpMutationAdmission::Finished(response) => return Ok(response),
+    };
     let revision = state
         .database
         .mcp_admin_block_rules(state.tenant_id)
@@ -2656,11 +3440,11 @@ async fn delete_admin_block_rule(
         .find(|rule| rule.id == id)
         .ok_or_else(ApiError::not_found)?
         .revision;
-    state
-        .database
-        .mcp_delete_admin_block_rule(state.tenant_id, id, revision)
+    mutation.delete_admin_block_rule(id, revision).await?;
+    let outcome = mutation
+        .finalize(i32::from(StatusCode::NO_CONTENT.as_u16()), &Value::Null)
         .await?;
-    Ok(StatusCode::NO_CONTENT)
+    mcp_idempotent_response(outcome, None)
 }
 
 async fn broker_probe(
@@ -2669,6 +3453,8 @@ async fn broker_probe(
     registration: &McpRegistrationRecord,
     operation: McpOperation,
     capability_name: &str,
+    expected_revision: i64,
+    operation_identity: BrokerOperationIdentity<'_>,
 ) -> Result<(String, Value), ApiError> {
     let protocols = if let Some(version) = &registration.protocol_version {
         vec![version.as_str()]
@@ -2676,6 +3462,8 @@ async fn broker_probe(
         vec![CURRENT_PROTOCOL, FALLBACK_PROTOCOL]
     };
     let mut last_error = None;
+    let arguments = serde_json::to_vec(&json!({"expected_revision": expected_revision}))
+        .map_err(|_| ApiError::internal())?;
     for protocol in protocols {
         match call_broker(
             state,
@@ -2686,9 +3474,10 @@ async fn broker_probe(
             capability_name,
             "filebelt.settings.mcp",
             protocol,
-            &[],
+            &arguments,
             None,
             &[0; 32],
+            Some(operation_identity),
             None,
             Vec::new(),
         )
@@ -2714,6 +3503,7 @@ async fn call_broker(
     arguments: &[u8],
     semantic_input: Option<&[u8]>,
     capability_fingerprint: &[u8; 32],
+    operation_identity: Option<BrokerOperationIdentity<'_>>,
     request_id: Option<Uuid>,
     attachments: Vec<AttachmentClaim>,
 ) -> Result<BrokerCallResult, ApiError> {
@@ -2735,11 +3525,19 @@ async fn call_broker(
         arguments_hasher.update(&0_u64.to_be_bytes());
     }
     let arguments_digest = arguments_hasher.finalize();
-    let mut nonce = vec![0_u8; 32];
-    getrandom::fill(&mut nonce).map_err(|_| ApiError::internal())?;
+    let nonce = if let Some(identity) = operation_identity {
+        identity.request_fingerprint.to_vec()
+    } else {
+        let mut nonce = vec![0_u8; 32];
+        getrandom::fill(&mut nonce).map_err(|_| ApiError::internal())?;
+        nonce
+    };
     let now = unix_time()?;
     let claims = DelegationClaims {
-        capability_id: Uuid::new_v4().to_string(),
+        capability_id: operation_identity.map_or_else(
+            || Uuid::new_v4().to_string(),
+            |identity| identity.operation_id.to_string(),
+        ),
         audience: "filebelt-mcp-broker".into(),
         operation: operation as i32,
         tenant_id: state.tenant_id.to_string(),
@@ -2773,7 +3571,11 @@ async fn call_broker(
     )
     .map_err(|_| ApiError::internal())?;
     let request = BrokerInvocationRequest {
-        request_id: request_id.unwrap_or_else(Uuid::new_v4).to_string(),
+        request_id: operation_identity
+            .map(|identity| identity.operation_id)
+            .or(request_id)
+            .unwrap_or_else(Uuid::new_v4)
+            .to_string(),
         delegation,
         protocol_version: protocol.into(),
         primitive: primitive as i32,
@@ -2797,7 +3599,29 @@ async fn call_broker(
         .await
         .map_err(|_| mcp_unavailable())?;
     if !response.status().is_success() {
-        return Err(mcp_unavailable());
+        let status = response.status();
+        let problem = read_bounded_broker_body(response)
+            .await
+            .ok()
+            .and_then(|body| serde_json::from_slice::<Value>(&body).ok());
+        return match problem
+            .as_ref()
+            .and_then(|problem| problem.get("code"))
+            .and_then(Value::as_str)
+        {
+            Some("idempotency.key_reused") if status == StatusCode::CONFLICT => {
+                Err(ApiError::conflict(
+                    "idempotency.key_reused",
+                    "The idempotency key was used for a different request",
+                ))
+            }
+            Some("generation.stale") if status == StatusCode::CONFLICT => Err(ApiError::new(
+                StatusCode::PRECONDITION_FAILED,
+                "generation.stale",
+                "The supplied generation is stale",
+            )),
+            _ => Err(mcp_unavailable()),
+        };
     }
     let body = read_bounded_broker_body(response).await?;
     let frames = decode_frames(&body).map_err(|_| mcp_unavailable())?;
@@ -2818,6 +3642,12 @@ async fn call_broker(
 struct BrokerCallResult {
     value: Value,
     semantic: Option<Value>,
+}
+
+#[derive(Clone, Copy)]
+struct BrokerOperationIdentity<'a> {
+    operation_id: Uuid,
+    request_fingerprint: &'a [u8; 32],
 }
 
 async fn read_bounded_broker_body(mut response: reqwest::Response) -> Result<Vec<u8>, ApiError> {
@@ -3521,18 +4351,6 @@ fn service_json(record: &filebelt_database::mcp::McpServicePrincipalRecord) -> V
     })
 }
 
-fn service_response(
-    status: StatusCode,
-    record: &filebelt_database::mcp::McpServicePrincipalRecord,
-) -> Result<Response, ApiError> {
-    let mut response = (status, Json(service_json(record))).into_response();
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&service_etag(record)).map_err(|_| ApiError::internal())?,
-    );
-    Ok(response)
-}
-
 fn service_etag(record: &filebelt_database::mcp::McpServicePrincipalRecord) -> String {
     format!(
         "\"fb-mcp-service-{}-{}\"",
@@ -3677,8 +4495,62 @@ fn require_revision(headers: &HeaderMap, record: &McpRegistrationRecord) -> Resu
     Ok(())
 }
 
+fn required_registration_revision(
+    headers: &HeaderMap,
+    registration_id: Uuid,
+) -> Result<i64, ApiError> {
+    let value = headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::PRECONDITION_FAILED,
+                "generation.stale",
+                "The supplied generation is stale",
+            )
+        })?;
+    let prefix = format!("\"fb-mcp-{registration_id}-");
+    let revision = value
+        .strip_prefix(&prefix)
+        .and_then(|value| value.strip_suffix('"'))
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|revision| *revision > 0)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::PRECONDITION_FAILED,
+                "generation.stale",
+                "The supplied generation is stale",
+            )
+        })?;
+    Ok(revision)
+}
+
 fn registration_etag(record: &McpRegistrationRecord) -> String {
     format!("\"fb-mcp-{}-{}\"", record.id, record.revision)
+}
+
+fn increment_registration_etag(
+    headers: &HeaderMap,
+    registration_id: Uuid,
+) -> Result<Option<String>, ApiError> {
+    let Some(value) = headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Ok(None);
+    };
+    let prefix = format!("\"fb-mcp-{registration_id}-");
+    let Some(revision) = value
+        .strip_prefix(&prefix)
+        .and_then(|value| value.strip_suffix('"'))
+        .and_then(|value| value.parse::<i64>().ok())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(format!(
+        "\"fb-mcp-{registration_id}-{}\"",
+        revision.checked_add(1).ok_or_else(ApiError::internal)?
+    )))
 }
 
 fn mcp_node_etag(node: &filebelt_database::NodeRecord) -> String {
@@ -3747,6 +4619,81 @@ fn mcp_idempotency_fingerprint(route: &str, request: &Value) -> Result<[u8; 32],
     .map_err(|_| ApiError::internal())
 }
 
+fn mcp_broker_idempotency_fingerprint(
+    state: &AppState,
+    route: &str,
+    request: &Value,
+) -> Result<[u8; 32], ApiError> {
+    let canonical = filebelt_mcp_policy::canonical_json(&json!({
+        "route": route,
+        "request": request,
+    }))
+    .map_err(|_| ApiError::internal())?;
+    Ok(state.digest(b"filebelt.mcp.broker-idempotency.v1\0", &canonical))
+}
+
+fn mcp_broker_operation_id(
+    state: &AppState,
+    principal_id: Uuid,
+    route: &str,
+    key: &str,
+) -> Result<Uuid, ApiError> {
+    let canonical = filebelt_mcp_policy::canonical_json(&json!({
+        "tenant_id": state.tenant_id,
+        "principal_id": principal_id,
+        "route": route,
+        "key": key,
+    }))
+    .map_err(|_| ApiError::internal())?;
+    let digest = state.digest(b"filebelt.mcp.broker-operation.v1\0", &canonical);
+    Ok(uuid_from_digest(digest))
+}
+
+fn uuid_from_digest(digest: [u8; 32]) -> Uuid {
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+fn derived_operation_uuid(state: &AppState, domain: &[u8], operation_id: Uuid) -> Uuid {
+    uuid_from_digest(state.digest(domain, operation_id.as_bytes()))
+}
+
+async fn replay_mcp_broker_receipt(
+    state: &AppState,
+    principal_id: Uuid,
+    route: &str,
+    key: &str,
+    request_fingerprint: &[u8; 32],
+) -> Result<Option<Response>, ApiError> {
+    let Some(record) = state
+        .database
+        .idempotency_record(state.tenant_id, principal_id, route, key)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if record.request_fingerprint.as_slice() != request_fingerprint {
+        return Err(ApiError::conflict(
+            "idempotency.key_reused",
+            "The idempotency key was used for a different request",
+        ));
+    }
+    if record.response_status == 102 {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "idempotency.incomplete",
+            "The idempotent operation has not completed",
+        ));
+    }
+    Ok(Some(mcp_idempotent_response(
+        McpIdempotentWrite::Replayed(record),
+        None,
+    )?))
+}
+
 fn mcp_idempotent_response(
     outcome: McpIdempotentWrite,
     etag: Option<&str>,
@@ -3764,14 +4711,61 @@ fn mcp_idempotent_response(
         .ok()
         .and_then(|status| StatusCode::from_u16(status).ok())
         .ok_or_else(ApiError::internal)?;
-    let mut response = (status, Json(record.response_body)).into_response();
-    if let Some(etag) = etag {
+    let response_etag = etag.map(ToOwned::to_owned).or_else(|| {
+        record
+            .response_body
+            .get("etag")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    });
+    let mut response = if status == StatusCode::NO_CONTENT {
+        status.into_response()
+    } else {
+        (status, Json(record.response_body)).into_response()
+    };
+    if let Some(etag) = response_etag.as_deref() {
         response.headers_mut().insert(
             header::ETAG,
             HeaderValue::from_str(etag).map_err(|_| ApiError::internal())?,
         );
     }
     Ok(response)
+}
+
+enum McpMutationAdmission {
+    Started(McpMutationTransaction),
+    Finished(Response),
+}
+
+async fn admit_mcp_mutation(
+    state: &AppState,
+    principal_id: Uuid,
+    route: &'static str,
+    key: &str,
+    request_fingerprint: &[u8; 32],
+    replay_etag: Option<&str>,
+) -> Result<McpMutationAdmission, ApiError> {
+    match state
+        .database
+        .mcp_begin_mutation(&McpMutationIdempotency {
+            tenant_id: state.tenant_id,
+            principal_id,
+            route,
+            key,
+            request_fingerprint,
+            legacy_request_fingerprint: None,
+        })
+        .await?
+    {
+        McpMutationStart::Started(transaction) => Ok(McpMutationAdmission::Started(transaction)),
+        McpMutationStart::Replayed(record) => Ok(McpMutationAdmission::Finished(
+            mcp_idempotent_response(McpIdempotentWrite::Replayed(record), replay_etag)?,
+        )),
+        McpMutationStart::KeyReused => Err(ApiError::conflict(
+            "idempotency.key_reused",
+            "The idempotency key was used for a different request",
+        )),
+    }
 }
 
 fn require_idempotency(headers: &HeaderMap) -> Result<&str, ApiError> {
@@ -4178,5 +5172,109 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn local_mcp_mutations_use_transaction_bound_idempotency() {
+        let source = include_str!("mcp.rs");
+        let discarded_key = ["require_idempotency", "(&headers)?;"].concat();
+        assert_eq!(source.matches(&discarded_key).count(), 0);
+        for handler in [
+            "create_registration_inner",
+            "change_registration_state",
+            "put_capability_review",
+            "revoke_approval",
+            "create_intent",
+            "cancel_invocation",
+            "revoke_data_grant",
+            "create_admin_template",
+            "update_admin_template",
+            "delete_admin_template",
+            "put_admin_assignment",
+            "delete_admin_assignment",
+            "create_admin_service",
+            "update_admin_service",
+            "delete_admin_service",
+            "revoke_admin_service_grant",
+            "create_admin_block_rule",
+            "delete_admin_block_rule",
+        ] {
+            let segment = async_handler_source(source, handler);
+            assert!(
+                segment.contains("admit_mcp_mutation("),
+                "{handler} does not reserve in the shared transaction"
+            );
+            assert!(
+                segment.contains(".finalize("),
+                "{handler} does not finalize before commit"
+            );
+        }
+        for handler in [
+            "update_registration",
+            "delete_registration",
+            "put_credential",
+            "delete_credential",
+            "start_oauth",
+            "test_registration",
+            "discover_registration",
+        ] {
+            let segment = async_handler_source(source, handler);
+            assert!(
+                segment.contains("mcp_broker_operation_id("),
+                "{handler} does not derive a stable broker operation"
+            );
+            assert!(
+                segment.contains("mark_broker_operation_applied(operation_id)"),
+                "{handler} does not bind API completion to its public receipt transaction"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_mutation_fingerprints_bind_route_ids_body_and_if_match() {
+        let registration_id = Uuid::new_v4();
+        let base = json!({
+            "registration_id":registration_id,
+            "if_match":"\"fb-mcp-test-7\"",
+            "request":{"action":"disable"},
+        });
+        let fingerprint = mcp_idempotency_fingerprint(
+            "POST /api/v1/mcp/registrations/{registration_id}/state",
+            &base,
+        )
+        .unwrap();
+        for changed in [
+            json!({"registration_id":Uuid::new_v4(),"if_match":"\"fb-mcp-test-7\"","request":{"action":"disable"}}),
+            json!({"registration_id":registration_id,"if_match":"\"fb-mcp-test-8\"","request":{"action":"disable"}}),
+            json!({"registration_id":registration_id,"if_match":"\"fb-mcp-test-7\"","request":{"action":"enable"}}),
+        ] {
+            assert_ne!(
+                fingerprint,
+                mcp_idempotency_fingerprint(
+                    "POST /api/v1/mcp/registrations/{registration_id}/state",
+                    &changed,
+                )
+                .unwrap()
+            );
+        }
+        assert_ne!(
+            fingerprint,
+            mcp_idempotency_fingerprint(
+                "POST /api/v1/mcp/registrations/{registration_id}/other",
+                &base,
+            )
+            .unwrap()
+        );
+    }
+
+    fn async_handler_source<'a>(source: &'a str, handler: &str) -> &'a str {
+        let start = source
+            .find(&format!("async fn {handler}("))
+            .unwrap_or_else(|| panic!("missing handler {handler}"));
+        let tail = &source[start..];
+        let end = tail[1..]
+            .find("\nasync fn ")
+            .map_or(tail.len(), |index| index + 1);
+        &tail[..end]
     }
 }

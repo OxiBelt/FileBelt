@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use filebelt_database::mount::{MountStagingCleanupJobRecord, MountWriteLockCleanupJobRecord};
+use filebelt_database::mount::{
+    MountPayloadDeletionRoute, MountStagingCleanupJobRecord, MountWriteLockCleanupJobRecord,
+};
 use filebelt_database::{Database, DatabaseError, JobRecord, PayloadRecord};
 use filebelt_events_protocol::EventEnvelope;
 use filebelt_storage::{StorageError, StorageLayout};
@@ -62,6 +64,7 @@ pub struct ReconcileReport {
     pub finalizing_temporaries_removed: u64,
     pub scrub_jobs_created: u64,
     pub expired_capability_nonces_removed: u64,
+    pub mcp_broker_operation_receipts_removed: u64,
     pub retained_consumer_deduplications_removed: u64,
     pub retained_outbox_events_removed: u64,
     pub collaboration_warnings_emitted: u64,
@@ -178,6 +181,10 @@ impl Maintenance {
         .map_err(|_| StorageError::Join)??;
         let scrub_jobs_created = self.enqueue_scrub_jobs().await?;
         let expired_capability_nonces_removed = self.cleanup_expired_capability_nonces().await?;
+        let mcp_broker_operation_receipts_removed = self
+            .database
+            .purge_mcp_broker_operation_receipts(self.tenant_id, RETENTION_BATCH_SIZE)
+            .await?;
         let (retained_consumer_deduplications_removed, retained_outbox_events_removed) =
             self.cleanup_retained_outbox().await?;
         let collaboration_retention = self
@@ -208,6 +215,7 @@ impl Maintenance {
             finalizing_temporaries_removed: temporary_cleanup.finalizing_removed,
             scrub_jobs_created,
             expired_capability_nonces_removed,
+            mcp_broker_operation_receipts_removed,
             retained_consumer_deduplications_removed,
             retained_outbox_events_removed,
             collaboration_warnings_emitted: collaboration_retention.warnings_emitted,
@@ -342,18 +350,35 @@ impl Maintenance {
         if payload.state == "deleted" {
             return Ok(JobDisposition::Complete("already_deleted"));
         }
+        if let Some(route) = self
+            .database
+            .route_mount_payload_deletion(job.tenant_id, self.backend_id, payload_id)
+            .await?
+        {
+            return match route {
+                MountPayloadDeletionRoute::Protected => {
+                    Ok(JobDisposition::Complete("mount_payload_protected"))
+                }
+                MountPayloadDeletionRoute::CleanupRequired { write_session_id } => {
+                    let cleanup = self
+                        .database
+                        .claim_mount_staging_cleanup(
+                            job.tenant_id,
+                            self.backend_id,
+                            write_session_id,
+                            self.worker_id,
+                        )
+                        .await?;
+                    self.cleanup_mount_staging_job(cleanup).await?;
+                    Ok(JobDisposition::Complete("mount_payload_cleanup_dispatched"))
+                }
+            };
+        }
         if !matches!(
             payload.state.as_str(),
             "delete_intent" | "deleting" | "abandoned"
         ) {
             return Err(MaintenanceError::InvalidJob);
-        }
-        if payload.state == "delete_intent" {
-            sqlx::query("UPDATE payload_objects SET state='deleting' WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'")
-                .bind(job.tenant_id)
-                .bind(payload_id)
-                .execute(self.database.pool())
-                .await?;
         }
         let document_payload = self
             .database
@@ -366,8 +391,27 @@ impl Maintenance {
             .upload_for_payload(job.tenant_id, payload_id)
             .await
         {
-            Ok(upload) => upload,
+            Ok(upload) => {
+                self.database
+                    .admit_finalized_upload_orphan_deletion(job.tenant_id, payload_id)
+                    .await?;
+                upload
+            }
             Err(DatabaseError::NotFound) => {
+                if payload.state == "delete_intent" {
+                    let transitioned = sqlx::query(
+                        "UPDATE payload_objects SET state='deleting' \
+                         WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'",
+                    )
+                    .bind(job.tenant_id)
+                    .bind(payload_id)
+                    .execute(self.database.pool())
+                    .await?
+                    .rows_affected();
+                    if transitioned != 1 {
+                        return Err(MaintenanceError::InvalidJob);
+                    }
+                }
                 let storage = self.storage.clone();
                 let payload_for_delete = payload.clone();
                 tokio::task::spawn_blocking(move || {
@@ -521,27 +565,15 @@ impl Maintenance {
     }
 
     async fn enqueue_finalized_orphans(&self) -> Result<u64, MaintenanceError> {
-        let mut transaction = self.database.pool().begin().await?;
-        let rows = sqlx::query("UPDATE payload_objects SET state='delete_intent',deletion_intent_at=clock_timestamp() WHERE (tenant_id,id) IN (SELECT p.tenant_id,p.id FROM payload_objects p WHERE p.tenant_id=$2 AND p.backend_id=$3 AND p.state='finalized' AND p.finalized_at<=clock_timestamp()-make_interval(secs=>$1) AND NOT EXISTS (SELECT 1 FROM filebelt_document.revisions r WHERE r.tenant_id=p.tenant_id AND r.payload_id=p.id) ORDER BY p.finalized_at FOR UPDATE SKIP LOCKED LIMIT 100) RETURNING tenant_id,id")
-            .bind(self.orphan_grace_seconds)
-            .bind(self.tenant_id)
-            .bind(self.backend_id)
-            .fetch_all(&mut *transaction)
-            .await?;
-        for row in &rows {
-            let tenant_id: Uuid = row.get("tenant_id");
-            let payload_id: Uuid = row.get("id");
-            sqlx::query("INSERT INTO jobs (tenant_id,id,kind,state,priority,aggregate_id,idempotency_key,payload) VALUES ($1,$2,'payload_delete','queued',80,$3,$4,$5) ON CONFLICT DO NOTHING")
-                .bind(tenant_id)
-                .bind(Uuid::new_v4())
-                .bind(payload_id)
-                .bind(format!("orphan:{payload_id}"))
-                .bind(serde_json::json!({"payload_id": payload_id}))
-                .execute(&mut *transaction)
-                .await?;
-        }
-        transaction.commit().await?;
-        Ok(rows.len() as u64)
+        self.database
+            .enqueue_finalized_upload_orphans(
+                self.tenant_id,
+                self.backend_id,
+                self.orphan_grace_seconds,
+                RECONCILE_BATCH_SIZE,
+            )
+            .await
+            .map_err(MaintenanceError::from)
     }
 
     async fn enqueue_scrub_jobs(&self) -> Result<u64, MaintenanceError> {
@@ -1095,7 +1127,7 @@ mod tests {
             .split_once("async fn enqueue_scrub_jobs")
             .expect("scrub sweep follows orphan sweep")
             .0;
-        assert!(orphan.contains("NOT EXISTS (SELECT 1 FROM filebelt_document.revisions"));
+        assert!(orphan.contains("enqueue_finalized_upload_orphans"));
 
         let cleanup = source
             .split_once("async fn cleanup_document_finalized_staging")
@@ -1165,6 +1197,24 @@ mod tests {
             .find("complete_mount_staging_cleanup")
             .expect("terminal completion");
         assert!(deleted < marked && marked < unlocked && unlocked < completed);
+
+        let deletion = source
+            .split_once("async fn delete_payload")
+            .expect("payload deletion exists")
+            .1
+            .split_once("async fn scrub_payload")
+            .expect("scrubbing follows deletion")
+            .0;
+        let routed = deletion
+            .find("route_mount_payload_deletion")
+            .expect("generic jobs are rerouted through PostgreSQL");
+        let physical = deletion
+            .find("storage.delete_payload")
+            .expect("non-mount physical deletion remains");
+        assert!(routed < physical);
+        assert!(deletion.contains("claim_mount_staging_cleanup"));
+        assert!(deletion.contains("cleanup_mount_staging_job"));
+        assert!(deletion.contains("admit_finalized_upload_orphan_deletion"));
     }
 
     #[test]

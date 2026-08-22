@@ -591,7 +591,7 @@ impl Database {
     }
 }
 
-async fn advance_admin_block_policy(
+pub(super) async fn advance_admin_block_policy(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: Uuid,
 ) -> Result<(), DatabaseError> {
@@ -614,7 +614,11 @@ fn update_one(affected: u64) -> Result<(), DatabaseError> {
     }
 }
 
-fn validate_block_rule(scope: &str, matcher: &str, reason: &str) -> Result<(), DatabaseError> {
+pub(super) fn validate_block_rule(
+    scope: &str,
+    matcher: &str,
+    reason: &str,
+) -> Result<(), DatabaseError> {
     if !matches!(
         scope,
         "origin" | "trust_profile" | "catalog_entry" | "registration" | "capability"
@@ -703,7 +707,7 @@ fn service_grant_from_row(row: &sqlx::postgres::PgRow) -> McpServiceGrantRecord 
         revoked: row.get("revoked"),
     }
 }
-fn block_rule_from_row(row: &sqlx::postgres::PgRow) -> McpAdminBlockRuleRecord {
+pub(super) fn block_rule_from_row(row: &sqlx::postgres::PgRow) -> McpAdminBlockRuleRecord {
     McpAdminBlockRuleRecord {
         id: row.get("id"),
         scope: row.get("scope"),

@@ -12,12 +12,19 @@ use uuid::Uuid;
 
 use super::{Database, DatabaseError};
 
+mod broker_idempotency;
 mod idempotency;
 mod invocation;
 mod management;
 mod operations;
 mod runner_slots;
-pub use idempotency::{McpIdempotency, McpIdempotentWrite};
+pub use broker_idempotency::{
+    McpBrokerOperationIdempotency, McpBrokerOperationStart, McpBrokerOperationTransaction,
+};
+pub use idempotency::{
+    McpCapabilityDecision, McpIdempotency, McpIdempotentWrite, McpMutationIdempotency,
+    McpMutationStart, McpMutationTransaction,
+};
 pub use invocation::{
     McpActivityRecord, McpInvocationIntentApprovalContext, McpOAuthAttemptSecret, McpRateDecision,
     McpRevocationGenerations, NewMcpApprovalRule, NewMcpInvocation, NewMcpOAuthAttempt,

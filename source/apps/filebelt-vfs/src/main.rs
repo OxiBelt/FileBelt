@@ -61,7 +61,7 @@ use prost::Message as _;
 use reqwest::{Certificate, Client, Identity, Url};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
-use uuid::Uuid;
+use uuid::{Uuid, Variant};
 use zeroize::{Zeroize, Zeroizing};
 
 const ROLE: &str = "filebelt-vfs";
@@ -115,6 +115,7 @@ struct MountIoClient {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateCredentialRequest {
+    operation_id: Uuid,
     principal_id: Uuid,
     protocol: String,
     read_only: bool,
@@ -2020,7 +2021,8 @@ async fn create_credential(
     let maximum_expiry = now
         .checked_add(jiff::SignedDuration::from_hours(7 * 24))
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "credential clock failed"))?;
-    if !matches!(request.protocol.as_str(), "smb" | "ftps")
+    if !valid_credential_operation_id(request.operation_id)
+        || !matches!(request.protocol.as_str(), "smb" | "ftps")
         || !request.read_only
         || request.allowed_drive_ids.is_empty()
         || request.allowed_drive_ids.len() > 256
@@ -2029,7 +2031,7 @@ async fn create_credential(
     {
         return Err((StatusCode::BAD_REQUEST, "invalid mount credential request"));
     }
-    let credential_id = Uuid::new_v4();
+    let credential_id = request.operation_id;
     let mut username_random = [0_u8; 12];
     let mut password_random = Zeroizing::new([0_u8; 32]);
     random_fill(&mut username_random).map_err(|_| {
@@ -2137,6 +2139,10 @@ async fn create_credential(
     ))
 }
 
+fn valid_credential_operation_id(operation_id: Uuid) -> bool {
+    operation_id.get_version_num() == 4 && operation_id.get_variant() == Variant::RFC4122
+}
+
 fn protocol_name(protocol: MountProtocol) -> &'static str {
     match protocol {
         MountProtocol::Smb => "smb",
@@ -2193,6 +2199,18 @@ fn unavailable(request: &RequestFence, reason: &str) -> VfsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_operation_ids_require_rfc4122_uuid_v4() {
+        assert!(valid_credential_operation_id(Uuid::new_v4()));
+        for invalid in [
+            Uuid::nil(),
+            Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap(),
+            Uuid::parse_str("00000000-0000-4000-0000-000000000001").unwrap(),
+        ] {
+            assert!(!valid_credential_operation_id(invalid));
+        }
+    }
 
     fn nfs_fence(operation: filebelt_vfs_protocol::OperationKind) -> RequestFence {
         RequestFence {

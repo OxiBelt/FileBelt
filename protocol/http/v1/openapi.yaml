@@ -415,7 +415,7 @@ paths:
   /api/v1/mounts/credentials:
     post:
       operationId: createMountCredential
-      description: Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected.
+      description: Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The caller supplies a fresh operation UUID that becomes the credential identifier so an unknown response can be revoked without replaying creation. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected.
       parameters:
         - $ref: "#/components/parameters/Csrf"
         - $ref: "#/components/parameters/Origin"
@@ -1483,7 +1483,7 @@ paths:
   /api/v1/drives/{drive_id}/nodes/{node_id}/acl:
     get:
       operationId: listAdvancedAcl
-      description: Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived rows are included as read-only projections.
+      description: Lists direct Virtual ACL rows after MANAGE_ACL authorization. Share-derived and non-core rows are included as read-only projections with exact principal and source provenance.
       parameters:
         - $ref: "#/components/parameters/DriveId"
         - $ref: "#/components/parameters/NodeId"
@@ -1502,7 +1502,7 @@ paths:
           $ref: "#/components/responses/Problem"
     put:
       operationId: replaceAdvancedAcl
-      description: Atomically replaces only the advanced rows for one exact verified user or local group. Owner grants and share-derived rows cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and non-share advanced rows removed by omission, regardless of effect or inheritance. An empty entries array clears advanced rows only when every removed action is held. Authorization denial remains existence-hiding 404; stale concurrent authorization or ACL state is 409.
+      description: Atomically replaces only mutable core rows for one exact verified user or local group. Owner grants, share-derived rows, and rows owned by another source cannot be changed through this route. The actor must hold MANAGE_ACL and every action in submitted rows and mutable core rows removed by omission, regardless of effect or inheritance. An empty entries array clears mutable core rows only when every removed action is held. Authorization denial remains existence-hiding 404; the exact If-Match value and authorization generations are rechecked while the PostgreSQL mutation transaction holds the resource fence, and stale concurrent state is 409.
       parameters:
         - $ref: "#/components/parameters/DriveId"
         - $ref: "#/components/parameters/NodeId"
@@ -3193,8 +3193,11 @@ components:
     CreateMountCredential:
       type: object
       additionalProperties: false
-      required: [protocol, read_only, allowed_drive_ids, bound_device_id, expires_at]
+      required: [operation_id, protocol, read_only, allowed_drive_ids, bound_device_id, expires_at]
       properties:
+        operation_id:
+          $ref: "#/components/schemas/UuidV4"
+          description: Fresh caller-generated operation identifier. It becomes the credential ID and must never be reused to retry secret creation.
         protocol:
           type: string
           enum: [smb, ftps]
@@ -4652,14 +4655,14 @@ components:
       properties:
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, TRAVERSE, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
           description: BYPASS_REPOSITORY_RULES records standing eligibility only; it never replaces the matching ruleset allowlist, recent OIDC authentication, bounded reason, one-operation grant, or audit evidence.
         effect:
           type: string
           enum: [allow, deny]
         inheritance:
           type: string
-          enum: [self, descendants, self_and_descendants]
+          enum: [self, children, descendants, self_and_descendants]
     ReplaceAcl:
       type: object
       additionalProperties: false
@@ -4669,20 +4672,24 @@ components:
           $ref: "#/components/schemas/AclPrincipalSelector"
         entries:
           type: array
-          maxItems: 25
+          maxItems: 26
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AclEntryMutation"
     AclEntry:
       type: object
       additionalProperties: false
-      required: [principal_id, principal_kind, display_name, verified_email, action, effect, inheritance, source]
+      required: [principal_id, principal_kind, group_id, display_name, verified_email, action, effect, inheritance, source, read_only]
       properties:
         principal_id:
           $ref: "#/components/schemas/UuidV4"
         principal_kind:
           type: string
           enum: [user, group]
+        group_id:
+          oneOf:
+            - $ref: "#/components/schemas/UuidV4"
+            - type: "null"
         display_name:
           type: string
         verified_email:
@@ -4692,17 +4699,19 @@ components:
             - type: "null"
         action:
           type: string
-          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
+          enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, TRAVERSE, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
           description: BYPASS_REPOSITORY_RULES records standing eligibility only; it never represents an operation-scoped bypass grant.
         effect:
           type: string
           enum: [allow, deny]
         inheritance:
           type: string
-          enum: [self, descendants, self_and_descendants]
+          enum: [self, children, descendants, self_and_descendants]
         source:
           type: string
-          enum: [advanced, share]
+          enum: [core, share, nfs]
+        read_only:
+          type: boolean
     AclCollection:
       type: object
       additionalProperties: false
@@ -4710,10 +4719,12 @@ components:
       properties:
         supported_actions:
           type: array
-          minItems: 21
-          maxItems: 21
+          minItems: 26
+          maxItems: 26
+          uniqueItems: true
           items:
             type: string
+            enum: [READ_METADATA, LIST_CHILDREN, READ_CONTENT, CREATE_CHILD, WRITE_CONTENT, CREATE_VERSION, RENAME, MOVE, DELETE, RESTORE, SET_ATTRIBUTES, SHARE, MANAGE_ACL, MANAGE_DRIVE, TRANSCODE, USE_EXTERNAL_EDITOR, COMMENT, REVIEW, USE_MCP, MOUNT, EXPORT, TRAVERSE, READ_REPOSITORY, WRITE_REPOSITORY, MANAGE_REPOSITORY, BYPASS_REPOSITORY_RULES]
         entries:
           type: array
           items:

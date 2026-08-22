@@ -2,7 +2,10 @@
 
 //! PostgreSQL-backed Phase 7 migration and least-privilege checks.
 
-use filebelt_database::Database;
+use filebelt_database::document::{
+    DocumentAuthorizationGenerations, ForceCloseDocumentSessionInput,
+};
+use filebelt_database::{Database, DatabaseError};
 
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL database in FILEBELT_DOCUMENT_TEST_DATABASE_URL"]
@@ -278,6 +281,396 @@ async fn origin_isolation_cutover_revokes_exact_sessions_and_preserves_revisions
     assert_eq!(receipt, 2);
     assert_eq!(session_audits, 1);
     assert_eq!(document_audits, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires an empty PostgreSQL database in FILEBELT_DOCUMENT_OPERATION_TEST_DATABASE_URL"]
+async fn document_close_receipts_replay_reject_reuse_and_rollback_with_mutations() {
+    let database_url = std::env::var("FILEBELT_DOCUMENT_OPERATION_TEST_DATABASE_URL")
+        .expect("FILEBELT_DOCUMENT_OPERATION_TEST_DATABASE_URL is required");
+    let database = Database::connect(&database_url, 2)
+        .await
+        .expect("connect test database");
+    sqlx::raw_sql(include_str!("../../../migrations/postgres/roles.sql"))
+        .execute(database.pool())
+        .await
+        .expect("apply roles");
+    database.migrate().await.expect("apply migrations");
+
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO tenants (id,slug) VALUES
+          ('10000000-0000-4000-8000-000000000001','document-operation-test');
+        INSERT INTO principals (tenant_id,id,kind) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002','user'),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000a','document_session'),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000b','document_session');
+        INSERT INTO users (tenant_id,id,principal_id,display_name) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000003',
+           '10000000-0000-4000-8000-000000000002','Operation User');
+        INSERT INTO drives
+          (tenant_id,id,owner_principal_id,kind,display_name,quota_bytes) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000002','private','Operation Drive',1073741824);
+        INSERT INTO nodes (tenant_id,drive_id,id,parent_id,kind,display_name,name_key) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000005',NULL,'directory','',''),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000006','10000000-0000-4000-8000-000000000005',
+           'file','operation.docx','operation.docx');
+        INSERT INTO node_ancestry (tenant_id,drive_id,ancestor_id,descendant_id,depth) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000005',0),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000006',1),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000006','10000000-0000-4000-8000-000000000006',0);
+        INSERT INTO storage_backends (tenant_id,id,kind) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000007','posix');
+        INSERT INTO payload_objects
+          (tenant_id,id,drive_id,backend_id,locator,layout,state,size_bytes,blake3,finalized_at)
+        VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000008',
+           '10000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000007',
+           '10000000-0000-4000-8000-000000000018','whole','referenced',10,
+           decode(repeat('01',32),'hex'),clock_timestamp());
+        INSERT INTO file_versions
+          (tenant_id,node_id,id,ordinal,payload_id,size_bytes,blake3,media_type,created_by)
+        VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000006',
+           '10000000-0000-4000-8000-000000000009',1,'10000000-0000-4000-8000-000000000008',
+           10,decode(repeat('01',32),'hex'),
+           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+           '10000000-0000-4000-8000-000000000002');
+        UPDATE nodes SET head_version_id='10000000-0000-4000-8000-000000000009'
+        WHERE tenant_id='10000000-0000-4000-8000-000000000001'
+          AND drive_id='10000000-0000-4000-8000-000000000004'
+          AND id='10000000-0000-4000-8000-000000000006';
+        INSERT INTO api_sessions
+          (tenant_id,id,user_id,principal_id,token_key_generation,token_digest,csrf_digest,
+           idle_expires_at,absolute_expires_at) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000c',
+           '10000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000002',
+           1,decode('41','hex'),decode('42','hex'),clock_timestamp()+interval '1 hour',
+           clock_timestamp()+interval '2 hours');
+        INSERT INTO filebelt_document.sessions
+          (tenant_id,id,session_principal_id,drive_id,node_id,provider_id,base_version_id,
+           expected_head_version_id,created_by) VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000d',
+           '10000000-0000-4000-8000-00000000000a','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000006','revoke-provider',
+           '10000000-0000-4000-8000-000000000009','10000000-0000-4000-8000-000000000009',
+           '10000000-0000-4000-8000-000000000002'),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000e',
+           '10000000-0000-4000-8000-00000000000b','10000000-0000-4000-8000-000000000004',
+           '10000000-0000-4000-8000-000000000006','force-close-provider',
+           '10000000-0000-4000-8000-000000000009','10000000-0000-4000-8000-000000000009',
+           '10000000-0000-4000-8000-000000000002');
+        INSERT INTO filebelt_document.participants
+          (tenant_id,id,document_session_id,user_principal_id,api_session_id,mode,
+           membership_generation,drive_acl_generation,namespace_generation,resource_acl_generation)
+        VALUES
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-00000000000f',
+           '10000000-0000-4000-8000-00000000000d','10000000-0000-4000-8000-000000000002',
+           '10000000-0000-4000-8000-00000000000c','edit',1,1,1,1),
+          ('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000010',
+           '10000000-0000-4000-8000-00000000000e','10000000-0000-4000-8000-000000000002',
+           '10000000-0000-4000-8000-00000000000c','edit',1,1,1,1);
+        "#,
+    )
+    .execute(database.pool())
+    .await
+    .expect("seed document operation state");
+
+    let tenant_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+    let actor_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000002").unwrap();
+    let drive_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000004").unwrap();
+    let node_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000006").unwrap();
+    let api_session_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-00000000000c").unwrap();
+    let revoke_session_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-00000000000d").unwrap();
+    let force_session_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-00000000000e").unwrap();
+    let revoke_participant_id =
+        uuid::Uuid::parse_str("10000000-0000-4000-8000-00000000000f").unwrap();
+    let force_participant_id =
+        uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000010").unwrap();
+
+    let revoke_digest = [1; 32];
+    let revoke_fingerprint = [2; 32];
+    sqlx::query(
+        "ALTER TABLE filebelt_document.operation_receipts ADD CONSTRAINT \
+         document_test_reject_revoke_receipt CHECK (command_kind <> 'revoke_session')",
+    )
+    .execute(database.pool())
+    .await
+    .expect("install revoke receipt failure");
+    assert!(
+        database
+            .revoke_document_participant(
+                tenant_id,
+                revoke_participant_id,
+                actor_id,
+                "owner_revoke",
+                &revoke_digest,
+                &revoke_fingerprint,
+            )
+            .await
+            .is_err()
+    );
+    let revoke_state: String = sqlx::query_scalar(
+        "SELECT state FROM filebelt_document.participants WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(revoke_participant_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("revoke rollback state");
+    assert_eq!(revoke_state, "active");
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &revoke_digest).await,
+        0
+    );
+    sqlx::query(
+        "ALTER TABLE filebelt_document.operation_receipts DROP CONSTRAINT \
+         document_test_reject_revoke_receipt",
+    )
+    .execute(database.pool())
+    .await
+    .expect("remove revoke receipt failure");
+
+    assert!(
+        database
+            .revoke_document_participant(
+                tenant_id,
+                revoke_participant_id,
+                actor_id,
+                "owner_revoke",
+                &revoke_digest,
+                &revoke_fingerprint,
+            )
+            .await
+            .expect("revoke participant")
+    );
+    assert!(
+        database
+            .revoke_document_participant(
+                tenant_id,
+                revoke_participant_id,
+                actor_id,
+                "owner_revoke",
+                &revoke_digest,
+                &revoke_fingerprint,
+            )
+            .await
+            .expect("replay revoke participant")
+    );
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &revoke_digest).await,
+        1
+    );
+    let revoked_owner_detail = database
+        .document_session_for_principal(tenant_id, actor_id, revoke_session_id)
+        .await
+        .expect("revoked owned session remains addressable for API replay");
+    assert!(
+        revoked_owner_detail
+            .iter()
+            .any(|launch| launch.participant.id == revoke_participant_id)
+    );
+    assert!(matches!(
+        database
+            .revoke_document_participant(
+                tenant_id,
+                revoke_participant_id,
+                actor_id,
+                "owner_revoke",
+                &revoke_digest,
+                &[3; 32],
+            )
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
+
+    let absent_revoke_digest = [4; 32];
+    assert!(
+        !database
+            .revoke_document_participant(
+                tenant_id,
+                uuid::Uuid::new_v4(),
+                actor_id,
+                "owner_revoke",
+                &absent_revoke_digest,
+                &[5; 32],
+            )
+            .await
+            .expect("absent participant is unchanged")
+    );
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &absent_revoke_digest).await,
+        0
+    );
+
+    let generations = DocumentAuthorizationGenerations {
+        membership: 1,
+        drive_acl: 1,
+        namespace: 1,
+        resource_acl: 1,
+    };
+    let force_digest = [6; 32];
+    let force_fingerprint = [7; 32];
+    sqlx::query(
+        "ALTER TABLE filebelt_document.operation_receipts ADD CONSTRAINT \
+         document_test_reject_force_close_receipt CHECK (command_kind <> 'force_close_session')",
+    )
+    .execute(database.pool())
+    .await
+    .expect("install force-close receipt failure");
+    let force_input = ForceCloseDocumentSessionInput {
+        tenant_id,
+        session_id: force_session_id,
+        actor_principal_id: actor_id,
+        api_session_id,
+        drive_id,
+        node_id,
+        generations,
+        reason: "manager_force_close",
+        operation_digest: &force_digest,
+        request_fingerprint: &force_fingerprint,
+    };
+    assert!(
+        database
+            .force_close_document_session(&force_input)
+            .await
+            .is_err()
+    );
+    let force_state: (String, i64) = sqlx::query_as(
+        "SELECT state,fencing_token FROM filebelt_document.sessions WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(force_session_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("force-close rollback state");
+    assert_eq!(force_state, ("active".into(), 1));
+    let force_participant_state: String = sqlx::query_scalar(
+        "SELECT state FROM filebelt_document.participants WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(force_participant_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("force-close participant rollback state");
+    assert_eq!(force_participant_state, "active");
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &force_digest).await,
+        0
+    );
+    sqlx::query(
+        "ALTER TABLE filebelt_document.operation_receipts DROP CONSTRAINT \
+         document_test_reject_force_close_receipt",
+    )
+    .execute(database.pool())
+    .await
+    .expect("remove force-close receipt failure");
+
+    assert!(
+        database
+            .force_close_document_session(&force_input)
+            .await
+            .expect("force-close session")
+    );
+    assert!(
+        database
+            .force_close_document_session(&force_input)
+            .await
+            .expect("replay force-close session")
+    );
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &force_digest).await,
+        1
+    );
+    let reused_force_fingerprint = [8; 32];
+    let reused_force_input = ForceCloseDocumentSessionInput {
+        request_fingerprint: &reused_force_fingerprint,
+        ..force_input
+    };
+    assert!(matches!(
+        database
+            .force_close_document_session(&reused_force_input)
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
+
+    let missing_force_digest = [9; 32];
+    let missing_force_fingerprint = [10; 32];
+    let missing_force_input = ForceCloseDocumentSessionInput {
+        session_id: uuid::Uuid::new_v4(),
+        operation_digest: &missing_force_digest,
+        request_fingerprint: &missing_force_fingerprint,
+        ..force_input
+    };
+    assert!(matches!(
+        database
+            .force_close_document_session(&missing_force_input)
+            .await,
+        Err(DatabaseError::NotFound)
+    ));
+    assert_eq!(
+        operation_receipt_count(&database, tenant_id, &missing_force_digest).await,
+        0
+    );
+
+    let revoke_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE tenant_id=$1 \
+         AND action='document.participant.revoke'",
+    )
+    .bind(tenant_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("revoke audit count");
+    let close_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_events WHERE tenant_id=$1 \
+         AND action='document.session.force_close'",
+    )
+    .bind(tenant_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("force-close audit count");
+    assert_eq!(revoke_audits, 1);
+    assert_eq!(close_audits, 1);
+    let closed_force_state: (String, i64) = sqlx::query_as(
+        "SELECT state,fencing_token FROM filebelt_document.sessions WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(force_session_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("force-close committed state");
+    assert_eq!(closed_force_state, ("revoked".into(), 2));
+    let revoked_session_state: String = sqlx::query_scalar(
+        "SELECT state FROM filebelt_document.sessions WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(revoke_session_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("revoke committed session state");
+    assert_eq!(revoked_session_state, "revoked");
+}
+
+async fn operation_receipt_count(
+    database: &Database,
+    tenant_id: uuid::Uuid,
+    operation_digest: &[u8; 32],
+) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM filebelt_document.operation_receipts \
+         WHERE tenant_id=$1 AND operation_digest=$2",
+    )
+    .bind(tenant_id)
+    .bind(operation_digest.as_slice())
+    .fetch_one(database.pool())
+    .await
+    .expect("operation receipt count")
 }
 
 async fn schema_privilege(database: &Database, role: &str, schema: &str, privilege: &str) -> bool {

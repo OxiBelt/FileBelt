@@ -218,6 +218,8 @@ pub struct ForceCloseDocumentSessionInput<'a> {
     pub node_id: Uuid,
     pub generations: DocumentAuthorizationGenerations,
     pub reason: &'a str,
+    pub operation_digest: &'a [u8; 32],
+    pub request_fingerprint: &'a [u8; 32],
 }
 
 #[derive(Clone, Debug)]
@@ -927,11 +929,25 @@ impl Database {
         participant_id: Uuid,
         actor_principal_id: Uuid,
         reason: &str,
+        operation_digest: &[u8; 32],
+        request_fingerprint: &[u8; 32],
     ) -> Result<bool, DatabaseError> {
         if reason.is_empty() || reason.len() > 96 {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool().begin().await?;
+        if let Some(replay) = document_operation_replay::<bool>(
+            &mut transaction,
+            tenant_id,
+            operation_digest,
+            request_fingerprint,
+            "revoke_session",
+        )
+        .await?
+        {
+            transaction.commit().await?;
+            return Ok(replay);
+        }
         let row = sqlx::query(
             "UPDATE filebelt_document.participants SET state='revoked',closed_at=clock_timestamp(),\
              close_reason=$4 WHERE tenant_id=$1 AND id=$2 AND user_principal_id=$3 \
@@ -973,6 +989,15 @@ impl Database {
             json!({"participant_id":participant_id,"document_session_id":session_id}),
         )
         .await?;
+        document_operation_record(
+            &mut transaction,
+            tenant_id,
+            operation_digest,
+            request_fingerprint,
+            "revoke_session",
+            &true,
+        )
+        .await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -988,6 +1013,18 @@ impl Database {
             return Err(DatabaseError::InvalidPersistedValue);
         }
         let mut transaction = self.pool().begin().await?;
+        if let Some(replay) = document_operation_replay::<bool>(
+            &mut transaction,
+            input.tenant_id,
+            input.operation_digest,
+            input.request_fingerprint,
+            "force_close_session",
+        )
+        .await?
+        {
+            transaction.commit().await?;
+            return Ok(replay);
+        }
         let stored = sqlx::query(
             "SELECT drive_id,node_id FROM filebelt_document.sessions WHERE tenant_id=$1 AND id=$2 \
              AND state IN ('active','draining') FOR UPDATE",
@@ -1047,6 +1084,15 @@ impl Database {
             input.reason,
             true,
             json!({"document_session_id":input.session_id}),
+        )
+        .await?;
+        document_operation_record(
+            &mut transaction,
+            input.tenant_id,
+            input.operation_digest,
+            input.request_fingerprint,
+            "force_close_session",
+            &true,
         )
         .await?;
         transaction.commit().await?;
@@ -2792,6 +2838,21 @@ mod tests {
         assert!(migration.contains("document_operation_receipts_expiry_index"));
         assert!(migration.contains("interval '24 hours'"));
         assert!(migration.contains("document_session"));
+    }
+
+    #[test]
+    fn close_idempotency_migration_admits_only_the_bounded_new_receipt_kinds() {
+        let migration =
+            include_str!("../../../migrations/postgres/000022_document_close_idempotency.sql");
+        for command_kind in [
+            "'create_session'",
+            "'conflict_copy'",
+            "'revoke_session'",
+            "'force_close_session'",
+        ] {
+            assert!(migration.contains(command_kind));
+        }
+        assert!(!migration.contains("launch_grant"));
     }
 
     #[test]

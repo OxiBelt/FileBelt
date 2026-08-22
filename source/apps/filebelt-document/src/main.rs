@@ -39,8 +39,8 @@ use filebelt_document_protocol::{
     DocumentRevisionKind, DocumentSession, DocumentSessionDetail, DocumentSessionError,
     DocumentSessionErrorCode, DocumentSessionMode, DocumentSessionPage, DocumentSessionPageAnchor,
     DocumentSessionState, ForceCloseDocumentSessionCommand, IssueDocumentLaunchGrantCommand,
-    ListDocumentSessionsCommand, RedeemDocumentLaunchCommand, document_execute_request,
-    document_execute_response,
+    ListDocumentSessionsCommand, RedeemDocumentLaunchCommand, RevokeDocumentSessionCommand,
+    document_execute_request, document_execute_response,
 };
 use filebelt_runtime::{
     MtlsListener, OperationsState, certificate_not_after_unix_seconds, init_telemetry,
@@ -375,14 +375,7 @@ async fn dispatch(
             .await
         }
         document_execute_request::Command::RevokeSession(command) => {
-            revoke_session(
-                state,
-                command.tenant_id,
-                command.actor_principal_id,
-                command.participant_id,
-                command.reason,
-            )
-            .await
+            revoke_session(state, command).await
         }
         document_execute_request::Command::ForceCloseSession(command) => {
             force_close_session(state, command).await
@@ -575,18 +568,19 @@ async fn get_session(
 
 async fn revoke_session(
     state: &AppState,
-    tenant_wire: String,
-    actor_wire: String,
-    participant_wire: String,
-    reason: String,
+    command: RevokeDocumentSessionCommand,
 ) -> Result<document_execute_response::Result, DocumentSessionErrorCode> {
+    let operation_digest = exact_digest(&command.operation_digest)?;
+    let request_fingerprint = exact_digest(&command.request_fingerprint)?;
     let changed = state
         .database
         .revoke_document_participant(
-            tenant(state, &tenant_wire)?,
-            parse_uuid(&participant_wire)?,
-            parse_uuid(&actor_wire)?,
-            &reason,
+            tenant(state, &command.tenant_id)?,
+            parse_uuid(&command.participant_id)?,
+            parse_uuid(&command.actor_principal_id)?,
+            &command.reason,
+            &operation_digest,
+            &request_fingerprint,
         )
         .await
         .map_err(database_error)?;
@@ -605,6 +599,8 @@ async fn force_close_session(
     state: &AppState,
     command: ForceCloseDocumentSessionCommand,
 ) -> Result<document_execute_response::Result, DocumentSessionErrorCode> {
+    let operation_digest = exact_digest(&command.operation_digest)?;
+    let request_fingerprint = exact_digest(&command.request_fingerprint)?;
     let changed = state
         .database
         .force_close_document_session(&ForceCloseDocumentSessionInput {
@@ -616,6 +612,8 @@ async fn force_close_session(
             node_id: parse_uuid(&command.node_id)?,
             generations: generations(command.generations)?,
             reason: &command.reason,
+            operation_digest: &operation_digest,
+            request_fingerprint: &request_fingerprint,
         })
         .await
         .map_err(database_error)?;

@@ -15,12 +15,14 @@ use filebelt_collaboration_protocol::{
 };
 use filebelt_database::collaboration::{
     CollaborationAuthorizationContext, CollaborationAuthorizationGenerations,
-    CollaborationImportIntentInput,
+    CollaborationImportIntentInput, CollaborationJoinGrantInput,
 };
 use filebelt_database::revision::TextPreferencesRecord;
 use filebelt_database::{
-    AdvancedAclEntryInput, AdvancedAclEntryRecord, AdvancedAclReplacementPreflight, DatabaseError,
-    DirectShareRecord, DriveRecord, FileVersionRecord, NodeRecord, UploadRecord,
+    AdvancedAclEntryInput, AdvancedAclEntryRecord, AdvancedAclReplacementEtag,
+    AdvancedAclReplacementPreflight, DatabaseError, DirectShareRecord, DriveRecord,
+    FileVersionRecord, NodeRecord, ResourceMutationIdempotency, ResourceMutationWrite,
+    UploadRecord,
 };
 use filebelt_domain::{Action, NormalizedName};
 use filebelt_storage_protocol::{
@@ -442,12 +444,14 @@ struct ReplaceAclRequest {
 struct AclEntryResponse {
     principal_id: Uuid,
     principal_kind: String,
+    group_id: Option<Uuid>,
     display_name: String,
     verified_email: Option<String>,
     action: String,
     effect: String,
     inheritance: String,
     source: String,
+    read_only: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -527,12 +531,18 @@ async fn update_content_class_policy(
         })?;
     let request_fingerprint = fingerprint(&(drive_id, node_id, expected_etag, &request))?;
     let route = "PATCH /api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy";
-    if let Some(response) =
-        replay::<NodeResponse>(&state, &session, route, key, &request_fingerprint).await?
+    if let Some((status, body)) = replay_finalized_resource::<NodeResponse>(
+        &state,
+        &session,
+        route,
+        key,
+        &request_fingerprint,
+        None,
+    )
+    .await?
     {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        let etag = node_response_etag(&response.1);
-        return json_with_etag(status, &response.1, etag);
+        let etag = node_response_etag(&body);
+        return json_with_etag(status, &body, etag);
     }
     let grant = authorize_session_bound(
         &state.database,
@@ -549,9 +559,9 @@ async fn update_content_class_policy(
         .node(state.tenant_id, drive_id, node_id)
         .await?;
     require_etag(&headers, &node_etag(&node), "content_class.etag_stale")?;
-    state
+    let result = state
         .database
-        .update_content_class_policy(
+        .update_content_class_policy_idempotent(
             state.tenant_id,
             session.record.principal_id,
             session.record.session_id,
@@ -563,24 +573,25 @@ async fn update_content_class_policy(
             generation_i64(grant.drive_acl_generation)?,
             generation_i64(grant.namespace_generation)?,
             generation_i64(grant.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &request_fingerprint,
+                None,
+                StatusCode::OK,
+            ),
+            |node| {
+                let response = NodeResponse::try_from(node.clone())
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                serde_json::to_value(response).map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
         )
         .await?;
-    let updated = state
-        .database
-        .node(state.tenant_id, drive_id, node_id)
-        .await?;
-    let body = NodeResponse::try_from(updated.clone())?;
-    let stored = store_idempotent(
-        &state,
-        &session,
-        route,
-        key,
-        &request_fingerprint,
-        StatusCode::OK,
-        &body,
-    )
-    .await?;
-    json_with_etag(StatusCode::OK, &stored, node_etag(&updated))
+    let (status, body) =
+        resource_mutation_result::<NodeResponse>(result, &request_fingerprint, None)?;
+    let etag = node_response_etag(&body);
+    json_with_etag(status, &body, etag)
 }
 
 fn text_preferences_response(
@@ -904,17 +915,21 @@ async fn create_collaboration_grant(
     let node_id = parse_uuid_v4(&node_id)?;
     let client_id = parse_uuid_v4(&request.client_id)?;
     let fingerprint = fingerprint(&(drive_id, node_id, &request))?;
-    if let Some(response) = replay::<CollaborationGrantResponse>(
+    let route = "POST /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants";
+    if let Some((status, response)) = replay_finalized_resource::<CollaborationGrantResponse>(
         &state,
         &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
+        route,
         key,
         &fingerprint,
+        None,
     )
     .await?
     {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)).into_response());
+        let mut http = (status, Json(response)).into_response();
+        http.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return Ok(http);
     }
     let read = authorize_session_bound(
         &state.database,
@@ -946,123 +961,7 @@ async fn create_collaboration_grant(
             "Markdown collaboration requires an immutable base version",
         )
     })?;
-    let room = state
-        .database
-        .collaboration_get_or_create_room(
-            state.tenant_id,
-            drive_id,
-            node_id,
-            base,
-            session.record.principal_id,
-        )
-        .await?;
     require_same_generations(read, write)?;
-    let now = unix_time()?;
-    let expires = now + 60;
-    let mut nonce = [0_u8; 32];
-    getrandom::fill(&mut nonce).map_err(|_| ApiError::internal())?;
-    let bootstrap_payload = state
-        .database
-        .payload_for_node(state.tenant_id, node_id, Some(base))
-        .await?;
-    let bootstrap_claims = CapabilityClaims {
-        capability_id: Uuid::new_v4().to_string(),
-        audience: CAPABILITY_AUDIENCE.into(),
-        operation: CapabilityOperation::Download as i32,
-        tenant_id: state.tenant_id.to_string(),
-        principal_id: session.record.principal_id.to_string(),
-        session_id: session.record.session_id.to_string(),
-        resource_id: node_id.to_string(),
-        upload_id: String::new(),
-        payload_id: bootstrap_payload.payload_id.to_string(),
-        part_number: 0,
-        range_start: 0,
-        range_end: u64::try_from(bootstrap_payload.size_bytes.saturating_sub(1)).unwrap_or(0),
-        resource_acl_generation: write.resource_acl_generation,
-        membership_generation: write.membership_generation,
-        namespace_generation: write.namespace_generation,
-        fencing_token: 0,
-        nonce: random_nonce()?,
-        issued_at_unix_seconds: now,
-        expires_at_unix_seconds: expires,
-        drive_acl_generation: write.drive_acl_generation,
-        grant_id: Uuid::new_v4().to_string(),
-    };
-    let bootstrap_download_capability = sign_api_capability(&state, &bootstrap_claims)?;
-    let grant_id = Uuid::new_v4();
-    let mode = match request.presence_mode {
-        CollaborationPresenceMode::Pseudonym => PresenceMode::Pseudonym,
-        CollaborationPresenceMode::DisplayName => PresenceMode::DisplayName,
-    };
-    let presence_label = match request.presence_mode {
-        CollaborationPresenceMode::Pseudonym => {
-            let digest = blake3::hash(client_id.as_bytes());
-            format!("Editor-{}", &digest.to_hex()[..8])
-        }
-        CollaborationPresenceMode::DisplayName => session.record.display_name.clone(),
-    };
-    let claims = CollaborationGrantClaims {
-        grant_id: grant_id.to_string(),
-        tenant_id: state.tenant_id.to_string(),
-        room_id: room.room_id.to_string(),
-        room_epoch: u64::try_from(room.epoch).map_err(|_| ApiError::internal())?,
-        drive_id: drive_id.to_string(),
-        node_id: node_id.to_string(),
-        base_version_id: base.to_string(),
-        principal_id: session.record.principal_id.to_string(),
-        session_id: session.record.session_id.to_string(),
-        client_id: client_id.to_string(),
-        presence_mode: mode as i32,
-        presence_label: presence_label.clone(),
-        resource_acl_generation: write.resource_acl_generation,
-        drive_acl_generation: write.drive_acl_generation,
-        membership_generation: write.membership_generation,
-        namespace_generation: write.namespace_generation,
-        can_checkpoint: true,
-        issued_at_unix_seconds: now,
-        expires_at_unix_seconds: expires,
-        nonce: nonce.to_vec(),
-        bootstrap_download_capability,
-    };
-    let wire = sign_collaboration_grant(
-        &claims,
-        state
-            .config
-            .keys
-            .api_collaboration_grant
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .current_generation,
-        state
-            .collaboration_grant_signer
-            .as_ref()
-            .ok_or_else(ApiError::internal)?,
-    )
-    .map_err(|_| ApiError::internal())?;
-    let digest = grant_digest(&wire);
-    let grant = state
-        .database
-        .collaboration_create_join_grant(
-            state.tenant_id,
-            grant_id,
-            room.room_id,
-            room.epoch,
-            &digest,
-            session.record.principal_id,
-            session.record.session_id,
-            client_id,
-            match request.presence_mode {
-                CollaborationPresenceMode::Pseudonym => "pseudonym",
-                CollaborationPresenceMode::DisplayName => "display_name",
-            },
-            &presence_label,
-            generation_i64(write.resource_acl_generation)?,
-            generation_i64(write.drive_acl_generation)?,
-            generation_i64(read.membership_generation)?,
-            generation_i64(read.namespace_generation)?,
-            true,
-        )
-        .await?;
     let (transport, endpoint) = match request.transport {
         CollaborationTransport::Websocket => {
             let mut endpoint =
@@ -1083,30 +982,152 @@ async fn create_collaboration_grant(
                 .ok_or_else(ApiError::internal)?,
         ),
     };
-    let response = CollaborationGrantResponse {
-        grant_id: grant.id,
-        authorization: wire,
-        expires_at: postgres_timestamp(&grant.expires_at)?,
-        codec: "yjs-v1".into(),
-        protocol_version: 1,
-        presence_label,
-        room: collaboration_summary_response(&room, node.head_version_id)?,
-        endpoints: vec![CollaborationEndpointResponse {
-            transport: transport.into(),
-            url: endpoint.to_string(),
-        }],
-    };
-    let response = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants",
-        key,
-        &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    let mut http = (StatusCode::CREATED, Json(response)).into_response();
+    let result = state
+        .database
+        .collaboration_create_join_grant_idempotent(
+            state.tenant_id,
+            drive_id,
+            node_id,
+            base,
+            session.record.principal_id,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                None,
+                StatusCode::CREATED,
+            ),
+            |room, bootstrap_payload| {
+                let now = unix_time().map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                let expires = now + 60;
+                let mut nonce = [0_u8; 32];
+                getrandom::fill(&mut nonce).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                let bootstrap_claims = CapabilityClaims {
+                    capability_id: Uuid::new_v4().to_string(),
+                    audience: CAPABILITY_AUDIENCE.into(),
+                    operation: CapabilityOperation::Download as i32,
+                    tenant_id: state.tenant_id.to_string(),
+                    principal_id: session.record.principal_id.to_string(),
+                    session_id: session.record.session_id.to_string(),
+                    resource_id: node_id.to_string(),
+                    upload_id: String::new(),
+                    payload_id: bootstrap_payload.payload_id.to_string(),
+                    part_number: 0,
+                    range_start: 0,
+                    range_end: u64::try_from(bootstrap_payload.size_bytes.saturating_sub(1))
+                        .unwrap_or(0),
+                    resource_acl_generation: write.resource_acl_generation,
+                    membership_generation: write.membership_generation,
+                    namespace_generation: write.namespace_generation,
+                    fencing_token: 0,
+                    nonce: random_nonce().map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                    issued_at_unix_seconds: now,
+                    expires_at_unix_seconds: expires,
+                    drive_acl_generation: write.drive_acl_generation,
+                    grant_id: Uuid::new_v4().to_string(),
+                };
+                let bootstrap_download_capability = sign_api_capability(&state, &bootstrap_claims)
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                let grant_id = Uuid::new_v4();
+                let (mode, presence_mode) = match request.presence_mode {
+                    CollaborationPresenceMode::Pseudonym => (PresenceMode::Pseudonym, "pseudonym"),
+                    CollaborationPresenceMode::DisplayName => {
+                        (PresenceMode::DisplayName, "display_name")
+                    }
+                };
+                let presence_label = match request.presence_mode {
+                    CollaborationPresenceMode::Pseudonym => {
+                        let digest = blake3::hash(client_id.as_bytes());
+                        format!("Editor-{}", &digest.to_hex()[..8])
+                    }
+                    CollaborationPresenceMode::DisplayName => session.record.display_name.clone(),
+                };
+                let room_epoch =
+                    u64::try_from(room.epoch).map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                let claims = CollaborationGrantClaims {
+                    grant_id: grant_id.to_string(),
+                    tenant_id: state.tenant_id.to_string(),
+                    room_id: room.room_id.to_string(),
+                    room_epoch,
+                    drive_id: drive_id.to_string(),
+                    node_id: node_id.to_string(),
+                    base_version_id: base.to_string(),
+                    principal_id: session.record.principal_id.to_string(),
+                    session_id: session.record.session_id.to_string(),
+                    client_id: client_id.to_string(),
+                    presence_mode: mode as i32,
+                    presence_label: presence_label.clone(),
+                    resource_acl_generation: write.resource_acl_generation,
+                    drive_acl_generation: write.drive_acl_generation,
+                    membership_generation: write.membership_generation,
+                    namespace_generation: write.namespace_generation,
+                    can_checkpoint: true,
+                    issued_at_unix_seconds: now,
+                    expires_at_unix_seconds: expires,
+                    nonce: nonce.to_vec(),
+                    bootstrap_download_capability,
+                };
+                let wire = sign_collaboration_grant(
+                    &claims,
+                    state
+                        .config
+                        .keys
+                        .api_collaboration_grant
+                        .as_ref()
+                        .ok_or(DatabaseError::InvalidPersistedValue)?
+                        .current_generation,
+                    state
+                        .collaboration_grant_signer
+                        .as_ref()
+                        .ok_or(DatabaseError::InvalidPersistedValue)?,
+                )
+                .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                Ok((
+                    CollaborationJoinGrantInput {
+                        id: grant_id,
+                        token_digest: grant_digest(&wire).to_vec(),
+                        principal_id: session.record.principal_id,
+                        session_id: session.record.session_id,
+                        client_id,
+                        presence_mode: presence_mode.into(),
+                        presence_label: presence_label.clone(),
+                        resource_acl_generation: generation_i64(write.resource_acl_generation)
+                            .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                        drive_acl_generation: generation_i64(write.drive_acl_generation)
+                            .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                        membership_generation: generation_i64(read.membership_generation)
+                            .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                        namespace_generation: generation_i64(read.namespace_generation)
+                            .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                        can_checkpoint: true,
+                    },
+                    (wire, presence_label),
+                ))
+            },
+            |room, grant, (wire, presence_label)| {
+                let response = CollaborationGrantResponse {
+                    grant_id: grant.id,
+                    authorization: wire,
+                    expires_at: postgres_timestamp(&grant.expires_at)
+                        .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                    codec: "yjs-v1".into(),
+                    protocol_version: 1,
+                    presence_label,
+                    room: collaboration_summary_response(room, node.head_version_id)
+                        .map_err(|_| DatabaseError::InvalidPersistedValue)?,
+                    endpoints: vec![CollaborationEndpointResponse {
+                        transport: transport.into(),
+                        url: endpoint.to_string(),
+                    }],
+                };
+                serde_json::to_value(response).map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
+        )
+        .await?;
+    let (status, response) =
+        resource_mutation_result::<CollaborationGrantResponse>(result, &fingerprint, None)?;
+    let mut http = (status, Json(response)).into_response();
     http.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(http)
@@ -1122,16 +1143,11 @@ async fn discard_collaboration(
     let drive_id = parse_uuid_v4(&drive_id)?;
     let node_id = parse_uuid_v4(&node_id)?;
     let fingerprint = fingerprint(&(drive_id, node_id))?;
-    if let Some(response) = replay::<()>(
-        &state,
-        &session,
-        "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration",
-        key,
-        &fingerprint,
-    )
-    .await?
+    let route = "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration";
+    if let Some((status, ())) =
+        replay_finalized_resource::<()>(&state, &session, route, key, &fingerprint, None).await?
     {
-        return StatusCode::from_u16(response.0).map_err(|_| ApiError::internal());
+        return Ok(status);
     }
     let delete_grant = authorize_session_bound(
         &state.database,
@@ -1159,9 +1175,9 @@ async fn discard_collaboration(
         .collaboration_room(state.tenant_id, drive_id, node_id)
         .await?
         .ok_or_else(ApiError::not_found)?;
-    state
+    let result = state
         .database
-        .collaboration_discard(
+        .collaboration_discard_idempotent(
             state.tenant_id,
             room.room_id,
             room.epoch,
@@ -1177,19 +1193,19 @@ async fn discard_collaboration(
                     resource_acl: generation_i64(delete_grant.resource_acl_generation)?,
                 },
             },
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                None,
+                StatusCode::NO_CONTENT,
+            ),
+            || Ok(serde_json::Value::Null),
         )
         .await?;
-    store_idempotent(
-        &state,
-        &session,
-        "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/collaboration",
-        key,
-        &fingerprint,
-        StatusCode::NO_CONTENT,
-        &(),
-    )
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
+    let (status, ()) = resource_mutation_result::<()>(result, &fingerprint, None)?;
+    Ok(status)
 }
 
 async fn create_markdown_import_intent(
@@ -1206,17 +1222,18 @@ async fn create_markdown_import_intent(
     let name = NormalizedName::new(&request.target_name)
         .map_err(|error| ApiError::bad_request(error.code(), "The target file name is invalid"))?;
     let fingerprint = fingerprint(&(drive_id, node_id, version_id, &request))?;
-    if let Some(response) = replay::<MarkdownImportIntentResponse>(
+    let route = "POST /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents";
+    if let Some((status, response)) = replay_finalized_resource::<MarkdownImportIntentResponse>(
         &state,
         &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
+        route,
         key,
         &fingerprint,
+        None,
     )
     .await?
     {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)));
+        return Ok((status, Json(response)));
     }
     let read = authorize_session_bound(
         &state.database,
@@ -1243,52 +1260,59 @@ async fn create_markdown_import_intent(
         Action::CreateChild,
     )
     .await?;
-    let intent = state
+    let result = state
         .database
-        .collaboration_create_import_intent(CollaborationImportIntentInput {
-            tenant_id: state.tenant_id,
-            drive_id,
-            source_node_id: node_id,
-            source_version_id: version_id,
-            principal_id: session.record.principal_id,
-            session_id: session.record.session_id,
-            source_generations: CollaborationAuthorizationGenerations {
-                membership: generation_i64(read.membership_generation)?,
-                drive_acl: generation_i64(read.drive_acl_generation)?,
-                namespace: generation_i64(read.namespace_generation)?,
-                resource_acl: generation_i64(read.resource_acl_generation)?,
+        .collaboration_create_import_intent_idempotent(
+            CollaborationImportIntentInput {
+                tenant_id: state.tenant_id,
+                drive_id,
+                source_node_id: node_id,
+                source_version_id: version_id,
+                principal_id: session.record.principal_id,
+                session_id: session.record.session_id,
+                source_generations: CollaborationAuthorizationGenerations {
+                    membership: generation_i64(read.membership_generation)?,
+                    drive_acl: generation_i64(read.drive_acl_generation)?,
+                    namespace: generation_i64(read.namespace_generation)?,
+                    resource_acl: generation_i64(read.resource_acl_generation)?,
+                },
+                target_generations: CollaborationAuthorizationGenerations {
+                    membership: generation_i64(create.membership_generation)?,
+                    drive_acl: generation_i64(create.drive_acl_generation)?,
+                    namespace: generation_i64(create.namespace_generation)?,
+                    resource_acl: generation_i64(create.resource_acl_generation)?,
+                },
+                target_display_name: name.display(),
+                target_name_key: name.comparison_key(),
             },
-            target_generations: CollaborationAuthorizationGenerations {
-                membership: generation_i64(create.membership_generation)?,
-                drive_acl: generation_i64(create.drive_acl_generation)?,
-                namespace: generation_i64(create.namespace_generation)?,
-                resource_acl: generation_i64(create.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                None,
+                StatusCode::CREATED,
+            ),
+            |intent| {
+                let expires_at = postgres_timestamp(&intent.expires_at)
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                serde_json::to_value(MarkdownImportIntentResponse {
+                    id: intent.id,
+                    source_drive_id: drive_id,
+                    source_node_id: node_id,
+                    source_version_id: version_id,
+                    target_parent_id: intent.target_parent_id,
+                    target_name: intent.target_display_name.clone(),
+                    target_media_type: "text/markdown".into(),
+                    expires_at,
+                })
+                .map_err(|_| DatabaseError::InvalidPersistedValue)
             },
-            target_display_name: name.display(),
-            target_name_key: name.comparison_key(),
-        })
+        )
         .await?;
-    let response = MarkdownImportIntentResponse {
-        id: intent.id,
-        source_drive_id: drive_id,
-        source_node_id: node_id,
-        source_version_id: version_id,
-        target_parent_id: intent.target_parent_id,
-        target_name: intent.target_display_name,
-        target_media_type: "text/markdown".into(),
-        expires_at: postgres_timestamp(&intent.expires_at)?,
-    };
-    let response = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents",
-        key,
-        &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    let (status, response) =
+        resource_mutation_result::<MarkdownImportIntentResponse>(result, &fingerprint, None)?;
+    Ok((status, Json(response)))
 }
 
 fn collaboration_summary_response(
@@ -1401,19 +1425,17 @@ async fn begin_upload(
         ));
     }
 
-    let fingerprint = fingerprint(&request)?;
-    if let Some(response) = replay::<UploadAllocationResponse>(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/uploads",
-        key,
-        &fingerprint,
-    )
-    .await?
-    {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)).into_response());
-    }
+    let legacy_fingerprint = fingerprint(&request)?;
+    let fingerprint = fingerprint(&(
+        drive_id,
+        parent_id,
+        node_id,
+        expected_head,
+        collaboration_checkpoint_id,
+        import_intent_id,
+        &request,
+    ))?;
+    let route = "POST /api/v1/drives/{drive_id}/uploads";
     let chunk_size = u64_to_i32(state.config.limits.chunk_size_bytes)?;
     let (layout, part_count) = upload_layout_and_part_count(
         request.declared_size_bytes,
@@ -1427,9 +1449,9 @@ async fn begin_upload(
             "The upload requires too many parts",
         ));
     }
-    let upload = state
+    let result = state
         .database
-        .begin_upload(
+        .begin_upload_idempotent(
             state.tenant_id,
             session.record.principal_id,
             session.record.session_id,
@@ -1453,20 +1475,26 @@ async fn begin_upload(
             generation_i64(grant.drive_acl_generation)?,
             generation_i64(grant.namespace_generation)?,
             generation_i64(grant.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                Some(&legacy_fingerprint),
+                StatusCode::CREATED,
+            ),
+            |upload| {
+                serde_json::to_value(UploadAllocationResponse::from(upload.clone()))
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
         )
         .await?;
-    let response = UploadAllocationResponse::from(upload);
-    let stored = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/uploads",
-        key,
+    let (status, response) = resource_mutation_result::<UploadAllocationResponse>(
+        result,
         &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(stored)).into_response())
+        Some(&legacy_fingerprint),
+    )?;
+    Ok((status, Json(response)).into_response())
 }
 
 async fn get_upload(
@@ -1610,22 +1638,18 @@ async fn commit_upload(
         .await?;
         require_same_generations(grant, write_grant)?;
     }
-    let fingerprint = fingerprint(&request)?;
-    if let Some(response) = replay::<CommitUploadResponse>(
-        &state,
-        &session,
-        "POST /api/v1/uploads/{upload_id}/commit",
-        key,
-        &fingerprint,
-    )
-    .await?
-    {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)).into_response());
-    }
-    let (node_id, version_id) = state
+    let legacy_fingerprint = fingerprint(&request)?;
+    let fingerprint = fingerprint(&(
+        upload.drive_id,
+        upload.node_id,
+        upload.parent_id,
+        upload_id,
+        &request,
+    ))?;
+    let route = "POST /api/v1/uploads/{upload_id}/commit";
+    let result = state
         .database
-        .commit_upload(
+        .commit_upload_idempotent(
             state.tenant_id,
             session.record.principal_id,
             session.record.session_id,
@@ -1635,23 +1659,29 @@ async fn commit_upload(
             generation_i64(grant.drive_acl_generation)?,
             generation_i64(grant.namespace_generation)?,
             generation_i64(grant.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                Some(&legacy_fingerprint),
+                StatusCode::CREATED,
+            ),
+            |node_id, version_id| {
+                serde_json::to_value(CommitUploadResponse {
+                    node_id,
+                    version_id,
+                })
+                .map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
         )
         .await?;
-    let response = CommitUploadResponse {
-        node_id,
-        version_id,
-    };
-    let stored = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/uploads/{upload_id}/commit",
-        key,
+    let (status, response) = resource_mutation_result::<CommitUploadResponse>(
+        result,
         &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(stored)).into_response())
+        Some(&legacy_fingerprint),
+    )?;
+    Ok((status, Json(response)).into_response())
 }
 
 async fn create_download_grant(
@@ -1835,21 +1865,10 @@ async fn restore_version(
     .await?;
     require_same_generations(create_grant, write_grant)?;
     let fingerprint = fingerprint(&(drive_id, node_id, version_id, &request))?;
-    if let Some(response) = replay::<VersionResponse>(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore",
-        key,
-        &fingerprint,
-    )
-    .await?
-    {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)).into_response());
-    }
-    let restored = state
+    let route = "POST /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore";
+    let result = state
         .database
-        .restore_file_version(
+        .restore_file_version_idempotent(
             state.tenant_id,
             session.record.principal_id,
             session.record.session_id,
@@ -1861,20 +1880,24 @@ async fn restore_version(
             generation_i64(create_grant.drive_acl_generation)?,
             generation_i64(create_grant.namespace_generation)?,
             generation_i64(create_grant.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                None,
+                StatusCode::CREATED,
+            ),
+            |version| {
+                let response = VersionResponse::try_from(version.clone())
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                serde_json::to_value(response).map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
         )
         .await?;
-    let response = VersionResponse::try_from(restored)?;
-    let stored = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore",
-        key,
-        &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(stored)).into_response())
+    let (status, response) =
+        resource_mutation_result::<VersionResponse>(result, &fingerprint, None)?;
+    Ok((status, Json(response)).into_response())
 }
 
 async fn list_shares(
@@ -1948,21 +1971,10 @@ async fn create_share(
         require_same_generations(grant, delegated_grant)?;
     }
     let fingerprint = fingerprint(&(drive_id, node_id, &request))?;
-    if let Some(response) = replay::<DirectShareResponse>(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/shares",
-        key,
-        &fingerprint,
-    )
-    .await?
-    {
-        let status = StatusCode::from_u16(response.0).map_err(|_| ApiError::internal())?;
-        return Ok((status, Json(response.1)).into_response());
-    }
-    let share = state
+    let route = "POST /api/v1/drives/{drive_id}/nodes/{node_id}/shares";
+    let result = state
         .database
-        .create_direct_share(
+        .create_direct_share_idempotent(
             state.tenant_id,
             session.record.principal_id,
             session.record.session_id,
@@ -1975,24 +1987,28 @@ async fn create_share(
             generation_i64(grant.drive_acl_generation)?,
             generation_i64(grant.namespace_generation)?,
             generation_i64(grant.resource_acl_generation)?,
+            &resource_mutation_idempotency(
+                &session,
+                route,
+                key,
+                &fingerprint,
+                None,
+                StatusCode::CREATED,
+            ),
+            |share| {
+                let response = DirectShareResponse::try_from(share.clone())
+                    .map_err(|_| DatabaseError::InvalidPersistedValue)?;
+                serde_json::to_value(response).map_err(|_| DatabaseError::InvalidPersistedValue)
+            },
         )
         .await
         .map_err(|error| match error {
             DatabaseError::SecurityAdmissionBlocked => share_remediation_in_progress(),
             other => ApiError::from(other),
         })?;
-    let response = DirectShareResponse::try_from(share)?;
-    let stored = store_idempotent(
-        &state,
-        &session,
-        "POST /api/v1/drives/{drive_id}/nodes/{node_id}/shares",
-        key,
-        &fingerprint,
-        StatusCode::CREATED,
-        &response,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(stored)).into_response())
+    let (status, response) =
+        resource_mutation_result::<DirectShareResponse>(result, &fingerprint, None)?;
+    Ok((status, Json(response)).into_response())
 }
 
 fn share_remediation_in_progress() -> ApiError {
@@ -2076,11 +2092,6 @@ async fn replace_acl(
     let session = authenticate_mutation(&state, &headers).await?;
     let drive_id = parse_uuid_v4(&drive_id)?;
     let node_id = parse_uuid_v4(&node_id)?;
-    let node = state
-        .database
-        .node(state.tenant_id, drive_id, node_id)
-        .await?;
-    require_acl_etag(&headers, &node_etag(&node))?;
     if request.entries.len() > Action::ALL.len() {
         return Err(ApiError::bad_request(
             "acl.entries_invalid",
@@ -2097,6 +2108,11 @@ async fn replace_acl(
         Action::ManageAcl,
     )
     .await?;
+    let node = state
+        .database
+        .node(state.tenant_id, drive_id, node_id)
+        .await?;
+    require_acl_etag(&headers, &node_etag(&node))?;
     let mut submitted_actions = BTreeSet::new();
     for entry in &request.entries {
         let action = parse_acl_action(&entry.action)?;
@@ -2104,7 +2120,7 @@ async fn replace_acl(
             || !matches!(entry.effect.as_str(), "allow" | "deny")
             || !matches!(
                 entry.inheritance.as_str(),
-                "self" | "descendants" | "self_and_descendants"
+                "self" | "children" | "descendants" | "self_and_descendants"
             )
         {
             return Err(ApiError::bad_request(
@@ -2183,6 +2199,11 @@ async fn replace_acl(
             preflight.target_principal_id,
             &entries,
             &covered_actions,
+            AdvancedAclReplacementEtag {
+                namespace_generation: node.namespace_generation,
+                acl_generation: node.acl_generation,
+                attribute_generation: node.attribute_generation,
+            },
             generation_i64(manage_grant.membership_generation)?,
             generation_i64(manage_grant.drive_acl_generation)?,
             generation_i64(manage_grant.namespace_generation)?,
@@ -2479,13 +2500,14 @@ fn upload_capability_range(
     Ok((0, part_size.saturating_sub(1)))
 }
 
-pub(crate) async fn replay<T: DeserializeOwned>(
+async fn replay_finalized_resource<T: DeserializeOwned>(
     state: &AppState,
     session: &AuthenticatedSession,
     route: &str,
     key: &str,
-    fingerprint: &[u8; 32],
-) -> Result<Option<(u16, T)>, ApiError> {
+    request_fingerprint: &[u8; 32],
+    legacy_request_fingerprint: Option<&[u8; 32]>,
+) -> Result<Option<(StatusCode, T)>, ApiError> {
     let Some(record) = state
         .database
         .idempotency_record(state.tenant_id, session.record.principal_id, route, key)
@@ -2493,57 +2515,86 @@ pub(crate) async fn replay<T: DeserializeOwned>(
     else {
         return Ok(None);
     };
-    if !bool::from(
+    let fingerprint_matches = bool::from(
         record
             .request_fingerprint
             .as_slice()
-            .ct_eq(fingerprint.as_slice()),
-    ) {
+            .ct_eq(request_fingerprint.as_slice()),
+    ) || legacy_request_fingerprint.is_some_and(|legacy| {
+        bool::from(
+            record
+                .request_fingerprint
+                .as_slice()
+                .ct_eq(legacy.as_slice()),
+        )
+    });
+    if !fingerprint_matches {
         return Err(ApiError::conflict(
             "idempotency.key_reused",
             "The idempotency key was used for a different request",
         ));
     }
     let status = u16::try_from(record.response_status).map_err(|_| ApiError::internal())?;
+    let status = StatusCode::from_u16(status).map_err(|_| ApiError::internal())?;
     let body = serde_json::from_value(record.response_body).map_err(|_| ApiError::internal())?;
     Ok(Some((status, body)))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn store_idempotent<T: DeserializeOwned + Serialize>(
-    state: &AppState,
-    session: &AuthenticatedSession,
-    route: &str,
-    key: &str,
-    fingerprint: &[u8; 32],
-    status: StatusCode,
-    body: &T,
-) -> Result<T, ApiError> {
-    let body_value = serde_json::to_value(body).map_err(|_| ApiError::internal())?;
-    let stored = state
-        .database
-        .store_idempotency_response(
-            state.tenant_id,
-            session.record.principal_id,
-            route,
-            key,
-            fingerprint,
-            i32::from(status.as_u16()),
-            &body_value,
-        )
-        .await?;
-    if !bool::from(
-        stored
+fn resource_mutation_result<T: DeserializeOwned>(
+    result: ResourceMutationWrite,
+    request_fingerprint: &[u8; 32],
+    legacy_request_fingerprint: Option<&[u8; 32]>,
+) -> Result<(StatusCode, T), ApiError> {
+    let record = match result {
+        ResourceMutationWrite::Created(record) | ResourceMutationWrite::Replayed(record) => record,
+        ResourceMutationWrite::KeyReused => {
+            return Err(ApiError::conflict(
+                "idempotency.key_reused",
+                "The idempotency key was used for a different request",
+            ));
+        }
+    };
+    let fingerprint_matches = bool::from(
+        record
             .request_fingerprint
             .as_slice()
-            .ct_eq(fingerprint.as_slice()),
-    ) {
+            .ct_eq(request_fingerprint.as_slice()),
+    ) || legacy_request_fingerprint.is_some_and(|legacy| {
+        bool::from(
+            record
+                .request_fingerprint
+                .as_slice()
+                .ct_eq(legacy.as_slice()),
+        )
+    });
+    if !fingerprint_matches {
         return Err(ApiError::conflict(
             "idempotency.key_reused",
             "The idempotency key was used for a different request",
         ));
     }
-    serde_json::from_value(stored.response_body).map_err(|_| ApiError::internal())
+    let status = u16::try_from(record.response_status).map_err(|_| ApiError::internal())?;
+    let status = StatusCode::from_u16(status).map_err(|_| ApiError::internal())?;
+    let body = serde_json::from_value(record.response_body).map_err(|_| ApiError::internal())?;
+    Ok((status, body))
+}
+
+fn resource_mutation_idempotency<'a>(
+    session: &AuthenticatedSession,
+    route: &'a str,
+    key: &'a str,
+    request_fingerprint: &'a [u8; 32],
+    legacy_request_fingerprint: Option<&'a [u8; 32]>,
+    status: StatusCode,
+) -> ResourceMutationIdempotency<'a> {
+    ResourceMutationIdempotency {
+        principal_id: session.record.principal_id,
+        route,
+        key,
+        request_fingerprint,
+        legacy_request_fingerprint,
+        response_status: i32::from(status.as_u16()),
+    }
 }
 
 pub(crate) fn idempotency_key(headers: &HeaderMap) -> Result<&str, ApiError> {
@@ -2711,12 +2762,14 @@ fn acl_collection(entries: Vec<AdvancedAclEntryRecord>) -> AclCollectionResponse
             .map(|entry| AclEntryResponse {
                 principal_id: entry.principal_id,
                 principal_kind: entry.principal_kind,
+                group_id: entry.group_id,
                 display_name: entry.display_name,
                 verified_email: entry.verified_email,
                 action: entry.action,
                 effect: entry.effect,
                 inheritance: entry.inheritance,
                 source: entry.source,
+                read_only: entry.read_only,
             })
             .collect(),
     }
@@ -3143,7 +3196,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{
-        CreateShareRequest, ShareInheritance, ShareKind, SharePreset,
+        CreateShareRequest, ShareInheritance, ShareKind, SharePreset, acl_collection,
         advanced_acl_replacement_actions, decode_cursor, decode_part_cursor, decode_version_cursor,
         direct_share_parameters, encode_cursor, encode_part_cursor, parse_acl_action,
         require_same_generations, rfc3339, share_preset_delegated_actions,
@@ -3151,7 +3204,9 @@ mod tests {
     };
     use crate::policy::AuthorizationGrant;
     use base64::Engine as _;
-    use filebelt_database::{AdvancedAclReplacementPreflight, NodeRecord, UploadRecord};
+    use filebelt_database::{
+        AdvancedAclEntryRecord, AdvancedAclReplacementPreflight, NodeRecord, UploadRecord,
+    };
     use filebelt_domain::Action;
     use filebelt_storage_protocol::CapabilityOperation;
     use uuid::Uuid;
@@ -3185,8 +3240,51 @@ mod tests {
             .0;
         assert!(handler.contains("Action::ManageAcl"));
         assert!(handler.contains("require_acl_etag"));
+        assert!(
+            handler.find("Action::ManageAcl").expect("authorization")
+                < handler.find("require_acl_etag").expect("ETag comparison")
+        );
         assert!(handler.contains("require_same_generations"));
         assert!(handler.contains("preflight_advanced_acl_replacement"));
+        assert_eq!(Action::ALL.len(), 26);
+        assert!(Action::ALL.contains(&Action::Traverse));
+    }
+
+    #[test]
+    fn advanced_acl_response_round_trips_group_provenance_and_mutability() {
+        let group_id = Uuid::new_v4();
+        let principal_id = Uuid::new_v4();
+        let collection = acl_collection(vec![AdvancedAclEntryRecord {
+            principal_id,
+            principal_kind: "group".into(),
+            group_id: Some(group_id),
+            display_name: "Editors".into(),
+            verified_email: None,
+            action: "TRAVERSE".into(),
+            effect: "allow".into(),
+            inheritance: "children".into(),
+            source: "nfs".into(),
+            read_only: true,
+        }]);
+        let serialized = serde_json::to_value(collection).expect("serialize ACL collection");
+        assert_eq!(
+            serialized["entries"][0]["principal_id"],
+            principal_id.to_string()
+        );
+        assert_eq!(serialized["entries"][0]["group_id"], group_id.to_string());
+        assert_eq!(serialized["entries"][0]["source"], "nfs");
+        assert_eq!(serialized["entries"][0]["read_only"], true);
+        assert_eq!(
+            serialized["supported_actions"].as_array().unwrap().len(),
+            26
+        );
+        assert!(
+            serialized["supported_actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action == "TRAVERSE")
+        );
     }
 
     #[test]
@@ -3229,17 +3327,76 @@ mod tests {
     }
 
     #[test]
-    fn markdown_control_plane_mutations_replay_idempotent_responses() {
+    fn resource_mutations_use_transaction_bound_idempotency() {
         let source = include_str!("resources.rs");
-        for handler in [
-            "async fn create_collaboration_grant",
-            "async fn discard_collaboration",
-            "async fn create_markdown_import_intent",
+        for (handler, database_call) in [
+            (
+                "async fn update_content_class_policy",
+                ".update_content_class_policy_idempotent(",
+            ),
+            (
+                "async fn create_collaboration_grant",
+                ".collaboration_create_join_grant_idempotent(",
+            ),
+            (
+                "async fn discard_collaboration",
+                ".collaboration_discard_idempotent(",
+            ),
+            (
+                "async fn create_markdown_import_intent",
+                ".collaboration_create_import_intent_idempotent(",
+            ),
+            ("async fn begin_upload", ".begin_upload_idempotent("),
+            ("async fn commit_upload", ".commit_upload_idempotent("),
+            (
+                "async fn restore_version",
+                ".restore_file_version_idempotent(",
+            ),
+            ("async fn create_share", ".create_direct_share_idempotent("),
         ] {
             let tail = source.split_once(handler).expect("handler exists").1;
-            assert!(tail.contains("replay::<"));
-            assert!(tail.contains("store_idempotent("));
+            assert!(tail.contains(database_call), "{handler} is not atomic");
         }
+    }
+
+    #[test]
+    fn upload_fingerprints_bind_normalized_route_identifiers() {
+        let source = include_str!("resources.rs");
+        let begin = source
+            .split_once("async fn begin_upload")
+            .expect("begin handler exists")
+            .1
+            .split_once("async fn get_upload")
+            .expect("get upload follows begin")
+            .0;
+        for identifier in [
+            "drive_id",
+            "parent_id",
+            "node_id",
+            "expected_head",
+            "collaboration_checkpoint_id",
+            "import_intent_id",
+        ] {
+            assert!(begin.contains(identifier), "missing {identifier}");
+        }
+        assert!(begin.contains("let legacy_fingerprint = fingerprint(&request)?"));
+
+        let commit = source
+            .split_once("async fn commit_upload")
+            .expect("commit handler exists")
+            .1
+            .split_once("async fn create_download_grant")
+            .expect("download grant follows commit")
+            .0;
+        for identifier in [
+            "upload.drive_id",
+            "upload.node_id",
+            "upload.parent_id",
+            "upload_id",
+        ] {
+            assert!(commit.contains(identifier), "missing {identifier}");
+        }
+        assert!(commit.contains("let legacy_fingerprint = fingerprint(&request)?"));
     }
 
     #[test]
@@ -3259,7 +3416,7 @@ mod tests {
             "Action::WriteContent",
             "require_same_generations(delete_grant, write_grant)?",
             "CollaborationAuthorizationContext",
-            ".collaboration_discard(",
+            ".collaboration_discard_idempotent(",
         ] {
             assert!(discard.contains(required), "missing {required}");
         }

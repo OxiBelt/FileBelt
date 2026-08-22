@@ -250,6 +250,10 @@ pub struct RevokeDocumentSessionCommand {
     pub participant_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
     pub reason: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="5")]
+    pub operation_digest: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="6")]
+    pub request_fingerprint: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ForceCloseDocumentSessionCommand {
@@ -269,6 +273,10 @@ pub struct ForceCloseDocumentSessionCommand {
     pub node_id: ::prost::alloc::string::String,
     #[prost(message, optional, tag="8")]
     pub generations: ::core::option::Option<DocumentAuthorizationGenerations>,
+    #[prost(bytes="vec", tag="9")]
+    pub operation_digest: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes="vec", tag="10")]
+    pub request_fingerprint: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateDocumentConflictCopyCommand {

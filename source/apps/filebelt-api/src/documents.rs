@@ -346,6 +346,12 @@ async fn revoke_own_session(
     let key = idempotency_key(&headers)?;
     let document_session_id = parse_uuid_v4(&document_session_id)?;
     let fingerprint = fingerprint(&(document_session_id, "owner_revoke"))?;
+    let operation_digest = document_operation_digest(
+        &state,
+        &session,
+        "DELETE /api/v1/document-sessions/{document_session_id}",
+        key,
+    );
     if replay_no_content(
         &state,
         &session,
@@ -366,6 +372,8 @@ async fn revoke_own_session(
                 actor_principal_id: session.record.principal_id.to_string(),
                 participant_id: participant_id.to_string(),
                 reason: "owner_revoke".into(),
+                operation_digest: operation_digest.to_vec(),
+                request_fingerprint: fingerprint.to_vec(),
             },
         ))
         .await?;
@@ -508,6 +516,12 @@ async fn force_close_session(
     let node_id = parse_uuid_v4(&node_id)?;
     let document_session_id = parse_uuid_v4(&document_session_id)?;
     let fingerprint = fingerprint(&(drive_id, node_id, document_session_id, "force_close"))?;
+    let operation_digest = document_operation_digest(
+        &state,
+        &session,
+        "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions/{document_session_id}",
+        key,
+    );
     if replay_no_content(
         &state,
         &session,
@@ -540,6 +554,8 @@ async fn force_close_session(
                 drive_id: drive_id.to_string(),
                 node_id: node_id.to_string(),
                 generations: Some(generations(grant)),
+                operation_digest: operation_digest.to_vec(),
+                request_fingerprint: fingerprint.to_vec(),
             },
         ))
         .await?;
@@ -1407,5 +1423,50 @@ mod tests {
             document_operation_material(tenant, principal, api_session, "ab", "c"),
             document_operation_material(tenant, principal, api_session, "a", "bc")
         );
+
+        assert_ne!(
+            document_operation_material(
+                tenant,
+                principal,
+                api_session,
+                "DELETE /api/v1/document-sessions/{document_session_id}",
+                "key",
+            ),
+            document_operation_material(
+                tenant,
+                principal,
+                api_session,
+                "DELETE /api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions/{document_session_id}",
+                "key",
+            )
+        );
+    }
+
+    #[test]
+    fn close_handlers_forward_coordinator_receipts_before_finalizing_http_receipts() {
+        let source = include_str!("documents.rs");
+        for (start, end) in [
+            ("async fn revoke_own_session", "async fn list_node_sessions"),
+            (
+                "async fn force_close_session",
+                "async fn create_conflict_copy",
+            ),
+        ] {
+            let handler = source
+                .split_once(start)
+                .expect("document close handler exists")
+                .1
+                .split_once(end)
+                .expect("document close handler has a bounded source section")
+                .0;
+            assert!(handler.contains("document_operation_digest("));
+            assert!(handler.contains("operation_digest: operation_digest.to_vec()"));
+            assert!(handler.contains("request_fingerprint: fingerprint.to_vec()"));
+            let execute = handler.find(".execute(").expect("coordinator mutation");
+            let finalize = handler
+                .find("store_no_content(")
+                .expect("public receipt finalization");
+            assert!(execute < finalize);
+        }
     }
 }

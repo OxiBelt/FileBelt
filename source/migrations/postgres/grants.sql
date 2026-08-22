@@ -137,6 +137,7 @@ GRANT SELECT (id, slug) ON tenants TO filebelt_io, filebelt_maintenance;
 GRANT SELECT, UPDATE ON payload_objects, upload_sessions, upload_parts TO filebelt_io;
 GRANT SELECT ON storage_backends TO filebelt_io;
 GRANT SELECT (tenant_id,node_id,id,payload_id,size_bytes) ON file_versions TO filebelt_io;
+GRANT SELECT (tenant_id,payload_id) ON file_versions TO filebelt_maintenance;
 GRANT UPDATE (capacity_total_bytes, capacity_free_bytes, capacity_checked_at, storage_ready)
   ON storage_backends TO filebelt_io;
 GRANT SELECT, INSERT ON capability_nonces TO filebelt_io;
@@ -202,6 +203,7 @@ GRANT INSERT ON filebelt_mcp.invocations TO filebelt_api;
 GRANT INSERT ON filebelt_mcp.capability_snapshots, filebelt_mcp.capabilities
   TO filebelt_api;
 GRANT UPDATE (superseded_at) ON filebelt_mcp.capability_snapshots TO filebelt_api;
+GRANT UPDATE (api_completed_at) ON filebelt_mcp.broker_operation_receipts TO filebelt_api;
 GRANT UPDATE (state, response_bytes, reason_code, semantic_output_digest, finished_at)
   ON filebelt_mcp.invocations TO filebelt_api;
 
@@ -222,12 +224,16 @@ GRANT SELECT ON
   filebelt_mcp.oauth_attempts, filebelt_mcp.invocation_intents,
   filebelt_mcp.invocations, filebelt_mcp.invocation_attachments,
   filebelt_mcp.rate_buckets, filebelt_mcp.runner_leases,
+  filebelt_mcp.broker_operation_receipts,
   filebelt_mcp.deletion_tombstones,
   filebelt_mcp.service_principals, filebelt_mcp.service_identity_bindings,
   filebelt_mcp.managed_templates, filebelt_mcp.template_assignments,
   filebelt_mcp.admin_block_rules
   TO filebelt_mcp_broker;
 GRANT SELECT, INSERT ON filebelt_mcp.runner_slot_admission TO filebelt_mcp_broker;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON filebelt_mcp.broker_operation_receipts TO filebelt_mcp_broker;
+GRANT DELETE ON filebelt_mcp.broker_operation_receipts TO filebelt_maintenance;
 GRANT SELECT, INSERT, UPDATE ON filebelt_mcp.runner_slot_reservations
   TO filebelt_mcp_broker;
 GRANT SELECT, INSERT ON filebelt_mcp.policy_generations TO filebelt_mcp_broker;
@@ -371,6 +377,8 @@ GRANT SELECT, INSERT, UPDATE ON
   TO filebelt_api;
 GRANT SELECT ON filebelt_mount.headscale_devices, filebelt_mount.sessions
   TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)
+  TO filebelt_api;
 
 -- The VFS is the only runtime role that can combine credential verification,
 -- authoritative mount state, namespace/ACL projections, and scoped I/O
@@ -483,6 +491,8 @@ GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
   filebelt_mount.byte_locks, filebelt_mount.leases,
   filebelt_mount.write_sessions, filebelt_mount.write_chunks,
   filebelt_mount.deletion_tombstones TO filebelt_recovery;
+GRANT SELECT (tenant_id,credential_id,principal_id,state,created_at,cancelled_at)
+  ON filebelt_mount.credential_operation_fences TO filebelt_recovery;
 GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
   ON filebelt_mount_vault.secret_envelopes TO filebelt_recovery;
 
@@ -775,6 +785,8 @@ GRANT EXECUTE ON FUNCTION filebelt_mcp.replace_registration_configuration_and_er
 ) TO filebelt_mcp_broker;
 REVOKE ALL ON FUNCTION filebelt_mount.erase_revoked_credential_secret() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.advance_authorization_generation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.reserve_credential_operation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.cancel_credential_operation(uuid,uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.create_session_principal(uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.create_nfs_session(
   uuid,text,bytea,text,bigint,inet,timestamptz,uuid,uuid

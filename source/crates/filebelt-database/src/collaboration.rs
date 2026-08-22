@@ -2,10 +2,15 @@
 
 //! Authoritative PostgreSQL state for Markdown collaboration.
 
-use sqlx::Row;
+use serde_json::Value;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use crate::{Database, DatabaseError, lock_collaboration_authorization_fence};
+use crate::idempotency::{IdempotencyReservation, finalize, reserve};
+use crate::{
+    Database, DatabaseError, PayloadRecord, ResourceMutationIdempotency, ResourceMutationWrite,
+    lock_collaboration_authorization_fence, payload_for_node_tx,
+};
 
 #[derive(Clone, Debug)]
 pub struct CollaborationSummaryRecord {
@@ -51,6 +56,22 @@ pub struct CollaborationJoinGrantRecord {
     pub presence_label: String,
     pub can_checkpoint: bool,
     pub expires_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CollaborationJoinGrantInput {
+    pub id: Uuid,
+    pub token_digest: Vec<u8>,
+    pub principal_id: Uuid,
+    pub session_id: Uuid,
+    pub client_id: Uuid,
+    pub presence_mode: String,
+    pub presence_label: String,
+    pub resource_acl_generation: i64,
+    pub drive_acl_generation: i64,
+    pub membership_generation: i64,
+    pub namespace_generation: i64,
+    pub can_checkpoint: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -126,6 +147,11 @@ impl CollaborationAuthorizationContext {
             self.generations.resource_acl,
         ]
     }
+}
+
+enum CollaborationRoomWrite {
+    Ready(CollaborationSummaryRecord),
+    ConflictAfterFreeze,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -391,6 +417,59 @@ impl Database {
         Ok(row.as_ref().map(summary_from_row))
     }
 
+    async fn collaboration_get_or_create_room_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        base_version_id: Uuid,
+        created_by: Uuid,
+    ) -> Result<CollaborationRoomWrite, DatabaseError> {
+        if let Some(row) = sqlx::query("SELECT e.room_id,e.epoch,e.drive_id,e.node_id,e.base_version_id,e.state,e.dirty,e.durable_sequence,e.fencing_token,e.expires_at::text AS expires_at,e.warning_at::text AS warning_at FROM filebelt_collaboration.rooms r JOIN filebelt_collaboration.epochs e ON e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.epoch=r.current_epoch WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 FOR UPDATE OF r,e")
+            .bind(tenant_id).bind(drive_id).bind(node_id).fetch_optional(&mut **transaction).await? {
+            let state: String = row.get("state");
+            let dirty: bool = row.get("dirty");
+            if state == "active"
+                && row.get::<Uuid, _>("base_version_id") != base_version_id
+                && dirty
+            {
+                sqlx::query("UPDATE filebelt_collaboration.epochs SET state='frozen',freeze_reason='external_head',fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state='active'")
+                    .bind(tenant_id).bind(row.get::<Uuid,_>("room_id")).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?;
+                return Ok(CollaborationRoomWrite::ConflictAfterFreeze);
+            }
+            if state == "active" && row.get::<Uuid, _>("base_version_id") == base_version_id {
+                return Ok(CollaborationRoomWrite::Ready(summary_from_row(&row)));
+            }
+            if state == "frozen" && dirty {
+                return Err(DatabaseError::Conflict);
+            }
+            let room_id: Uuid = row.get("room_id");
+            if matches!(state.as_str(), "active" | "frozen") {
+                let closed = sqlx::query("UPDATE filebelt_collaboration.epochs SET state='closed',dirty=false,freeze_reason=COALESCE(freeze_reason,'external_head'),closed_at=clock_timestamp(),fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state IN ('active','frozen') AND NOT dirty")
+                    .bind(tenant_id).bind(room_id).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?.rows_affected();
+                if closed != 1 {
+                    return Err(DatabaseError::Conflict);
+                }
+            }
+            let epoch = row
+                .get::<i64, _>("epoch")
+                .checked_add(1)
+                .ok_or(DatabaseError::InvalidPersistedValue)?;
+            let next = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
+                .bind(tenant_id).bind(room_id).bind(epoch).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut **transaction).await?;
+            sqlx::query("UPDATE filebelt_collaboration.rooms SET current_epoch=$3,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2")
+                .bind(tenant_id).bind(room_id).bind(epoch).execute(&mut **transaction).await?;
+            return Ok(CollaborationRoomWrite::Ready(summary_from_row(&next)));
+        }
+        let room_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO filebelt_collaboration.rooms (tenant_id,id,drive_id,node_id,created_by) VALUES ($1,$2,$3,$4,$5)")
+            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(created_by).execute(&mut **transaction).await?;
+        let row = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,1,$3,$4,$5) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
+            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut **transaction).await?;
+        Ok(CollaborationRoomWrite::Ready(summary_from_row(&row)))
+    }
+
     pub async fn collaboration_get_or_create_room(
         &self,
         tenant_id: Uuid,
@@ -400,42 +479,47 @@ impl Database {
         created_by: Uuid,
     ) -> Result<CollaborationSummaryRecord, DatabaseError> {
         let mut transaction = self.pool.begin().await?;
-        if let Some(row) = sqlx::query("SELECT e.room_id,e.epoch,e.drive_id,e.node_id,e.base_version_id,e.state,e.durable_sequence,e.fencing_token,e.expires_at::text AS expires_at,e.warning_at::text AS warning_at FROM filebelt_collaboration.rooms r JOIN filebelt_collaboration.epochs e ON e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.epoch=r.current_epoch WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 FOR UPDATE OF r,e")
-            .bind(tenant_id).bind(drive_id).bind(node_id).fetch_optional(&mut *transaction).await? {
-            let state: String = row.get("state");
-            if state == "active" && row.get::<Uuid, _>("base_version_id") != base_version_id {
-                sqlx::query("UPDATE filebelt_collaboration.epochs SET state='frozen',freeze_reason='external_head',fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state='active'")
-                    .bind(tenant_id).bind(row.get::<Uuid,_>("room_id")).bind(row.get::<i64,_>("epoch")).execute(&mut *transaction).await?;
-                transaction.commit().await?;
-                return Err(DatabaseError::Conflict);
-            }
-            if state == "active" {
-                transaction.commit().await?;
-                return Ok(summary_from_row(&row));
-            }
-            if state == "frozen" {
-                transaction.commit().await?;
-                return Err(DatabaseError::Conflict);
-            }
-            let room_id: Uuid = row.get("room_id");
-            let epoch = row
-                .get::<i64, _>("epoch")
-                .checked_add(1)
-                .ok_or(DatabaseError::InvalidPersistedValue)?;
-            let next = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
-                .bind(tenant_id).bind(room_id).bind(epoch).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut *transaction).await?;
-            sqlx::query("UPDATE filebelt_collaboration.rooms SET current_epoch=$3,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2")
-                .bind(tenant_id).bind(room_id).bind(epoch).execute(&mut *transaction).await?;
-            transaction.commit().await?;
-            return Ok(summary_from_row(&next));
-        }
-        let room_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO filebelt_collaboration.rooms (tenant_id,id,drive_id,node_id,created_by) VALUES ($1,$2,$3,$4,$5)")
-            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(created_by).execute(&mut *transaction).await?;
-        let row = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,1,$3,$4,$5) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
-            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut *transaction).await?;
+        let result = self
+            .collaboration_get_or_create_room_tx(
+                &mut transaction,
+                tenant_id,
+                drive_id,
+                node_id,
+                base_version_id,
+                created_by,
+            )
+            .await?;
         transaction.commit().await?;
-        Ok(summary_from_row(&row))
+        match result {
+            CollaborationRoomWrite::Ready(room) => Ok(room),
+            CollaborationRoomWrite::ConflictAfterFreeze => Err(DatabaseError::Conflict),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn collaboration_create_join_grant_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant_id: Uuid,
+        id: Uuid,
+        room_id: Uuid,
+        epoch: i64,
+        token_digest: &[u8],
+        principal_id: Uuid,
+        session_id: Uuid,
+        client_id: Uuid,
+        presence_mode: &str,
+        presence_label: &str,
+        resource_acl_generation: i64,
+        drive_acl_generation: i64,
+        membership_generation: i64,
+        namespace_generation: i64,
+        can_checkpoint: bool,
+    ) -> Result<CollaborationJoinGrantRecord, DatabaseError> {
+        let row = sqlx::query("INSERT INTO filebelt_collaboration.join_grants (tenant_id,id,token_digest,room_id,epoch,principal_id,session_id,client_id,presence_mode,presence_label,resource_acl_generation,drive_acl_generation,membership_generation,namespace_generation,can_checkpoint,expires_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,clock_timestamp()+interval '60 seconds' FROM filebelt_collaboration.epochs WHERE tenant_id=$1 AND room_id=$4 AND epoch=$5 AND state='active' RETURNING id,room_id,epoch,principal_id,session_id,client_id,presence_mode,presence_label,can_checkpoint,expires_at::text AS expires_at")
+            .bind(tenant_id).bind(id).bind(token_digest).bind(room_id).bind(epoch).bind(principal_id).bind(session_id).bind(client_id).bind(presence_mode).bind(presence_label).bind(resource_acl_generation).bind(drive_acl_generation).bind(membership_generation).bind(namespace_generation).bind(can_checkpoint)
+            .fetch_optional(&mut **transaction).await?.ok_or(DatabaseError::Conflict)?;
+        Ok(join_grant_from_row(&row))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -457,10 +541,141 @@ impl Database {
         namespace_generation: i64,
         can_checkpoint: bool,
     ) -> Result<CollaborationJoinGrantRecord, DatabaseError> {
-        let row = sqlx::query("INSERT INTO filebelt_collaboration.join_grants (tenant_id,id,token_digest,room_id,epoch,principal_id,session_id,client_id,presence_mode,presence_label,resource_acl_generation,drive_acl_generation,membership_generation,namespace_generation,can_checkpoint,expires_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,clock_timestamp()+interval '60 seconds' FROM filebelt_collaboration.epochs WHERE tenant_id=$1 AND room_id=$4 AND epoch=$5 AND state='active' RETURNING id,room_id,epoch,principal_id,session_id,client_id,presence_mode,presence_label,can_checkpoint,expires_at::text AS expires_at")
-            .bind(tenant_id).bind(id).bind(token_digest).bind(room_id).bind(epoch).bind(principal_id).bind(session_id).bind(client_id).bind(presence_mode).bind(presence_label).bind(resource_acl_generation).bind(drive_acl_generation).bind(membership_generation).bind(namespace_generation).bind(can_checkpoint)
-            .fetch_optional(&self.pool).await?.ok_or(DatabaseError::Conflict)?;
-        Ok(join_grant_from_row(&row))
+        let mut transaction = self.pool.begin().await?;
+        let result = self
+            .collaboration_create_join_grant_tx(
+                &mut transaction,
+                tenant_id,
+                id,
+                room_id,
+                epoch,
+                token_digest,
+                principal_id,
+                session_id,
+                client_id,
+                presence_mode,
+                presence_label,
+                resource_acl_generation,
+                drive_acl_generation,
+                membership_generation,
+                namespace_generation,
+                can_checkpoint,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn collaboration_create_join_grant_idempotent<P, R, C>(
+        &self,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        base_version_id: Uuid,
+        created_by: Uuid,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        prepare_grant: P,
+        render_response: R,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        P: FnOnce(
+            &CollaborationSummaryRecord,
+            &PayloadRecord,
+        ) -> Result<(CollaborationJoinGrantInput, C), DatabaseError>,
+        R: FnOnce(
+            &CollaborationSummaryRecord,
+            &CollaborationJoinGrantRecord,
+            C,
+        ) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(created_by)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let room = match self
+                    .collaboration_get_or_create_room_tx(
+                        &mut transaction,
+                        tenant_id,
+                        drive_id,
+                        node_id,
+                        base_version_id,
+                        created_by,
+                    )
+                    .await?
+                {
+                    CollaborationRoomWrite::Ready(room) => room,
+                    CollaborationRoomWrite::ConflictAfterFreeze => {
+                        sqlx::query(
+                            "DELETE FROM public.idempotency_records WHERE tenant_id=$1 \
+                             AND principal_id=$2 AND route=$3 AND key=$4 \
+                             AND request_fingerprint=$5 AND response_status=102",
+                        )
+                        .bind(tenant_id)
+                        .bind(reservation.principal_id)
+                        .bind(reservation.route)
+                        .bind(reservation.key)
+                        .bind(reservation.request_fingerprint.as_slice())
+                        .execute(&mut *transaction)
+                        .await?;
+                        transaction.commit().await?;
+                        return Err(DatabaseError::Conflict);
+                    }
+                };
+                let payload = payload_for_node_tx(
+                    &mut transaction,
+                    tenant_id,
+                    drive_id,
+                    node_id,
+                    base_version_id,
+                )
+                .await?;
+                let (input, context) = prepare_grant(&room, &payload)?;
+                if input.principal_id != created_by {
+                    return Err(DatabaseError::InvalidPersistedValue);
+                }
+                let grant = self
+                    .collaboration_create_join_grant_tx(
+                        &mut transaction,
+                        tenant_id,
+                        input.id,
+                        room.room_id,
+                        room.epoch,
+                        &input.token_digest,
+                        input.principal_id,
+                        input.session_id,
+                        input.client_id,
+                        &input.presence_mode,
+                        &input.presence_label,
+                        input.resource_acl_generation,
+                        input.drive_acl_generation,
+                        input.membership_generation,
+                        input.namespace_generation,
+                        input.can_checkpoint,
+                    )
+                    .await?;
+                let response = render_response(&room, &grant, context)?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
 
     pub async fn collaboration_consume_join_grant(
@@ -1456,16 +1671,16 @@ impl Database {
             Err(DatabaseError::Conflict)
         }
     }
-    pub async fn collaboration_discard(
+    async fn collaboration_discard_tx(
         &self,
+        transaction: &mut Transaction<'_, Postgres>,
         tenant_id: Uuid,
         room_id: Uuid,
         epoch: i64,
         authorization: CollaborationAuthorizationContext,
     ) -> Result<(), DatabaseError> {
-        let mut transaction = self.pool.begin().await?;
         lock_collaboration_authorization_fence(
-            &mut transaction,
+            transaction,
             tenant_id,
             authorization.principal_id,
             authorization.session_id,
@@ -1490,24 +1705,138 @@ impl Database {
         .bind(epoch)
         .bind(authorization.drive_id)
         .bind(authorization.node_id)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await?
         .rows_affected();
         if affected == 1 {
-            transaction.commit().await?;
             Ok(())
         } else {
             Err(DatabaseError::Conflict)
         }
     }
 
+    pub async fn collaboration_discard(
+        &self,
+        tenant_id: Uuid,
+        room_id: Uuid,
+        epoch: i64,
+        authorization: CollaborationAuthorizationContext,
+    ) -> Result<(), DatabaseError> {
+        let mut transaction = self.pool.begin().await?;
+        self.collaboration_discard_tx(&mut transaction, tenant_id, room_id, epoch, authorization)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn collaboration_discard_idempotent<F>(
+        &self,
+        tenant_id: Uuid,
+        room_id: Uuid,
+        epoch: i64,
+        authorization: CollaborationAuthorizationContext,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce() -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(authorization.principal_id)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                self.collaboration_discard_tx(
+                    &mut transaction,
+                    tenant_id,
+                    room_id,
+                    epoch,
+                    authorization,
+                )
+                .await?;
+                let response = render_response()?;
+                let record = finalize(
+                    &mut transaction,
+                    tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
+    }
+
+    async fn collaboration_create_import_intent_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        input: CollaborationImportIntentInput<'_>,
+    ) -> Result<CollaborationImportIntentRecord, DatabaseError> {
+        let id = Uuid::new_v4();
+        let row=sqlx::query("INSERT INTO filebelt_collaboration.import_intents (tenant_id,id,drive_id,source_node_id,source_version_id,target_parent_id,target_display_name,target_name_key,principal_id,session_id,source_membership_generation,source_drive_acl_generation,source_namespace_generation,source_resource_acl_generation,target_membership_generation,target_drive_acl_generation,target_namespace_generation,target_resource_acl_generation,expires_at) SELECT $1,$2,$3,$4,$5,n.parent_id,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,clock_timestamp()+interval '15 minutes' FROM public.nodes n JOIN public.file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=$5 WHERE n.tenant_id=$1 AND n.drive_id=$3 AND n.id=$4 AND n.kind='file' AND n.parent_id IS NOT NULL AND n.trash_root_id IS NULL RETURNING id,drive_id,source_node_id,source_version_id,target_parent_id,target_display_name,target_name_key,expires_at::text AS expires_at").bind(input.tenant_id).bind(id).bind(input.drive_id).bind(input.source_node_id).bind(input.source_version_id).bind(input.target_display_name).bind(input.target_name_key).bind(input.principal_id).bind(input.session_id).bind(input.source_generations.membership).bind(input.source_generations.drive_acl).bind(input.source_generations.namespace).bind(input.source_generations.resource_acl).bind(input.target_generations.membership).bind(input.target_generations.drive_acl).bind(input.target_generations.namespace).bind(input.target_generations.resource_acl).fetch_optional(&mut **transaction).await?.ok_or(DatabaseError::NotFound)?;
+        Ok(import_from_row(&row))
+    }
+
     pub async fn collaboration_create_import_intent(
         &self,
         input: CollaborationImportIntentInput<'_>,
     ) -> Result<CollaborationImportIntentRecord, DatabaseError> {
-        let id = Uuid::new_v4();
-        let row=sqlx::query("INSERT INTO filebelt_collaboration.import_intents (tenant_id,id,drive_id,source_node_id,source_version_id,target_parent_id,target_display_name,target_name_key,principal_id,session_id,source_membership_generation,source_drive_acl_generation,source_namespace_generation,source_resource_acl_generation,target_membership_generation,target_drive_acl_generation,target_namespace_generation,target_resource_acl_generation,expires_at) SELECT $1,$2,$3,$4,$5,n.parent_id,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,clock_timestamp()+interval '15 minutes' FROM public.nodes n JOIN public.file_versions v ON v.tenant_id=n.tenant_id AND v.node_id=n.id AND v.id=$5 WHERE n.tenant_id=$1 AND n.drive_id=$3 AND n.id=$4 AND n.kind='file' AND n.parent_id IS NOT NULL AND n.trash_root_id IS NULL RETURNING id,drive_id,source_node_id,source_version_id,target_parent_id,target_display_name,target_name_key,expires_at::text AS expires_at").bind(input.tenant_id).bind(id).bind(input.drive_id).bind(input.source_node_id).bind(input.source_version_id).bind(input.target_display_name).bind(input.target_name_key).bind(input.principal_id).bind(input.session_id).bind(input.source_generations.membership).bind(input.source_generations.drive_acl).bind(input.source_generations.namespace).bind(input.source_generations.resource_acl).bind(input.target_generations.membership).bind(input.target_generations.drive_acl).bind(input.target_generations.namespace).bind(input.target_generations.resource_acl).fetch_optional(&self.pool).await?.ok_or(DatabaseError::NotFound)?;
-        Ok(import_from_row(&row))
+        let mut transaction = self.pool.begin().await?;
+        let result = self
+            .collaboration_create_import_intent_tx(&mut transaction, input)
+            .await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    pub async fn collaboration_create_import_intent_idempotent<F>(
+        &self,
+        input: CollaborationImportIntentInput<'_>,
+        idempotency: &ResourceMutationIdempotency<'_>,
+        render_response: F,
+    ) -> Result<ResourceMutationWrite, DatabaseError>
+    where
+        F: FnOnce(&CollaborationImportIntentRecord) -> Result<Value, DatabaseError>,
+    {
+        idempotency.validate_actor(input.principal_id)?;
+        let reservation = idempotency.reservation_input();
+        let mut transaction = self.pool.begin().await?;
+        match reserve(&mut transaction, input.tenant_id, &reservation).await? {
+            IdempotencyReservation::Replay(record) => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Replayed(record))
+            }
+            IdempotencyReservation::KeyReused => {
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::KeyReused)
+            }
+            IdempotencyReservation::Created => {
+                let intent = self
+                    .collaboration_create_import_intent_tx(&mut transaction, input)
+                    .await?;
+                let response = render_response(&intent)?;
+                let record = finalize(
+                    &mut transaction,
+                    input.tenant_id,
+                    &reservation,
+                    idempotency.response_status,
+                    &response,
+                )
+                .await?;
+                transaction.commit().await?;
+                Ok(ResourceMutationWrite::Created(record))
+            }
+        }
     }
     pub async fn collaboration_consume_import_intent(
         &self,
@@ -1703,11 +2032,11 @@ mod tests {
     fn discard_locks_the_current_authorization_fence_before_expiring_the_room() {
         let source = include_str!("collaboration.rs");
         let discard = source
-            .split_once("pub async fn collaboration_discard")
+            .split_once("async fn collaboration_discard_tx")
             .expect("discard exists")
             .1
-            .split_once("pub async fn collaboration_create_import_intent")
-            .expect("import intent follows discard")
+            .split_once("pub async fn collaboration_discard(")
+            .expect("discard wrapper follows transaction body")
             .0;
         for required in [
             "authorization: CollaborationAuthorizationContext",
@@ -1718,6 +2047,67 @@ mod tests {
         ] {
             assert!(discard.contains(required), "missing {required}");
         }
+    }
+
+    #[test]
+    fn grant_creation_advances_only_clean_frozen_epochs() {
+        let source = include_str!("collaboration.rs");
+        let create = source
+            .split_once("async fn collaboration_get_or_create_room_tx")
+            .expect("room creation exists")
+            .1
+            .split_once("pub async fn collaboration_get_or_create_room(")
+            .expect("room wrapper follows transaction body")
+            .0;
+        assert!(create.contains("if state == \"frozen\" && dirty"));
+        assert!(create.contains("state IN ('active','frozen') AND NOT dirty"));
+        assert!(create.contains("freeze_reason=COALESCE(freeze_reason,'external_head')"));
+        assert!(create.contains("INSERT INTO filebelt_collaboration.epochs"));
+    }
+
+    #[test]
+    fn collaboration_receipts_share_the_authoritative_mutation_transaction() {
+        let source = include_str!("collaboration.rs");
+        for (method, mutation) in [
+            (
+                "pub async fn collaboration_create_join_grant_idempotent",
+                ".collaboration_create_join_grant_tx(",
+            ),
+            (
+                "pub async fn collaboration_discard_idempotent",
+                ".collaboration_discard_tx(",
+            ),
+            (
+                "pub async fn collaboration_create_import_intent_idempotent",
+                ".collaboration_create_import_intent_tx(",
+            ),
+        ] {
+            let implementation = source.split_once(method).expect("method exists").1;
+            let reserve = implementation.find("reserve(&mut transaction").unwrap();
+            let mutate = implementation.find(mutation).unwrap();
+            let finalize = implementation.find("finalize(").unwrap();
+            let commit = finalize
+                + implementation[finalize..]
+                    .find("transaction.commit().await?")
+                    .unwrap();
+            assert!(reserve < mutate, "{method} mutates before reserving");
+            assert!(mutate < finalize, "{method} finalizes before mutation");
+            assert!(finalize < commit, "{method} commits before finalizing");
+        }
+
+        let grant = source
+            .split_once("pub async fn collaboration_create_join_grant_idempotent")
+            .unwrap()
+            .1;
+        assert!(grant.contains(".collaboration_get_or_create_room_tx("));
+        assert!(grant.contains("payload_for_node_tx("));
+    }
+
+    #[test]
+    fn checkpoint_schema_matches_the_sixteen_mibibyte_runtime_ceiling() {
+        let migration =
+            include_str!("../../../migrations/postgres/000021_collaboration_checkpoint_limit.sql");
+        assert!(migration.contains("source_size_bytes BETWEEN 0 AND 16777216"));
     }
 
     #[test]
@@ -1764,11 +2154,11 @@ mod tests {
     fn discard_immediately_fences_dirty_state_for_retention() {
         let source = include_str!("collaboration.rs");
         let discard = source
-            .split_once("pub async fn collaboration_discard")
+            .split_once("async fn collaboration_discard_tx")
             .expect("discard exists")
             .1
-            .split_once("pub async fn collaboration_create_import_intent")
-            .expect("import follows discard")
+            .split_once("pub async fn collaboration_discard(")
+            .expect("discard wrapper follows transaction body")
             .0;
         assert!(discard.contains("freeze_reason=CASE WHEN dirty THEN 'discarded'"));
         assert!(discard.contains("expires_at=CASE WHEN dirty THEN clock_timestamp()"));

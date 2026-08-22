@@ -22,7 +22,7 @@ use filebelt_domain::{Action, NormalizedName};
 use reqwest::{Certificate, Client, Identity};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use url::Url;
-use uuid::Uuid;
+use uuid::{Uuid, Variant};
 
 use crate::app::AppState;
 use crate::auth::{AuthenticatedSession, authenticate, authenticate_mutation};
@@ -67,6 +67,7 @@ struct PolicyInput {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct CreateCredentialInput {
+    operation_id: Uuid,
     protocol: String,
     read_only: bool,
     allowed_drive_ids: Vec<Uuid>,
@@ -76,6 +77,7 @@ struct CreateCredentialInput {
 
 #[derive(Debug, Serialize)]
 struct InternalCreateCredentialRequest<'a> {
+    operation_id: Uuid,
     principal_id: Uuid,
     protocol: &'a str,
     read_only: bool,
@@ -1604,6 +1606,7 @@ async fn create_credential(
 ) -> Result<(StatusCode, Json<CreateCredentialResponse>), ApiError> {
     let mounts = require_enabled(&state)?;
     let session = require_recent_mutation(&state, &headers).await?;
+    require_credential_operation_id(input.operation_id)?;
     validate_protocol(&state.config, &input.protocol)?;
     require_read_only(input.read_only)?;
     validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
@@ -1617,6 +1620,7 @@ async fn create_credential(
         .management
         .post(mounts.credential_url.clone())
         .json(&InternalCreateCredentialRequest {
+            operation_id: input.operation_id,
             principal_id: session.record.principal_id,
             protocol: &input.protocol,
             read_only: input.read_only,
@@ -1716,6 +1720,16 @@ fn require_read_only(read_only: bool) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn require_credential_operation_id(operation_id: Uuid) -> Result<(), ApiError> {
+    if operation_id.get_version_num() != 4 || operation_id.get_variant() != Variant::RFC4122 {
+        return Err(ApiError::bad_request(
+            "mount.credential_invalid",
+            "The mount credential operation ID must be an RFC 4122 UUID version 4",
+        ));
+    }
+    Ok(())
+}
+
 async fn validate_drive_selection(
     state: &AppState,
     session: &AuthenticatedSession,
@@ -1778,6 +1792,18 @@ fn unavailable() -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_operation_ids_require_rfc4122_uuid_v4() {
+        assert!(require_credential_operation_id(Uuid::new_v4()).is_ok());
+        for invalid in [
+            Uuid::nil(),
+            Uuid::parse_str("f81d4fae-7dec-11d0-a765-00a0c91e6bf6").unwrap(),
+            Uuid::parse_str("00000000-0000-4000-0000-000000000001").unwrap(),
+        ] {
+            assert!(require_credential_operation_id(invalid).is_err());
+        }
+    }
 
     #[test]
     fn nfs_kerberos_mapping_accepts_only_users_in_the_exact_realm() {

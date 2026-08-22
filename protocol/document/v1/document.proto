@@ -146,6 +146,8 @@ message RevokeDocumentSessionCommand {
   string actor_principal_id = 2;
   string participant_id = 3;
   string reason = 4;
+  bytes operation_digest = 5;
+  bytes request_fingerprint = 6;
 }
 
 message ForceCloseDocumentSessionCommand {
@@ -157,6 +159,8 @@ message ForceCloseDocumentSessionCommand {
   string drive_id = 6;
   string node_id = 7;
   DocumentAuthorizationGenerations generations = 8;
+  bytes operation_digest = 9;
+  bytes request_fingerprint = 10;
 }
 
 message CreateDocumentConflictCopyCommand {

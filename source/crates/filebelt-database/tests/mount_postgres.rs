@@ -6,10 +6,11 @@ use filebelt_database::mount::{
     ApplyNfsWriteExtentInput, BeginMountIoOperationInput, CommitNfsWriteInput,
     CreateNfsMappingProposalInput, CreateNfsMountSessionInput, EndNfsSessionInput,
     ExtendNfsWriteChunksInput, FinalizeNfsInternalIoReplayInput, MountIoAdmission,
-    MountIoCompletion, MountIoLookup, MountIoOperation, MountWriteCapabilityFence,
-    MountWriteChunkPlan, MountWriteRangeOperation, NfsAdminIdempotency, NfsAdminIdempotentWrite,
-    NfsExportState, NfsFeatureState, NfsMountSessionProjection, NfsMutationAuthorization,
-    NfsPrincipalMapping, NfsReplayContext, OpenNfsHandleInput, PendingMountIoWorkerState,
+    MountIoCompletion, MountIoLookup, MountIoOperation, MountPayloadDeletionRoute,
+    MountSecretEnvelopeInput, MountWriteCapabilityFence, MountWriteChunkPlan,
+    MountWriteRangeOperation, NfsAdminIdempotency, NfsAdminIdempotentWrite, NfsExportState,
+    NfsFeatureState, NfsMountSessionProjection, NfsMutationAuthorization, NfsPrincipalMapping,
+    NfsReplayContext, OpenNfsHandleInput, PendingMountIoWorkerState,
     PreauthorizeMountIoOperationInput, ReconcileNfsExportManifestInput,
     RecordNfsReplayReceiptInput, ReissueMountIoOperationInput, SeekNfsWriteExtentInput,
     UpsertNfsPrincipalMappingInput,
@@ -415,6 +416,152 @@ fn expect_idempotent_replayed(outcome: NfsAdminIdempotentWrite) -> IdempotencyRe
     }
 }
 
+async fn assert_mount_credential_cancellation_fence(
+    database: &Database,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+    drive_id: Uuid,
+) {
+    database
+        .upsert_mount_policy(tenant_id, principal_id, "ftps", true, true, &[drive_id])
+        .await
+        .expect("enable the credential fence test policy");
+    let expires_at: String =
+        sqlx::query_scalar("SELECT (clock_timestamp()+interval '1 hour')::text")
+            .fetch_one(database.pool())
+            .await
+            .expect("derive a valid credential expiry");
+
+    let cancelled_before_create_id = Uuid::new_v4();
+    assert!(matches!(
+        database
+            .revoke_mount_credential(
+                tenant_id,
+                principal_id,
+                cancelled_before_create_id,
+                "unknown_create_recovery",
+            )
+            .await,
+        Err(DatabaseError::NotFound)
+    ));
+    let cancelled_state: String = sqlx::query_scalar(
+        "SELECT state FROM filebelt_mount.credential_operation_fences \
+         WHERE tenant_id=$1 AND credential_id=$2",
+    )
+    .bind(tenant_id)
+    .bind(cancelled_before_create_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read the durable missing-credential cancellation fence");
+    assert_eq!(cancelled_state, "cancelled");
+
+    let nonce = [21_u8; 12];
+    let wrap_nonce = [22_u8; 12];
+    let aad_digest = [23_u8; 32];
+    assert!(matches!(
+        database
+            .create_mount_credential(
+                tenant_id,
+                principal_id,
+                cancelled_before_create_id,
+                "ftps",
+                "cancelled-operation-user",
+                "hmac_sha256",
+                true,
+                &[drive_id],
+                None,
+                &expires_at,
+                &MountSecretEnvelopeInput {
+                    ciphertext: &[20_u8; 32],
+                    nonce: &nonce,
+                    wrapped_dek: &[24_u8; 48],
+                    wrap_nonce: &wrap_nonce,
+                    kek_generation: 1,
+                    aad_digest: &aad_digest,
+                    aad_version: 1,
+                },
+            )
+            .await,
+        Err(DatabaseError::Conflict)
+    ));
+
+    let in_flight_id = Uuid::new_v4();
+    let mut create_transaction = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin in-flight credential create");
+    sqlx::query(
+        "INSERT INTO filebelt_mount.credentials \
+         (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,allowed_drive_ids,expires_at) \
+         VALUES ($1,$2,$3,'ftps',$4,'hmac_sha256',true,$5,$6::timestamptz)",
+    )
+    .bind(tenant_id)
+    .bind(in_flight_id)
+    .bind(principal_id)
+    .bind(format!("credential-{in_flight_id}"))
+    .bind(vec![drive_id])
+    .bind(&expires_at)
+    .execute(&mut *create_transaction)
+    .await
+    .expect("reserve the in-flight credential operation");
+
+    let mut revoke_transaction = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin concurrent credential revocation");
+    sqlx::query("SET LOCAL lock_timeout='100ms'")
+        .execute(&mut *revoke_transaction)
+        .await
+        .expect("bound the concurrency assertion");
+    let lock_error = sqlx::query(
+        "SELECT credential_existed FROM \
+         filebelt_mount.cancel_credential_operation($1,$2,$3)",
+    )
+    .bind(tenant_id)
+    .bind(principal_id)
+    .bind(in_flight_id)
+    .fetch_one(&mut *revoke_transaction)
+    .await
+    .expect_err("revocation must wait for an in-flight create of the same UUID");
+    assert!(
+        matches!(&lock_error,sqlx::Error::Database(error) if error.code().as_deref()==Some("55P03")),
+        "the exact operation fence must serialize create and revoke: {lock_error}"
+    );
+    revoke_transaction
+        .rollback()
+        .await
+        .expect("roll back the timed-out revocation probe");
+    create_transaction
+        .commit()
+        .await
+        .expect("commit the in-flight credential");
+
+    database
+        .revoke_mount_credential(
+            tenant_id,
+            principal_id,
+            in_flight_id,
+            "unknown_create_recovery",
+        )
+        .await
+        .expect("revoke after the create ordering point commits");
+    let terminal: (String, bool) = sqlx::query_as(
+        "SELECT fence.state,credential.revoked_at IS NOT NULL \
+         FROM filebelt_mount.credential_operation_fences AS fence \
+         JOIN filebelt_mount.credentials AS credential \
+           ON credential.tenant_id=fence.tenant_id AND credential.id=fence.credential_id \
+         WHERE fence.tenant_id=$1 AND fence.credential_id=$2",
+    )
+    .bind(tenant_id)
+    .bind(in_flight_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read the serialized credential terminal state");
+    assert_eq!(terminal, ("cancelled".to_owned(), true));
+}
+
 #[tokio::test]
 #[ignore = "requires an empty PostgreSQL database in FILEBELT_NFS_UPGRADE_TEST_DATABASE_URL"]
 async fn nfs_alias_upgrade_is_deterministic_and_non_mutating_on_conflict() {
@@ -791,6 +938,41 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         .await
     );
     assert!(
+        function_privilege(
+            &database,
+            "filebelt_api",
+            "filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)"
+        )
+        .await
+    );
+    assert!(
+        !function_privilege(
+            &database,
+            "filebelt_vfs",
+            "filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)"
+        )
+        .await
+    );
+    assert!(
+        !table_privilege(
+            &database,
+            "filebelt_api",
+            "filebelt_mount.credential_operation_fences",
+            "INSERT"
+        )
+        .await
+    );
+    assert!(
+        column_privilege(
+            &database,
+            "filebelt_recovery",
+            "filebelt_mount.credential_operation_fences",
+            "state",
+            "SELECT"
+        )
+        .await
+    );
+    assert!(
         table_privilege(
             &database,
             "filebelt_vfs",
@@ -1120,6 +1302,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     .execute(database.pool())
     .await
     .expect("insert NFS root ancestry");
+    assert_mount_credential_cancellation_fence(&database, tenant_id, principal_id, drive_id).await;
     let seeded_state: String =
         sqlx::query_scalar("SELECT state FROM filebelt_mount.nfs_feature_state WHERE tenant_id=$1")
             .bind(tenant_id)
@@ -2317,19 +2500,24 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     let inherited_vfs_login = "filebelt_nfs_mount_it_vfs_login";
     let inherited_io_login = "filebelt_nfs_mount_it_io_login";
     let inherited_api_login = "filebelt_nfs_mount_it_api_login";
+    let inherited_maintenance_login = "filebelt_nfs_mount_it_maintenance_login";
     sqlx::raw_sql(
         "DROP ROLE IF EXISTS filebelt_nfs_mount_it_vfs_login;\
          DROP ROLE IF EXISTS filebelt_nfs_mount_it_io_login;\
          DROP ROLE IF EXISTS filebelt_nfs_mount_it_api_login;\
+         DROP ROLE IF EXISTS filebelt_nfs_mount_it_maintenance_login;\
          CREATE ROLE filebelt_nfs_mount_it_vfs_login LOGIN INHERIT \
            PASSWORD 'filebelt-nfs-role-test';\
          CREATE ROLE filebelt_nfs_mount_it_io_login LOGIN INHERIT \
            PASSWORD 'filebelt-nfs-role-test';\
          CREATE ROLE filebelt_nfs_mount_it_api_login LOGIN INHERIT \
            PASSWORD 'filebelt-nfs-role-test';\
+         CREATE ROLE filebelt_nfs_mount_it_maintenance_login LOGIN INHERIT \
+           PASSWORD 'filebelt-nfs-role-test';\
          GRANT filebelt_vfs TO filebelt_nfs_mount_it_vfs_login;\
          GRANT filebelt_io TO filebelt_nfs_mount_it_io_login;\
-         GRANT filebelt_api TO filebelt_nfs_mount_it_api_login;",
+         GRANT filebelt_api TO filebelt_nfs_mount_it_api_login;\
+         GRANT filebelt_maintenance TO filebelt_nfs_mount_it_maintenance_login;",
     )
     .execute(database.pool())
     .await
@@ -2385,6 +2573,15 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     let inherited_api_database = Database::connect(&inherited_api_url, 2)
         .await
         .expect("connect as deployment-like inherited API login");
+    let inherited_maintenance_url = PgConnectOptions::from_str(&database_url)
+        .expect("parse mount test database URL for maintenance login")
+        .username(inherited_maintenance_login)
+        .password("filebelt-nfs-role-test")
+        .to_url_lossy()
+        .to_string();
+    let inherited_maintenance_database = Database::connect(&inherited_maintenance_url, 2)
+        .await
+        .expect("connect as deployment-like inherited maintenance login");
     let api_role_fingerprint = [10_u8; 32];
     let api_role_idempotency = NfsAdminIdempotency {
         principal_id,
@@ -2429,6 +2626,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     assert_nfs_conflict_admin_idempotency(
         &database,
         &inherited_api_database,
+        &inherited_maintenance_database,
         &first_session,
         tenant_id,
         user_id,
@@ -4603,10 +4801,12 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     inherited_vfs_pool.close().await;
     inherited_io_pool.close().await;
     inherited_api_database.pool().close().await;
+    inherited_maintenance_database.pool().close().await;
     sqlx::raw_sql(
         "DROP ROLE filebelt_nfs_mount_it_vfs_login;\
          DROP ROLE filebelt_nfs_mount_it_io_login;\
-         DROP ROLE filebelt_nfs_mount_it_api_login;",
+         DROP ROLE filebelt_nfs_mount_it_api_login;\
+         DROP ROLE filebelt_nfs_mount_it_maintenance_login;",
     )
     .execute(database.pool())
     .await
@@ -4617,6 +4817,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
 async fn assert_nfs_conflict_admin_idempotency(
     database: &Database,
     inherited_api_database: &Database,
+    inherited_maintenance_database: &Database,
     session: &NfsMountSessionProjection,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -4625,6 +4826,111 @@ async fn assert_nfs_conflict_admin_idempotency(
     root_node_id: Uuid,
     backend_id: Uuid,
 ) {
+    let live_writer = insert_test_mount_writer(
+        database,
+        session,
+        tenant_id,
+        drive_id,
+        root_node_id,
+        backend_id,
+        "generic-orphan-live-writer",
+        "committing",
+        "finalized",
+    )
+    .await;
+    let live_payload_id: Uuid = sqlx::query_scalar(
+        "SELECT staging_payload_id FROM filebelt_mount.write_sessions \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(live_writer.fence.write_session_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read live-writer staging payload");
+    sqlx::query(
+        "UPDATE public.payload_objects SET finalized_at=clock_timestamp()-interval '20 years' \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(live_payload_id)
+    .execute(database.pool())
+    .await
+    .expect("age finalized live-writer payload past generic orphan grace");
+    assert_eq!(
+        inherited_maintenance_database
+            .enqueue_finalized_upload_orphans(tenant_id, backend_id, 10 * 365 * 24 * 60 * 60, 100)
+            .await
+            .expect("run authority-aware generic orphan selection"),
+        0,
+        "a finalized mount writer must not enter generic orphan deletion"
+    );
+    sqlx::query(
+        "UPDATE public.payload_objects SET state='delete_intent',\
+                deletion_intent_at=clock_timestamp() \
+         WHERE tenant_id=$1 AND id=$2 AND state='finalized'",
+    )
+    .bind(tenant_id)
+    .bind(live_payload_id)
+    .execute(database.pool())
+    .await
+    .expect("simulate stale generic mount delete intent");
+    assert!(matches!(
+        inherited_maintenance_database
+            .admit_finalized_upload_orphan_deletion(tenant_id, live_payload_id,)
+            .await,
+        Err(DatabaseError::StaleGeneration)
+    ));
+    assert_eq!(
+        inherited_maintenance_database
+            .route_mount_payload_deletion(tenant_id, backend_id, live_payload_id,)
+            .await
+            .expect("reroute stale generic job away from live mount writer"),
+        Some(MountPayloadDeletionRoute::Protected)
+    );
+    let protected_state: String =
+        sqlx::query_scalar("SELECT state FROM public.payload_objects WHERE tenant_id=$1 AND id=$2")
+            .bind(tenant_id)
+            .bind(live_payload_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("read protected live-writer payload");
+    assert_eq!(protected_state, "finalized");
+    sqlx::query(
+        "UPDATE filebelt_mount.write_sessions SET state='expired',\
+                finished_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 \
+                AND state='committing'",
+    )
+    .bind(tenant_id)
+    .bind(live_writer.fence.write_session_id)
+    .execute(database.pool())
+    .await
+    .expect("expire live-writer fixture");
+    sqlx::query(
+        "UPDATE public.payload_objects SET state='abandoned' \
+         WHERE tenant_id=$1 AND id=$2 AND state='finalized'",
+    )
+    .bind(tenant_id)
+    .bind(live_payload_id)
+    .execute(database.pool())
+    .await
+    .expect("abandon expired live-writer payload for mount-specific cleanup");
+    assert_eq!(
+        inherited_maintenance_database
+            .route_mount_payload_deletion(tenant_id, backend_id, live_payload_id,)
+            .await
+            .expect("dispatch expired writer through mount cleanup"),
+        Some(MountPayloadDeletionRoute::CleanupRequired {
+            write_session_id: live_writer.fence.write_session_id,
+        })
+    );
+    complete_test_conflict_cleanup(
+        inherited_maintenance_database,
+        tenant_id,
+        backend_id,
+        &live_writer,
+    )
+    .await;
+
     let api_session_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO public.api_sessions \
@@ -4673,6 +4979,40 @@ async fn assert_nfs_conflict_admin_idempotency(
     .await;
     let copy_conflict_id =
         insert_retained_nfs_conflict(database, session, &copy_writer, false).await;
+    let copy_payload_id: Uuid = sqlx::query_scalar(
+        "SELECT staging_payload_id FROM filebelt_mount.write_sessions \
+         WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(tenant_id)
+    .bind(copy_writer.fence.write_session_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read retained-conflict staging payload");
+    sqlx::query(
+        "UPDATE public.payload_objects SET state='delete_intent',\
+                deletion_intent_at=clock_timestamp() \
+         WHERE tenant_id=$1 AND id=$2 AND state='finalized'",
+    )
+    .bind(tenant_id)
+    .bind(copy_payload_id)
+    .execute(database.pool())
+    .await
+    .expect("simulate stale generic delete intent against retained conflict");
+    assert_eq!(
+        inherited_maintenance_database
+            .route_mount_payload_deletion(tenant_id, backend_id, copy_payload_id,)
+            .await
+            .expect("preserve retained conflict from generic deletion"),
+        Some(MountPayloadDeletionRoute::Protected)
+    );
+    let retained_payload_state: String =
+        sqlx::query_scalar("SELECT state FROM public.payload_objects WHERE tenant_id=$1 AND id=$2")
+            .bind(tenant_id)
+            .bind(copy_payload_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("read retained conflict payload after generic reroute");
+    assert_eq!(retained_payload_state, "finalized");
     let listed = inherited_api_database
         .list_nfs_write_conflicts(tenant_id, actor_principal_id)
         .await

@@ -54,4 +54,7 @@ Generated output is committed, records its source, generator/version,
 regeneration command, and Apache-2.0 license, and is checked for deterministic
 regeneration. A schema change updates generated output and consumers together
 and passes Buf lint and file-level breaking checks, generation drift, license,
-deterministic serialization, and consumer tests.
+deterministic serialization, and consumer tests. Pull requests run the breaking
+check against both their exact base revision and the latest release tag
+reachable from the candidate. Branch, scheduled, and manual checks retain the
+latest reachable release tag when one exists.

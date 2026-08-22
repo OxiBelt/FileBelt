@@ -1019,6 +1019,15 @@ pub struct MountStagingCleanupJobRecord {
     pub source_nonce_digest: Option<[u8; 32]>,
 }
 
+/// PostgreSQL's disposition for a generic payload-delete job that names a
+/// mount staging payload. Generic maintenance may retire the public job, but
+/// only the mount cleanup lease identified here may authorize physical I/O.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MountPayloadDeletionRoute {
+    Protected,
+    CleanupRequired { write_session_id: Uuid },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MountWriteLockCleanupJobRecord {
     pub tenant_id: Uuid,
@@ -3052,18 +3061,21 @@ impl Database {
         }
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
-            "UPDATE filebelt_mount.credentials SET revoked_at=clock_timestamp(),\
-             credential_generation=credential_generation+1,authorization_generation=authorization_generation+1 \
-             WHERE tenant_id=$1 AND principal_id=$2 AND id=$3 AND revoked_at IS NULL \
-             RETURNING protocol,credential_generation",
+            "SELECT credential_existed,protocol,generation \
+             FROM filebelt_mount.cancel_credential_operation($1,$2,$3)",
         )
         .bind(tenant_id)
         .bind(principal_id)
         .bind(credential_id)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or(DatabaseError::NotFound)?;
-        let generation: i64 = row.get("credential_generation");
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !row.get::<bool, _>("credential_existed") {
+            // A missing or already-revoked credential remains an existence-
+            // hiding 404, but only after its durable cancellation fence commits.
+            transaction.commit().await?;
+            return Err(DatabaseError::NotFound);
+        }
+        let generation: i64 = row.get("generation");
         sqlx::query(
             "UPDATE filebelt_mount.sessions SET state='revoked',closed_at=clock_timestamp(),\
              close_reason=$4 WHERE tenant_id=$1 AND credential_id=$2 AND user_principal_id=$3 \
@@ -6356,6 +6368,138 @@ impl Database {
                 Ok(record)
             })
             .collect()
+    }
+
+    /// Reroute a generic payload-delete job away from a mount staging payload.
+    ///
+    /// A stale generic orphan job can predate the authority-aware selector.
+    /// PostgreSQL locks the payload and writer before either restoring a live
+    /// finalized/staging state or enqueuing the existing fenced mount cleanup
+    /// machine. The caller must never unlink the payload directly when this
+    /// returns `Some`.
+    pub async fn route_mount_payload_deletion(
+        &self,
+        tenant_id: Uuid,
+        backend_id: Uuid,
+        payload_id: Uuid,
+    ) -> Result<Option<MountPayloadDeletionRoute>, DatabaseError> {
+        if tenant_id.is_nil() || backend_id.is_nil() || payload_id.is_nil() {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool().begin().await?;
+        let rows = sqlx::query(
+            "SELECT writer.id AS write_session_id,writer.state AS writer_state,\
+                    payload.state AS payload_state,\
+                    EXISTS (SELECT 1 FROM filebelt_mount.nfs_write_conflicts AS conflict \
+                      WHERE conflict.tenant_id=writer.tenant_id \
+                        AND conflict.write_session_id=writer.id \
+                        AND conflict.staging_payload_id=payload.id \
+                        AND conflict.state='retained') AS retained_conflict \
+             FROM public.payload_objects AS payload \
+             JOIN filebelt_mount.write_sessions AS writer \
+               ON writer.tenant_id=payload.tenant_id \
+              AND writer.staging_payload_id=payload.id \
+             WHERE payload.tenant_id=$1 AND payload.id=$2 \
+               AND payload.backend_id=$3 \
+             ORDER BY writer.created_at,writer.id \
+             FOR UPDATE OF payload,writer",
+        )
+        .bind(tenant_id)
+        .bind(payload_id)
+        .bind(backend_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let Some(row) = rows.first() else {
+            transaction.commit().await?;
+            return Ok(None);
+        };
+        if rows.len() != 1 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let write_session_id: Uuid = row.get("write_session_id");
+        let writer_state: String = row.get("writer_state");
+        let payload_state: String = row.get("payload_state");
+        let retained_conflict: bool = row.get("retained_conflict");
+
+        let route = match writer_state.as_str() {
+            "open" | "flushing" | "aborting" => {
+                if payload_state == "delete_intent" {
+                    let changed = sqlx::query(
+                        "UPDATE public.payload_objects \
+                         SET state='staging',deletion_intent_at=NULL \
+                         WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'",
+                    )
+                    .bind(tenant_id)
+                    .bind(payload_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+                    if changed != 1 {
+                        return Err(DatabaseError::StaleGeneration);
+                    }
+                } else if payload_state == "deleting" {
+                    return Err(DatabaseError::StaleGeneration);
+                }
+                MountPayloadDeletionRoute::Protected
+            }
+            "committing" | "conflicted" => {
+                if writer_state == "conflicted" && !retained_conflict {
+                    return Err(DatabaseError::InvalidPersistedValue);
+                }
+                if payload_state == "delete_intent" {
+                    let changed = sqlx::query(
+                        "UPDATE public.payload_objects \
+                         SET state='finalized',deletion_intent_at=NULL \
+                         WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'",
+                    )
+                    .bind(tenant_id)
+                    .bind(payload_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+                    if changed != 1 {
+                        return Err(DatabaseError::StaleGeneration);
+                    }
+                } else if payload_state == "deleting" {
+                    return Err(DatabaseError::StaleGeneration);
+                }
+                MountPayloadDeletionRoute::Protected
+            }
+            "committed" => MountPayloadDeletionRoute::Protected,
+            "aborted" | "expired" => {
+                if retained_conflict {
+                    return Err(DatabaseError::InvalidPersistedValue);
+                }
+                if payload_state == "delete_intent" {
+                    let changed = sqlx::query(
+                        "UPDATE public.payload_objects \
+                         SET state='abandoned' \
+                         WHERE tenant_id=$1 AND id=$2 AND state='delete_intent'",
+                    )
+                    .bind(tenant_id)
+                    .bind(payload_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+                    if changed != 1 {
+                        return Err(DatabaseError::StaleGeneration);
+                    }
+                }
+                sqlx::query(
+                    "SELECT filebelt_mount.enqueue_nfs_staging_cleanup(\
+                       $1,$2,'generic_payload_delete_rerouted',NULL,'cleanup')",
+                )
+                .bind(tenant_id)
+                .bind(write_session_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(map_nfs_mutation_error)?;
+                MountPayloadDeletionRoute::CleanupRequired { write_session_id }
+            }
+            _ => return Err(DatabaseError::InvalidPersistedValue),
+        };
+        transaction.commit().await?;
+        Ok(Some(route))
     }
 
     /// Leases one authoritative cleanup job for the exact backend/session.

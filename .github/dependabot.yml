@@ -17,6 +17,13 @@ updates:
       media-protocol:
         patterns: ["*"]
   - package-ecosystem: cargo
+    directory: "/adapters/directory-repository"
+    schedule:
+      interval: weekly
+    groups:
+      directory-repository-adapter:
+        patterns: ["*"]
+  - package-ecosystem: cargo
     directory: "/adapters/ftp-ftps"
     schedule:
       interval: weekly

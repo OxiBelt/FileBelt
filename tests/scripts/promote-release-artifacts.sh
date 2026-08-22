@@ -59,7 +59,7 @@ jq -e --arg registry "${registry}" '
   and (.source.revision | test("^[0-9a-f]{40}$"))
   and (.source.created | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
   and .runtime == {uid:10001,gid:10001}
-  and (.images | length) == 15
+  and (.images | length) == 17
   and ([.images[].role] | sort) == ([
     "filebelt-api",
     "filebelt-mcp-broker",
@@ -73,6 +73,8 @@ jq -e --arg registry "${registry}" '
     "filebelt-vfs",
     "filebelt-headscale-sync",
     "filebelt-nfs-relay",
+    "filebelt-private-egress-gateway",
+    "filebelt-tunnel-relay",
     "filebelt-web",
     "filebelt-worker-io",
     "filebelt-worker-maintenance"
@@ -104,6 +106,18 @@ active_roles=(
   filebelt-revision
   filebelt-web
 )
+preview_roles=(
+  filebelt-private-egress-gateway
+  filebelt-tunnel-relay
+)
+for preview_role in "${preview_roles[@]}"; do
+  for active_role in "${active_roles[@]}"; do
+    [[ "${preview_role}" != "${active_role}" ]] || {
+      echo "preview role entered active release promotion: ${preview_role}" >&2
+      exit 1
+    }
+  done
+done
 architectures=(amd64 arm64 riscv64)
 temporary=$(mktemp -d)
 cleanup() {

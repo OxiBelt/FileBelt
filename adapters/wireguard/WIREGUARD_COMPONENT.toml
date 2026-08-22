@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-FileCopyrightText: WireGuard and iproute2 contributors
+
+[[components]]
+name = "wireguard-tools"
+version = "1.0.20260223"
+relationship = "separate-executable"
+source = "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20260223.tar.xz"
+sha256 = "af459827b80bfd31b83b08077f4b5843acb7d18ad9a33a2ef532d3090f291fbf"
+license = "GPL-2.0-only"
+
+[[components]]
+name = "iproute2"
+version = "7.1.0"
+relationship = "separate-executable"
+source = "https://www.kernel.org/pub/linux/utils/net/iproute2/iproute2-7.1.0.tar.xz"
+sha256 = "fd9fa1b95809417157ca83dd72957e3261bdbce896353cb936f80af0b33a4b5c"
+license = "GPL-2.0-only"

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[first_party]
+package = "filebelt-wireguard-init"
+license = "Apache-2.0"
+relationship = "application"
+image_path = "/usr/local/bin/filebelt-wireguard-init"
+
+[wireguard_tools]
+version = "1.0.20260223"
+source = "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20260223.tar.xz"
+sha256 = "af459827b80bfd31b83b08077f4b5843acb7d18ad9a33a2ef532d3090f291fbf"
+license = "GPL-2.0-only"
+boundary = "separate-executable"
+image_path = "/usr/local/bin/wg"
+
+[iproute2]
+version = "7.1.0"
+source = "https://www.kernel.org/pub/linux/utils/net/iproute2/iproute2-7.1.0.tar.xz"
+sha256 = "fd9fa1b95809417157ca83dd72957e3261bdbce896353cb936f80af0b33a4b5c"
+license = "GPL-2.0-only"
+boundary = "separate-executable"
+image_path = "/usr/local/bin/ip"
+
+[image]
+minimum_license_expression = "Apache-2.0 AND GPL-2.0-only AND MIT"
+
+[source_qualification]
+state = "blocked"
+state_scope = "checked-in-default"
+required = ["exact-filebelt-revision", "wireguard-tools-source", "iproute2-source", "versioned-cargo-vendor-closure", "licenses-and-notices", "immutable-source-bundle-url-and-checksum"]
+
+[image_build]
+state = "blocked"
+state_scope = "checked-in-default"
+required = ["digest-pinned-builder", "static-musl-toolchain", "network-disabled-compilation", "reviewed-image-license-expression"]
+
+[publication]
+state = "blocked"
+state_scope = "checked-in-default-and-current-release"
+required = ["runtime-sbom", "build-sbom", "vulnerability-decision", "provenance", "native-amd64-wireguard", "native-arm64-wireguard", "native-riscv64-wireguard", "calico-and-cilium", "rollback"]

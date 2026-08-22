@@ -60,6 +60,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- if .Values.mcp.enabled -}}
 {{- $configuration = printf "%s\n\n[keys.api_mcp_delegation]\nprivate_key_file = \"/run/secrets/api-mcp-delegation-capability-private-key\"\npublic_keyset_file = \"/run/secrets/api-mcp-delegation-capability-public-keyset\"\ncurrent_generation = 1" $configuration -}}
+{{- if .Values.mcp.privateEgress.enabled -}}
+{{- $private := .Values.mcp.privateEgress -}}
+{{- $configuration = printf "%s\n\n[mcp.gateways.%s]\nkind = \"private_tunnel\"\ngateway_url = %q\nclient_certificate_chain_file = \"/run/secrets/mcp-private-egress-tls/tls.crt\"\nclient_private_key_file = \"/run/secrets/mcp-private-egress-tls/tls.key\"\nserver_ca_file = \"/run/secrets/mcp-private-egress-tls/server-ca.crt\"" $configuration $private.name $private.gatewayUrl -}}
+{{- end -}}
 {{- end -}}
 {{- if $mountsEnabled -}}
 {{- $configuration = replace "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\"]" "allowed_client_uri_sans = [\"spiffe://filebelt/web/io\", \"spiffe://filebelt/mcp-broker/io\", \"spiffe://filebelt/vfs/io\"]" $configuration -}}
@@ -245,6 +249,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.mcp.enabled -}}
+{{- if and .Values.mcp.privateEgress.enabled (eq .Values.secrets.mcpPrivateEgressClientTls.name .Values.secrets.mcpGatewayClientTls.name) -}}
+{{- fail "MCP private egress and public gateway must use distinct client TLS Secrets" -}}
+{{- end -}}
 {{- if not .Values.networkPolicy.mcpGateway.enabled -}}
 {{- fail "mcp.enabled requires networkPolicy.mcpGateway.enabled" -}}
 {{- end -}}

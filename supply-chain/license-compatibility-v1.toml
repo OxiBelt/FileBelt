@@ -70,6 +70,7 @@ filebelt-mcp-runner = "Apache-2.0"
 filebelt-mcp-vault = "Apache-2.0"
 filebelt-media-controller = "Apache-2.0"
 filebelt-nfs-relay = "Apache-2.0"
+filebelt-private-egress-gateway = "Apache-2.0"
 filebelt-repository-tests = "Apache-2.0"
 filebelt-revision = "Apache-2.0"
 filebelt-revision-protocol = "Apache-2.0"
@@ -77,6 +78,7 @@ filebelt-runtime = "Apache-2.0"
 filebelt-secret-vault = "Apache-2.0"
 filebelt-storage = "Apache-2.0"
 filebelt-storage-protocol = "Apache-2.0"
+filebelt-tunnel-relay = "Apache-2.0"
 filebelt-unsafe-harness = "Apache-2.0"
 filebelt-vfs = "Apache-2.0"
 filebelt-vfs-protocol = "Apache-2.0"
@@ -168,6 +170,18 @@ restricted_license_exceptions = []
 
 [workspaces.package_licenses]
 filebelt-nfs-bridge = "LGPL-3.0-or-later"
+
+[[workspaces]]
+id = "wireguard"
+manifest = "adapters/wireguard/Cargo.toml"
+lockfile = "adapters/wireguard/Cargo.lock"
+region = "adapter-apache"
+license = "Apache-2.0"
+allowed_local_dependencies = []
+restricted_license_exceptions = []
+
+[workspaces.package_licenses]
+filebelt-wireguard-init = "Apache-2.0"
 
 [[workspaces]]
 id = "transcode"
@@ -393,6 +407,43 @@ version = "6.3-4"
 relationship = "linked"
 license = "BSD-3-Clause"
 path = "/usr/bin/ganesha.nfsd"
+source_required = true
+
+[[artifacts]]
+id = "filebelt-wireguard-init"
+workspace = "wireguard"
+minimum_license_expression = "Apache-2.0 AND GPL-2.0-only AND MIT"
+
+[[artifacts.components]]
+id = "filebelt-wireguard-init"
+version = "0.1.0"
+relationship = "linked"
+license = "Apache-2.0"
+path = "/usr/local/bin/filebelt-wireguard-init"
+source_required = true
+
+[[artifacts.components]]
+id = "wireguard-tools"
+version = "1.0.20260223"
+relationship = "separate-executable"
+license = "GPL-2.0-only"
+path = "/usr/local/bin/wg"
+source_required = true
+
+[[artifacts.components]]
+id = "iproute2"
+version = "7.1.0"
+relationship = "separate-executable"
+license = "GPL-2.0-only"
+path = "/usr/local/bin/ip"
+source_required = true
+
+[[artifacts.components]]
+id = "musl"
+version = "1.2.5"
+relationship = "linked"
+license = "MIT"
+path = "/usr/local/bin/filebelt-wireguard-init"
 source_required = true
 
 [[artifacts]]

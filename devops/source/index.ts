@@ -8,6 +8,7 @@ export {
   ImagePlanSchemaVersion,
   ImageRegistry,
   ImageRoles,
+  PreviewImageRoles,
   IsReleaseTag,
   OxibeltImage,
   OxibeltRevision,

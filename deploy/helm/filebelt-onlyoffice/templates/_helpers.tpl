@@ -58,6 +58,9 @@ runAsGroup: {{ .Values.global.runAsGroup }}
 {{- if eq .Values.integrationNamespace .Values.coreNamespace -}}
 {{- fail "integrationNamespace must be distinct from coreNamespace" -}}
 {{- end -}}
+{{- if and .Values.networkPolicy.privateEgress.enabled (eq .Values.secrets.privateEgressClientTls.name .Values.secrets.egressClientTls.name) -}}
+{{- fail "ONLYOFFICE private egress and public gateway must use distinct client TLS Secrets" -}}
+{{- end -}}
 {{- if or (eq (len .Values.networkPolicy.oxibeltIngress.from) 0) (eq (len .Values.networkPolicy.dns.to) 0) (eq (len .Values.networkPolicy.core.to) 0) (eq (len .Values.networkPolicy.io.to) 0) (eq (len .Values.networkPolicy.egressGateway.to) 0) -}}
 {{- fail "ONLYOFFICE adapter NetworkPolicy peers must be explicit and nonempty" -}}
 {{- end -}}

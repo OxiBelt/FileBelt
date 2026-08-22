@@ -41,6 +41,7 @@ their respective details:
 - [UI documentation](../ui/README.md) defines browser security, accessibility,
   design, dependency, and test requirements.
 - [Kubernetes operations](operations/kubernetes.md),
+  [private egress preview operations](operations/private-egress.md),
   [Docker integration units](operations/docker-integration.md),
   [ONLYOFFICE integration operations](operations/onlyoffice.md),
   [revision storage operations](operations/revisions.md),

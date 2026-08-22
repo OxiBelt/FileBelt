@@ -22,7 +22,7 @@ spec:
       annotations:
 {{ include "filebelt-onlyoffice.annotations" . | indent 8 }}
         checksum/provider-config: {{ printf "%s:%s:%s" .Values.providerConfig.existingConfigMap .Values.providerConfig.key .Values.providerConfig.generation | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s" .Values.secrets.browserJwt.generation .Values.secrets.outboxJwt.generation .Values.secrets.serverTls.generation .Values.secrets.coreClientTls.generation .Values.secrets.ioClientTls.generation .Values.secrets.egressClientTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.browserJwt.generation .Values.secrets.outboxJwt.generation .Values.secrets.serverTls.generation .Values.secrets.coreClientTls.generation .Values.secrets.ioClientTls.generation .Values.secrets.egressClientTls.generation .Values.secrets.privateEgressClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt-onlyoffice.name" . }}
       automountServiceAccountToken: false
@@ -66,6 +66,9 @@ spec:
             - {name: core-client-tls, mountPath: /run/secrets/core-client-tls, readOnly: true}
             - {name: io-client-tls, mountPath: /run/secrets/io-client-tls, readOnly: true}
             - {name: egress-client-tls, mountPath: /run/secrets/egress-client-tls, readOnly: true}
+            {{- if .Values.networkPolicy.privateEgress.enabled }}
+            - {name: private-egress-client-tls, mountPath: /run/secrets/private-egress-client-tls, readOnly: true}
+            {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: provider-config
@@ -89,5 +92,9 @@ spec:
           secret: {secretName: {{ .Values.secrets.ioClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.ioClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.ioClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.ioClientTls.caKey }}, path: server-ca.crt}]}
         - name: egress-client-tls
           secret: {secretName: {{ .Values.secrets.egressClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.egressClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.egressClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.egressClientTls.caKey }}, path: server-ca.crt}]}
+        {{- if .Values.networkPolicy.privateEgress.enabled }}
+        - name: private-egress-client-tls
+          secret: {secretName: {{ .Values.secrets.privateEgressClientTls.name }}, defaultMode: 0440, items: [{key: {{ .Values.secrets.privateEgressClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.privateEgressClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.privateEgressClientTls.caKey }}, path: server-ca.crt}]}
+        {{- end }}
         - name: tmp
           emptyDir: {medium: Memory, sizeLimit: 256Mi}

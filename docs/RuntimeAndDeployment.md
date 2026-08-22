@@ -39,7 +39,7 @@ development composition and is never a production image.
 
 ## Image and process roles
 
-The current build matrix contains fifteen Apache-region images on
+The current build matrix contains seventeen Apache-region images on
 `linux/amd64`, `linux/arm64`, and `linux/riscv64`:
 
 | Role | Current status and authority |
@@ -56,6 +56,8 @@ The current build matrix contains fifteen Apache-region images on
 | `filebelt-mcp-broker` | Active, publishable, and disabled by default. Revalidates MCP policy, owns encrypted MCP-vault access, mediates Streamable HTTP and runner relays, and has no payload mount or direct Internet route. |
 | `filebelt-controller` | Active, publishable, and enabled only with stdio runners. Verifies the offline runner catalog, leads reconciliation in the exclusive runner namespace, and creates/deletes only bounded runner Pods, bootstrap Secrets, and its Lease there. |
 | `filebelt-mcp-runner` | Active and publishable. Supplies the trusted relay/shim injected into one-shot curated server Pods; it receives no FileBelt database, payload, session, or vault credential. |
+| `filebelt-private-egress-gateway` | Preview-only and blocked from publication. A role-specific Apache protocol gateway for exact MCP or ONLYOFFICE output requests; it holds only its two mTLS hop identities and target CA and has no tunnel key, database, payload mount, or generic proxy API. |
+| `filebelt-tunnel-relay` | Preview-only and blocked from publication. Accepts the fixed private-egress ALPN over mTLS and relays to one configured set of numeric same-port targets, directly through WireGuard or through a loopback userspace-Tailscale SOCKS5 endpoint. It accepts no caller destination. |
 | `filebelt-vfs` | Active and publishable, but mount delivery is disabled by default. Resolves generic gateway requests through PostgreSQL-authoritative Virtual ACL/session/handle fences and signs `mount-storage` `fbcap2` reads to I/O. It has no payload mount. |
 | `filebelt-headscale-sync` | Active and publishable, but mount delivery is disabled by default. Validates complete Headscale `0.29.3` device snapshots and atomically replaces the narrow PostgreSQL device projection. It has no payload mount or credential authority. |
 | `filebelt-nfs-relay` | Active and publishable, but NFS delivery is disabled by default. Opaquely forwards bounded TCP/2049 streams from the tailnet edge to one chart-pinned Ganesha backend. It has no Ganesha keytab, bridge TLS identity, VFS route, payload mount, or authority over NFS identities. |

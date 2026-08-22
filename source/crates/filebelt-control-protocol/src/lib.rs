@@ -761,6 +761,10 @@ pub struct McpConfig {
     pub vault: McpVaultConfig,
     #[serde(default)]
     pub egress: McpEgressConfig,
+    /// Named outbound gateways selected by an MCP trust profile. The legacy
+    /// `egress` entry remains the default for profiles without a selector.
+    #[serde(default)]
+    pub gateways: BTreeMap<String, McpEgressConfig>,
     #[serde(default)]
     pub attachments: McpAttachmentConfig,
     #[serde(default)]
@@ -784,6 +788,7 @@ impl Default for McpConfig {
             broker: McpBrokerClientConfig::default(),
             vault: McpVaultConfig::default(),
             egress: McpEgressConfig::default(),
+            gateways: BTreeMap::new(),
             attachments: McpAttachmentConfig::default(),
             trust_profiles: BTreeMap::new(),
             oauth_clients: BTreeMap::new(),
@@ -829,6 +834,8 @@ impl Default for McpVaultConfig {
 #[serde(deny_unknown_fields)]
 pub struct McpEgressConfig {
     #[serde(default)]
+    pub kind: McpGatewayKind,
+    #[serde(default)]
     pub gateway_url: Option<Url>,
     #[serde(default)]
     pub client_certificate_chain_file: Option<PathBuf>,
@@ -836,6 +843,14 @@ pub struct McpEgressConfig {
     pub client_private_key_file: Option<PathBuf>,
     #[serde(default)]
     pub server_ca_file: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpGatewayKind {
+    #[default]
+    Public,
+    PrivateTunnel,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -854,6 +869,10 @@ pub struct McpAttachmentConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpTrustProfile {
+    /// Optional named outbound gateway. Profiles without a selector retain the
+    /// legacy `mcp.egress` gateway.
+    #[serde(default)]
+    pub gateway: Option<String>,
     #[serde(default)]
     pub public_webpki: bool,
     #[serde(default)]
@@ -2010,16 +2029,13 @@ impl Config {
         let required_paths = [
             mcp.database_url_file.as_ref(),
             mcp.vault.keyring_file.as_ref(),
-            mcp.egress.client_certificate_chain_file.as_ref(),
-            mcp.egress.client_private_key_file.as_ref(),
-            mcp.egress.server_ca_file.as_ref(),
         ];
         if required_paths
             .into_iter()
             .any(|path| path.is_none_or(|path| !path.is_absolute()))
         {
             return Err(invalid(
-                "enabled MCP requires absolute database, vault, and gateway TLS paths",
+                "enabled MCP requires absolute database and vault paths",
             ));
         }
         let broker = mcp
@@ -2090,32 +2106,30 @@ impl Config {
                 "Kubernetes MCP attachment mediation requires absolute I/O client TLS paths",
             ));
         }
-        let gateway = mcp
-            .egress
-            .gateway_url
-            .as_ref()
-            .ok_or_else(|| invalid("enabled MCP requires an egress gateway"))?;
-        if gateway.scheme() != "https"
-            || gateway.host_str().is_none()
-            || gateway.port().is_none()
-            || !gateway.username().is_empty()
-            || gateway.password().is_some()
-            || gateway.path() != "/"
-            || gateway.query().is_some()
-            || gateway.fragment().is_some()
-        {
-            return Err(invalid(
-                "MCP egress gateway must be a credential-free HTTPS origin with a port",
-            ));
-        }
         if mcp.vault.current_generation == 0 {
             return Err(invalid("MCP vault key generation must be positive"));
         }
         if mcp.trust_profiles.is_empty() {
             return Err(invalid("enabled MCP requires at least one trust profile"));
         }
+        let legacy_gateway_required = mcp
+            .trust_profiles
+            .values()
+            .any(|profile| profile.gateway.is_none());
+        validate_mcp_gateway(&mcp.egress, legacy_gateway_required, "legacy")?;
+        for (name, gateway) in &mcp.gateways {
+            validate_policy_name(name, "MCP gateway")?;
+            validate_mcp_gateway(gateway, true, "named")?;
+        }
         for (name, profile) in &mcp.trust_profiles {
             validate_policy_name(name, "MCP trust profile")?;
+            let gateway = match profile.gateway.as_deref() {
+                Some(gateway) => mcp
+                    .gateways
+                    .get(gateway)
+                    .ok_or_else(|| invalid("MCP trust profile selects an unknown gateway"))?,
+                None => &mcp.egress,
+            };
             if profile.ports.is_empty() || profile.ports.contains(&0) {
                 return Err(invalid("MCP trust profile ports must be non-zero"));
             }
@@ -2138,6 +2152,13 @@ impl Config {
             }
             if !profile.public_webpki && profile.hosts.is_empty() && profile.cidrs.is_empty() {
                 return Err(invalid("private MCP trust profile requires hosts or CIDRs"));
+            }
+            if gateway.kind == McpGatewayKind::PrivateTunnel
+                && profile.allow_dynamic_client_registration
+            {
+                return Err(invalid(
+                    "private-tunnel MCP gateways forbid dynamic client registration",
+                ));
             }
         }
         for (name, client) in &mcp.oauth_clients {
@@ -2424,6 +2445,60 @@ fn spiffe_identity_uses_domain(identity: &str, domains: &std::collections::BTree
         .ok()
         .and_then(|uri| uri.host_str().map(|domain| domains.contains(domain)))
         .unwrap_or(false)
+}
+
+fn validate_mcp_gateway(
+    gateway_config: &McpEgressConfig,
+    required: bool,
+    gateway_scope: &str,
+) -> Result<(), ConfigError> {
+    let fields_present = [
+        gateway_config.gateway_url.is_some(),
+        gateway_config.client_certificate_chain_file.is_some(),
+        gateway_config.client_private_key_file.is_some(),
+        gateway_config.server_ca_file.is_some(),
+    ];
+    if !fields_present.into_iter().any(|present| present) {
+        if required {
+            return Err(invalid("enabled MCP requires an egress gateway"));
+        }
+        return Ok(());
+    }
+    if fields_present.into_iter().any(|present| !present) {
+        return Err(invalid(&format!(
+            "MCP {gateway_scope} gateway requires a URL and absolute TLS paths"
+        )));
+    }
+    let gateway = gateway_config
+        .gateway_url
+        .as_ref()
+        .expect("gateway URL is present");
+    if gateway.scheme() != "https"
+        || gateway.host_str().is_none()
+        || gateway.port().is_none()
+        || !gateway.username().is_empty()
+        || gateway.password().is_some()
+        || gateway.path() != "/"
+        || gateway.query().is_some()
+        || gateway.fragment().is_some()
+    {
+        return Err(invalid(
+            "MCP egress gateway must be a credential-free HTTPS origin with a port",
+        ));
+    }
+    if [
+        gateway_config.client_certificate_chain_file.as_ref(),
+        gateway_config.client_private_key_file.as_ref(),
+        gateway_config.server_ca_file.as_ref(),
+    ]
+    .into_iter()
+    .any(|path| path.is_none_or(|path| !path.is_absolute()))
+    {
+        return Err(invalid(&format!(
+            "MCP {gateway_scope} gateway requires a URL and absolute TLS paths"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_mcp_limits(limits: &McpLimitConfig) -> Result<(), ConfigError> {
@@ -3189,6 +3264,7 @@ mod tests {
         candidate.mcp.trust_profiles.insert(
             "public".into(),
             McpTrustProfile {
+                gateway: None,
                 public_webpki: true,
                 hosts: Vec::new(),
                 cidrs: Vec::new(),
@@ -3198,6 +3274,97 @@ mod tests {
             },
         );
         candidate.validate().unwrap();
+    }
+
+    #[test]
+    fn enabled_mcp_allows_a_named_public_gateway_without_legacy_egress() {
+        let mut candidate = config();
+        candidate.mcp.enabled = true;
+        candidate.mcp.database_url_file = Some("/run/secrets/mcp-database-url".into());
+        candidate.mcp.broker.url = Some(Url::parse("http://127.0.0.1:8082/").unwrap());
+        candidate.mcp.attachments.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.mcp.vault.keyring_file = Some("/run/secrets/mcp-keyring".into());
+        candidate.keys.api_mcp_delegation = Some(signing(
+            "/run/secrets/api-mcp-delegation.pk8",
+            "/run/secrets/api-mcp-delegation.pub",
+            1,
+        ));
+        candidate.mcp.gateways.insert(
+            "public".into(),
+            McpEgressConfig {
+                kind: McpGatewayKind::Public,
+                gateway_url: Some(Url::parse("https://mcp-egress.example.test:8443/").unwrap()),
+                client_certificate_chain_file: Some("/run/secrets/mcp-egress.crt".into()),
+                client_private_key_file: Some("/run/secrets/mcp-egress.key".into()),
+                server_ca_file: Some("/run/secrets/mcp-egress-ca.crt".into()),
+            },
+        );
+        candidate.mcp.trust_profiles.insert(
+            "public".into(),
+            McpTrustProfile {
+                gateway: Some("public".into()),
+                public_webpki: true,
+                hosts: Vec::new(),
+                cidrs: Vec::new(),
+                ports: vec![443],
+                custom_ca_file: None,
+                allow_dynamic_client_registration: false,
+            },
+        );
+        candidate.validate().unwrap();
+    }
+
+    #[test]
+    fn enabled_mcp_rejects_unknown_or_dynamic_private_gateway_selection() {
+        let mut candidate = config();
+        candidate.mcp.enabled = true;
+        candidate.mcp.database_url_file = Some("/run/secrets/mcp-database-url".into());
+        candidate.mcp.broker.url = Some(Url::parse("http://127.0.0.1:8082/").unwrap());
+        candidate.mcp.attachments.io_url = Some(Url::parse("http://127.0.0.1:8081/").unwrap());
+        candidate.mcp.vault.keyring_file = Some("/run/secrets/mcp-keyring".into());
+        candidate.keys.api_mcp_delegation = Some(signing(
+            "/run/secrets/api-mcp-delegation.pk8",
+            "/run/secrets/api-mcp-delegation.pub",
+            1,
+        ));
+        candidate.mcp.gateways.insert(
+            "private".into(),
+            McpEgressConfig {
+                kind: McpGatewayKind::PrivateTunnel,
+                gateway_url: Some(Url::parse("https://mcp-egress.example.test:8443/").unwrap()),
+                client_certificate_chain_file: Some("/run/secrets/mcp-egress.crt".into()),
+                client_private_key_file: Some("/run/secrets/mcp-egress.key".into()),
+                server_ca_file: Some("/run/secrets/mcp-egress-ca.crt".into()),
+            },
+        );
+        candidate.mcp.trust_profiles.insert(
+            "private".into(),
+            McpTrustProfile {
+                gateway: Some("missing".into()),
+                public_webpki: true,
+                hosts: Vec::new(),
+                cidrs: Vec::new(),
+                ports: vec![443],
+                custom_ca_file: None,
+                allow_dynamic_client_registration: false,
+            },
+        );
+        assert!(candidate.validate().is_err());
+
+        candidate
+            .mcp
+            .trust_profiles
+            .get_mut("private")
+            .unwrap()
+            .gateway = Some("private".into());
+        candidate.validate().unwrap();
+        candidate
+            .mcp
+            .trust_profiles
+            .get_mut("private")
+            .unwrap()
+            .allow_dynamic_client_registration = true;
+        assert!(candidate.validate().is_err());
     }
     #[test]
     fn mcp_runners_are_separately_opt_in() {

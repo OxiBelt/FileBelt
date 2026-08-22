@@ -40,6 +40,9 @@ The reserved regions have these additional constraints:
   JWT and callback handling, branding, and provider-specific browser code.
 - `nfs/` is LGPL-3.0-or-later; any NFS-Ganesha FSAL review must define the exact
   ABI, linkage, replacement and relinking path, and protocol integration.
+- `wireguard/` is an Apache-2.0 init-only adapter wrapper. Its separately
+  executable GPL-2.0-only `wg` and `ip` tools remain source-offer and native
+  platform qualified before any image may be published.
 - `transcode/` is GPL-3.0-or-later and wraps the reviewed GPL-enabled FFmpeg
   composition through an independent workspace and image. Its image remains
   disabled and non-publishable until exact source, notices, SBOM, provenance,

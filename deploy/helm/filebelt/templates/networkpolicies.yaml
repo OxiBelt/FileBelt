@@ -298,6 +298,11 @@ spec:
     - to:
 {{ toYaml .Values.networkPolicy.mcpGateway.to | indent 8 }}
       ports: [{port: {{ .Values.networkPolicy.mcpGateway.port }}, protocol: TCP}]
+    {{- if .Values.mcp.privateEgress.enabled }}
+    - to:
+{{ toYaml .Values.networkPolicy.mcpPrivateEgress.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.mcpPrivateEgress.port }}, protocol: TCP}]
+    {{- end }}
     - to:
         - podSelector:
             matchLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: api}

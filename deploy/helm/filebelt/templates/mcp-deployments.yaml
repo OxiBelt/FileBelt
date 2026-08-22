@@ -23,7 +23,7 @@ spec:
 {{ include "filebelt.componentLabels" (dict "root" . "component" "mcp-broker") | indent 8 }}
       annotations:
         checksum/config: {{ include "filebelt.renderedFilebeltConfiguration" . | sha256sum | quote }}
-        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s" .Values.secrets.mcpDatabase.generation .Values.secrets.mcpVaultKeyring.generation .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.generation .Values.secrets.mcpBrokerServerTls.generation .Values.secrets.mcpGatewayClientTls.generation .Values.secrets.mcpBackendClientTls.generation .Values.secrets.controllerClientTls.generation | sha256sum | quote }}
+        checksum/secrets: {{ printf "%s:%s:%s:%s:%s:%s:%s:%s" .Values.secrets.mcpDatabase.generation .Values.secrets.mcpVaultKeyring.generation .Values.secrets.apiMcpDelegationCapabilityPublicKeyset.generation .Values.secrets.mcpBrokerServerTls.generation .Values.secrets.mcpGatewayClientTls.generation .Values.secrets.mcpPrivateEgressClientTls.generation .Values.secrets.mcpBackendClientTls.generation .Values.secrets.controllerClientTls.generation | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "filebelt.name" . }}-mcp-broker
       automountServiceAccountToken: false
@@ -65,6 +65,9 @@ spec:
             - {name: api-mcp-delegation-capability-public, mountPath: /run/secrets/api-mcp-delegation-capability-public-keyset, subPath: public-keyset, readOnly: true}
             - {name: server-tls, mountPath: /run/secrets/mcp-broker-server-tls, readOnly: true}
             - {name: gateway-tls, mountPath: /run/secrets/mcp-gateway-tls, readOnly: true}
+            {{- if .Values.mcp.privateEgress.enabled }}
+            - {name: private-egress-tls, mountPath: /run/secrets/mcp-private-egress-tls, readOnly: true}
+            {{- end }}
             - {name: backend-tls, mountPath: /run/secrets/mcp-backend-tls, readOnly: true}
             - {name: controller-tls, mountPath: /run/secrets/controller-client-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
@@ -86,6 +89,13 @@ spec:
             secretName: {{ .Values.secrets.mcpGatewayClientTls.name }}
             defaultMode: 0440
             items: [{key: {{ .Values.secrets.mcpGatewayClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.mcpGatewayClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.mcpGatewayClientTls.caKey }}, path: server-ca.crt}]
+        {{- if .Values.mcp.privateEgress.enabled }}
+        - name: private-egress-tls
+          secret:
+            secretName: {{ .Values.secrets.mcpPrivateEgressClientTls.name }}
+            defaultMode: 0440
+            items: [{key: {{ .Values.secrets.mcpPrivateEgressClientTls.certificateKey }}, path: tls.crt}, {key: {{ .Values.secrets.mcpPrivateEgressClientTls.privateKeyKey }}, path: tls.key}, {key: {{ .Values.secrets.mcpPrivateEgressClientTls.caKey }}, path: server-ca.crt}]
+        {{- end }}
         - name: backend-tls
           secret:
             secretName: {{ .Values.secrets.mcpBackendClientTls.name }}

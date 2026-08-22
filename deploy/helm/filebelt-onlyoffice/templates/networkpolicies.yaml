@@ -55,6 +55,11 @@ spec:
     - to:
 {{ toYaml .Values.networkPolicy.egressGateway.to | indent 8 }}
       ports: [{port: {{ .Values.networkPolicy.egressGateway.port }}, protocol: TCP}]
+    {{- if .Values.networkPolicy.privateEgress.enabled }}
+    - to:
+{{ toYaml .Values.networkPolicy.privateEgress.to | indent 8 }}
+      ports: [{port: {{ .Values.networkPolicy.privateEgress.port }}, protocol: TCP}]
+    {{- end }}
     {{- if .Values.networkPolicy.otlp.enabled }}
     - to:
 {{ toYaml .Values.networkPolicy.otlp.to | indent 8 }}

@@ -99,6 +99,7 @@ fn compatibility_policy_covers_all_adapter_artifacts_and_relationships() {
             "filebelt-onlyoffice-adapter",
             "filebelt-smb-gateway",
             "filebelt-transcoder",
+            "filebelt-wireguard-init",
         ])
     );
     for artifact in artifacts {
@@ -196,5 +197,15 @@ fn transcode_region_is_a_separate_gpl_workspace() {
         .expect("license regions");
     assert!(policy.contains(
         "path = \"adapters/transcode\"\nlicense = \"GPL-3.0-or-later\"\nworkspace = \"adapter\""
+    ));
+}
+
+#[test]
+fn wireguard_region_is_an_isolated_apache_workspace() {
+    let root = repository_root();
+    let policy = fs::read_to_string(root.join("supply-chain/license-regions.toml"))
+        .expect("license regions");
+    assert!(policy.contains(
+        "path = \"adapters/wireguard\"\nlicense = \"Apache-2.0\"\nworkspace = \"adapter\""
     ));
 }

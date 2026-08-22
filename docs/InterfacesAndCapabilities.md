@@ -384,6 +384,22 @@ provider-controlled content.
 
 ## MCP mediation contracts
 
+Format 9 adds named `[mcp.gateways.<name>]` entries. A trust profile may select
+one by its `gateway` field; profiles without a selector retain the existing
+`mcp.egress` default. `kind = "private_tunnel"` is Kubernetes-only and routes
+through the dedicated private-egress protocol gateway. It forbids dynamic
+client registration and OAuth discovery, authorization, token, and refresh
+flows. Registrations on that profile may use only no authentication, a bearer
+secret, or an API key. An unknown gateway name, incomplete absolute mTLS paths,
+or an enabled private gateway outside Kubernetes invalidates configuration.
+
+The private gateway is not Streamable HTTP forwarding authority in general.
+For MCP it accepts only the exact configured canonical target and trust-profile
+control values at `/`; for ONLYOFFICE it accepts only the existing bounded
+`/v1/fetch` contract under one canonical origin and path prefix. It follows no
+redirect, performs no DNS resolution, and cannot request a target from the
+tunnel relay. Inner target TLS remains end to end across the opaque relay.
+
 The public MCP workflow is intent-first. `POST /api/v1/mcp/invocation-intents`
 accepts one exact `McpInvocationRequest` and returns a five-minute
 `McpInvocationIntent`. When approval is required, the browser confirms the

@@ -138,6 +138,15 @@ FFmpeg bindings, codec-specific Rust types, or Kubernetes Job structures into
 domain or authorization packages. The wrapper has no database or browser
 session dependency, and the controller has no payload or media-cache mount.
 
+The private-egress gateway and destination-free relay remain Apache workspace
+services and know nothing about WireGuard or Tailscale implementation types.
+They exchange only a fixed mTLS/ALPN byte stream. The isolated
+`adapters/wireguard` workspace contains the init wrapper and separately
+executable GPL tools; Apache packages must not import it. Tailscale is an
+operator-integrated external image. No transport library, key, state schema,
+provider API, or route-management type may cross into domain, authorization,
+MCP, document, or protocol-gateway packages.
+
 ## Change review
 
 Adding a dependency edge across one of these layers requires an explicit

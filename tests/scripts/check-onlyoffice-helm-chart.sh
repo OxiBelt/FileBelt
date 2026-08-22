@@ -98,6 +98,22 @@ helm template onlyoffice "${chart}" --kube-version 1.36.0 \
 grep -F -- 'path: retiring' "${temporary}/rotating.yaml" >/dev/null \
   || die "configured retiring outbox key was not mounted"
 
+helm template onlyoffice-private-egress "${chart}" --kube-version 1.36.0 \
+  --namespace filebelt-integrations "${qualified[@]}" \
+  --set networkPolicy.privateEgress.enabled=true \
+  >"${temporary}/private-egress.yaml"
+grep -F -- 'mountPath: /run/secrets/private-egress-client-tls' "${temporary}/private-egress.yaml" >/dev/null \
+  || die "enabled private egress did not mount its distinct client identity"
+grep -F -- 'filebelt.dev/private-egress-role: onlyoffice-output' "${temporary}/private-egress.yaml" >/dev/null \
+  || die "enabled private egress did not render its exact gateway peer"
+if helm template onlyoffice-private-egress "${chart}" --kube-version 1.36.0 \
+    --namespace filebelt-integrations "${qualified[@]}" \
+    --set networkPolicy.privateEgress.enabled=true \
+    --set-string secrets.privateEgressClientTls.name=filebelt-onlyoffice-egress-client-tls \
+    >"${temporary}/reused-egress-identity.log" 2>&1; then
+  die "private egress reused the public gateway client identity"
+fi
+
 if helm template onlyoffice "${chart}" --kube-version 1.36.0 --namespace filebelt-core \
     "${qualified[@]}" >"${temporary}/wrong-namespace.log" 2>&1; then
   die "chart rendered into the core namespace"

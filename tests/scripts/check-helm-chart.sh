@@ -677,6 +677,21 @@ assert_document_not_contains "${default_manifest}" Deployment filebelt-api 'chec
 assert_not_contains "${temporary}/mcp.yaml" 'kind: ClusterRole'
 assert_not_contains "${temporary}/mcp.yaml" 'hostPath:'
 
+helm template phase4-private-egress "${chart}" --kube-version 1.36.0 \
+  --set mcp.enabled=true \
+  --set mcp.runners.enabled=true \
+  --set mcp.privateEgress.enabled=true \
+  --set networkPolicy.mcpGateway.enabled=true \
+  --set networkPolicy.mcpPrivateEgress.enabled=true \
+  --set networkPolicy.kubernetesApi.enabled=true \
+  --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
+  --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml" \
+  >"${temporary}/mcp-private-egress.yaml"
+assert_rendered_toml "${temporary}/mcp-private-egress.yaml" filebelt.toml
+assert_contains "${temporary}/mcp-private-egress.yaml" '[mcp.gateways.private-llm]'
+assert_document_contains "${temporary}/mcp-private-egress.yaml" Deployment filebelt-mcp-broker 'mountPath: /run/secrets/mcp-private-egress-tls'
+assert_document_contains "${temporary}/mcp-private-egress.yaml" NetworkPolicy filebelt-mcp-broker-egress 'filebelt.dev/private-egress-role: mcp'
+
 # MCP remains independently operable: its API delegation purpose does not
 # depend on collaboration being enabled or on collaboration Secret projections.
 helm template phase4 "${chart}" --kube-version 1.36.0 \
@@ -977,6 +992,16 @@ expect_failure old_config --skip-schema-validation \
   --set-string 'configuration.filebelt=version = 1'
 expect_failure monitoring_crd_absent --set monitoring.serviceMonitor.enabled=true
 expect_failure mcp_without_gateway --set mcp.enabled=true
+expect_failure mcp_private_egress_reuses_public_identity \
+  --set mcp.enabled=true \
+  --set mcp.runners.enabled=true \
+  --set mcp.privateEgress.enabled=true \
+  --set networkPolicy.mcpGateway.enabled=true \
+  --set networkPolicy.mcpPrivateEgress.enabled=true \
+  --set networkPolicy.kubernetesApi.enabled=true \
+  --set-json 'networkPolicy.kubernetesApi.to=[{"ipBlock":{"cidr":"10.96.0.1/32"}}]' \
+  --set-string secrets.mcpPrivateEgressClientTls.name=filebelt-mcp-gateway-client-tls \
+  --set-file configuration.filebelt="${temporary}/filebelt-mcp.toml"
 expect_failure legacy_mount_enabled --set mounts.enabled=true
 expect_failure mounts_without_headscale --set mounts.smb.enabled=true
 expect_failure disabled_smb_previous_identity \

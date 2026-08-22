@@ -97,6 +97,17 @@ license = "LGPL-3.0-or-later"
 workspace = "adapter"
 
 [[regions]]
+path = "adapters/wireguard"
+license = "Apache-2.0"
+workspace = "adapter"
+
+[[regions]]
+path = "adapters/wireguard/WIREGUARD_COMPONENT.toml"
+license = "GPL-2.0-only"
+workspace = "none"
+third_party_notice = true
+
+[[regions]]
 path = "adapters/transcode"
 license = "GPL-3.0-or-later"
 workspace = "adapter"

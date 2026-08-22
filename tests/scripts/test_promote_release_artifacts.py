@@ -28,6 +28,10 @@ ACTIVE_ROLES = (
     "filebelt-revision",
     "filebelt-web",
 )
+PREVIEW_ROLES = (
+    "filebelt-private-egress-gateway",
+    "filebelt-tunnel-relay",
+)
 ARCHITECTURES = ("amd64", "arm64", "riscv64")
 DIGEST = "sha256:" + "a" * 64
 REVISION = "b" * 40
@@ -69,7 +73,7 @@ class PromoteReleaseArtifactsTest(unittest.TestCase):
                     }
                 },
             }
-            for role in (*ACTIVE_ROLES, "filebelt-media-controller")
+            for role in (*ACTIVE_ROLES, "filebelt-media-controller", *PREVIEW_ROLES)
         ]
         self.plan.write_text(
             json.dumps(
@@ -276,6 +280,9 @@ exit 0
         self.assertTrue(all(subject["digest"] == DIGEST for subject in subjects["subjects"]))
         log = self.log.read_text(encoding="utf-8")
         self.assertNotIn("filebelt-media-controller", log)
+        for role in PREVIEW_ROLES:
+            self.assertNotIn(role, log)
+            self.assertNotIn(role, [subject["role"] for subject in subjects["subjects"]])
         self.assertEqual(log.count("buildx imagetools create --tag"), len(ACTIVE_ROLES))
 
     def test_refuses_to_replace_an_existing_release_tag(self) -> None:

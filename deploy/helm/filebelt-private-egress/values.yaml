@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# This preview chart creates no Namespace, Secret, or PersistentVolumeClaim.
+# Every enabled instance is an independently authenticated gateway/relay pair.
+namespace: filebelt-private-egress
+architecture: amd64
+
+images:
+  gateway:
+    repository: ghcr.io/oxibelt/filebelt-private-egress-gateway
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  relay:
+    repository: ghcr.io/oxibelt/filebelt-tunnel-relay
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  tailscale:
+    repository: ghcr.io/tailscale/tailscale
+    digest: sha256:321ce041508c19079b57a28b6666c8d81ab0b08accc0a2585b3ab663d557ac24
+  wireguardInit:
+    repository: ghcr.io/oxibelt/filebelt-wireguard-init
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# There are deliberately no usable instance defaults. See README.md for the
+# complete values contract and operator-owned prerequisite objects.
+instances: []

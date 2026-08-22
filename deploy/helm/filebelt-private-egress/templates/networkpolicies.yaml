@@ -1,0 +1,76 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- range $instance := .Values.instances }}{{- if $instance.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ include "privateEgress.name" $instance.name }}-default-deny}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ include "privateEgress.name" $instance.name }}-gateway}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: {{ $instance.client.namespace | quote }}}}
+          podSelector:
+            matchLabels:
+{{ toYaml $instance.client.podLabels | indent 14 }}
+      ports: [{port: 8443, protocol: TCP}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+      ports: [{port: 9443, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ include "privateEgress.relayName" $instance.name }}-ingress}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+      ports: [{port: 9443, protocol: TCP}]
+{{- range $slot := $instance.transports }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ include "privateEgress.slotName" (dict "instance" $instance.name "slot" $slot.name) }}-egress}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-slot: {{ $slot.name | quote }}}}
+  policyTypes: [Egress]
+  egress:
+{{- if eq $instance.provider "tailscale" }}
+    - to:
+{{ toYaml $slot.tailscale.dns.to | indent 8 }}
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to:
+{{- range $block := $slot.tailscale.outerNetwork }}
+        - ipBlock:
+{{ toYaml $block | indent 12 }}
+{{- end }}
+      ports: [{port: 443, protocol: TCP}]
+    - to:
+{{- range $block := $slot.tailscale.outerNetwork }}
+        - ipBlock:
+{{ toYaml $block | indent 12 }}
+{{- end }}
+      ports: [{protocol: UDP}]
+{{- else }}
+    - to: [{ipBlock: {cidr: {{ $slot.wireguard.peerCidr | quote }}}}]
+      ports: [{port: {{ $slot.wireguard.peerPort }}, protocol: UDP}]
+    - to:
+{{- range $cidr := $slot.wireguard.targetCidrs }}
+        - ipBlock: {cidr: {{ $cidr | quote }}}
+{{- end }}
+      ports: [{port: {{ $instance.target.port }}, protocol: TCP}]
+{{- end }}
+{{ end }}
+{{ end }}{{ end }}

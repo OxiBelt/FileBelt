@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object", "additionalProperties": false,
+  "required": ["namespace", "architecture", "images", "instances"],
+  "properties": {
+    "namespace": {"$ref": "#/definitions/dnsLabel"},
+    "architecture": {"enum": ["amd64", "arm64", "riscv64"]},
+    "images": {"type": "object", "additionalProperties": false, "required": ["gateway", "relay", "tailscale", "wireguardInit"], "properties": {
+      "gateway": {"$ref": "#/definitions/image"}, "relay": {"$ref": "#/definitions/image"}, "tailscale": {"$ref": "#/definitions/image"}, "wireguardInit": {"$ref": "#/definitions/image"}
+    }},
+    "instances": {"type": "array", "maxItems": 8, "items": {"$ref": "#/definitions/instance"}}
+  },
+  "definitions": {
+    "dnsLabel": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+    "generation": {"type": "string", "minLength": 1, "maxLength": 128},
+    "image": {"type": "object", "additionalProperties": false, "required": ["repository", "digest"], "properties": {
+      "repository": {"type": "string", "minLength": 1}, "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    }},
+    "singleSecret": {"type": "object", "additionalProperties": false, "required": ["name", "key", "generation"], "properties": {
+      "name": {"$ref": "#/definitions/dnsLabel"}, "key": {"type": "string", "minLength": 1}, "generation": {"$ref": "#/definitions/generation"}
+    }},
+    "tlsSecret": {"type": "object", "additionalProperties": false, "required": ["name", "certificateKey", "privateKeyKey", "caKey", "generation"], "properties": {
+      "name": {"$ref": "#/definitions/dnsLabel"}, "certificateKey": {"type": "string", "minLength": 1}, "privateKeyKey": {"type": "string", "minLength": 1},
+      "caKey": {"type": "string", "minLength": 1}, "generation": {"$ref": "#/definitions/generation"}
+    }},
+    "resources": {"type": "object", "additionalProperties": false, "required": ["requests", "limits"], "properties": {
+      "requests": {"type": "object"}, "limits": {"type": "object"}
+    }},
+    "target": {"type": "object", "additionalProperties": false, "required": ["canonicalUrl", "canonicalOrigin", "pathPrefix", "trustProfile", "serverName", "port", "dialAddresses", "caSecret"], "properties": {
+      "canonicalUrl": {"type": "string", "pattern": "^https://"}, "canonicalOrigin": {"type": "string", "pattern": "^https://"},
+      "pathPrefix": {"type": "string", "pattern": "^/.*/$"}, "trustProfile": {"type": "string", "minLength": 1, "maxLength": 128},
+      "serverName": {"type": "string", "minLength": 1, "maxLength": 253}, "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+      "dialAddresses": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 2, "maxLength": 45}},
+      "caSecret": {"$ref": "#/definitions/singleSecret"}
+    }},
+    "gateway": {"type": "object", "additionalProperties": false, "required": ["replicas", "serverIdentity", "relayIdentity", "relayUriSan", "limits", "resources"], "properties": {
+      "replicas": {"type": "integer", "minimum": 1, "maximum": 3}, "serverIdentity": {"$ref": "#/definitions/tlsSecret"}, "relayIdentity": {"$ref": "#/definitions/tlsSecret"},
+      "relayUriSan": {"type": "string", "pattern": "^spiffe://"},
+      "limits": {"type": "object", "additionalProperties": false, "required": ["maxConcurrency", "maxRequestBytes", "maxResponseBytes", "connectTimeoutSeconds", "requestTimeoutSeconds"], "properties": {
+        "maxConcurrency": {"type": "integer", "minimum": 1, "maximum": 64}, "maxRequestBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "maxResponseBytes": {"type": "integer", "minimum": 1, "maximum": 104857600}, "connectTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 60},
+        "requestTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }}, "resources": {"$ref": "#/definitions/resources"}
+    }},
+    "relay": {"type": "object", "additionalProperties": false, "required": ["clusterIP", "serverName", "serverIdentity", "limits", "resources"], "properties": {
+      "clusterIP": {"type": "string", "minLength": 7, "maxLength": 45}, "serverName": {"type": "string", "minLength": 1, "maxLength": 253}, "serverIdentity": {"$ref": "#/definitions/tlsSecret"},
+      "limits": {"type": "object", "additionalProperties": false, "required": ["maxConnections", "handshakeTimeoutSeconds", "connectTimeoutSeconds", "inactivityTimeoutSeconds", "drainTimeoutSeconds"], "properties": {
+        "maxConnections": {"type": "integer", "minimum": 1, "maximum": 4096}, "handshakeTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "connectTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}, "inactivityTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "drainTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }}, "resources": {"$ref": "#/definitions/resources"}
+    }},
+    "tailscale": {"type": "object", "additionalProperties": false, "required": ["authSecret", "stateClaim", "hostname", "loginServer", "acceptRoutes", "dns", "outerNetwork", "resources"], "properties": {
+      "authSecret": {"$ref": "#/definitions/singleSecret"}, "stateClaim": {"$ref": "#/definitions/dnsLabel"}, "hostname": {"$ref": "#/definitions/dnsLabel"},
+      "loginServer": {"type": "string", "pattern": "^https://"}, "acceptRoutes": {"type": "boolean"},
+      "dns": {"type": "object", "additionalProperties": false, "required": ["to"], "properties": {"to": {"type": "array", "minItems": 1, "items": {"type": "object"}}}},
+      "outerNetwork": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["cidr", "except"], "properties": {
+        "cidr": {"type": "string"}, "except": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }}}, "resources": {"$ref": "#/definitions/resources"}
+    }},
+    "wireguard": {"type": "object", "additionalProperties": false, "required": ["privateKeySecret", "presharedKeySecret", "peerPublicKey", "endpointAddress", "peerCidr", "peerPort", "tunnelAddress", "targetCidrs"], "properties": {
+      "privateKeySecret": {"$ref": "#/definitions/singleSecret"}, "presharedKeySecret": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/singleSecret"}]},
+      "peerPublicKey": {"type": "string", "minLength": 44, "maxLength": 44}, "endpointAddress": {"type": "string", "minLength": 2, "maxLength": 45},
+      "peerCidr": {"type": "string", "minLength": 3}, "peerPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+      "tunnelAddress": {"type": "string", "minLength": 3}, "targetCidrs": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "(?:/32$)|(?:/128$)"}}
+    }},
+    "transport": {"type": "object", "additionalProperties": false, "required": ["name", "tailscale", "wireguard"], "properties": {
+      "name": {"$ref": "#/definitions/dnsLabel"}, "tailscale": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/tailscale"}]}, "wireguard": {"anyOf": [{"type": "null"}, {"$ref": "#/definitions/wireguard"}]}
+    }},
+    "instance": {"type": "object", "additionalProperties": false, "required": ["name", "enabled", "role", "provider", "client", "gateway", "relay", "target", "transports"], "properties": {
+      "name": {"$ref": "#/definitions/dnsLabel"}, "enabled": {"type": "boolean"}, "role": {"enum": ["mcp", "onlyoffice-output"]}, "provider": {"enum": ["tailscale", "wireguard"]},
+      "client": {"type": "object", "additionalProperties": false, "required": ["namespace", "podLabels", "uriSan", "identity"], "properties": {
+        "namespace": {"$ref": "#/definitions/dnsLabel"}, "podLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+        "uriSan": {"type": "string", "pattern": "^spiffe://"}, "identity": {"$ref": "#/definitions/tlsSecret"}
+      }}, "gateway": {"$ref": "#/definitions/gateway"}, "relay": {"$ref": "#/definitions/relay"}, "target": {"$ref": "#/definitions/target"},
+      "transports": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"$ref": "#/definitions/transport"}}
+    }, "allOf": [
+      {"if": {"properties": {"provider": {"const": "tailscale"}}}, "then": {"properties": {"transports": {"items": {"properties": {"tailscale": {"$ref": "#/definitions/tailscale"}, "wireguard": {"type": "null"}}}}}}},
+      {"if": {"properties": {"provider": {"const": "wireguard"}}}, "then": {"properties": {"transports": {"items": {"properties": {"tailscale": {"type": "null"}, "wireguard": {"$ref": "#/definitions/wireguard"}}}}}}}
+    ]}
+  }
+}

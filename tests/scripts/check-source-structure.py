@@ -22,6 +22,7 @@ ADAPTER_ROOTS = {
     "adapters/git": "Apache-2.0",
     "adapters/directory-repository": "Apache-2.0",
     "adapters/nfs": "LGPL-3.0-or-later",
+    "adapters/wireguard": "Apache-2.0",
     "adapters/transcode": "GPL-3.0-or-later",
 }
 EXPECTED_RUST_MEMBERS = {
@@ -40,6 +41,8 @@ EXPECTED_RUST_MEMBERS = {
     "source/apps/filebelt-vfs",
     "source/apps/filebelt-headscale-sync",
     "source/apps/filebelt-nfs-relay",
+    "source/apps/filebelt-private-egress-gateway",
+    "source/apps/filebelt-tunnel-relay",
     "source/crates/filebelt-build-identity",
     "source/crates/filebelt-domain",
     "source/crates/filebelt-authz",
@@ -325,7 +328,11 @@ def check(root: Path) -> list[str]:
                     failures.append("release workflow trigger differs from signed tags only")
                 if promote >= 0:
                     promotion = content[promote:]
-                    for inactive in ["filebelt-media-controller"]:
+                    for inactive in [
+                        "filebelt-media-controller",
+                        "filebelt-private-egress-gateway",
+                        "filebelt-tunnel-relay",
+                    ]:
                         if inactive in promotion:
                             failures.append(
                                 f"inactive role is present in release promotion: {inactive}"

@@ -30,6 +30,7 @@ registered_adapter_manifests = [
   "adapters/onlyoffice/Cargo.toml",
   "adapters/smb/Cargo.toml",
   "adapters/transcode/Cargo.toml",
+  "adapters/wireguard/Cargo.toml",
 ]
 
 [[graph_profiles]]
@@ -807,6 +808,47 @@ filebelt-storage = []
 filebelt-worker-maintenance = []
 filebeltctl = []
 
+[[graph_profiles]]
+label = "private egress protocol gateway"
+package = "filebelt-private-egress-gateway"
+manifest = "source/apps/filebelt-private-egress-gateway/Cargo.toml"
+feature_arguments = []
+forbidden_packages = ["k8s-openapi", "kube", "oauth2", "openidconnect", "sqlx", "tokio-postgres"]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-deployment-diagnostics = []
+filebelt-private-egress-gateway = []
+filebelt-runtime = []
+
+[[graph_profiles]]
+label = "destination-free tunnel relay"
+package = "filebelt-tunnel-relay"
+manifest = "source/apps/filebelt-tunnel-relay/Cargo.toml"
+feature_arguments = []
+forbidden_packages = ["k8s-openapi", "kube", "oauth2", "openidconnect", "sqlx", "tokio-postgres"]
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-build-identity = []
+filebelt-control-protocol = []
+filebelt-deployment-diagnostics = []
+filebelt-runtime = []
+filebelt-tunnel-relay = []
+
+[[graph_profiles]]
+label = "Apache WireGuard initialization wrapper"
+package = "filebelt-wireguard-init"
+manifest = "adapters/wireguard/Cargo.toml"
+feature_arguments = []
+forbidden_packages = []
+forbidden_package_prefixes = []
+
+[graph_profiles.first_party_features]
+filebelt-wireguard-init = []
+
 # Rust paths use identifier spelling, so Cargo package hyphens become underscores.
 [[source_boundaries]]
 label = "Apache packages cannot import adapter implementation namespaces"
@@ -830,12 +872,14 @@ packages = [
   "filebelt-mcp-broker",
   "filebelt-mcp-policy",
   "filebelt-media-controller",
+  "filebelt-private-egress-gateway",
   "filebelt-runtime",
   "filebelt-revision",
   "filebelt-revision-protocol",
   "filebelt-secret-vault",
   "filebelt-storage",
   "filebelt-storage-protocol",
+  "filebelt-tunnel-relay",
   "filebelt-vfs-protocol",
   "filebelt-vfs",
   "filebelt-worker-io",
@@ -1185,6 +1229,30 @@ public_modules = []
 wildcard_reexports = []
 
 [[public_surfaces]]
+package = "filebelt-private-egress-gateway"
+crate_root = "source/apps/filebelt-private-egress-gateway/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-private-egress-gateway"
+crate_root = "source/apps/filebelt-private-egress-gateway/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-tunnel-relay"
+crate_root = "source/apps/filebelt-tunnel-relay/src/lib.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-tunnel-relay"
+crate_root = "source/apps/filebelt-tunnel-relay/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
 package = "filebelt-mcp-protocol"
 crate_root = "source/crates/filebelt-mcp-protocol/src/lib.rs"
 public_modules = []
@@ -1253,6 +1321,12 @@ wildcard_reexports = []
 [[public_surfaces]]
 package = "filebelt-nfs-relay"
 crate_root = "source/apps/filebelt-nfs-relay/src/main.rs"
+public_modules = []
+wildcard_reexports = []
+
+[[public_surfaces]]
+package = "filebelt-wireguard-init"
+crate_root = "adapters/wireguard/src/main.rs"
 public_modules = []
 wildcard_reexports = []
 

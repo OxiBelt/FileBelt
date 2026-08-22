@@ -105,7 +105,7 @@
     },
     "secrets": {
       "type": "object", "additionalProperties": false,
-      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "nfsGaneshaKeytab", "nfsBridgeVfsClientTls", "nfsHandleKeyring", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls", "revisionDatabase", "revisionStorageCapabilityPrivateKey", "revisionStorageCapabilityPublicKeyset", "revisionServerTls", "apiRevisionClientTls", "revisionAdapterClientTls", "revisionIoClientTls"],
+      "required": ["apiDatabase", "ioDatabase", "maintenanceDatabase", "migratorDatabase", "auditDatabase", "recoveryDatabase", "oidcClient", "oidcCa", "apiStorageCapabilityPrivateKey", "apiStorageCapabilityPublicKeyset", "apiCollaborationGrantCapabilityPrivateKey", "apiCollaborationGrantCapabilityPublicKeyset", "apiMcpDelegationCapabilityPrivateKey", "apiMcpDelegationCapabilityPublicKeyset", "collaborationStorageCapabilityPrivateKey", "collaborationStorageCapabilityPublicKeyset", "documentStorageCapabilityPrivateKey", "documentStorageCapabilityPublicKeyset", "mountStorageCapabilityPrivateKey", "mountStorageCapabilityPublicKeyset", "mediaStorageCapabilityPrivateKey", "mediaStorageCapabilityPublicKeyset", "digestKey", "publicTls", "apiServerTls", "ioServerTls", "apiClientTls", "ioClientTls", "collaborationDatabase", "collaborationServerTls", "collaborationIoClientTls", "collaborationEdgeClientTls", "mcpDatabase", "mcpVaultKeyring", "mcpBrokerServerTls", "apiMcpClientTls", "mcpGatewayClientTls", "mcpPrivateEgressClientTls", "mcpBackendClientTls", "controllerServerTls", "controllerClientTls", "runnerBrokerClientTls", "runnerGatewayClientTls", "vfsDatabase", "headscaleSyncDatabase", "mountVaultKeyring", "vfsServerTls", "vfsManagementServerTls", "vfsManagementClientTls", "vfsIoClientTls", "headscaleApiToken", "headscaleServerCa", "nfsGaneshaKeytab", "nfsBridgeVfsClientTls", "nfsHandleKeyring", "documentDatabase", "documentApiServerTls", "documentAdapterServerTls", "apiDocumentClientTls", "onlyofficeEdgeClientTls", "revisionDatabase", "revisionStorageCapabilityPrivateKey", "revisionStorageCapabilityPublicKeyset", "revisionServerTls", "apiRevisionClientTls", "revisionAdapterClientTls", "revisionIoClientTls"],
       "properties": {
         "apiDatabase": {"$ref": "#/definitions/singleKeySecret"},
         "ioDatabase": {"$ref": "#/definitions/singleKeySecret"},
@@ -144,6 +144,7 @@
         "mcpBrokerServerTls": {"$ref": "#/definitions/tlsSecret"},
         "apiMcpClientTls": {"$ref": "#/definitions/tlsSecret"},
         "mcpGatewayClientTls": {"$ref": "#/definitions/tlsSecret"},
+        "mcpPrivateEgressClientTls": {"$ref": "#/definitions/tlsSecret"},
         "mcpBackendClientTls": {"$ref": "#/definitions/tlsSecret"},
         "controllerServerTls": {"$ref": "#/definitions/tlsSecret"},
         "controllerClientTls": {"$ref": "#/definitions/tlsSecret"},
@@ -177,7 +178,7 @@
     },
     "mcp": {
       "type": "object", "additionalProperties": false,
-      "required": ["enabled", "runners", "gateway"],
+      "required": ["enabled", "runners", "gateway", "privateEgress"],
       "properties": {
         "enabled": {"type": "boolean"},
         "runners": {
@@ -201,7 +202,8 @@
             "serverName": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[A-Za-z0-9.-]+$"},
             "profile": {"$ref": "#/definitions/dnsLabel"}
           }
-        }
+        },
+        "privateEgress": {"type": "object", "additionalProperties": false, "required": ["enabled", "name", "gatewayUrl"], "properties": {"enabled": {"type": "boolean"}, "name": {"$ref": "#/definitions/dnsLabel"}, "gatewayUrl": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+:[1-9][0-9]{0,4}/$"}}}
       },
       "allOf": [
         {"if": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"enabled": {"const": true}}}}
@@ -289,7 +291,7 @@
     },
     "networkPolicy": {
       "type": "object", "additionalProperties": false,
-      "required": ["publicIngress", "monitoring", "dns", "postgres", "oidcGateway", "mcpGateway", "kubernetesApi", "iggy", "otlp", "headscale", "mountIngress"],
+      "required": ["publicIngress", "monitoring", "dns", "postgres", "oidcGateway", "mcpGateway", "mcpPrivateEgress", "kubernetesApi", "iggy", "otlp", "headscale", "mountIngress"],
       "properties": {
         "publicIngress": {"$ref": "#/definitions/fromList"},
         "monitoring": {"$ref": "#/definitions/fromList"},
@@ -300,6 +302,7 @@
         "postgres": {"$ref": "#/definitions/destination"},
         "oidcGateway": {"$ref": "#/definitions/destination"},
         "mcpGateway": {"$ref": "#/definitions/optionalDestination"},
+        "mcpPrivateEgress": {"$ref": "#/definitions/optionalDestination"},
         "kubernetesApi": {"$ref": "#/definitions/optionalDestination"},
         "iggy": {"$ref": "#/definitions/optionalDestination"},
         "otlp": {"$ref": "#/definitions/optionalDestination"},
@@ -374,6 +377,7 @@
   },
   "allOf": [
     {"if": {"properties": {"mcp": {"properties": {"enabled": {"const": true}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"mcpGateway": {"properties": {"enabled": {"const": true}}}}}}}},
+    {"if": {"properties": {"mcp": {"properties": {"privateEgress": {"properties": {"enabled": {"const": true}}}}}}}, "then": {"properties": {"mcp": {"properties": {"enabled": {"const": true}}}, "networkPolicy": {"properties": {"mcpPrivateEgress": {"properties": {"enabled": {"const": true}}}}}}}},
     {"if": {"properties": {"mcp": {"properties": {"runners": {"properties": {"enabled": {"const": true}}}}}}}, "then": {"properties": {"networkPolicy": {"properties": {"kubernetesApi": {"properties": {"enabled": {"const": true}}}}}}}},
     {"if": {"properties": {"mounts": {"anyOf": [{"properties": {"smb": {"properties": {"enabled": {"const": true}}}}}, {"properties": {"ftpFtps": {"properties": {"enabled": {"const": true}}}}}, {"properties": {"nfs": {"properties": {"enabled": {"const": true}}}}}]}}}, "then": {"properties": {"networkPolicy": {"properties": {"headscale": {"properties": {"to": {"minItems": 1}}}, "mountIngress": {"properties": {"from": {"minItems": 1}}}}}}}}
   ],

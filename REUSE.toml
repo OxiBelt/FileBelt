@@ -134,6 +134,18 @@ SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
 SPDX-License-Identifier = "LGPL-3.0-or-later"
 
 [[annotations]]
+path = ["adapters/wireguard/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["adapters/wireguard/WIREGUARD_COMPONENT.toml"]
+precedence = "override"
+SPDX-FileCopyrightText = "WireGuard and iproute2 contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
 path = ["adapters/transcode/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 PiQuark6046 and FileBelt contributors"

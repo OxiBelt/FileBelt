@@ -16,6 +16,7 @@ import {
   Amd64IsaBaseline,
   ImagePlatforms,
   ImageRoles,
+  PreviewImageRoles,
   IsReleaseTag,
   OxibeltImage,
   OxibeltRevision,
@@ -49,7 +50,7 @@ function buildSource(overrides = {}) {
   };
 }
 
-test("build plan contains the fifteen fixed roles and immutable runtime contract", () => {
+test("build plan contains the seventeen fixed roles and immutable runtime contract", () => {
   const plan = CreateImagePlan({ Channel: "build", Version: "0.1.0", Source: buildSource() });
 
   assert.equal(plan.schemaVersion, 2);
@@ -80,6 +81,8 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
       "filebelt-vfs": RustCdlaImageLicense,
       "filebelt-headscale-sync": RustCdlaImageLicense,
       "filebelt-nfs-relay": RustCdlaImageLicense,
+      "filebelt-private-egress-gateway": RustCdlaImageLicense,
+      "filebelt-tunnel-relay": RustCdlaImageLicense,
       "filebelt-web": WebImageLicense,
     }[image.role];
     assert.equal(image.license, expectedLicense);
@@ -205,6 +208,7 @@ test("build plan contains the fifteen fixed roles and immutable runtime contract
     plan.images.find(({ role }) => role === "filebelt-tools").artifact.binary,
     "filebeltctl",
   );
+  assert.deepEqual(PreviewImageRoles, ["filebelt-private-egress-gateway", "filebelt-tunnel-relay"]);
 });
 
 test("Rust Docker targets match their image-plan descriptions", () => {

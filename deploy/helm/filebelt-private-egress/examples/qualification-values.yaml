@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+instances:
+  - name: mcp
+    enabled: true
+    role: mcp
+    provider: tailscale
+    client:
+      namespace: filebelt-core
+      podLabels: {app.kubernetes.io/name: filebelt, app.kubernetes.io/component: mcp-broker}
+      uriSan: spiffe://filebelt/mcp-broker/private-egress
+      identity: &clientTls {name: mcp-private-client, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+    gateway:
+      replicas: 2
+      serverIdentity: {name: mcp-private-gateway-server, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+      relayIdentity: {name: mcp-private-relay-client, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+      relayUriSan: spiffe://filebelt/private-egress/mcp/relay-client
+      limits: {maxConcurrency: 16, maxRequestBytes: 4194304, maxResponseBytes: 104857600, connectTimeoutSeconds: 5, requestTimeoutSeconds: 300}
+      resources: {requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}, limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 128Mi}}
+    relay:
+      clusterIP: 10.96.20.10
+      serverName: filebelt-tunnel-relay-mcp.filebelt-private-egress.svc
+      serverIdentity: {name: mcp-private-relay-server, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+      limits: {maxConnections: 128, handshakeTimeoutSeconds: 10, connectTimeoutSeconds: 5, inactivityTimeoutSeconds: 300, drainTimeoutSeconds: 30}
+      resources: {requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 64Mi}, limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}}
+    target:
+      canonicalUrl: https://llm.private.example/mcp
+      canonicalOrigin: https://unused.invalid/
+      pathPrefix: /unused/
+      trustProfile: private-llm
+      serverName: llm.private.example
+      port: 443
+      dialAddresses: [100.64.20.10]
+      caSecret: {name: private-llm-ca, key: ca.crt, generation: "1"}
+    transports:
+      - name: a
+        wireguard: null
+        tailscale:
+          authSecret: {name: mcp-tail-auth-a, key: auth-key, generation: "1"}
+          stateClaim: mcp-tailstate-a
+          hostname: filebelt-mcp-a
+          loginServer: https://controlplane.tailscale.com/
+          acceptRoutes: true
+          dns:
+            to:
+              - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+                podSelector: {matchLabels: {k8s-app: kube-dns}}
+          outerNetwork:
+            - cidr: 0.0.0.0/0
+              except: [10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16]
+          resources: {requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 64Mi}, limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}}
+  - name: onlyoffice
+    enabled: true
+    role: onlyoffice-output
+    provider: wireguard
+    client:
+      namespace: filebelt-integrations
+      podLabels: {app.kubernetes.io/name: filebelt-onlyoffice, app.kubernetes.io/component: onlyoffice-adapter}
+      uriSan: spiffe://filebelt/onlyoffice-adapter/private-egress
+      identity: {name: onlyoffice-private-client, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+    gateway:
+      replicas: 1
+      serverIdentity: {name: onlyoffice-private-gateway-server, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+      relayIdentity: {name: onlyoffice-private-relay-client, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+      relayUriSan: spiffe://filebelt/private-egress/onlyoffice/relay-client
+      limits: {maxConcurrency: 8, maxRequestBytes: 65536, maxResponseBytes: 104857600, connectTimeoutSeconds: 5, requestTimeoutSeconds: 300}
+      resources: {requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}, limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 128Mi}}
+    relay:
+      clusterIP: 10.96.20.11
+      serverName: filebelt-tunnel-relay-onlyoffice.filebelt-private-egress.svc
+      serverIdentity: {name: onlyoffice-private-relay-server, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
+      limits: {maxConnections: 64, handshakeTimeoutSeconds: 10, connectTimeoutSeconds: 5, inactivityTimeoutSeconds: 300, drainTimeoutSeconds: 30}
+      resources: {requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 64Mi}, limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}}
+    target:
+      canonicalUrl: https://unused.invalid/
+      canonicalOrigin: https://model-output.private.example/
+      pathPrefix: /artifacts/
+      trustProfile: unused
+      serverName: model-output.private.example
+      port: 443
+      dialAddresses: [10.40.0.10]
+      caSecret: {name: model-output-ca, key: ca.crt, generation: "1"}
+    transports:
+      - name: a
+        tailscale: null
+        wireguard:
+          privateKeySecret: {name: onlyoffice-wg-private-a, key: private-key, generation: "1"}
+          presharedKeySecret: null
+          peerPublicKey: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          endpointAddress: 198.51.100.20
+          peerCidr: 198.51.100.20/32
+          peerPort: 51820
+          tunnelAddress: 10.200.0.2/32
+          targetCidrs: [10.40.0.10/32]

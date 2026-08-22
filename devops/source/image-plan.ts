@@ -30,10 +30,17 @@ export const ImageRoles = [
   "filebelt-vfs",
   "filebelt-headscale-sync",
   "filebelt-nfs-relay",
+  "filebelt-private-egress-gateway",
+  "filebelt-tunnel-relay",
   "filebelt-web",
 ] as const;
 
 export type ImageRole = (typeof ImageRoles)[number];
+
+export const PreviewImageRoles = [
+  "filebelt-private-egress-gateway",
+  "filebelt-tunnel-relay",
+] as const satisfies readonly ImageRole[];
 
 export const ImagePlatforms = ["linux/amd64", "linux/arm64", "linux/riscv64"] as const;
 
@@ -309,6 +316,18 @@ const RoleDefinitions: readonly RoleDefinition[] = [
     RustCdlaImageLicense,
     WebpkiRuntimeComponents,
   ),
+  RustRole(
+    "filebelt-private-egress-gateway",
+    "filebelt-private-egress-gateway",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
+  RustRole(
+    "filebelt-tunnel-relay",
+    "filebelt-tunnel-relay",
+    RustCdlaImageLicense,
+    WebpkiRuntimeComponents,
+  ),
   {
     Role: "filebelt-web",
     Dockerfile: "ui/web/Dockerfile",
@@ -344,6 +363,8 @@ const RoleDescriptions: Readonly<Record<ImageRole, string>> = {
   "filebelt-vfs": "FileBelt VFS service",
   "filebelt-headscale-sync": "FileBelt Headscale synchronization service",
   "filebelt-nfs-relay": "FileBelt opaque NFS TCP relay",
+  "filebelt-private-egress-gateway": "FileBelt fixed-protocol private egress gateway",
+  "filebelt-tunnel-relay": "FileBelt destination-free private tunnel relay",
   "filebelt-web": "FileBelt OxiBelt TLS edge and web application",
 };
 

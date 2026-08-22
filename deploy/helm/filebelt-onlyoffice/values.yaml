@@ -37,6 +37,7 @@ secrets:
   coreClientTls: {name: filebelt-onlyoffice-core-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   ioClientTls: {name: filebelt-onlyoffice-io-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   egressClientTls: {name: filebelt-onlyoffice-egress-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  privateEgressClientTls: {name: filebelt-onlyoffice-private-egress-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
 
 workload:
   replicas: 2
@@ -72,6 +73,12 @@ networkPolicy:
     to:
       - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-egress}}
         podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-onlyoffice-egress}}
+  privateEgress:
+    enabled: false
+    port: 8443
+    to:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: filebelt-private-egress}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, filebelt.dev/private-egress-role: onlyoffice-output}}
   otlp:
     enabled: false
     port: 4318

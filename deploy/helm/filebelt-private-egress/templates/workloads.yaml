@@ -1,0 +1,280 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
+{{- include "privateEgress.validate" . -}}
+{{- range $instance := .Values.instances }}{{- if $instance.enabled }}
+{{- $gatewayName := include "privateEgress.name" $instance.name -}}
+{{- $relayName := include "privateEgress.relayName" $instance.name -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $gatewayName }}-config
+  labels: {app.kubernetes.io/name: filebelt-private-egress, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}
+immutable: true
+data:
+  gateway.toml: |
+    version = 1
+    mode = {{ $instance.role | quote }}
+    listen_address = "0.0.0.0:8443"
+    operations_address = "0.0.0.0:9090"
+
+    [server_tls]
+    certificate_chain_file = "/run/secrets/gateway-server/tls.crt"
+    private_key_file = "/run/secrets/gateway-server/tls.key"
+    client_ca_file = "/run/secrets/gateway-server/ca.crt"
+    allowed_client_uri_sans = [{{ $instance.client.uriSan | quote }}]
+
+    [relay]
+    addresses = [{{ include "privateEgress.socket" (dict "address" $instance.relay.clusterIP "port" 9443) | quote }}]
+    server_name = {{ $instance.relay.serverName | quote }}
+    ca_file = "/run/secrets/relay-client/ca.crt"
+    certificate_chain_file = "/run/secrets/relay-client/tls.crt"
+    private_key_file = "/run/secrets/relay-client/tls.key"
+
+    [limits]
+    max_concurrency = {{ $instance.gateway.limits.maxConcurrency }}
+    max_request_bytes = {{ $instance.gateway.limits.maxRequestBytes }}
+    max_response_bytes = {{ $instance.gateway.limits.maxResponseBytes }}
+    connect_timeout_seconds = {{ $instance.gateway.limits.connectTimeoutSeconds }}
+    request_timeout_seconds = {{ $instance.gateway.limits.requestTimeoutSeconds }}
+{{- if eq $instance.role "mcp" }}
+
+    [mcp]
+    canonical_url = {{ $instance.target.canonicalUrl | quote }}
+    trust_profile = {{ $instance.target.trustProfile | quote }}
+    server_name = {{ $instance.target.serverName | quote }}
+    ca_file = "/run/secrets/target-ca/ca.crt"
+    port = {{ $instance.target.port }}
+{{- else }}
+
+    [onlyoffice_output]
+    canonical_origin = {{ $instance.target.canonicalOrigin | quote }}
+    path_prefix = {{ $instance.target.pathPrefix | quote }}
+    server_name = {{ $instance.target.serverName | quote }}
+    ca_file = "/run/secrets/target-ca/ca.crt"
+    port = {{ $instance.target.port }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $relayName }}-config
+  labels: {app.kubernetes.io/name: filebelt-private-egress, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}
+immutable: true
+data:
+  relay.toml: |
+    version = 1
+    listen_address = "0.0.0.0:9443"
+    operations_address = "0.0.0.0:9090"
+    target_addresses = [{{- range $index, $address := $instance.target.dialAddresses }}{{ if $index }}, {{ end }}{{ include "privateEgress.socket" (dict "address" $address "port" $instance.target.port) | quote }}{{- end }}]
+{{- if eq $instance.provider "tailscale" }}
+    socks5_proxy = "127.0.0.1:1055"
+{{- end }}
+
+    [server_tls]
+    certificate_chain_file = "/run/secrets/relay-server/tls.crt"
+    private_key_file = "/run/secrets/relay-server/tls.key"
+    client_ca_file = "/run/secrets/relay-server/ca.crt"
+    allowed_client_uri_sans = [{{ $instance.gateway.relayUriSan | quote }}]
+
+    [limits]
+    max_connections = {{ $instance.relay.limits.maxConnections }}
+    handshake_timeout_seconds = {{ $instance.relay.limits.handshakeTimeoutSeconds }}
+    connect_timeout_seconds = {{ $instance.relay.limits.connectTimeoutSeconds }}
+    inactivity_timeout_seconds = {{ $instance.relay.limits.inactivityTimeoutSeconds }}
+    drain_timeout_seconds = {{ $instance.relay.limits.drainTimeoutSeconds }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ $gatewayName }}, labels: {app.kubernetes.io/name: filebelt-private-egress}}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $gatewayName }}
+  labels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-role: {{ $instance.role | quote }}}
+spec:
+  replicas: {{ $instance.gateway.replicas }}
+  strategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  selector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-role: {{ $instance.role | quote }}}
+      annotations:
+        checksum/config: {{ printf "%s:%s:%s" (toJson $instance.target) $instance.gateway.serverIdentity.generation $instance.gateway.relayIdentity.generation | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ $gatewayName }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector: {kubernetes.io/arch: {{ $.Values.architecture | quote }}}
+      securityContext: {runAsNonRoot: true, fsGroup: 10001, fsGroupChangePolicy: OnRootMismatch, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: gateway
+          image: {{ include "privateEgress.image" $.Values.images.gateway }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/gateway.toml"]
+          ports: [{name: https, containerPort: 8443, protocol: TCP}, {name: operations, containerPort: 9090, protocol: TCP}]
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "privateEgress.security" . | indent 12 }}
+          resources:
+{{ toYaml $instance.gateway.resources | indent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: gateway-server, mountPath: /run/secrets/gateway-server, readOnly: true}
+            - {name: relay-client, mountPath: /run/secrets/relay-client, readOnly: true}
+            - {name: target-ca, mountPath: /run/secrets/target-ca, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: {{ $gatewayName }}-config, defaultMode: 0444}}
+        - name: gateway-server
+{{ include "privateEgress.tlsVolume" $instance.gateway.serverIdentity | indent 10 }}
+        - name: relay-client
+{{ include "privateEgress.tlsVolume" $instance.gateway.relayIdentity | indent 10 }}
+        - name: target-ca
+          secret: {secretName: {{ $instance.target.caSecret.name }}, defaultMode: 0440, items: [{key: {{ $instance.target.caSecret.key }}, path: ca.crt}]}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: {{ $gatewayName }}}
+spec:
+  maxUnavailable: {{ ternary 1 0 (gt (int $instance.gateway.replicas) 1) }}
+  selector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $gatewayName }}, labels: {app.kubernetes.io/name: filebelt-private-egress, filebelt.dev/private-egress-role: {{ $instance.role | quote }}}}
+spec:
+  selector: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}
+  ports: [{name: https, port: 8443, targetPort: https, protocol: TCP}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $relayName }}, labels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}}
+spec:
+  clusterIP: {{ $instance.relay.clusterIP }}
+  selector: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}}
+  ports: [{name: relay, port: 9443, targetPort: relay, protocol: TCP}]
+{{- range $slot := $instance.transports }}
+{{- $slotName := include "privateEgress.slotName" (dict "instance" $instance.name "slot" $slot.name) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $slotName }}
+  labels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-provider: {{ $instance.provider | quote }}, filebelt.dev/private-egress-slot: {{ $slot.name | quote }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-slot: {{ $slot.name | quote }}}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: relay, filebelt.dev/private-egress-instance: {{ $instance.name | quote }}, filebelt.dev/private-egress-provider: {{ $instance.provider | quote }}, filebelt.dev/private-egress-slot: {{ $slot.name | quote }}}
+      annotations:
+        checksum/config: {{ printf "%s:%s:%s" (toJson $slot) $instance.relay.serverIdentity.generation (toJson $instance.target.dialAddresses) | sha256sum | quote }}
+    spec:
+      serviceAccountName: {{ $gatewayName }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ $instance.relay.limits.drainTimeoutSeconds }}
+      nodeSelector: {kubernetes.io/arch: {{ $.Values.architecture | quote }}}
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+{{- if eq $instance.provider "wireguard" }}
+      initContainers:
+        - name: wireguard-init
+          image: {{ include "privateEgress.image" $.Values.images.wireguardInit }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --interface
+            - fbwg0
+            - --private-key-file
+            - /run/secrets/wireguard/private-key
+{{- if $slot.wireguard.presharedKeySecret }}
+            - --preshared-key-file
+            - /run/secrets/wireguard/preshared-key
+{{- end }}
+            - --peer-public-key
+            - {{ $slot.wireguard.peerPublicKey | quote }}
+            - --endpoint
+            - {{ include "privateEgress.socket" (dict "address" $slot.wireguard.endpointAddress "port" $slot.wireguard.peerPort) | quote }}
+            - --tunnel-address
+            - {{ $slot.wireguard.tunnelAddress | quote }}
+{{- range $cidr := $slot.wireguard.targetCidrs }}
+            - --target-cidr
+            - {{ $cidr | quote }}
+{{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"], add: ["NET_ADMIN"]}
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts: [{name: wireguard-key, mountPath: /run/secrets/wireguard, readOnly: true}]
+{{- end }}
+      containers:
+        - name: relay
+          image: {{ include "privateEgress.image" $.Values.images.relay }}
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--config", "/etc/filebelt/relay.toml"]
+          ports: [{name: relay, containerPort: 9443, protocol: TCP}, {name: operations, containerPort: 9090, protocol: TCP}]
+          startupProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 2, failureThreshold: 30}
+          livenessProbe: {httpGet: {path: /health/live, port: operations}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+          readinessProbe: {httpGet: {path: /health/ready, port: operations}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          securityContext:
+{{ include "privateEgress.security" . | indent 12 }}
+          resources:
+{{ toYaml $instance.relay.resources | indent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/filebelt, readOnly: true}
+            - {name: relay-server, mountPath: /run/secrets/relay-server, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+{{- if eq $instance.provider "tailscale" }}
+        - name: tailscale
+          image: {{ include "privateEgress.image" $.Values.images.tailscale }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TS_AUTHKEY, valueFrom: {secretKeyRef: {name: {{ $slot.tailscale.authSecret.name }}, key: {{ $slot.tailscale.authSecret.key }}}}}
+            - {name: TS_STATE_DIR, value: /var/lib/tailscale}
+            - {name: TS_SOCKET, value: /tmp/tailscaled.sock}
+            - {name: TS_USERSPACE, value: "true"}
+            - {name: TS_SOCKS5_SERVER, value: "127.0.0.1:1055"}
+            - {name: TS_ACCEPT_DNS, value: "false"}
+            - {name: TS_HOSTNAME, value: {{ $slot.tailscale.hostname | quote }}}
+            - {name: TS_KUBE_SECRET, value: ""}
+            - {name: TS_EXTRA_ARGS, value: {{ printf "--shields-up --login-server=%s%s" $slot.tailscale.loginServer (ternary " --accept-routes" "" $slot.tailscale.acceptRoutes) | quote }}}
+          securityContext:
+{{ include "privateEgress.security" . | indent 12 }}
+          resources:
+{{ toYaml $slot.tailscale.resources | indent 12 }}
+          volumeMounts:
+            - {name: tailstate, mountPath: /var/lib/tailscale}
+            - {name: tailscale-tmp, mountPath: /tmp}
+{{- end }}
+      volumes:
+        - {name: config, configMap: {name: {{ $relayName }}-config, defaultMode: 0444}}
+        - name: relay-server
+{{ include "privateEgress.tlsVolume" $instance.relay.serverIdentity | indent 10 }}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+{{- if eq $instance.provider "tailscale" }}
+        - {name: tailstate, persistentVolumeClaim: {claimName: {{ $slot.tailscale.stateClaim }}}}
+        - {name: tailscale-tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+{{- else }}
+        - name: wireguard-key
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret: {name: {{ $slot.wireguard.privateKeySecret.name }}, items: [{key: {{ $slot.wireguard.privateKeySecret.key }}, path: private-key}]}
+{{- if $slot.wireguard.presharedKeySecret }}
+              - secret: {name: {{ $slot.wireguard.presharedKeySecret.name }}, items: [{key: {{ $slot.wireguard.presharedKeySecret.key }}, path: preshared-key}]}
+{{- end }}
+{{- end }}
+{{ end }}
+{{ end }}{{ end }}

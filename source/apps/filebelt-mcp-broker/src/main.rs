@@ -24,7 +24,8 @@ use base64::engine::general_purpose::STANDARD;
 use clap::{Parser, Subcommand};
 use filebelt_capability_keyset::ApiMcpDelegationKeyset;
 use filebelt_control_protocol::{
-    Config, DeploymentMode, McpLimitConfig, McpTrustProfile, read_secret_string,
+    Config, DeploymentMode, McpEgressConfig, McpGatewayKind, McpLimitConfig, McpTrustProfile,
+    read_secret_string,
 };
 use filebelt_database::mcp::{
     McpAuthoritySnapshot, McpRegistrationRecord, McpSecretEnvelope, NewMcpOAuthAttempt,
@@ -83,8 +84,8 @@ struct BrokerState {
     database: Database,
     keyring: Arc<Keyring>,
     verification_keys: Arc<ApiMcpDelegationKeyset>,
-    gateway: Client,
-    gateway_url: Url,
+    legacy_gateway: Option<GatewayClient>,
+    gateways: Arc<BTreeMap<String, GatewayClient>>,
     attachment_client: Client,
     attachment_io_url: Url,
     limits: McpLimitConfig,
@@ -93,6 +94,13 @@ struct BrokerState {
     oauth_clients: Arc<HashMap<String, OauthClientState>>,
     current_kek_generation: u32,
     trust_profiles: Arc<BTreeMap<String, McpTrustProfile>>,
+}
+
+#[derive(Clone)]
+struct GatewayClient {
+    client: Client,
+    url: Url,
+    kind: McpGatewayKind,
 }
 
 struct OauthClientState {
@@ -250,14 +258,22 @@ async fn serve(config: Config) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("API MCP delegation signing is absent"))?;
     let verification_keys = Arc::new(load_verification_keys(&delegation.public_keyset_file)?);
-    let gateway = gateway_client(&config)?;
-    let (attachment_client, attachment_io_url) = attachment_client(&config)?;
-    let gateway_url = config
+    let legacy_gateway = config
         .mcp
         .egress
         .gateway_url
-        .clone()
-        .ok_or_else(|| anyhow!("MCP gateway URL is absent"))?;
+        .is_some()
+        .then(|| gateway_client(&config.mcp.egress, &config.mcp.limits))
+        .transpose()?;
+    let gateways = config
+        .mcp
+        .gateways
+        .iter()
+        .map(|(name, gateway)| {
+            gateway_client(gateway, &config.mcp.limits).map(|client| (name.clone(), client))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let (attachment_client, attachment_io_url) = attachment_client(&config)?;
     let limits = config.mcp.limits.clone();
     let oauth_clients = Arc::new(load_oauth_clients(&config)?);
     let runners = if config.mcp.runners.enabled {
@@ -277,8 +293,8 @@ async fn serve(config: Config) -> Result<()> {
         database: database.clone(),
         keyring,
         verification_keys,
-        gateway,
-        gateway_url,
+        legacy_gateway,
+        gateways: Arc::new(gateways),
         attachment_client,
         attachment_io_url,
         limits,
@@ -1463,6 +1479,7 @@ async fn decrypt_credential(
             .map_err(|_| BrokerError::forbidden("mcp.credential.invalid"));
         let secret = secret?;
         if envelope.secret_kind == "oauth_access" {
+            ensure_oauth_gateway(state, registration)?;
             return oauth_credential(state, registration, &envelope.issuer, secret)
                 .await
                 .map(Some);
@@ -1577,6 +1594,59 @@ fn enforce_endpoint_policy(
     Ok(())
 }
 
+fn selected_gateway<'a>(
+    state: &'a BrokerState,
+    registration: &McpRegistrationRecord,
+) -> Result<&'a GatewayClient, BrokerError> {
+    let profile_name = registration
+        .trust_profile
+        .as_deref()
+        .ok_or_else(|| BrokerError::forbidden("mcp.trust_profile.invalid"))?;
+    let profile = state
+        .trust_profiles
+        .get(profile_name)
+        .ok_or_else(|| BrokerError::forbidden("mcp.trust_profile.invalid"))?;
+    selected_gateway_for_profile(profile, state.legacy_gateway.as_ref(), &state.gateways)
+}
+
+fn selected_gateway_for_profile<'a>(
+    profile: &McpTrustProfile,
+    legacy_gateway: Option<&'a GatewayClient>,
+    gateways: &'a BTreeMap<String, GatewayClient>,
+) -> Result<&'a GatewayClient, BrokerError> {
+    match profile.gateway.as_deref() {
+        Some(name) => gateways
+            .get(name)
+            .ok_or_else(|| BrokerError::unavailable("mcp.gateway.unavailable")),
+        None => legacy_gateway.ok_or_else(|| BrokerError::unavailable("mcp.gateway.unavailable")),
+    }
+}
+
+fn ensure_oauth_gateway<'a>(
+    state: &'a BrokerState,
+    registration: &McpRegistrationRecord,
+) -> Result<&'a GatewayClient, BrokerError> {
+    let gateway = selected_gateway(state, registration)?;
+    ensure_gateway_allows_oauth(gateway.kind)?;
+    Ok(gateway)
+}
+
+fn ensure_gateway_allows_oauth(kind: McpGatewayKind) -> Result<(), BrokerError> {
+    if kind == McpGatewayKind::PrivateTunnel {
+        return Err(BrokerError::forbidden(
+            "mcp.oauth.private_tunnel_prohibited",
+        ));
+    }
+    Ok(())
+}
+
+fn private_tunnel_permits_credential(credential: Option<&DecryptedCredential>) -> bool {
+    matches!(
+        credential.map(|credential| credential.kind.as_str()),
+        None | Some("bearer" | "api_key")
+    )
+}
+
 async fn broker_management_operation(
     state: &BrokerState,
     registration: &McpRegistrationRecord,
@@ -1594,9 +1664,16 @@ async fn broker_management_operation(
         McpOperation::RegistrationConfigure => {
             configure_registration(state, registration, &arguments).await
         }
-        McpOperation::OauthDiscover => oauth_discover(state, registration, &arguments).await,
-        McpOperation::OauthBegin => begin_oauth(state, registration, claims, &arguments).await,
+        McpOperation::OauthDiscover => {
+            ensure_oauth_gateway(state, registration)?;
+            oauth_discover(state, registration, &arguments).await
+        }
+        McpOperation::OauthBegin => {
+            ensure_oauth_gateway(state, registration)?;
+            begin_oauth(state, registration, claims, &arguments).await
+        }
         McpOperation::OauthComplete => {
+            ensure_oauth_gateway(state, registration)?;
             complete_oauth(state, registration, claims, &arguments).await
         }
         _ => Err(BrokerError::bad_request("mcp.management.invalid")),
@@ -2280,9 +2357,10 @@ async fn gateway_json(
     {
         return Err(BrokerError::forbidden("mcp.oauth.endpoint_invalid"));
     }
-    let mut request = state
-        .gateway
-        .post(state.gateway_url.clone())
+    let gateway = ensure_oauth_gateway(state, registration)?;
+    let mut request = gateway
+        .client
+        .post(gateway.url.clone())
         .header("x-filebelt-mcp-target", target.as_str())
         .header(
             "x-filebelt-mcp-trust-profile",
@@ -2940,9 +3018,9 @@ async fn remote_operation(
     credential: Option<&DecryptedCredential>,
     arguments_json: &[u8],
 ) -> Result<Value, BrokerError> {
+    let gateway = selected_gateway(state, registration)?;
     let mut session = RemoteSession::new(
-        state.gateway.clone(),
-        state.gateway_url.clone(),
+        gateway,
         endpoint,
         registration.trust_profile.as_deref().unwrap_or_default(),
         request.protocol_version.as_str(),
@@ -3041,14 +3119,20 @@ struct RemoteSession {
 
 impl RemoteSession {
     fn new(
-        client: Client,
-        gateway: Url,
+        gateway: &GatewayClient,
         endpoint: &Url,
         trust_profile: &str,
         protocol: &str,
         credential: Option<&DecryptedCredential>,
         limit: usize,
     ) -> Result<Self, BrokerError> {
+        if gateway.kind == McpGatewayKind::PrivateTunnel
+            && !private_tunnel_permits_credential(credential)
+        {
+            return Err(BrokerError::forbidden(
+                "mcp.credential.private_tunnel_prohibited",
+            ));
+        }
         let credential_header = credential
             .map(|secret| {
                 let text = std::str::from_utf8(secret.secret.as_slice())
@@ -3076,8 +3160,8 @@ impl RemoteSession {
             _ => None,
         };
         Ok(Self {
-            client,
-            gateway,
+            client: gateway.client.clone(),
+            gateway: gateway.url.clone(),
             target: HeaderValue::from_str(endpoint.as_str())
                 .map_err(|_| BrokerError::forbidden("mcp.endpoint.invalid"))?,
             trust_profile: HeaderValue::from_str(trust_profile)
@@ -3536,8 +3620,7 @@ async fn keyed_semaphore(
     semaphore
 }
 
-fn gateway_client(config: &Config) -> Result<Client> {
-    let egress = &config.mcp.egress;
+fn gateway_client(egress: &McpEgressConfig, limits: &McpLimitConfig) -> Result<GatewayClient> {
     let certificate = std::fs::read(
         egress
             .client_certificate_chain_file
@@ -3567,15 +3650,22 @@ fn gateway_client(config: &Config) -> Result<Client> {
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .identity(identity)
-        .connect_timeout(Duration::from_secs(
-            config.mcp.limits.connect_timeout_seconds,
-        ));
+        .connect_timeout(Duration::from_secs(limits.connect_timeout_seconds));
     for certificate in certificates {
         builder = builder.add_root_certificate(certificate);
     }
-    builder
+    let client = builder
         .build()
-        .context("cannot initialize MCP gateway client")
+        .context("cannot initialize MCP gateway client")?;
+    let url = egress
+        .gateway_url
+        .clone()
+        .ok_or_else(|| anyhow!("MCP gateway URL is absent"))?;
+    Ok(GatewayClient {
+        client,
+        url,
+        kind: egress.kind,
+    })
 }
 
 fn attachment_client(config: &Config) -> Result<(Client, Url)> {
@@ -3794,6 +3884,98 @@ mod tests {
             relay_accepts: Arc::new(Semaphore::new(1)),
             hello_timeout: Duration::from_secs(1),
         }
+    }
+
+    fn test_gateway(kind: McpGatewayKind) -> GatewayClient {
+        let _ = install_crypto_provider();
+        GatewayClient {
+            client: Client::new(),
+            url: Url::parse("https://mcp-egress.example.test:8443/").unwrap(),
+            kind,
+        }
+    }
+
+    fn test_trust_profile(gateway: Option<&str>) -> McpTrustProfile {
+        McpTrustProfile {
+            gateway: gateway.map(ToOwned::to_owned),
+            public_webpki: true,
+            hosts: Vec::new(),
+            cidrs: Vec::new(),
+            ports: vec![443],
+            custom_ca_file: None,
+            allow_dynamic_client_registration: false,
+        }
+    }
+
+    #[test]
+    fn gateways_select_legacy_or_named_and_private_rejects_oauth() {
+        let legacy = test_gateway(McpGatewayKind::Public);
+        let mut gateways = BTreeMap::new();
+        gateways.insert("public".into(), test_gateway(McpGatewayKind::Public));
+        gateways.insert(
+            "private".into(),
+            test_gateway(McpGatewayKind::PrivateTunnel),
+        );
+
+        assert_eq!(
+            selected_gateway_for_profile(&test_trust_profile(None), Some(&legacy), &gateways)
+                .unwrap()
+                .kind,
+            McpGatewayKind::Public
+        );
+        assert_eq!(
+            selected_gateway_for_profile(
+                &test_trust_profile(Some("public")),
+                Some(&legacy),
+                &gateways
+            )
+            .unwrap()
+            .kind,
+            McpGatewayKind::Public
+        );
+        assert_eq!(
+            selected_gateway_for_profile(
+                &test_trust_profile(Some("private")),
+                Some(&legacy),
+                &gateways
+            )
+            .unwrap()
+            .kind,
+            McpGatewayKind::PrivateTunnel
+        );
+        assert_eq!(
+            selected_gateway_for_profile(
+                &test_trust_profile(Some("unknown")),
+                Some(&legacy),
+                &gateways
+            )
+            .err()
+            .unwrap()
+            .code,
+            "mcp.gateway.unavailable"
+        );
+        assert!(private_tunnel_permits_credential(None));
+        let bearer = DecryptedCredential {
+            kind: "bearer".into(),
+            secret: Zeroizing::new(Vec::new()),
+        };
+        let api_key = DecryptedCredential {
+            kind: "api_key".into(),
+            secret: Zeroizing::new(Vec::new()),
+        };
+        let oauth = DecryptedCredential {
+            kind: "oauth_access".into(),
+            secret: Zeroizing::new(Vec::new()),
+        };
+        assert!(private_tunnel_permits_credential(Some(&bearer)));
+        assert!(private_tunnel_permits_credential(Some(&api_key)));
+        assert!(!private_tunnel_permits_credential(Some(&oauth)));
+        assert_eq!(
+            ensure_gateway_allows_oauth(McpGatewayKind::PrivateTunnel)
+                .unwrap_err()
+                .code,
+            "mcp.oauth.private_tunnel_prohibited"
+        );
     }
 
     #[test]

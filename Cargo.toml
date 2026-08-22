@@ -16,6 +16,8 @@ members = [
   "source/apps/filebelt-vfs",
   "source/apps/filebelt-headscale-sync",
   "source/apps/filebelt-nfs-relay",
+  "source/apps/filebelt-private-egress-gateway",
+  "source/apps/filebelt-tunnel-relay",
   "source/apps/filebelt-revision",
   "source/crates/filebelt-build-identity",
   "source/crates/filebelt-domain",
@@ -91,6 +93,8 @@ fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 http = "=1.5.0"
 http-body-util = "=0.1.4"
+hyper = { version = "=1.11.0", features = ["client", "http1"] }
+hyper-util = { version = "=0.1.20", features = ["tokio"] }
 h3 = "=0.0.8"
 h3-quinn = { version = "=0.0.10", default-features = false, features = ["datagram"] }
 h3-webtransport = "=0.1.2"
@@ -124,6 +128,7 @@ tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "pr
 tokio-util = { version = "=0.7.19", features = ["io"] }
 tokio-rustls = "=0.26.4"
 toml = "=1.1.4"
+tower = { version = "=0.5.3", features = ["limit"] }
 tower-http = { version = "=0.7.0", features = ["catch-panic", "cors", "limit", "request-id", "trace"] }
 tracing = "=0.1.44"
 tracing-opentelemetry = { version = "=0.33.0", default-features = false }

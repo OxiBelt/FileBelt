@@ -64,7 +64,7 @@ jobs:
           cache: false
       - name: Prepare signed release plan
         run: tests/scripts/prepare-image-plan.sh --channel release --output artifacts/phase3/image-plan.json
-      - name: Build and validate all fifteen Apache role contracts
+      - name: Build and validate all seventeen Apache role contracts
         run: >-
           tests/scripts/run-image-matrix.sh
           --plan artifacts/phase3/image-plan.json

@@ -831,6 +831,7 @@ secrets:
   mcpBrokerServerTls: {name: filebelt-mcp-broker-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   apiMcpClientTls: {name: filebelt-api-mcp-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   mcpGatewayClientTls: {name: filebelt-mcp-gateway-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
+  mcpPrivateEgressClientTls: {name: filebelt-mcp-private-egress-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   mcpBackendClientTls: {name: filebelt-mcp-backend-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
   controllerServerTls: {name: filebelt-controller-server-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: client-ca.crt, generation: "1"}
   controllerClientTls: {name: filebelt-controller-client-tls, certificateKey: tls.crt, privateKeyKey: tls.key, caKey: server-ca.crt, generation: "1"}
@@ -875,6 +876,10 @@ mcp:
     address: filebelt-mcp-egress.filebelt-egress.svc:8443
     serverName: filebelt-mcp-egress.filebelt-egress.svc
     profile: public-web
+  privateEgress:
+    enabled: false
+    name: private-llm
+    gatewayUrl: https://filebelt-private-egress-mcp.filebelt-private-egress.svc:8443/
 
 collaboration:
   enabled: false
@@ -1034,6 +1039,14 @@ networkPolicy:
           matchLabels: {kubernetes.io/metadata.name: filebelt-egress}
         podSelector:
           matchLabels: {app.kubernetes.io/name: filebelt-mcp-egress}
+  mcpPrivateEgress:
+    enabled: false
+    port: 8443
+    to:
+      - namespaceSelector:
+          matchLabels: {kubernetes.io/metadata.name: filebelt-private-egress}
+        podSelector:
+          matchLabels: {app.kubernetes.io/name: filebelt-private-egress, app.kubernetes.io/component: gateway, filebelt.dev/private-egress-role: mcp}
   kubernetesApi:
     enabled: false
     port: 443

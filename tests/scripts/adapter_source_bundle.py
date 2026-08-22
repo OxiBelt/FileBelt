@@ -24,6 +24,7 @@ ROLES = {
     "filebelt-git-adapter": "git",
     "filebelt-nfs-gateway": "nfs",
     "filebelt-transcoder": "transcode",
+    "filebelt-wireguard-init": "wireguard",
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -37,6 +38,7 @@ REQUIRED_CANONICAL_LICENSES = {
     "filebelt-git-adapter": ("GPL-2.0-only.txt",),
     "filebelt-nfs-gateway": ("LGPL-3.0-or-later.txt",),
     "filebelt-transcoder": ("GPL-3.0-or-later.txt",),
+    "filebelt-wireguard-init": ("Apache-2.0.txt", "GPL-2.0-only.txt", "MIT.txt"),
 }
 PUBLISHED_PLATFORMS = {"linux/amd64", "linux/arm64", "linux/riscv64"}
 MAX_ARCHIVE_MEMBERS = 250_000
@@ -186,6 +188,30 @@ def validate_manifest(
             validate_relative_path(patch)
             if not root.joinpath(*patch.parts).is_file():
                 raise BundleError(f"manifest patch is missing: {patch_path}")
+
+    if role == "filebelt-wireguard-init":
+        expected_upstreams = {
+            "adapter-inputs/wireguard/upstream/wireguard-tools-1.0.20260223.tar.xz": (
+                "wireguard-tools", "1.0.20260223", "GPL-2.0-only",
+                "separate-executable", "af459827b80bfd31b83b08077f4b5843acb7d18ad9a33a2ef532d3090f291fbf",
+            ),
+            "adapter-inputs/wireguard/upstream/iproute2-7.1.0.tar.xz": (
+                "iproute2", "7.1.0", "GPL-2.0-only", "separate-executable",
+                "fd9fa1b95809417157ca83dd72957e3261bdbce896353cb936f80af0b33a4b5c",
+            ),
+        }
+        actual_upstreams = {
+            item["archivePath"]: (
+                item["name"], item["version"], item["spdx"],
+                item["relationship"], item["sha256"],
+            )
+            for item in entries
+            if str(item["archivePath"]).startswith("adapter-inputs/wireguard/upstream/")
+        }
+        if actual_upstreams != expected_upstreams:
+            raise BundleError(
+                "WireGuard source manifest must contain the exact reviewed wireguard-tools and iproute2 archives"
+            )
 
 
 def validate_vendor_closure(source: pathlib.Path, inputs: pathlib.Path, role: str) -> None:

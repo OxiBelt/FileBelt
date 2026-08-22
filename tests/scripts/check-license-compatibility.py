@@ -332,9 +332,10 @@ def load_policy(path: Path) -> CompatibilityPolicy:
         "git",
         "directory-repository",
         "nfs",
+        "wireguard",
         "transcode",
     }:
-        _fail("policy must register the root and all seven adapter workspaces")
+        _fail("policy must register the root and all eight adapter workspaces")
 
     raw_artifacts = document["artifacts"]
     if not isinstance(raw_artifacts, list) or not raw_artifacts:

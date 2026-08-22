@@ -496,6 +496,19 @@ synthetic screenshots for 7 days on pull requests and 30 days otherwise.
 
 ## Phase 5 Kubernetes and publication evidence
 
+The private-egress preview adds two Apache build roles and one isolated
+mixed-license adapter image. `filebelt-private-egress-gateway` and
+`filebelt-tunnel-relay` follow the root Cargo/image admission path but remain
+absent from active release promotion until provider and CNI qualification.
+`filebelt-wireguard-init` follows the adapter source-bundle path: its manifest
+must contain the exact checksum-pinned WireGuard tools `1.0.20260223` and
+iproute2 `7.1.0` archives, offline Cargo vendor closure, canonical license
+texts, notices, build inputs, per-platform SBOM/provenance, and immutable
+corresponding-source URL/checksum. The digest-pinned upstream Tailscale image is
+an external runtime input and requires the same re-admission discipline as
+other operator-integrated images. All three publication states remain blocked
+until the private-egress operations gates pass.
+
 Phase 5 uses a ten-image build and evidence matrix and admits nine
 deployable/publishable roles: API, I/O, maintenance, collaboration, MCP broker,
 controller, runner, tools, and web. The media controller remains probe-only, has no Helm

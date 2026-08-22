@@ -288,7 +288,7 @@ fn validation_is_read_only_and_release_promotion_is_tag_only() {
             "release promotion must carry {release_role}"
         );
         assert!(
-            dry_run.contains("Build all fifteen Apache roles"),
+            dry_run.contains("Build all seventeen Apache roles"),
             "dry-run must build the complete Apache image plan"
         );
     }

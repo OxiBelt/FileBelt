@@ -13,6 +13,7 @@ export const AdapterImageRoles = [
   "filebelt-git-adapter",
   "filebelt-nfs-gateway",
   "filebelt-transcoder",
+  "filebelt-wireguard-init",
 ] as const;
 
 export type AdapterImageRole = (typeof AdapterImageRoles)[number];
@@ -142,7 +143,7 @@ export interface CreateAdapterImagePlanInput {
 
 interface AdapterCatalogRow {
   readonly Role: AdapterImageRole;
-  readonly Path: "smb" | "ftp-ftps" | "onlyoffice" | "git" | "nfs" | "transcode";
+  readonly Path: "smb" | "ftp-ftps" | "onlyoffice" | "git" | "nfs" | "transcode" | "wireguard";
   readonly FirstPartyLicense: string;
   readonly ImageLicense: string;
   readonly Platforms: readonly ImagePlatform[];
@@ -507,6 +508,65 @@ const AdapterCatalog: readonly AdapterCatalogRow[] = [
       "codec inventory, malicious-input, performance, and native platform qualification are incomplete",
     ],
     RequiredBuildArguments: null,
+  },
+  {
+    Role: "filebelt-wireguard-init",
+    Path: "wireguard",
+    FirstPartyLicense: "Apache-2.0",
+    ImageLicense: "Apache-2.0 AND GPL-2.0-only AND MIT",
+    Platforms: ["linux/amd64", "linux/arm64", "linux/riscv64"],
+    Riscv64Policy: "publish-native",
+    ExecutablePaths: [
+      "/usr/local/bin/filebelt-wireguard-init",
+      "/usr/local/bin/wg",
+      "/usr/local/bin/ip",
+    ],
+    Entrypoint: "/usr/local/bin/filebelt-wireguard-init",
+    Components: [
+      {
+        id: "filebelt-wireguard-init",
+        version: "0.1.0",
+        license: "Apache-2.0",
+        relationship: "linked",
+        path: "/usr/local/bin/filebelt-wireguard-init",
+        sourceRequired: true,
+      },
+      {
+        id: "wireguard-tools",
+        version: "1.0.20260223",
+        license: "GPL-2.0-only",
+        relationship: "separate-executable",
+        path: "/usr/local/bin/wg",
+        sourceRequired: true,
+      },
+      {
+        id: "iproute2",
+        version: "7.1.0",
+        license: "GPL-2.0-only",
+        relationship: "separate-executable",
+        path: "/usr/local/bin/ip",
+        sourceRequired: true,
+      },
+      {
+        id: "musl",
+        version: "1.2.5",
+        license: "MIT",
+        relationship: "linked",
+        path: "/usr/local/bin/filebelt-wireguard-init",
+        sourceRequired: true,
+      },
+    ],
+    DefaultQualification: {
+      license: Blocked,
+      source: Blocked,
+      security: Blocked,
+      functional: Blocked,
+      platform: Blocked,
+    },
+    DefaultReasons: [
+      "WireGuard source, security, functional, and native platform qualification are incomplete",
+    ],
+    RequiredBuildArguments: ["FILEBELT_WIREGUARD_BUILDER_IMAGE", "RUST_TARGET"],
   },
 ] as const;
 
@@ -896,7 +956,9 @@ function NormalizePlatformBuildArguments(
         ? "x86_64-unknown-linux-musl"
         : Platform === "linux/arm64"
           ? "aarch64-unknown-linux-musl"
-          : undefined;
+          : Platform === "linux/riscv64"
+            ? "riscv64gc-unknown-linux-musl"
+            : undefined;
     if (ExpectedTarget === undefined || Normalized.RUST_TARGET !== ExpectedTarget) {
       throw new Error(`${Catalog.Role} ${Platform} RUST_TARGET is not the reviewed native target`);
     }

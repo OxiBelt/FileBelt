@@ -1,0 +1,9 @@
+SPDX-License-Identifier: Apache-2.0
+
+The FileBelt-authored source in this directory is licensed under the Apache
+License, Version 2.0. The canonical license text is distributed at
+`../../LICENSES/Apache-2.0.txt`.
+
+The aggregate image also contains separate GPL-2.0-only executables. Their
+licenses and corresponding-source obligations are documented in
+`THIRD_PARTY_NOTICES.md` and `SOURCE_OFFER.md`.

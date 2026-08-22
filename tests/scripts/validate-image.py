@@ -37,6 +37,8 @@ RUST_IMAGE_LICENSES = {
     "filebelt-vfs": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-headscale-sync": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
     "filebelt-nfs-relay": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
+    "filebelt-private-egress-gateway": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
+    "filebelt-tunnel-relay": "Apache-2.0 AND MIT AND CDLA-Permissive-2.0",
 }
 WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD"
 OXIBELT_IMAGE = (
@@ -69,6 +71,8 @@ BINARIES = {
     "filebelt-vfs": "/usr/local/bin/filebelt-vfs",
     "filebelt-headscale-sync": "/usr/local/bin/filebelt-headscale-sync",
     "filebelt-nfs-relay": "/usr/local/bin/filebelt-nfs-relay",
+    "filebelt-private-egress-gateway": "/usr/local/bin/filebelt-private-egress-gateway",
+    "filebelt-tunnel-relay": "/usr/local/bin/filebelt-tunnel-relay",
 }
 
 

@@ -758,7 +758,7 @@ def exercise() -> None:
         entry["principal_id"] == member_session["principal_id"]
         and entry["action"] == "READ_CONTENT"
         and entry["effect"] == "deny"
-        and entry["source"] == "advanced"
+        and entry["source"] == "core"
         for entry in direct_deny["entries"]
     )
     member_denied_read = member.api(

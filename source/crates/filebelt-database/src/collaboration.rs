@@ -3,7 +3,7 @@
 //! Authoritative PostgreSQL state for Markdown collaboration.
 
 use serde_json::Value;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 use crate::idempotency::{IdempotencyReservation, finalize, reserve};
@@ -417,6 +417,58 @@ impl Database {
         Ok(row.as_ref().map(summary_from_row))
     }
 
+    async fn collaboration_locked_room_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<PgRow>, DatabaseError> {
+        Ok(sqlx::query("SELECT e.room_id,e.epoch,e.drive_id,e.node_id,e.base_version_id,e.state,e.dirty,e.durable_sequence,e.fencing_token,e.expires_at::text AS expires_at,e.warning_at::text AS warning_at FROM filebelt_collaboration.rooms r JOIN filebelt_collaboration.epochs e ON e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.epoch=r.current_epoch WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 FOR UPDATE OF r,e")
+            .bind(tenant_id).bind(drive_id).bind(node_id).fetch_optional(&mut **transaction).await?)
+    }
+
+    async fn collaboration_reuse_locked_room_tx(
+        &self,
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant_id: Uuid,
+        drive_id: Uuid,
+        node_id: Uuid,
+        base_version_id: Uuid,
+        row: PgRow,
+    ) -> Result<CollaborationRoomWrite, DatabaseError> {
+        let state: String = row.get("state");
+        let dirty: bool = row.get("dirty");
+        if state == "active" && row.get::<Uuid, _>("base_version_id") != base_version_id && dirty {
+            sqlx::query("UPDATE filebelt_collaboration.epochs SET state='frozen',freeze_reason='external_head',fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state='active'")
+                .bind(tenant_id).bind(row.get::<Uuid,_>("room_id")).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?;
+            return Ok(CollaborationRoomWrite::ConflictAfterFreeze);
+        }
+        if state == "active" && row.get::<Uuid, _>("base_version_id") == base_version_id {
+            return Ok(CollaborationRoomWrite::Ready(summary_from_row(&row)));
+        }
+        if state == "frozen" && dirty {
+            return Err(DatabaseError::Conflict);
+        }
+        let room_id: Uuid = row.get("room_id");
+        if matches!(state.as_str(), "active" | "frozen") {
+            let closed = sqlx::query("UPDATE filebelt_collaboration.epochs SET state='closed',dirty=false,freeze_reason=COALESCE(freeze_reason,'external_head'),closed_at=clock_timestamp(),fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state IN ('active','frozen') AND NOT dirty")
+                .bind(tenant_id).bind(room_id).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?.rows_affected();
+            if closed != 1 {
+                return Err(DatabaseError::Conflict);
+            }
+        }
+        let epoch = row
+            .get::<i64, _>("epoch")
+            .checked_add(1)
+            .ok_or(DatabaseError::InvalidPersistedValue)?;
+        let next = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
+            .bind(tenant_id).bind(room_id).bind(epoch).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut **transaction).await?;
+        sqlx::query("UPDATE filebelt_collaboration.rooms SET current_epoch=$3,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2")
+            .bind(tenant_id).bind(room_id).bind(epoch).execute(&mut **transaction).await?;
+        Ok(CollaborationRoomWrite::Ready(summary_from_row(&next)))
+    }
+
     async fn collaboration_get_or_create_room_tx(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
@@ -426,45 +478,40 @@ impl Database {
         base_version_id: Uuid,
         created_by: Uuid,
     ) -> Result<CollaborationRoomWrite, DatabaseError> {
-        if let Some(row) = sqlx::query("SELECT e.room_id,e.epoch,e.drive_id,e.node_id,e.base_version_id,e.state,e.dirty,e.durable_sequence,e.fencing_token,e.expires_at::text AS expires_at,e.warning_at::text AS warning_at FROM filebelt_collaboration.rooms r JOIN filebelt_collaboration.epochs e ON e.tenant_id=r.tenant_id AND e.room_id=r.id AND e.epoch=r.current_epoch WHERE r.tenant_id=$1 AND r.drive_id=$2 AND r.node_id=$3 FOR UPDATE OF r,e")
-            .bind(tenant_id).bind(drive_id).bind(node_id).fetch_optional(&mut **transaction).await? {
-            let state: String = row.get("state");
-            let dirty: bool = row.get("dirty");
-            if state == "active"
-                && row.get::<Uuid, _>("base_version_id") != base_version_id
-                && dirty
-            {
-                sqlx::query("UPDATE filebelt_collaboration.epochs SET state='frozen',freeze_reason='external_head',fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state='active'")
-                    .bind(tenant_id).bind(row.get::<Uuid,_>("room_id")).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?;
-                return Ok(CollaborationRoomWrite::ConflictAfterFreeze);
-            }
-            if state == "active" && row.get::<Uuid, _>("base_version_id") == base_version_id {
-                return Ok(CollaborationRoomWrite::Ready(summary_from_row(&row)));
-            }
-            if state == "frozen" && dirty {
-                return Err(DatabaseError::Conflict);
-            }
-            let room_id: Uuid = row.get("room_id");
-            if matches!(state.as_str(), "active" | "frozen") {
-                let closed = sqlx::query("UPDATE filebelt_collaboration.epochs SET state='closed',dirty=false,freeze_reason=COALESCE(freeze_reason,'external_head'),closed_at=clock_timestamp(),fencing_token=fencing_token+1 WHERE tenant_id=$1 AND room_id=$2 AND epoch=$3 AND state IN ('active','frozen') AND NOT dirty")
-                    .bind(tenant_id).bind(room_id).bind(row.get::<i64,_>("epoch")).execute(&mut **transaction).await?.rows_affected();
-                if closed != 1 {
-                    return Err(DatabaseError::Conflict);
-                }
-            }
-            let epoch = row
-                .get::<i64, _>("epoch")
-                .checked_add(1)
-                .ok_or(DatabaseError::InvalidPersistedValue)?;
-            let next = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
-                .bind(tenant_id).bind(room_id).bind(epoch).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut **transaction).await?;
-            sqlx::query("UPDATE filebelt_collaboration.rooms SET current_epoch=$3,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2")
-                .bind(tenant_id).bind(room_id).bind(epoch).execute(&mut **transaction).await?;
-            return Ok(CollaborationRoomWrite::Ready(summary_from_row(&next)));
+        if let Some(row) = self
+            .collaboration_locked_room_tx(transaction, tenant_id, drive_id, node_id)
+            .await?
+        {
+            return self
+                .collaboration_reuse_locked_room_tx(
+                    transaction,
+                    tenant_id,
+                    drive_id,
+                    node_id,
+                    base_version_id,
+                    row,
+                )
+                .await;
         }
         let room_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO filebelt_collaboration.rooms (tenant_id,id,drive_id,node_id,created_by) VALUES ($1,$2,$3,$4,$5)")
-            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(created_by).execute(&mut **transaction).await?;
+        let inserted: Option<Uuid> = sqlx::query_scalar("INSERT INTO filebelt_collaboration.rooms (tenant_id,id,drive_id,node_id,created_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (tenant_id,drive_id,node_id) DO NOTHING RETURNING id")
+            .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(created_by).fetch_optional(&mut **transaction).await?;
+        if inserted.is_none() {
+            let row = self
+                .collaboration_locked_room_tx(transaction, tenant_id, drive_id, node_id)
+                .await?
+                .ok_or(DatabaseError::Conflict)?;
+            return self
+                .collaboration_reuse_locked_room_tx(
+                    transaction,
+                    tenant_id,
+                    drive_id,
+                    node_id,
+                    base_version_id,
+                    row,
+                )
+                .await;
+        }
         let row = sqlx::query("INSERT INTO filebelt_collaboration.epochs (tenant_id,room_id,epoch,drive_id,node_id,base_version_id) VALUES ($1,$2,1,$3,$4,$5) RETURNING room_id,epoch,drive_id,node_id,base_version_id,state,durable_sequence,fencing_token,expires_at::text AS expires_at,warning_at::text AS warning_at")
             .bind(tenant_id).bind(room_id).bind(drive_id).bind(node_id).bind(base_version_id).fetch_one(&mut **transaction).await?;
         Ok(CollaborationRoomWrite::Ready(summary_from_row(&row)))
@@ -2052,6 +2099,13 @@ mod tests {
     #[test]
     fn grant_creation_advances_only_clean_frozen_epochs() {
         let source = include_str!("collaboration.rs");
+        let reuse = source
+            .split_once("async fn collaboration_reuse_locked_room_tx")
+            .expect("locked-room reuse exists")
+            .1
+            .split_once("async fn collaboration_get_or_create_room_tx")
+            .expect("room creation follows locked-room reuse")
+            .0;
         let create = source
             .split_once("async fn collaboration_get_or_create_room_tx")
             .expect("room creation exists")
@@ -2059,10 +2113,19 @@ mod tests {
             .split_once("pub async fn collaboration_get_or_create_room(")
             .expect("room wrapper follows transaction body")
             .0;
-        assert!(create.contains("if state == \"frozen\" && dirty"));
-        assert!(create.contains("state IN ('active','frozen') AND NOT dirty"));
-        assert!(create.contains("freeze_reason=COALESCE(freeze_reason,'external_head')"));
-        assert!(create.contains("INSERT INTO filebelt_collaboration.epochs"));
+        assert!(reuse.contains("if state == \"frozen\" && dirty"));
+        assert!(reuse.contains("state IN ('active','frozen') AND NOT dirty"));
+        assert!(reuse.contains("freeze_reason=COALESCE(freeze_reason,'external_head')"));
+        assert!(reuse.contains("INSERT INTO filebelt_collaboration.epochs"));
+        assert!(
+            create.contains("ON CONFLICT (tenant_id,drive_id,node_id) DO NOTHING RETURNING id")
+        );
+        assert!(
+            create.contains(
+                ".collaboration_locked_room_tx(transaction, tenant_id, drive_id, node_id)"
+            )
+        );
+        assert!(create.contains(".ok_or(DatabaseError::Conflict)?"));
     }
 
     #[test]

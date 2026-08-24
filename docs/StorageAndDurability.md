@@ -407,6 +407,21 @@ turn extracted attachments, OCR, or remote assets into payload reads. A concurre
 head change outside a room freezes its dirty state rather than creating a
 sibling version or silently applying a CRDT merge.
 
+Concurrent first join-grant transactions for one tenant, drive, and node
+converge through the unique room row. Exactly one transaction inserts the room
+and initial epoch; a conflicting transaction reloads and locks the committed
+room and current epoch before applying the same base-version, freeze, and
+clean-epoch rules. Successful same-base or clean-epoch callers each commit
+their own one-use grant and exact idempotency receipt, while a dirty
+base-version mismatch freezes the epoch and returns the existing conflict
+outcome without leaving a pending receipt. A room uniqueness collision is
+therefore never exposed as a partial public mutation.
+
+This convergence rule changes neither the room schema nor persisted formats.
+Existing rooms and epochs remain compatible across upgrade. Rollback quiesces
+join-grant creation before restoring a binary without conflict-aware room
+creation; no collaboration data is rewritten or discarded.
+
 A frozen epoch is never silently discarded. When its persisted `dirty` flag
 is false, grant creation may atomically close that epoch and open the next one
 against the current immutable head. A dirty frozen epoch remains blocked until

@@ -10,7 +10,7 @@ use filebelt_database::mcp::{
 };
 use filebelt_database::{Database, DatabaseError};
 use serde_json::json;
-use sqlx::Row as _;
+use sqlx::{Connection as _, PgConnection, Row as _};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -489,6 +489,41 @@ async fn mcp_local_mutations_commit_receipts_atomically() {
 
     verify_local_mutation_idempotency(&database, tenant_id, principal_id).await;
     verify_broker_operation_idempotency(&database, tenant_id, principal_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an empty PostgreSQL database in FILEBELT_MCP_TEST_DATABASE_URL"]
+async fn broker_receipt_runtime_roles_enforce_narrow_grants() {
+    let database_url = std::env::var("FILEBELT_MCP_TEST_DATABASE_URL")
+        .expect("FILEBELT_MCP_TEST_DATABASE_URL is required");
+    let database = Database::connect(&database_url, 4)
+        .await
+        .expect("connect test database");
+    sqlx::raw_sql(include_str!("../../../migrations/postgres/roles.sql"))
+        .execute(database.pool())
+        .await
+        .expect("apply roles");
+    database.migrate().await.expect("apply migrations");
+    sqlx::raw_sql(include_str!("../../../migrations/postgres/grants.sql"))
+        .execute(database.pool())
+        .await
+        .expect("apply grants");
+
+    let tenant_id = Uuid::new_v4();
+    let principal_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO public.tenants (id,slug) VALUES ($1,'mcp-receipt-roles')")
+        .bind(tenant_id)
+        .execute(database.pool())
+        .await
+        .expect("receipt role tenant");
+    sqlx::query("INSERT INTO public.principals (tenant_id,id,kind) VALUES ($1,$2,'user')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .execute(database.pool())
+        .await
+        .expect("receipt role principal");
+
+    verify_broker_receipt_runtime_roles(&database, &database_url, tenant_id, principal_id).await;
 }
 
 async fn verify_broker_config_erasure_boundary(
@@ -1038,6 +1073,420 @@ async fn verify_broker_operation_idempotency(
             .expect("expired incomplete delete replay"),
         McpBrokerOperationStart::Replayed(_)
     ));
+}
+
+async fn verify_broker_receipt_runtime_roles(
+    database: &Database,
+    database_url: &str,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+) {
+    let registration_id = Uuid::new_v4();
+    let completion_id = Uuid::new_v4();
+    let eligible_id = Uuid::new_v4();
+    let incomplete_id = Uuid::new_v4();
+    let broker_operation_id = Uuid::new_v4();
+    let reset_race_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint,result,expires_at) VALUES ($1,$2,$3,'credential_erase',$4,$5,'{}'::jsonb,clock_timestamp()+interval '1 day')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(completion_id)
+        .bind([91_u8; 32].as_slice())
+        .execute(database.pool())
+        .await
+        .expect("seed API completion receipt");
+    sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint,result,api_completed_at,created_at,expires_at) VALUES ($1,$2,$3,'credential_erase',$4,$5,'{}'::jsonb,clock_timestamp(),clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(eligible_id)
+        .bind([92_u8; 32].as_slice())
+        .execute(database.pool())
+        .await
+        .expect("seed eligible maintenance receipt");
+    sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint,result,created_at,expires_at) VALUES ($1,$2,$3,'credential_erase',$4,$5,'{}'::jsonb,clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(incomplete_id)
+        .bind([93_u8; 32].as_slice())
+        .execute(database.pool())
+        .await
+        .expect("seed incomplete maintenance receipt");
+    sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint,result,api_completed_at,created_at,expires_at) VALUES ($1,$2,$3,'credential_erase',$4,$5,'{}'::jsonb,clock_timestamp(),clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(reset_race_id)
+        .bind([95_u8; 32].as_slice())
+        .execute(database.pool())
+        .await
+        .expect("seed broker reset race receipt");
+
+    let mut broker = database.pool().begin().await.expect("begin broker receipt");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker)
+        .await
+        .expect("assume MCP broker role");
+    let admitted = sqlx::query("INSERT INTO filebelt_mcp.broker_operation_receipts (tenant_id,principal_id,registration_id,operation,operation_id,request_fingerprint) VALUES ($1,$2,$3,'credential_erase',$4,$5) ON CONFLICT DO NOTHING")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(registration_id)
+        .bind(broker_operation_id)
+        .bind([94_u8; 32].as_slice())
+        .execute(&mut *broker)
+        .await
+        .expect("admit broker receipt through the MCP broker role")
+        .rows_affected();
+    assert_eq!(admitted, 1);
+    let pending = sqlx::query("SELECT registration_id,operation,request_fingerprint,result,api_completed_at IS NOT NULL AS api_completed,expires_at<=clock_timestamp() AS expired FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 FOR UPDATE")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(broker_operation_id)
+        .fetch_one(&mut *broker)
+        .await
+        .expect("read pending broker receipt through the MCP broker role");
+    assert!(
+        pending
+            .get::<Option<serde_json::Value>, _>("result")
+            .is_none()
+    );
+    let finalized = sqlx::query("UPDATE filebelt_mcp.broker_operation_receipts SET result=$7 WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 AND registration_id=$4 AND operation=$5 AND request_fingerprint=$6 AND result IS NULL")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(broker_operation_id)
+        .bind(registration_id)
+        .bind("credential_erase")
+        .bind([94_u8; 32].as_slice())
+        .bind(json!({"revision": 1, "credential_generation": 1}))
+        .execute(&mut *broker)
+        .await
+        .expect("finalize broker receipt through the MCP broker role")
+        .rows_affected();
+    assert_eq!(finalized, 1);
+    broker.commit().await.expect("commit broker receipt");
+
+    let mut broker_replay = database.pool().begin().await.expect("begin broker replay");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker_replay)
+        .await
+        .expect("assume MCP broker role for replay");
+    let replayed = sqlx::query("SELECT registration_id,operation,request_fingerprint,result,api_completed_at IS NOT NULL AS api_completed,expires_at<=clock_timestamp() AS expired FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 FOR UPDATE")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(broker_operation_id)
+        .fetch_one(&mut *broker_replay)
+        .await
+        .expect("replay broker receipt through the MCP broker role");
+    assert_eq!(
+        replayed.get::<Option<serde_json::Value>, _>("result"),
+        Some(json!({"revision": 1, "credential_generation": 1}))
+    );
+    broker_replay.commit().await.expect("commit broker replay");
+
+    let mut broker_denied = database.pool().begin().await.expect("begin broker denial");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker_denied)
+        .await
+        .expect("assume MCP broker role for denial");
+    assert!(
+        sqlx::query("DELETE FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+            .bind(tenant_id)
+            .bind(principal_id)
+            .bind(broker_operation_id)
+            .execute(&mut *broker_denied)
+            .await
+            .is_err(),
+        "the MCP broker role must not delete broker receipts"
+    );
+    broker_denied
+        .rollback()
+        .await
+        .expect("rollback broker denial");
+
+    let mut broker_select_denied = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin broker select denial");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker_select_denied)
+        .await
+        .expect("assume MCP broker role for select denial");
+    assert!(
+        sqlx::query("SELECT created_at FROM filebelt_mcp.broker_operation_receipts")
+            .fetch_optional(&mut *broker_select_denied)
+            .await
+            .is_err(),
+        "the MCP broker role must not read broader receipt metadata"
+    );
+    broker_select_denied
+        .rollback()
+        .await
+        .expect("rollback broker select denial");
+
+    let mut broker_vault = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin broker vault access");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker_vault)
+        .await
+        .expect("assume MCP broker role for vault access");
+    sqlx::query("SELECT ciphertext FROM filebelt_mcp_vault.secret_envelopes")
+        .fetch_optional(&mut *broker_vault)
+        .await
+        .expect("the MCP broker role may read encrypted vault envelopes");
+    broker_vault
+        .commit()
+        .await
+        .expect("commit broker vault access");
+
+    let mut api = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin API continuation");
+    sqlx::query("SET LOCAL ROLE filebelt_api")
+        .execute(&mut *api)
+        .await
+        .expect("assume API role");
+    let marked = sqlx::query("UPDATE filebelt_mcp.broker_operation_receipts SET api_completed_at=COALESCE(api_completed_at,clock_timestamp()) WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 AND result IS NOT NULL")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(completion_id)
+        .execute(&mut *api)
+        .await
+        .expect("complete broker receipt through the API role")
+        .rows_affected();
+    assert_eq!(marked, 1);
+    api.commit().await.expect("commit API continuation");
+
+    let mut api_denied = database.pool().begin().await.expect("begin API denial");
+    sqlx::query("SET LOCAL ROLE filebelt_api")
+        .execute(&mut *api_denied)
+        .await
+        .expect("assume API role for denial");
+    assert!(
+        sqlx::query("SELECT created_at FROM filebelt_mcp.broker_operation_receipts")
+            .fetch_optional(&mut *api_denied)
+            .await
+            .is_err(),
+        "the API role must not read broader receipt metadata"
+    );
+    api_denied.rollback().await.expect("rollback API denial");
+
+    let mut vault_denied = database.pool().begin().await.expect("begin vault denial");
+    sqlx::query("SET LOCAL ROLE filebelt_api")
+        .execute(&mut *vault_denied)
+        .await
+        .expect("assume API role for vault denial");
+    assert!(
+        sqlx::query("SELECT ciphertext FROM filebelt_mcp_vault.secret_envelopes")
+            .fetch_optional(&mut *vault_denied)
+            .await
+            .is_err(),
+        "the API role must not access the MCP vault"
+    );
+    vault_denied
+        .rollback()
+        .await
+        .expect("rollback vault denial");
+
+    let mut maintenance_select = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin maintenance select denial");
+    sqlx::query("SET LOCAL ROLE filebelt_maintenance")
+        .execute(&mut *maintenance_select)
+        .await
+        .expect("assume maintenance role for select denial");
+    assert!(
+        sqlx::query("SELECT created_at FROM filebelt_mcp.broker_operation_receipts")
+            .fetch_optional(&mut *maintenance_select)
+            .await
+            .is_err(),
+        "the maintenance role must not read broader receipt metadata"
+    );
+    maintenance_select
+        .rollback()
+        .await
+        .expect("rollback maintenance select denial");
+
+    let mut maintenance_update = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin maintenance update denial");
+    sqlx::query("SET LOCAL ROLE filebelt_maintenance")
+        .execute(&mut *maintenance_update)
+        .await
+        .expect("assume maintenance role for update denial");
+    assert!(
+        sqlx::query("UPDATE filebelt_mcp.broker_operation_receipts SET api_completed_at=clock_timestamp() WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+            .bind(tenant_id)
+            .bind(principal_id)
+            .bind(incomplete_id)
+            .execute(&mut *maintenance_update)
+            .await
+            .is_err(),
+        "the maintenance role must not update broker receipts"
+    );
+    maintenance_update
+        .rollback()
+        .await
+        .expect("rollback maintenance update denial");
+
+    let mut maintenance = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin maintenance purge");
+    sqlx::query("SET LOCAL ROLE filebelt_maintenance")
+        .execute(&mut *maintenance)
+        .await
+        .expect("assume maintenance role");
+    let removed = sqlx::query("DELETE FROM filebelt_mcp.broker_operation_receipts AS receipt WHERE (receipt.tenant_id,receipt.principal_id,receipt.operation_id) IN (SELECT candidate.tenant_id,candidate.principal_id,candidate.operation_id FROM filebelt_mcp.broker_operation_receipts AS candidate WHERE candidate.tenant_id=$1 AND candidate.result IS NOT NULL AND candidate.api_completed_at IS NOT NULL AND candidate.expires_at<=clock_timestamp() ORDER BY candidate.expires_at,candidate.operation_id LIMIT $2) AND receipt.result IS NOT NULL AND receipt.api_completed_at IS NOT NULL AND receipt.expires_at<=clock_timestamp()")
+        .bind(tenant_id)
+        .bind(1_i64)
+        .execute(&mut *maintenance)
+        .await
+        .expect("purge the eligible broker receipt through the maintenance role")
+        .rows_affected();
+    assert_eq!(removed, 1);
+    maintenance
+        .commit()
+        .await
+        .expect("commit maintenance purge");
+
+    let completed: bool = sqlx::query_scalar("SELECT api_completed_at IS NOT NULL FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(completion_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("completed API continuation");
+    assert!(completed);
+    let eligible_removed: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3)")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(eligible_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("eligible broker receipt removal");
+    assert!(eligible_removed);
+    let incomplete_retained: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 AND api_completed_at IS NULL)")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(incomplete_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("incomplete broker receipt retention");
+    assert!(incomplete_retained);
+
+    verify_broker_reset_wins_over_blocked_purge(
+        database,
+        database_url,
+        tenant_id,
+        principal_id,
+        registration_id,
+        reset_race_id,
+    )
+    .await;
+}
+
+async fn verify_broker_reset_wins_over_blocked_purge(
+    database: &Database,
+    database_url: &str,
+    tenant_id: Uuid,
+    principal_id: Uuid,
+    registration_id: Uuid,
+    operation_id: Uuid,
+) {
+    let mut observer = PgConnection::connect(database_url)
+        .await
+        .expect("connect purge race observer");
+    let mut broker = database
+        .pool()
+        .begin()
+        .await
+        .expect("begin broker reset race");
+    sqlx::query("SET LOCAL ROLE filebelt_mcp_broker")
+        .execute(&mut *broker)
+        .await
+        .expect("assume MCP broker role for reset race");
+    sqlx::query("SELECT result FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3 FOR UPDATE")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(operation_id)
+        .fetch_one(&mut *broker)
+        .await
+        .expect("lock expired receipt before reset");
+
+    let maintenance_pool = database.pool().clone();
+    let maintenance_task = tokio::spawn(async move {
+        let mut maintenance = maintenance_pool.begin().await?;
+        sqlx::query("SET LOCAL ROLE filebelt_maintenance")
+            .execute(&mut *maintenance)
+            .await?;
+        sqlx::query("SET LOCAL application_name='filebelt-mcp-purge-reset-race'")
+            .execute(&mut *maintenance)
+            .await?;
+        let removed = sqlx::query("DELETE FROM filebelt_mcp.broker_operation_receipts AS receipt WHERE (receipt.tenant_id,receipt.principal_id,receipt.operation_id) IN (SELECT candidate.tenant_id,candidate.principal_id,candidate.operation_id FROM filebelt_mcp.broker_operation_receipts AS candidate WHERE candidate.tenant_id=$1 AND candidate.result IS NOT NULL AND candidate.api_completed_at IS NOT NULL AND candidate.expires_at<=clock_timestamp() ORDER BY candidate.expires_at,candidate.operation_id LIMIT $2) AND receipt.result IS NOT NULL AND receipt.api_completed_at IS NOT NULL AND receipt.expires_at<=clock_timestamp()")
+            .bind(tenant_id)
+            .bind(1_i64)
+            .execute(&mut *maintenance)
+            .await?
+            .rows_affected();
+        maintenance.commit().await?;
+        Ok::<u64, sqlx::Error>(removed)
+    });
+
+    let mut purge_waiting = false;
+    for _ in 0..100 {
+        purge_waiting = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name='filebelt-mcp-purge-reset-race' AND wait_event_type='Lock')")
+            .fetch_one(&mut observer)
+            .await
+            .expect("observe blocked maintenance purge");
+        if purge_waiting {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        purge_waiting,
+        "maintenance purge must wait on the broker row lock"
+    );
+
+    let reset = sqlx::query("UPDATE filebelt_mcp.broker_operation_receipts SET registration_id=$4,operation='credential_erase',request_fingerprint=$5,result=NULL,api_completed_at=NULL,created_at=clock_timestamp(),expires_at=clock_timestamp()+interval '24 hours' WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(operation_id)
+        .bind(registration_id)
+        .bind([96_u8; 32].as_slice())
+        .execute(&mut *broker)
+        .await
+        .expect("reset expired receipt through the broker role")
+        .rows_affected();
+    assert_eq!(reset, 1);
+    broker.commit().await.expect("commit broker reset race");
+
+    let removed = maintenance_task
+        .await
+        .expect("join blocked maintenance purge")
+        .expect("complete blocked maintenance purge");
+    assert_eq!(removed, 0);
+    let retained: bool = sqlx::query_scalar("SELECT result IS NULL AND api_completed_at IS NULL AND expires_at>clock_timestamp() FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND principal_id=$2 AND operation_id=$3")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(operation_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("broker-reset receipt survives blocked purge");
+    assert!(retained);
 }
 
 async fn configure_broker_operation(

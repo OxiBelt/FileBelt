@@ -105,7 +105,7 @@ impl Database {
         if !(1..=1_000).contains(&limit) {
             return Err(DatabaseError::InvalidPersistedValue);
         }
-        let removed = sqlx::query("DELETE FROM filebelt_mcp.broker_operation_receipts WHERE ctid IN (SELECT ctid FROM filebelt_mcp.broker_operation_receipts WHERE tenant_id=$1 AND result IS NOT NULL AND api_completed_at IS NOT NULL AND expires_at<=clock_timestamp() ORDER BY expires_at,operation_id LIMIT $2 FOR UPDATE SKIP LOCKED)")
+        let removed = sqlx::query("DELETE FROM filebelt_mcp.broker_operation_receipts AS receipt WHERE (receipt.tenant_id,receipt.principal_id,receipt.operation_id) IN (SELECT candidate.tenant_id,candidate.principal_id,candidate.operation_id FROM filebelt_mcp.broker_operation_receipts AS candidate WHERE candidate.tenant_id=$1 AND candidate.result IS NOT NULL AND candidate.api_completed_at IS NOT NULL AND candidate.expires_at<=clock_timestamp() ORDER BY candidate.expires_at,candidate.operation_id LIMIT $2) AND receipt.result IS NOT NULL AND receipt.api_completed_at IS NOT NULL AND receipt.expires_at<=clock_timestamp()")
             .bind(tenant_id)
             .bind(limit)
             .execute(&self.pool)

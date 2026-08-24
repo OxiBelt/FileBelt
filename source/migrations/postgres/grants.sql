@@ -51,7 +51,8 @@ GRANT USAGE ON SCHEMA public
 GRANT USAGE ON SCHEMA public, filebelt_collaboration
   TO filebelt_collaboration_definer;
 GRANT USAGE ON SCHEMA filebelt_mcp
-  TO filebelt_api, filebelt_recovery, filebelt_mcp_broker, filebelt_collaboration;
+  TO filebelt_api, filebelt_maintenance, filebelt_recovery, filebelt_mcp_broker,
+     filebelt_collaboration;
 GRANT USAGE ON SCHEMA filebelt_mcp_vault TO filebelt_recovery, filebelt_mcp_broker;
 GRANT USAGE ON SCHEMA filebelt_collaboration
   TO filebelt_api, filebelt_io, filebelt_maintenance, filebelt_recovery,
@@ -203,6 +204,8 @@ GRANT INSERT ON filebelt_mcp.invocations TO filebelt_api;
 GRANT INSERT ON filebelt_mcp.capability_snapshots, filebelt_mcp.capabilities
   TO filebelt_api;
 GRANT UPDATE (superseded_at) ON filebelt_mcp.capability_snapshots TO filebelt_api;
+GRANT SELECT (tenant_id, principal_id, operation_id, result, api_completed_at)
+  ON filebelt_mcp.broker_operation_receipts TO filebelt_api;
 GRANT UPDATE (api_completed_at) ON filebelt_mcp.broker_operation_receipts TO filebelt_api;
 GRANT UPDATE (state, response_bytes, reason_code, semantic_output_digest, finished_at)
   ON filebelt_mcp.invocations TO filebelt_api;
@@ -224,15 +227,26 @@ GRANT SELECT ON
   filebelt_mcp.oauth_attempts, filebelt_mcp.invocation_intents,
   filebelt_mcp.invocations, filebelt_mcp.invocation_attachments,
   filebelt_mcp.rate_buckets, filebelt_mcp.runner_leases,
-  filebelt_mcp.broker_operation_receipts,
   filebelt_mcp.deletion_tombstones,
   filebelt_mcp.service_principals, filebelt_mcp.service_identity_bindings,
   filebelt_mcp.managed_templates, filebelt_mcp.template_assignments,
   filebelt_mcp.admin_block_rules
   TO filebelt_mcp_broker;
 GRANT SELECT, INSERT ON filebelt_mcp.runner_slot_admission TO filebelt_mcp_broker;
-GRANT SELECT, INSERT, UPDATE, DELETE
-  ON filebelt_mcp.broker_operation_receipts TO filebelt_mcp_broker;
+GRANT SELECT (
+  tenant_id, principal_id, registration_id, operation, operation_id,
+  request_fingerprint, result, api_completed_at, expires_at
+) ON filebelt_mcp.broker_operation_receipts TO filebelt_mcp_broker;
+GRANT INSERT (
+  tenant_id, principal_id, registration_id, operation, operation_id, request_fingerprint
+) ON filebelt_mcp.broker_operation_receipts TO filebelt_mcp_broker;
+GRANT UPDATE (
+  registration_id, operation, request_fingerprint, result, api_completed_at,
+  created_at, expires_at
+) ON filebelt_mcp.broker_operation_receipts TO filebelt_mcp_broker;
+GRANT SELECT (
+  tenant_id, principal_id, operation_id, result, api_completed_at, expires_at
+) ON filebelt_mcp.broker_operation_receipts TO filebelt_maintenance;
 GRANT DELETE ON filebelt_mcp.broker_operation_receipts TO filebelt_maintenance;
 GRANT SELECT, INSERT, UPDATE ON filebelt_mcp.runner_slot_reservations
   TO filebelt_mcp_broker;

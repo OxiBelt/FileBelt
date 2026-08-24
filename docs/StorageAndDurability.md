@@ -247,6 +247,26 @@ expired journal rows per sweep only after both broker result finalization and
 API completion, so an incomplete delete or probe continuation remains
 recoverable.
 
+Receipt access remains column-scoped. `filebelt_api` has `SELECT` only on
+`tenant_id`, `principal_id`, `operation_id`, `result`, and
+`api_completed_at`, plus `UPDATE` only on `api_completed_at`.
+`filebelt_maintenance` has schema usage, table deletion, and `SELECT` only on
+those identity and completion columns plus `expires_at`. Cleanup selects a
+bounded candidate set and deletes by the receipt composite primary key rather
+than by a physical tuple identifier, then rechecks completion and expiry after
+acquiring each delete lock so a concurrently reset operation cannot be removed.
+`filebelt_mcp_broker` retains only the
+receipt reads, inserts, and updates used by its fixed journal lifecycle and can
+no longer delete receipts. The API and maintenance roles gain neither
+table-level `SELECT` nor any `filebelt_mcp_vault` privilege, and the reviewed
+grant verifier rejects broader access.
+
+The receipt query, grant script, and reviewed verifier are one compatibility
+unit. Rollout applies that unit before starting API and maintenance traffic.
+Rollback stops maintenance before reverting a member of the unit and retains
+the additive column grants until every dependent binary is quiesced; no schema
+or persisted-data conversion must be reversed.
+
 ## Mount state, verifier vault, and recovery
 
 `filebelt_mount` owns the policy and runtime state used by both protocol

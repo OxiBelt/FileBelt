@@ -223,7 +223,11 @@ fn expected_schema_privilege(role: &str, schema: &str, privilege: &str) -> bool 
         "public" => true,
         "filebelt_mcp" => matches!(
             role,
-            "filebelt_api" | "filebelt_recovery" | "filebelt_mcp_broker" | "filebelt_collaboration"
+            "filebelt_api"
+                | "filebelt_maintenance"
+                | "filebelt_recovery"
+                | "filebelt_mcp_broker"
+                | "filebelt_collaboration"
         ),
         "filebelt_mcp_vault" => matches!(role, "filebelt_recovery" | "filebelt_mcp_broker"),
         "filebelt_collaboration" => matches!(
@@ -986,6 +990,7 @@ fn expected_mcp_table_privilege(role: &str, table: &str, privilege: &str) -> boo
                 || table == "runner_slot_reservations" && matches!(privilege, "INSERT" | "UPDATE")
                 || table == "policy_generations" && privilege == "INSERT"
         }
+        "filebelt_maintenance" => table == "broker_operation_receipts" && privilege == "DELETE",
         _ => false,
     }
 }
@@ -1059,6 +1064,56 @@ fn expected_column_privilege(
                     && matches!(column, "tenant_id" | "attempt_id" | "kek_generation")));
     }
     if schema == "filebelt_mcp" {
+        if table == "broker_operation_receipts" {
+            return match (role, privilege) {
+                ("filebelt_api", "SELECT") => matches!(
+                    column,
+                    "tenant_id" | "principal_id" | "operation_id" | "result" | "api_completed_at"
+                ),
+                ("filebelt_api", "UPDATE") => column == "api_completed_at",
+                ("filebelt_maintenance", "SELECT") => matches!(
+                    column,
+                    "tenant_id"
+                        | "principal_id"
+                        | "operation_id"
+                        | "result"
+                        | "api_completed_at"
+                        | "expires_at"
+                ),
+                ("filebelt_mcp_broker", "SELECT") => matches!(
+                    column,
+                    "tenant_id"
+                        | "principal_id"
+                        | "registration_id"
+                        | "operation"
+                        | "operation_id"
+                        | "request_fingerprint"
+                        | "result"
+                        | "api_completed_at"
+                        | "expires_at"
+                ),
+                ("filebelt_mcp_broker", "INSERT") => matches!(
+                    column,
+                    "tenant_id"
+                        | "principal_id"
+                        | "registration_id"
+                        | "operation"
+                        | "operation_id"
+                        | "request_fingerprint"
+                ),
+                ("filebelt_mcp_broker", "UPDATE") => matches!(
+                    column,
+                    "registration_id"
+                        | "operation"
+                        | "request_fingerprint"
+                        | "result"
+                        | "api_completed_at"
+                        | "created_at"
+                        | "expires_at"
+                ),
+                _ => false,
+            };
+        }
         if role == "filebelt_collaboration" && table == "invocations" && privilege == "SELECT" {
             return matches!(
                 column,
@@ -1297,6 +1352,9 @@ fn expected_column_privilege(
         }
         "filebelt_maintenance" => {
             (table == "tenants" && privilege == "SELECT" && matches!(column, "id" | "slug"))
+                || (table == "file_versions"
+                    && privilege == "SELECT"
+                    && matches!(column, "tenant_id" | "payload_id"))
                 || (table == "drives"
                     && privilege == "SELECT"
                     && matches!(
@@ -1845,17 +1903,109 @@ mod tests {
             "quota_bytes",
             "UPDATE"
         ));
+        assert!(expected_column_privilege(
+            "filebelt_maintenance",
+            "public",
+            "file_versions",
+            "payload_id",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_maintenance",
+            "public",
+            "file_versions",
+            "node_id",
+            "SELECT"
+        ));
         assert!(!expected_table_privilege(
             "filebelt_api",
             "filebelt_mcp_vault",
             "secret_envelopes",
             "SELECT"
         ));
+        assert!(expected_schema_privilege(
+            "filebelt_maintenance",
+            "filebelt_mcp",
+            "USAGE"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_maintenance",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "DELETE"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_maintenance",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "SELECT"
+        ));
+        assert!(!expected_table_privilege(
+            "filebelt_mcp_broker",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "DELETE"
+        ));
+        assert!(expected_column_privilege(
+            "filebelt_mcp_broker",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "request_fingerprint",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_mcp_broker",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "created_at",
+            "SELECT"
+        ));
+        assert!(expected_column_privilege(
+            "filebelt_api",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "api_completed_at",
+            "UPDATE"
+        ));
+        assert!(expected_column_privilege(
+            "filebelt_api",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "result",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_api",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "created_at",
+            "SELECT"
+        ));
+        assert!(expected_column_privilege(
+            "filebelt_maintenance",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "expires_at",
+            "SELECT"
+        ));
+        assert!(!expected_column_privilege(
+            "filebelt_maintenance",
+            "filebelt_mcp",
+            "broker_operation_receipts",
+            "result",
+            "UPDATE"
+        ));
         assert!(expected_table_privilege(
             "filebelt_mcp_broker",
             "filebelt_mcp_vault",
             "secret_envelopes",
             "UPDATE"
+        ));
+        assert!(expected_table_privilege(
+            "filebelt_mcp_broker",
+            "filebelt_mcp_vault",
+            "secret_envelopes",
+            "SELECT"
         ));
         assert!(!expected_table_privilege(
             "filebelt_mcp_broker",

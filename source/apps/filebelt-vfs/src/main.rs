@@ -116,6 +116,7 @@ struct MountIoClient {
 #[serde(deny_unknown_fields)]
 struct CreateCredentialRequest {
     operation_id: Uuid,
+    operation_generation: i64,
     principal_id: Uuid,
     protocol: String,
     read_only: bool,
@@ -2022,6 +2023,7 @@ async fn create_credential(
         .checked_add(jiff::SignedDuration::from_hours(7 * 24))
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "credential clock failed"))?;
     if !valid_credential_operation_id(request.operation_id)
+        || request.operation_generation <= 0
         || !matches!(request.protocol.as_str(), "smb" | "ftps")
         || !request.read_only
         || request.allowed_drive_ids.is_empty()
@@ -2100,6 +2102,7 @@ async fn create_credential(
             state.tenant_id,
             request.principal_id,
             credential_id,
+            request.operation_generation,
             &request.protocol,
             &username,
             verifier_kind,
@@ -2119,6 +2122,10 @@ async fn create_credential(
         )
         .await
         .map_err(|error| match error {
+            DatabaseError::StaleGeneration => (
+                StatusCode::PRECONDITION_FAILED,
+                "mount credential operation is stale",
+            ),
             DatabaseError::NotFound | DatabaseError::Conflict => {
                 (StatusCode::CONFLICT, "mount policy rejected credential")
             }

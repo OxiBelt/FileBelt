@@ -1265,6 +1265,40 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/mounts/credential-operations": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** @description Prepares the authenticated principal's bounded, two-minute credential-creation slot after recent OIDC authentication. Repeating this request while the slot is prepared and unexpired returns the same tuple. */
+        readonly post: operations["prepareMountCredentialOperation"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/mounts/credential-operations/{operation_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** @description Recovers the exact prepared credential-creation operation after recent OIDC authentication. It cancels an uncommitted operation or revokes the credential committed by that operation, including after the principal's current slot rotates. Unknown tuples and stale, expired, generation-mismatched, or cross-principal tuples without that exact committed credential are hidden behind a non-mutating 404. */
+        readonly delete: operations["cancelMountCredentialOperation"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/mounts/credentials": {
         readonly parameters: {
             readonly query?: never;
@@ -1274,7 +1308,7 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        /** @description Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The caller supplies a fresh operation UUID that becomes the credential identifier so an unknown response can be revoked without replaying creation. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected. */
+        /** @description Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The operation UUID and generation must be the unexpired server-prepared tuple for the authenticated principal; the operation UUID becomes the credential identifier and creation is never retried. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected. */
         readonly post: operations["createMountCredential"];
         readonly delete?: never;
         readonly options?: never;
@@ -1920,7 +1954,9 @@ export interface components {
             readonly bound_device_id: components["schemas"]["UuidV4"] | null;
             /** Format: date-time */
             readonly expires_at: string;
-            /** @description Fresh caller-generated operation identifier. It becomes the credential ID and must never be reused to retry secret creation. */
+            /** Format: int64 */
+            readonly operation_generation: number;
+            /** @description Server-prepared operation identifier. It becomes the credential ID and must never be reused to retry secret creation. */
             readonly operation_id: components["schemas"]["UuidV4"];
             /** @enum {string} */
             readonly protocol: "smb" | "ftps";
@@ -2423,6 +2459,13 @@ export interface components {
             readonly username: string;
             /** @enum {string} */
             readonly verifier_kind: "ntlm_verifier" | "hmac_sha256";
+        };
+        readonly MountCredentialOperation: {
+            /** Format: date-time */
+            readonly expires_at: string;
+            /** Format: int64 */
+            readonly operation_generation: number;
+            readonly operation_id: components["schemas"]["UuidV4"];
         };
         readonly MountDevice: {
             /** @constant */
@@ -2966,6 +3009,7 @@ export interface components {
         readonly Limit: number;
         readonly McpGrantId: components["schemas"]["UuidV4"];
         readonly MountCredentialId: components["schemas"]["UuidV4"];
+        readonly MountCredentialOperationId: components["schemas"]["UuidV4"];
         readonly MountProtocol: "smb" | "ftps";
         readonly NfsConflictId: components["schemas"]["UuidV4"];
         readonly NfsProposalId: components["schemas"]["UuidV4"];
@@ -5871,6 +5915,67 @@ export interface operations {
                 content: {
                     readonly "application/json": components["schemas"]["MountOverview"];
                 };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly prepareMountCredentialOperation: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Existing unexpired prepared operation. */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MountCredentialOperation"];
+                };
+            };
+            /** @description Newly prepared operation. */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MountCredentialOperation"];
+                };
+            };
+            readonly default: components["responses"]["Problem"];
+        };
+    };
+    readonly cancelMountCredentialOperation: {
+        readonly parameters: {
+            readonly query: {
+                readonly expected_generation: number;
+            };
+            readonly header: {
+                readonly Origin: components["parameters"]["Origin"];
+                readonly "Sec-Fetch-Site": components["parameters"]["FetchSite"];
+                readonly "X-FileBelt-Csrf": components["parameters"]["Csrf"];
+            };
+            readonly path: {
+                readonly operation_id: components["parameters"]["MountCredentialOperationId"];
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Exact operation cancelled or its committed credential revoked. */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
             };
             readonly default: components["responses"]["Problem"];
         };

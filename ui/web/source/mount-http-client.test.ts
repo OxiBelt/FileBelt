@@ -11,6 +11,7 @@ import {
 
 const DriveId = "00000000-0000-4000-8000-000000000071";
 const CredentialId = "00000000-0000-4000-8000-000000000072";
+const OperationGeneration = 7;
 
 const Session = {
   csrf_token: "csrf-memory-only",
@@ -28,6 +29,7 @@ class ContractServer {
   MalformedSuccess = false;
   Rejected = false;
   ReauthenticationRequired = false;
+  ReusedOperation = false;
   TransportFailure = false;
   Unavailable = false;
 
@@ -37,6 +39,20 @@ class ContractServer {
     this.Requests.push(RequestValue);
     const Url = new URL(RequestValue.url);
     if (Url.pathname === "/api/v1/session") return Json(Session);
+    if (Url.pathname === "/api/v1/mounts/credential-operations" && RequestValue.method === "POST")
+      return Json(
+        {
+          expires_at: "2026-08-08T10:02:00Z",
+          operation_generation: OperationGeneration,
+          operation_id: CredentialId,
+        },
+        this.ReusedOperation ? 200 : 201,
+      );
+    if (
+      Url.pathname === `/api/v1/mounts/credential-operations/${CredentialId}` &&
+      RequestValue.method === "DELETE"
+    )
+      return new Response(null, { status: 204 });
     if (Url.pathname === "/api/v1/mounts/credentials" && RequestValue.method === "POST") {
       if (this.TransportFailure) throw new TypeError("Connection interrupted");
       if (this.Unavailable) return new Response(null, { status: 503 });
@@ -92,6 +108,7 @@ describe("HttpMountSettingsClient", () => {
       allowed_drive_ids: [DriveId],
       bound_device_id: null,
       expires_at: "2026-08-15T10:00:00Z",
+      operation_generation: OperationGeneration,
       operation_id: CredentialId,
       protocol: "smb",
       read_only: true,
@@ -105,6 +122,7 @@ describe("HttpMountSettingsClient", () => {
       allowed_drive_ids: [DriveId],
       bound_device_id: null,
       expires_at: "2026-08-15T10:00:00Z",
+      operation_generation: OperationGeneration,
       operation_id: CredentialId,
       protocol: "smb",
       read_only: true,
@@ -121,6 +139,7 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_generation: OperationGeneration,
         operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
@@ -138,11 +157,12 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_generation: OperationGeneration,
         operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
       }),
-    ).rejects.toBeInstanceOf(MountCredentialOutcomeUnknownError);
+    ).rejects.toMatchObject({ OperationGeneration, OperationId: CredentialId });
     expect(Server.Requests.filter(({ method: Method }) => Method === "POST")).toHaveLength(1);
   });
 
@@ -156,11 +176,12 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_generation: OperationGeneration,
         operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
       }),
-    ).rejects.toMatchObject({ CredentialId });
+    ).rejects.toMatchObject({ OperationGeneration, OperationId: CredentialId });
     expect(Server.Requests.filter(({ method: Method }) => Method === "POST")).toHaveLength(1);
   });
 
@@ -174,11 +195,12 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_generation: OperationGeneration,
         operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
       }),
-    ).rejects.toMatchObject({ CredentialId });
+    ).rejects.toMatchObject({ OperationGeneration, OperationId: CredentialId });
   });
 
   it("keeps a definite client rejection distinct from an unknown creation outcome", async () => {
@@ -191,6 +213,7 @@ describe("HttpMountSettingsClient", () => {
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: "2026-08-15T10:00:00Z",
+        operation_generation: OperationGeneration,
         operation_id: CredentialId,
         protocol: "smb",
         read_only: true,
@@ -204,6 +227,49 @@ describe("HttpMountSettingsClient", () => {
     const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
 
     await expect(Client.revokeCredential(CredentialId)).resolves.toBeUndefined();
-    expect(Server.Requests.at(-1)?.method).toBe("DELETE");
+    const RequestValue = Server.Requests.at(-1);
+    expect(RequestValue?.method).toBe("DELETE");
+    expect(RequestValue?.url).toBe(
+      `https://filebelt.example.test/api/v1/mounts/credentials/${CredentialId}`,
+    );
+  });
+
+  it("prepares a server-owned operation tuple with the mutation protections", async () => {
+    const Server = new ContractServer();
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(Client.prepareCredentialOperation()).resolves.toEqual({
+      Created: true,
+      Operation: {
+        expires_at: "2026-08-08T10:02:00Z",
+        operation_generation: OperationGeneration,
+        operation_id: CredentialId,
+      },
+    });
+    const RequestValue = Server.Requests.at(-1);
+    expect(RequestValue?.method).toBe("POST");
+    expect(RequestValue?.headers.get("X-FileBelt-Csrf")).toBe("csrf-memory-only");
+  });
+
+  it("preserves whether prepare replayed an existing operation", async () => {
+    const Server = new ContractServer();
+    Server.ReusedOperation = true;
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(Client.prepareCredentialOperation()).resolves.toMatchObject({ Created: false });
+  });
+
+  it("recovers the exact operation tuple through the dedicated route", async () => {
+    const Server = new ContractServer();
+    const Client = new HttpMountSettingsClient(Server.fetch, "https://filebelt.example.test");
+
+    await expect(
+      Client.cancelCredentialOperation(CredentialId, OperationGeneration),
+    ).resolves.toBeUndefined();
+    const RequestValue = Server.Requests.at(-1);
+    expect(RequestValue?.method).toBe("DELETE");
+    expect(RequestValue?.url).toBe(
+      `https://filebelt.example.test/api/v1/mounts/credential-operations/${CredentialId}?expected_generation=${OperationGeneration}`,
+    );
   });
 });

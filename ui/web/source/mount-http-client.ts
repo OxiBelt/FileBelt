@@ -11,6 +11,12 @@ export type MountProtocol = components["schemas"]["MountPolicy"]["protocol"];
 export type PutMountPolicy = components["schemas"]["PutMountPolicy"];
 export type CreateMountCredential = components["schemas"]["CreateMountCredential"];
 export type CreatedMountCredential = components["schemas"]["CreatedMountCredential"];
+export type MountCredentialOperation = components["schemas"]["MountCredentialOperation"];
+
+export interface PreparedMountCredentialOperation {
+  readonly Created: boolean;
+  readonly Operation: MountCredentialOperation;
+}
 
 interface ApiResult<T> {
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
@@ -37,20 +43,24 @@ export class MountReauthenticationRequiredError extends Error {
 }
 
 export class MountCredentialOutcomeUnknownError extends Error {
-  readonly CredentialId: string;
+  readonly OperationGeneration: number;
+  readonly OperationId: string;
 
-  constructor(CredentialId: string) {
+  constructor(OperationId: string, OperationGeneration: number) {
     super(
-      "The credential creation result is unknown. FileBelt must revoke the operation identifier before another credential is created.",
+      "The credential creation result is unknown. FileBelt must recover the prepared operation before another credential is created.",
     );
     this.name = "MountCredentialOutcomeUnknownError";
-    this.CredentialId = CredentialId;
+    this.OperationGeneration = OperationGeneration;
+    this.OperationId = OperationId;
   }
 }
 
 export interface MountSettingsClient {
+  cancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void>;
   createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential>;
   getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview>;
+  prepareCredentialOperation(): Promise<PreparedMountCredentialOperation>;
   putPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void>;
   revokeCredential(CredentialId: string): Promise<void>;
 }
@@ -89,6 +99,16 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     );
   }
 
+  async prepareCredentialOperation(): Promise<PreparedMountCredentialOperation> {
+    const Result = await this.#Api.POST("/api/v1/mounts/credential-operations", {
+      params: { header: await this.#mutationHeaders() },
+    });
+    return {
+      Created: Result.response.status === 201,
+      Operation: RequireData<MountCredentialOperation>(Result),
+    };
+  }
+
   async createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential> {
     const Headers = await this.#mutationHeaders();
     const Result = await (async () => {
@@ -98,14 +118,29 @@ export class HttpMountSettingsClient implements MountSettingsClient {
           params: { header: Headers },
         });
       } catch {
-        throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+        throw new MountCredentialOutcomeUnknownError(
+          Input.operation_id,
+          Input.operation_generation,
+        );
       }
     })();
     if (Result.response.status >= 500)
-      throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+      throw new MountCredentialOutcomeUnknownError(Input.operation_id, Input.operation_generation);
     if (Result.response.ok && Result.data === undefined)
-      throw new MountCredentialOutcomeUnknownError(Input.operation_id);
+      throw new MountCredentialOutcomeUnknownError(Input.operation_id, Input.operation_generation);
     return RequireData<CreatedMountCredential>(Result);
+  }
+
+  async cancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void> {
+    const Result = await this.#Api.DELETE("/api/v1/mounts/credential-operations/{operation_id}", {
+      params: {
+        header: await this.#mutationHeaders(),
+        path: { operation_id: OperationId },
+        query: { expected_generation: ExpectedGeneration },
+      },
+    });
+    if (Result.response.status === 404) return;
+    await RequireSuccess(Result);
   }
 
   async revokeCredential(CredentialId: string): Promise<void> {
@@ -115,9 +150,6 @@ export class HttpMountSettingsClient implements MountSettingsClient {
         path: { credential_id: CredentialId },
       },
     });
-    // Revocation is the recovery barrier for a caller-owned operation UUID.
-    // A definite 404 proves there is no active credential visible to that
-    // principal and is therefore already the desired terminal state.
     if (Result.response.status === 404) return;
     await RequireSuccess(Result);
   }

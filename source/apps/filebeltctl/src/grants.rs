@@ -1040,6 +1040,21 @@ fn expected_column_privilege(
                     | "created_at"
                     | "cancelled_at"
             ),
+            ("filebelt_recovery", "credential_creation_slots", "SELECT") => matches!(
+                column,
+                "tenant_id"
+                    | "principal_id"
+                    | "operation_id"
+                    | "operation_generation"
+                    | "state"
+                    | "prepared_at"
+                    | "expires_at"
+                    | "committed_at"
+                    | "cancelled_at"
+            ),
+            ("filebelt_recovery", "credential_creation_cutovers", "SELECT") => {
+                matches!(column, "name" | "removed_cancelled_fences" | "completed_at")
+            }
             _ => false,
         };
     }
@@ -1619,6 +1634,11 @@ fn expected_function_privilege(role: &str, function: &str) -> bool {
         || (function == "filebelt_mount.create_session_principal(uuid,uuid)"
             && role == "filebelt_vfs")
         || (function == "filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)"
+            && role == "filebelt_api")
+        || (function == "filebelt_mount.prepare_credential_creation_operation(uuid,uuid)"
+            && role == "filebelt_api")
+        || (function
+            == "filebelt_mount.cancel_credential_creation_operation(uuid,uuid,uuid,bigint)"
             && role == "filebelt_api")
         || (function == "filebelt_mount.fence_nfs_mapping_sessions(uuid,uuid,uuid,bigint,text)"
             && role == "filebelt_api")

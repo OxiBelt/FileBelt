@@ -23,7 +23,9 @@ import {
   MountReauthenticationRequiredError,
 } from "./mount-http-client.js";
 import type {
+  CreateMountCredential,
   CreatedMountCredential,
+  MountCredentialOperation,
   MountOverview,
   MountProtocol,
   MountSettingsClient,
@@ -46,8 +48,56 @@ interface PolicyDraft {
 
 const Protocols = ["smb", "ftps"] as const;
 
-export function MountCredentialCreationBlocked(UnresolvedCredentialId: string | null): boolean {
-  return UnresolvedCredentialId !== null;
+export function MountCredentialCreationBlocked(
+  UnresolvedOperation: MountCredentialOperation | null,
+): boolean {
+  return UnresolvedOperation !== null;
+}
+
+type MountCredentialDraft = Omit<CreateMountCredential, "operation_generation" | "operation_id">;
+
+type MountCredentialCreationClient = Pick<
+  MountSettingsClient,
+  "cancelCredentialOperation" | "createCredential" | "prepareCredentialOperation"
+>;
+
+export class MountCredentialRecoveryRequiredError extends Error {
+  readonly Operation: MountCredentialOperation;
+
+  constructor(Operation: MountCredentialOperation) {
+    super(
+      `Credential operation ${Operation.operation_id} generation ${Operation.operation_generation} could not be recovered. Retry recovery before creating another credential.`,
+    );
+    this.name = "MountCredentialRecoveryRequiredError";
+    this.Operation = Operation;
+  }
+}
+
+export async function CreateCredentialWithRecovery(
+  Client: MountCredentialCreationClient,
+  Draft: MountCredentialDraft,
+): Promise<CreatedMountCredential> {
+  const { Operation } = await Client.prepareCredentialOperation();
+  try {
+    return await Client.createCredential({
+      ...Draft,
+      operation_generation: Operation.operation_generation,
+      operation_id: Operation.operation_id,
+    });
+  } catch (Cause) {
+    if (!(Cause instanceof MountCredentialOutcomeUnknownError)) throw Cause;
+    try {
+      await Client.cancelCredentialOperation(
+        Operation.operation_id,
+        Operation.operation_generation,
+      );
+    } catch {
+      throw new MountCredentialRecoveryRequiredError(Operation);
+    }
+    throw new Error(
+      "The creation response was interrupted. Any credential from that operation was revoked; create a new credential to receive a new password.",
+    );
+  }
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns the nested client props and this component only observes them.
@@ -775,7 +825,9 @@ function CredentialCreator({
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   const [Protocol, SetProtocol] = useState<MountProtocol>("smb");
   const [DeviceId, SetDeviceId] = useState("");
-  const [UnresolvedCredentialId, SetUnresolvedCredentialId] = useState<string | null>(null);
+  const [UnresolvedOperation, SetUnresolvedOperation] = useState<MountCredentialOperation | null>(
+    null,
+  );
   const Policy = useMemo(
     () => Policies.find(({ protocol: Value }) => Value === Protocol),
     [Policies, Protocol],
@@ -784,39 +836,24 @@ function CredentialCreator({
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
   const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
     Event.preventDefault();
-    if (MountCredentialCreationBlocked(UnresolvedCredentialId)) return;
+    if (MountCredentialCreationBlocked(UnresolvedOperation)) return;
     SetBusy(true);
     try {
       const ExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       OnCreated(
-        await Client.createCredential({
+        await CreateCredentialWithRecovery(Client, {
           allowed_drive_ids: Allowed,
           bound_device_id: DeviceId.length === 0 ? null : DeviceId,
           expires_at: ExpiresAt,
-          operation_id: crypto.randomUUID(),
           protocol: Protocol,
           read_only: true,
         }),
       );
     } catch (Cause) {
-      if (Cause instanceof MountCredentialOutcomeUnknownError) {
-        try {
-          await Client.revokeCredential(Cause.CredentialId);
-          SetUnresolvedCredentialId(null);
-          OnError(
-            new Error(
-              "The creation response was interrupted. Any credential from that operation was revoked; create a new credential to receive a new password.",
-            ),
-          );
-        } catch {
-          SetUnresolvedCredentialId(Cause.CredentialId);
-          OnError(
-            new Error(
-              `The creation result is unknown and automatic revocation failed. Revoke credential ${Cause.CredentialId} before creating another credential.`,
-            ),
-          );
-        }
-      } else OnError(Cause);
+      if (Cause instanceof MountCredentialRecoveryRequiredError)
+        SetUnresolvedOperation(Cause.Operation);
+      else SetUnresolvedOperation(null);
+      OnError(Cause);
     } finally {
       SetBusy(false);
     }
@@ -833,10 +870,11 @@ function CredentialCreator({
         </div>
       </div>
       <form className="fb-mount-create-form" onSubmit={(Event) => void Submit(Event)}>
-        {UnresolvedCredentialId === null ? null : (
+        {UnresolvedOperation === null ? null : (
           <div className="fb-error" role="alert">
             <span>
-              Creation outcome {UnresolvedCredentialId} must be revoked before another credential
+              Creation operation {UnresolvedOperation.operation_id} generation{" "}
+              {UnresolvedOperation.operation_generation} must be recovered before another credential
               can be created.
             </span>
             <Button
@@ -844,12 +882,15 @@ function CredentialCreator({
               disabled={Busy}
               onClick={() => {
                 SetBusy(true);
-                void Client.revokeCredential(UnresolvedCredentialId).then(
+                void Client.cancelCredentialOperation(
+                  UnresolvedOperation.operation_id,
+                  UnresolvedOperation.operation_generation,
+                ).then(
                   () => {
-                    SetUnresolvedCredentialId(null);
+                    SetUnresolvedOperation(null);
                     OnError(
                       new Error(
-                        "The unresolved credential operation was revoked. You can now create a new one-time credential.",
+                        "The unresolved credential operation was recovered. You can now create a new one-time credential.",
                       ),
                     );
                     SetBusy(false);
@@ -904,7 +945,7 @@ function CredentialCreator({
           appearance="primary"
           disabled={
             Busy ||
-            MountCredentialCreationBlocked(UnresolvedCredentialId) ||
+            MountCredentialCreationBlocked(UnresolvedOperation) ||
             Policy?.enabled !== true ||
             Allowed.length === 0
           }

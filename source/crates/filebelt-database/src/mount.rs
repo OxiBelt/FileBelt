@@ -48,6 +48,14 @@ pub struct MountCredentialRecord {
     pub revoked_at: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MountCredentialOperationRecord {
+    pub created: bool,
+    pub operation_id: Uuid,
+    pub operation_generation: i64,
+    pub expires_at: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct MountAuthenticationMaterial {
     pub credential: MountCredentialRecord,
@@ -2882,12 +2890,34 @@ impl Database {
         Ok(policy)
     }
 
+    pub async fn prepare_mount_credential_operation(
+        &self,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+    ) -> Result<MountCredentialOperationRecord, DatabaseError> {
+        let row = sqlx::query(
+            "SELECT created,operation_id,operation_generation,expires_at::text \
+             FROM filebelt_mount.prepare_credential_creation_operation($1,$2)",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .fetch_one(self.pool())
+        .await?;
+        Ok(MountCredentialOperationRecord {
+            created: row.get("created"),
+            operation_id: row.get("operation_id"),
+            operation_generation: row.get("operation_generation"),
+            expires_at: row.get("expires_at"),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create_mount_credential(
         &self,
         tenant_id: Uuid,
         principal_id: Uuid,
         credential_id: Uuid,
+        creation_operation_generation: i64,
         protocol: &str,
         username: &str,
         verifier_kind: &str,
@@ -2902,6 +2932,7 @@ impl Database {
             ("smb", "ntlm_verifier") | ("ftps", "hmac_sha256")
         ) || !(16..=96).contains(&username.len())
             || allowed_drive_ids.len() > 256
+            || creation_operation_generation <= 0
             || envelope.kek_generation <= 0
             || envelope.aad_version != 1
             || envelope.wrapped_dek.len() != 48
@@ -2947,12 +2978,13 @@ impl Database {
         let id = credential_id;
         sqlx::query(
             "INSERT INTO filebelt_mount.credentials \
-             (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,allowed_drive_ids,bound_device_id,expires_at) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz)",
+             (tenant_id,id,principal_id,creation_operation_generation,protocol,username,verifier_kind,read_only,allowed_drive_ids,bound_device_id,expires_at) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz)",
         )
         .bind(tenant_id)
         .bind(id)
         .bind(principal_id)
+        .bind(creation_operation_generation)
         .bind(protocol)
         .bind(username)
         .bind(verifier_kind)
@@ -2962,7 +2994,7 @@ impl Database {
         .bind(expires_at)
         .execute(&mut *transaction)
         .await
-        .map_err(map_conflict)?;
+        .map_err(map_mount_credential_operation)?;
         sqlx::query(
             "INSERT INTO filebelt_mount_vault.secret_envelopes \
              (tenant_id,credential_id,owner_principal_id,credential_generation,namespace,secret_kind,\
@@ -3070,12 +3102,76 @@ impl Database {
         .fetch_one(&mut *transaction)
         .await?;
         if !row.get::<bool, _>("credential_existed") {
-            // A missing or already-revoked credential remains an existence-
-            // hiding 404, but only after its durable cancellation fence commits.
-            transaction.commit().await?;
+            // Ordinary revocation of a missing credential is state-free.  The
+            // dedicated creation-operation route owns response-loss recovery.
             return Err(DatabaseError::NotFound);
         }
         let generation: i64 = row.get("generation");
+        Self::finalize_mount_credential_revocation(
+            &mut transaction,
+            tenant_id,
+            principal_id,
+            credential_id,
+            row.get::<String, _>("protocol"),
+            generation,
+            reason_code,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn cancel_mount_credential_operation(
+        &self,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+        operation_id: Uuid,
+        expected_generation: i64,
+        reason_code: &str,
+    ) -> Result<(), DatabaseError> {
+        if expected_generation <= 0 || reason_code.is_empty() || reason_code.len() > 128 {
+            return Err(DatabaseError::InvalidPersistedValue);
+        }
+        let mut transaction = self.pool().begin().await?;
+        let row = sqlx::query(
+            "SELECT credential_existed,operation_cancelled,protocol,generation \
+             FROM filebelt_mount.cancel_credential_creation_operation($1,$2,$3,$4)",
+        )
+        .bind(tenant_id)
+        .bind(principal_id)
+        .bind(operation_id)
+        .bind(expected_generation)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !row.get::<bool, _>("operation_cancelled") {
+            return Err(DatabaseError::NotFound);
+        }
+        if row.get::<bool, _>("credential_existed") {
+            Self::finalize_mount_credential_revocation(
+                &mut transaction,
+                tenant_id,
+                principal_id,
+                operation_id,
+                row.get::<String, _>("protocol"),
+                row.get::<i64, _>("generation"),
+                reason_code,
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn finalize_mount_credential_revocation(
+        transaction: &mut Transaction<'_, Postgres>,
+        tenant_id: Uuid,
+        principal_id: Uuid,
+        credential_id: Uuid,
+        protocol: String,
+        generation: i64,
+        reason_code: &str,
+    ) -> Result<(), DatabaseError> {
         sqlx::query(
             "UPDATE filebelt_mount.sessions SET state='revoked',closed_at=clock_timestamp(),\
              close_reason=$4 WHERE tenant_id=$1 AND credential_id=$2 AND user_principal_id=$3 \
@@ -3085,7 +3181,7 @@ impl Database {
         .bind(credential_id)
         .bind(principal_id)
         .bind(reason_code)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await?;
         sqlx::query(
             "INSERT INTO filebelt_mount.deletion_tombstones \
@@ -3096,13 +3192,13 @@ impl Database {
         .bind(Uuid::new_v4())
         .bind(credential_id)
         .bind(principal_id)
-        .bind(row.get::<String, _>("protocol"))
+        .bind(protocol)
         .bind(reason_code)
         .bind(generation)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await?;
         insert_audit(
-            &mut transaction,
+            transaction,
             tenant_id,
             Some(principal_id),
             Some(principal_id),
@@ -3115,7 +3211,7 @@ impl Database {
         )
         .await?;
         insert_outbox(
-            &mut transaction,
+            transaction,
             tenant_id,
             "filebelt.v1.mount.credential.changed",
             "mount_credential",
@@ -3123,7 +3219,6 @@ impl Database {
             generation,
         )
         .await?;
-        transaction.commit().await?;
         Ok(())
     }
 
@@ -12213,6 +12308,15 @@ fn array_32(value: Vec<u8>) -> Result<[u8; 32], DatabaseError> {
     value
         .try_into()
         .map_err(|_| DatabaseError::InvalidPersistedValue)
+}
+
+fn map_mount_credential_operation(error: sqlx::Error) -> DatabaseError {
+    if matches!(&error,sqlx::Error::Database(database) if database.code().as_deref()==Some("FB002"))
+    {
+        DatabaseError::StaleGeneration
+    } else {
+        map_conflict(error)
+    }
 }
 
 #[cfg(test)]

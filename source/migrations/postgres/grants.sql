@@ -393,6 +393,9 @@ GRANT SELECT ON filebelt_mount.headscale_devices, filebelt_mount.sessions
   TO filebelt_api;
 GRANT EXECUTE ON FUNCTION filebelt_mount.cancel_credential_operation(uuid,uuid,uuid)
   TO filebelt_api;
+GRANT EXECUTE ON FUNCTION filebelt_mount.prepare_credential_creation_operation(uuid,uuid),
+  filebelt_mount.cancel_credential_creation_operation(uuid,uuid,uuid,bigint)
+  TO filebelt_api;
 
 -- The VFS is the only runtime role that can combine credential verification,
 -- authoritative mount state, namespace/ACL projections, and scoped I/O
@@ -507,6 +510,11 @@ GRANT SELECT ON filebelt_mount.policies, filebelt_mount.credentials,
   filebelt_mount.deletion_tombstones TO filebelt_recovery;
 GRANT SELECT (tenant_id,credential_id,principal_id,state,created_at,cancelled_at)
   ON filebelt_mount.credential_operation_fences TO filebelt_recovery;
+GRANT SELECT (tenant_id,principal_id,operation_id,operation_generation,state,
+              prepared_at,expires_at,committed_at,cancelled_at)
+  ON filebelt_mount.credential_creation_slots TO filebelt_recovery;
+GRANT SELECT (name,removed_cancelled_fences,completed_at)
+  ON filebelt_mount.credential_creation_cutovers TO filebelt_recovery;
 GRANT SELECT (tenant_id,credential_id,kek_generation,secret_kind,created_at)
   ON filebelt_mount_vault.secret_envelopes TO filebelt_recovery;
 
@@ -801,6 +809,10 @@ REVOKE ALL ON FUNCTION filebelt_mount.erase_revoked_credential_secret() FROM PUB
 REVOKE ALL ON FUNCTION filebelt_mount.advance_authorization_generation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.reserve_credential_operation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.cancel_credential_operation(uuid,uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.prepare_credential_creation_operation(uuid,uuid)
+  FROM PUBLIC;
+REVOKE ALL ON FUNCTION filebelt_mount.cancel_credential_creation_operation(uuid,uuid,uuid,bigint)
+  FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.create_session_principal(uuid,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION filebelt_mount.create_nfs_session(
   uuid,text,bytea,text,bigint,inet,timestamptz,uuid,uuid

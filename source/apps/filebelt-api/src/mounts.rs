@@ -68,6 +68,7 @@ struct PolicyInput {
 #[serde(deny_unknown_fields)]
 struct CreateCredentialInput {
     operation_id: Uuid,
+    operation_generation: i64,
     protocol: String,
     read_only: bool,
     allowed_drive_ids: Vec<Uuid>,
@@ -78,6 +79,7 @@ struct CreateCredentialInput {
 #[derive(Debug, Serialize)]
 struct InternalCreateCredentialRequest<'a> {
     operation_id: Uuid,
+    operation_generation: i64,
     principal_id: Uuid,
     protocol: &'a str,
     read_only: bool,
@@ -93,6 +95,13 @@ struct CreateCredentialResponse {
     protocol: String,
     username: String,
     password: String,
+    expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MountCredentialOperationResponse {
+    operation_id: Uuid,
+    operation_generation: i64,
     expires_at: String,
 }
 
@@ -532,6 +541,14 @@ pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/mounts", routing::get(get_overview))
         .route("/mounts/policies/{protocol}", routing::put(put_policy))
+        .route(
+            "/mounts/credential-operations",
+            routing::post(prepare_credential_operation),
+        )
+        .route(
+            "/mounts/credential-operations/{operation_id}",
+            routing::delete(cancel_credential_operation),
+        )
         .route("/mounts/credentials", routing::post(create_credential))
         .route(
             "/mounts/credentials/{credential_id}",
@@ -1599,6 +1616,59 @@ async fn put_policy(
     ))
 }
 
+async fn prepare_credential_operation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<MountCredentialOperationResponse>), ApiError> {
+    require_enabled(&state)?;
+    let session = require_recent_mutation(&state, &headers).await?;
+    let operation = state
+        .database
+        .prepare_mount_credential_operation(state.tenant_id, session.record.principal_id)
+        .await?;
+    let status = if operation.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(MountCredentialOperationResponse {
+            operation_id: operation.operation_id,
+            operation_generation: operation.operation_generation,
+            expires_at: operation.expires_at,
+        }),
+    ))
+}
+
+async fn cancel_credential_operation(
+    State(state): State<AppState>,
+    Path(operation_id): Path<Uuid>,
+    Query(query): Query<TargetGenerationQuery>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    require_enabled(&state)?;
+    let session = require_recent_mutation(&state, &headers).await?;
+    require_credential_operation_id(operation_id)?;
+    if query.expected_generation <= 0 {
+        return Err(ApiError::bad_request(
+            "mount.credential_operation_invalid",
+            "The mount credential operation generation must be positive",
+        ));
+    }
+    state
+        .database
+        .cancel_mount_credential_operation(
+            state.tenant_id,
+            session.record.principal_id,
+            operation_id,
+            query.expected_generation,
+            "unknown_create_recovery",
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn create_credential(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1607,6 +1677,12 @@ async fn create_credential(
     let mounts = require_enabled(&state)?;
     let session = require_recent_mutation(&state, &headers).await?;
     require_credential_operation_id(input.operation_id)?;
+    if input.operation_generation <= 0 {
+        return Err(ApiError::bad_request(
+            "mount.credential_operation_invalid",
+            "The mount credential operation generation must be positive",
+        ));
+    }
     validate_protocol(&state.config, &input.protocol)?;
     require_read_only(input.read_only)?;
     validate_drive_selection(&state, &session, &input.allowed_drive_ids).await?;
@@ -1621,6 +1697,7 @@ async fn create_credential(
         .post(mounts.credential_url.clone())
         .json(&InternalCreateCredentialRequest {
             operation_id: input.operation_id,
+            operation_generation: input.operation_generation,
             principal_id: session.record.principal_id,
             protocol: &input.protocol,
             read_only: input.read_only,
@@ -1646,6 +1723,10 @@ async fn create_credential(
         StatusCode::CONFLICT => Err(ApiError::conflict(
             "mount.policy_conflict",
             "The mount policy or device binding rejected this credential",
+        )),
+        StatusCode::PRECONDITION_FAILED => Err(ApiError::conflict(
+            "mount.credential_operation_stale",
+            "The mount credential operation is stale, expired, or already consumed",
         )),
         _ => Err(unavailable()),
     }

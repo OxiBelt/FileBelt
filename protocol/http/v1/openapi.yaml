@@ -415,7 +415,7 @@ paths:
   /api/v1/mounts/credentials:
     post:
       operationId: createMountCredential
-      description: Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The caller supplies a fresh operation UUID that becomes the credential identifier so an unknown response can be revoked without replaying creation. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected.
+      description: Creates a scoped, read-only mount credential with at most a seven-day lifetime after recent OIDC authentication. The operation UUID and generation must be the unexpired server-prepared tuple for the authenticated principal; the operation UUID becomes the credential identifier and creation is never retried. The plaintext password is returned exactly once. Write-enabled credentials are reserved for a future release and are rejected.
       parameters:
         - $ref: "#/components/parameters/Csrf"
         - $ref: "#/components/parameters/Origin"
@@ -433,6 +433,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreatedMountCredential"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mounts/credential-operations:
+    post:
+      operationId: prepareMountCredentialOperation
+      description: Prepares the authenticated principal's bounded, two-minute credential-creation slot after recent OIDC authentication. Repeating this request while the slot is prepared and unexpired returns the same tuple.
+      parameters:
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "200":
+          description: Existing unexpired prepared operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MountCredentialOperation"
+        "201":
+          description: Newly prepared operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MountCredentialOperation"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/mounts/credential-operations/{operation_id}:
+    delete:
+      operationId: cancelMountCredentialOperation
+      description: Recovers the exact prepared credential-creation operation after recent OIDC authentication. It cancels an uncommitted operation or revokes the credential committed by that operation, including after the principal's current slot rotates. Unknown tuples and stale, expired, generation-mismatched, or cross-principal tuples without that exact committed credential are hidden behind a non-mutating 404.
+      parameters:
+        - $ref: "#/components/parameters/MountCredentialOperationId"
+        - name: expected_generation
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - $ref: "#/components/parameters/Csrf"
+        - $ref: "#/components/parameters/Origin"
+        - $ref: "#/components/parameters/FetchSite"
+      responses:
+        "204":
+          description: Exact operation cancelled or its committed credential revoked.
         default:
           $ref: "#/components/responses/Problem"
   /api/v1/mounts/credentials/{credential_id}:
@@ -2676,6 +2720,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/UuidV4"
+    MountCredentialOperationId:
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UuidV4"
     NfsConflictId:
       name: conflict_id
       in: path
@@ -3193,11 +3243,15 @@ components:
     CreateMountCredential:
       type: object
       additionalProperties: false
-      required: [operation_id, protocol, read_only, allowed_drive_ids, bound_device_id, expires_at]
+      required: [operation_id, operation_generation, protocol, read_only, allowed_drive_ids, bound_device_id, expires_at]
       properties:
         operation_id:
           $ref: "#/components/schemas/UuidV4"
-          description: Fresh caller-generated operation identifier. It becomes the credential ID and must never be reused to retry secret creation.
+          description: Server-prepared operation identifier. It becomes the credential ID and must never be reused to retry secret creation.
+        operation_generation:
+          type: integer
+          format: int64
+          minimum: 1
         protocol:
           type: string
           enum: [smb, ftps]
@@ -3215,6 +3269,20 @@ components:
           oneOf:
             - $ref: "#/components/schemas/UuidV4"
             - type: "null"
+        expires_at:
+          type: string
+          format: date-time
+    MountCredentialOperation:
+      type: object
+      additionalProperties: false
+      required: [operation_id, operation_generation, expires_at]
+      properties:
+        operation_id:
+          $ref: "#/components/schemas/UuidV4"
+        operation_generation:
+          type: integer
+          format: int64
+          minimum: 1
         expires_at:
           type: string
           format: date-time

@@ -416,7 +416,7 @@ fn expect_idempotent_replayed(outcome: NfsAdminIdempotentWrite) -> IdempotencyRe
     }
 }
 
-async fn assert_mount_credential_cancellation_fence(
+async fn assert_mount_credential_creation_slot(
     database: &Database,
     tenant_id: Uuid,
     principal_id: Uuid,
@@ -425,35 +425,68 @@ async fn assert_mount_credential_cancellation_fence(
     database
         .upsert_mount_policy(tenant_id, principal_id, "ftps", true, true, &[drive_id])
         .await
-        .expect("enable the credential fence test policy");
+        .expect("enable the credential slot test policy");
     let expires_at: String =
         sqlx::query_scalar("SELECT (clock_timestamp()+interval '1 hour')::text")
             .fetch_one(database.pool())
             .await
             .expect("derive a valid credential expiry");
 
-    let cancelled_before_create_id = Uuid::new_v4();
-    assert!(matches!(
-        database
-            .revoke_mount_credential(
-                tenant_id,
-                principal_id,
-                cancelled_before_create_id,
-                "unknown_create_recovery",
-            )
-            .await,
-        Err(DatabaseError::NotFound)
-    ));
-    let cancelled_state: String = sqlx::query_scalar(
-        "SELECT state FROM filebelt_mount.credential_operation_fences \
-         WHERE tenant_id=$1 AND credential_id=$2",
+    let counts_before: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM filebelt_mount.credential_operation_fences),\
+                (SELECT count(*) FROM filebelt_mount.credential_creation_slots),\
+                (SELECT count(*) FROM filebelt_mount.deletion_tombstones),\
+                (SELECT count(*) FROM audit_events),\
+                (SELECT count(*) FROM outbox_events)",
     )
-    .bind(tenant_id)
-    .bind(cancelled_before_create_id)
     .fetch_one(database.pool())
     .await
-    .expect("read the durable missing-credential cancellation fence");
-    assert_eq!(cancelled_state, "cancelled");
+    .expect("count durable state before missing revocations");
+    for _ in 0..64 {
+        assert!(matches!(
+            database
+                .revoke_mount_credential(tenant_id, principal_id, Uuid::new_v4(), "user_revoked")
+                .await,
+            Err(DatabaseError::NotFound)
+        ));
+    }
+    let counts_after: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM filebelt_mount.credential_operation_fences),\
+                (SELECT count(*) FROM filebelt_mount.credential_creation_slots),\
+                (SELECT count(*) FROM filebelt_mount.deletion_tombstones),\
+                (SELECT count(*) FROM audit_events),\
+                (SELECT count(*) FROM outbox_events)",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("count durable state after missing revocations");
+    assert_eq!(counts_after, counts_before);
+
+    let cancelled = database
+        .prepare_mount_credential_operation(tenant_id, principal_id)
+        .await
+        .expect("prepare a credential operation");
+    assert!(cancelled.created);
+    let replayed = database
+        .prepare_mount_credential_operation(tenant_id, principal_id)
+        .await
+        .expect("replay the unexpired credential operation");
+    assert!(!replayed.created);
+    assert_eq!(replayed.operation_id, cancelled.operation_id);
+    assert_eq!(
+        replayed.operation_generation,
+        cancelled.operation_generation
+    );
+    database
+        .cancel_mount_credential_operation(
+            tenant_id,
+            principal_id,
+            cancelled.operation_id,
+            cancelled.operation_generation,
+            "unknown_create_recovery",
+        )
+        .await
+        .expect("cancel the prepared operation");
 
     let nonce = [21_u8; 12];
     let wrap_nonce = [22_u8; 12];
@@ -463,7 +496,8 @@ async fn assert_mount_credential_cancellation_fence(
             .create_mount_credential(
                 tenant_id,
                 principal_id,
-                cancelled_before_create_id,
+                cancelled.operation_id,
+                cancelled.operation_generation,
                 "ftps",
                 "cancelled-operation-user",
                 "hmac_sha256",
@@ -482,10 +516,19 @@ async fn assert_mount_credential_cancellation_fence(
                 },
             )
             .await,
-        Err(DatabaseError::Conflict)
+        Err(DatabaseError::StaleGeneration)
     ));
 
-    let in_flight_id = Uuid::new_v4();
+    let in_flight = database
+        .prepare_mount_credential_operation(tenant_id, principal_id)
+        .await
+        .expect("rotate the terminal operation");
+    assert!(in_flight.created);
+    assert_ne!(in_flight.operation_id, cancelled.operation_id);
+    assert_eq!(
+        in_flight.operation_generation,
+        cancelled.operation_generation + 1
+    );
     let mut create_transaction = database
         .pool()
         .begin()
@@ -493,13 +536,14 @@ async fn assert_mount_credential_cancellation_fence(
         .expect("begin in-flight credential create");
     sqlx::query(
         "INSERT INTO filebelt_mount.credentials \
-         (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,allowed_drive_ids,expires_at) \
-         VALUES ($1,$2,$3,'ftps',$4,'hmac_sha256',true,$5,$6::timestamptz)",
+         (tenant_id,id,principal_id,creation_operation_generation,protocol,username,verifier_kind,read_only,allowed_drive_ids,expires_at) \
+         VALUES ($1,$2,$3,$4,'ftps',$5,'hmac_sha256',true,$6,$7::timestamptz)",
     )
     .bind(tenant_id)
-    .bind(in_flight_id)
+    .bind(in_flight.operation_id)
     .bind(principal_id)
-    .bind(format!("credential-{in_flight_id}"))
+    .bind(in_flight.operation_generation)
+    .bind(format!("credential-{}", in_flight.operation_id))
     .bind(vec![drive_id])
     .bind(&expires_at)
     .execute(&mut *create_transaction)
@@ -517,11 +561,12 @@ async fn assert_mount_credential_cancellation_fence(
         .expect("bound the concurrency assertion");
     let lock_error = sqlx::query(
         "SELECT credential_existed FROM \
-         filebelt_mount.cancel_credential_operation($1,$2,$3)",
+         filebelt_mount.cancel_credential_creation_operation($1,$2,$3,$4)",
     )
     .bind(tenant_id)
     .bind(principal_id)
-    .bind(in_flight_id)
+    .bind(in_flight.operation_id)
+    .bind(in_flight.operation_generation)
     .fetch_one(&mut *revoke_transaction)
     .await
     .expect_err("revocation must wait for an in-flight create of the same UUID");
@@ -538,28 +583,60 @@ async fn assert_mount_credential_cancellation_fence(
         .await
         .expect("commit the in-flight credential");
 
+    let successor = database
+        .prepare_mount_credential_operation(tenant_id, principal_id)
+        .await
+        .expect("prepare a successor after the credential commits");
+    assert!(successor.created);
+    assert_eq!(
+        successor.operation_generation,
+        in_flight.operation_generation + 1
+    );
+
     database
-        .revoke_mount_credential(
+        .cancel_mount_credential_operation(
             tenant_id,
             principal_id,
-            in_flight_id,
+            in_flight.operation_id,
+            in_flight.operation_generation,
             "unknown_create_recovery",
         )
         .await
         .expect("revoke after the create ordering point commits");
-    let terminal: (String, bool) = sqlx::query_as(
-        "SELECT fence.state,credential.revoked_at IS NOT NULL \
-         FROM filebelt_mount.credential_operation_fences AS fence \
+    let terminal: (Uuid, String, bool) = sqlx::query_as(
+        "SELECT slot.operation_id,slot.state,credential.revoked_at IS NOT NULL \
+         FROM filebelt_mount.credential_creation_slots AS slot \
          JOIN filebelt_mount.credentials AS credential \
-           ON credential.tenant_id=fence.tenant_id AND credential.id=fence.credential_id \
-         WHERE fence.tenant_id=$1 AND fence.credential_id=$2",
+           ON credential.tenant_id=slot.tenant_id \
+         WHERE slot.tenant_id=$1 AND credential.id=$2",
     )
     .bind(tenant_id)
-    .bind(in_flight_id)
+    .bind(in_flight.operation_id)
     .fetch_one(database.pool())
     .await
     .expect("read the serialized credential terminal state");
-    assert_eq!(terminal, ("cancelled".to_owned(), true));
+    assert_eq!(
+        terminal,
+        (successor.operation_id, "prepared".to_owned(), true)
+    );
+
+    let raw_old_write = sqlx::query(
+        "INSERT INTO filebelt_mount.credentials \
+         (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,allowed_drive_ids,expires_at) \
+         VALUES ($1,$2,$3,'ftps',$4,'hmac_sha256',true,$5,$6::timestamptz)",
+    )
+    .bind(tenant_id)
+    .bind(Uuid::new_v4())
+    .bind(principal_id)
+    .bind(format!("old-writer-{}", Uuid::new_v4()))
+    .bind(vec![drive_id])
+    .bind(&expires_at)
+    .execute(database.pool())
+    .await
+    .expect_err("an old SMB/FTPS writer without a slot generation must fail closed");
+    assert!(
+        matches!(&raw_old_write,sqlx::Error::Database(error) if error.code().as_deref()==Some("FB002"))
+    );
 }
 
 #[tokio::test]
@@ -874,6 +951,172 @@ async fn insert_legacy_nfs_alias(
 }
 
 #[tokio::test]
+#[ignore = "requires an empty PostgreSQL database in FILEBELT_MOUNT_CUTOVER_TEST_DATABASE_URL"]
+async fn mount_credential_slot_cutover_is_quiesced_and_preserves_linked_history() {
+    let database_url = std::env::var("FILEBELT_MOUNT_CUTOVER_TEST_DATABASE_URL")
+        .expect("FILEBELT_MOUNT_CUTOVER_TEST_DATABASE_URL is required");
+    let database = Database::connect(&database_url, 2)
+        .await
+        .expect("connect credential cutover database");
+    sqlx::raw_sql(include_str!("../../../migrations/postgres/roles.sql"))
+        .execute(database.pool())
+        .await
+        .expect("apply roles");
+    for migration in [
+        include_str!("../../../migrations/postgres/000001_phase2_core.sql"),
+        include_str!("../../../migrations/postgres/000002_phase4_mcp.sql"),
+        include_str!("../../../migrations/postgres/000003_phase5_markdown.sql"),
+        include_str!("../../../migrations/postgres/000004_phase6_mounts.sql"),
+        include_str!("../../../migrations/postgres/000005_phase6_mount_vault.sql"),
+        include_str!("../../../migrations/postgres/000006_phase7_documents.sql"),
+        include_str!("../../../migrations/postgres/000007_phase8_compatibility.sql"),
+        include_str!("../../../migrations/postgres/000008_phase8_media.sql"),
+        include_str!("../../../migrations/postgres/000009_phase8_nfs.sql"),
+        include_str!("../../../migrations/postgres/000010_onlyoffice_origin_isolation.sql"),
+        include_str!("../../../migrations/postgres/000011_security_descendant_shares.sql"),
+        include_str!("../../../migrations/postgres/000012_nfs_authority.sql"),
+        include_str!("../../../migrations/postgres/000013_nfs_namespace.sql"),
+        include_str!("../../../migrations/postgres/000014_nfs_write_authority.sql"),
+        include_str!("../../../migrations/postgres/000015_nfs_mapping_target_approval.sql"),
+        include_str!("../../../migrations/postgres/000016_revision_storage.sql"),
+        include_str!("../../../migrations/postgres/000017_nfs_worker_trigger_dispatch.sql"),
+        include_str!("../../../migrations/postgres/000018_collaboration_backend_reservation.sql"),
+        include_str!("../../../migrations/postgres/000019_git_managed_directories.sql"),
+        include_str!("../../../migrations/postgres/000020_acl_children_scope.sql"),
+        include_str!("../../../migrations/postgres/000021_collaboration_checkpoint_limit.sql"),
+        include_str!("../../../migrations/postgres/000022_document_close_idempotency.sql"),
+        include_str!("../../../migrations/postgres/000023_mount_credential_cancellation_fence.sql"),
+        include_str!("../../../migrations/postgres/000024_mcp_broker_operation_receipts.sql"),
+    ] {
+        sqlx::raw_sql(migration)
+            .execute(database.pool())
+            .await
+            .expect("apply pre-cutover migration");
+    }
+
+    let tenant_id = Uuid::new_v4();
+    let principal_id = Uuid::new_v4();
+    let linked_id = Uuid::new_v4();
+    let cancelled_orphan_id = Uuid::new_v4();
+    let unexpected_orphan_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO tenants (id,slug) VALUES ($1,'credential-cutover-test')")
+        .bind(tenant_id)
+        .execute(database.pool())
+        .await
+        .expect("insert cutover tenant");
+    sqlx::query("INSERT INTO principals (tenant_id,id,kind) VALUES ($1,$2,'user')")
+        .bind(tenant_id)
+        .bind(principal_id)
+        .execute(database.pool())
+        .await
+        .expect("insert cutover principal");
+    sqlx::query(
+        "INSERT INTO filebelt_mount.credentials \
+         (tenant_id,id,principal_id,protocol,username,verifier_kind,expires_at) \
+         VALUES ($1,$2,$3,'ftps','cutover-linked-user','hmac_sha256',clock_timestamp()+interval '1 hour')",
+    )
+    .bind(tenant_id)
+    .bind(linked_id)
+    .bind(principal_id)
+    .execute(database.pool())
+    .await
+    .expect("insert linked legacy credential and fence");
+    sqlx::query(
+        "INSERT INTO filebelt_mount.credential_operation_fences \
+         (tenant_id,credential_id,principal_id,state,cancelled_at) \
+         VALUES ($1,$2,$3,'cancelled',clock_timestamp()),($1,$4,$3,'reserved',NULL)",
+    )
+    .bind(tenant_id)
+    .bind(cancelled_orphan_id)
+    .bind(principal_id)
+    .bind(unexpected_orphan_id)
+    .execute(database.pool())
+    .await
+    .expect("insert legacy orphan fixtures");
+
+    let blocked = sqlx::raw_sql(include_str!(
+        "../../../migrations/postgres/000025_mount_credential_creation_slots.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect_err("a non-cancelled orphan must block the quiesced cutover");
+    assert!(
+        matches!(&blocked,sqlx::Error::Database(error) if error.code().as_deref()==Some("23514"))
+    );
+    let rolled_back: bool = sqlx::query_scalar(
+        "SELECT to_regclass('filebelt_mount.credential_creation_slots') IS NULL",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("verify the rejected migration rolled back");
+    assert!(rolled_back);
+
+    sqlx::query(
+        "DELETE FROM filebelt_mount.credential_operation_fences \
+         WHERE tenant_id=$1 AND credential_id=$2",
+    )
+    .bind(tenant_id)
+    .bind(unexpected_orphan_id)
+    .execute(database.pool())
+    .await
+    .expect("remove the deliberately undrained fixture");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/postgres/000025_mount_credential_creation_slots.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect("apply the quiesced credential slot cutover");
+
+    let result: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM filebelt_mount.credential_operation_fences \
+            WHERE tenant_id=$1 AND credential_id=$2),\
+           (SELECT count(*) FROM filebelt_mount.credential_operation_fences \
+            WHERE tenant_id=$1 AND credential_id=$3),\
+           (SELECT removed_cancelled_fences FROM filebelt_mount.credential_creation_cutovers \
+            WHERE name='bounded_creation_slots_v1'),\
+           (SELECT count(*) FROM filebelt_mount.credentials \
+            WHERE tenant_id=$1 AND id=$2 AND creation_operation_generation IS NULL)",
+    )
+    .bind(tenant_id)
+    .bind(linked_id)
+    .bind(cancelled_orphan_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("read cutover result");
+    assert_eq!(result, (1, 0, 1, 1));
+
+    let old_writer = sqlx::query(
+        "INSERT INTO filebelt_mount.credentials \
+         (tenant_id,id,principal_id,protocol,username,verifier_kind,expires_at) \
+         VALUES ($1,$2,$3,'ftps','cutover-old-writer','hmac_sha256',clock_timestamp()+interval '1 hour')",
+    )
+    .bind(tenant_id)
+    .bind(Uuid::new_v4())
+    .bind(principal_id)
+    .execute(database.pool())
+    .await
+    .expect_err("an old SMB/FTPS writer must fail closed after cutover");
+    assert!(
+        matches!(&old_writer,sqlx::Error::Database(error) if error.code().as_deref()==Some("FB002"))
+    );
+    // The post-approval NFS trigger requires newly staged mappings to start
+    // revoked; the browser slot trigger must otherwise leave the row alone.
+    sqlx::query(
+        "INSERT INTO filebelt_mount.credentials \
+         (tenant_id,id,principal_id,protocol,username,verifier_kind,read_only,expires_at,revoked_at) \
+         VALUES ($1,$2,$3,'nfs',$4,'kerberos_principal',false,'infinity'::timestamptz,clock_timestamp())",
+    )
+    .bind(tenant_id)
+    .bind(Uuid::new_v4())
+    .bind(principal_id)
+    .bind(format!("{}@EXAMPLE.TEST", Uuid::new_v4()))
+    .execute(database.pool())
+    .await
+    .expect("NFS credential admission remains independent of browser slots");
+}
+
+#[tokio::test]
 #[ignore = "requires an empty PostgreSQL database in FILEBELT_MOUNT_TEST_DATABASE_URL"]
 async fn mount_schema_enforces_process_and_vault_boundaries() {
     let database_url = std::env::var("FILEBELT_MOUNT_TEST_DATABASE_URL")
@@ -953,6 +1196,24 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
         )
         .await
     );
+    for function in [
+        "filebelt_mount.prepare_credential_creation_operation(uuid,uuid)",
+        "filebelt_mount.cancel_credential_creation_operation(uuid,uuid,uuid,bigint)",
+    ] {
+        assert!(function_privilege(&database, "filebelt_api", function).await);
+        assert!(!function_privilege(&database, "filebelt_vfs", function).await);
+    }
+    for role in ["filebelt_api", "filebelt_vfs"] {
+        assert!(
+            !table_privilege(
+                &database,
+                role,
+                "filebelt_mount.credential_creation_slots",
+                "INSERT"
+            )
+            .await
+        );
+    }
     assert!(
         !table_privilege(
             &database,
@@ -968,6 +1229,16 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
             "filebelt_recovery",
             "filebelt_mount.credential_operation_fences",
             "state",
+            "SELECT"
+        )
+        .await
+    );
+    assert!(
+        column_privilege(
+            &database,
+            "filebelt_recovery",
+            "filebelt_mount.credential_creation_slots",
+            "operation_generation",
             "SELECT"
         )
         .await
@@ -1302,7 +1573,7 @@ async fn mount_schema_enforces_process_and_vault_boundaries() {
     .execute(database.pool())
     .await
     .expect("insert NFS root ancestry");
-    assert_mount_credential_cancellation_fence(&database, tenant_id, principal_id, drive_id).await;
+    assert_mount_credential_creation_slot(&database, tenant_id, principal_id, drive_id).await;
     let seeded_state: String =
         sqlx::query_scalar("SELECT state FROM filebelt_mount.nfs_feature_state WHERE tenant_id=$1")
             .bind(tenant_id)

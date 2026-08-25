@@ -176,22 +176,33 @@ exact range. The VFS, Headscale sync, API, and adapters never receive the
 payload mount.
 
 The public OpenAPI surface is `GET /api/v1/mounts`, `PUT
-/api/v1/mounts/policies/{protocol}`, `POST /api/v1/mounts/credentials`, and
-`DELETE /api/v1/mounts/credentials/{credential_id}`. Policy and credential
-mutations use the ordinary CSRF/origin/fetch-site rules; credential create and
-revoke additionally require recent OIDC authentication, and credential
-lifetimes are capped at seven days. A plaintext credential appears only in the
-create response and is absent from every later list, activity, log, audit, and
-error contract. Creation requires a fresh caller-generated operation UUID that
-becomes the credential identifier. Clients never retry an interrupted create
-to recover plaintext; they revoke that exact UUID and start a new operation.
-A definite not-found revocation response is the same safe terminal state as a
-successful revocation for that caller-owned UUID because PostgreSQL commits a
-durable cancellation fence before either response. Create and revoke serialize
-on that exact tenant/UUID fence, so a create cannot commit after the revocation
-barrier. A transport-unknown
-revocation keeps new credential creation blocked and exposes the UUID plus a
-retry control until the barrier completes.
+/api/v1/mounts/policies/{protocol}`, `POST
+/api/v1/mounts/credential-operations`, `POST /api/v1/mounts/credentials`,
+`DELETE /api/v1/mounts/credential-operations/{operation_id}`, and `DELETE
+/api/v1/mounts/credentials/{credential_id}`. Policy and credential mutations
+use the ordinary CSRF/origin/fetch-site rules; operation prepare/cancel and
+credential create/revoke additionally require recent OIDC authentication, and
+credential lifetimes are capped at seven days. A plaintext credential appears
+only in the create response and is absent from every later list, activity, log,
+audit, and error contract.
+
+PostgreSQL prepares one current creation slot per tenant/principal and returns
+its server-generated UUID, positive monotonic generation, and database-clock
+expiry two minutes later. A repeated prepare returns `200` with the same
+unexpired prepared tuple; a new or rotated tuple returns `201`. Credential
+creation must carry that exact tuple and never retries to recover plaintext.
+Only a transport-unknown create is resolved through the dedicated operation
+DELETE with the expected generation; a definite create rejection never
+cancels a tuple that another client may share. Create and recovery cancel serialize on the slot row;
+cancel re-reads the credential only after obtaining that lock, so it either
+blocks the create or revokes the credential that committed first. A stale,
+expired, mismatched, cross-principal, or unknown tuple without an exact
+credential committed by that tuple returns an existence-hiding not-found
+result without mutation. Exact committed credentials remain recoverable after
+the principal's current slot rotates. A transport-unknown cancel
+keeps new credential creation blocked and exposes the prepared tuple plus a
+retry control. Ordinary credential DELETE only revokes an existing owned
+credential; a missing UUID creates no durable state.
 
 ## Text revision, editing, and collaboration contracts
 

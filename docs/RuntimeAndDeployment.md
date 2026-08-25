@@ -751,11 +751,15 @@ drain connections, fence rooms, and preserve dirty manifests
 for review; never
 acknowledge an update from an event or in-memory replica state.
 
-Phase 6 mount rollout remains gated. Apply the forward migration series through
-`000023` with reviewed VFS, Headscale, and NFS-approval grants first. Keep
-credential creation and revocation quiesced until every API replica uses the
-transaction-bound credential cancellation fence; an older API can report an
-unsafe absence before an in-flight create commits. Provision
+Phase 6 mount rollout remains gated. Quiesce credential prepare, create,
+recovery-cancel, and revoke routes and drain in-flight VFS credential creates
+before applying the forward migration series through `000025`. Snapshot the
+legacy credential-fence and credential counts, apply the release-matched
+grants, verify the recorded orphan-fence cutover count and preserved linked
+rows, then deploy the API, VFS, and Web client as one compatibility unit. Keep
+credential routes disabled until all three use server-issued slot UUIDs and
+generations; older API/VFS credential writers fail closed after `000025`.
+Provision
 `mount-storage` signing and mount-vault secrets, render the chart with all
 protocol flags false, and verify that API/I/O have no new payload or database
 authority. Verify the NFS legacy-mapping quarantine and approved-active
@@ -773,9 +777,12 @@ present) Headscale sync to zero. Keep the additive schemas, KEKs, and every admi
 `mount-storage` public key while retained state or recovery evidence references
 them. Keep proposal and approval history and the database approval gate;
 rollback never restores direct mapping activation.
-The additive credential-operation fence and insert trigger also remain in
-place. Do not re-enable credential routes on a rolled-back API that cannot
-establish a durable missing-credential cancellation barrier.
+The additive credential creation-slot table, cutover receipt, legacy linked
+fences, and insert trigger remain in place. Rollback disables all credential
+operation and credential-create routes and rolls forward; do not re-enable
+them on an API, VFS, or Web client that predates the server-issued slot
+contract. Existing credential revocation may be enabled only on a binary whose
+missing-credential path is state-free.
 
 Phase 7 document rollout is also staged and disabled by default. First apply
 migration `000006`, expand built-in ACL presets under the statement-scoped

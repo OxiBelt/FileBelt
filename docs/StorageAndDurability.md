@@ -137,6 +137,17 @@ deployed. Rollback keeps the additive fence and trigger; an older API may run
 only with credential routes disabled because it cannot commit the missing-
 credential cancellation barrier.
 
+Forward migration `000025_mount_credential_creation_slots.sql` is a quiesced
+cutover from caller-UUID fences to one reusable creation slot per
+tenant/principal. Before applying it, stop and drain legacy credential creates
+and snapshot fence/credential counts. It aborts if a non-cancelled fence lacks
+a credential, deletes cancelled no-credential legacy fences, records the
+removed count, and preserves linked history. It then requires an exact
+server-issued UUID plus positive generation for new SMB/FTPS inserts; old
+writers fail closed and NFS remains compatible. Apply matched grants and roll
+out API, VFS, and Web together. Rollback retains the additive schema and keeps
+prepare/create/recovery routes disabled until roll-forward.
+
 Production migration is an explicit `filebeltctl database migrate` operation
 using the migrator credential. API replicas check compatibility and never race
 to apply migrations. After each migration, the database owner applies the
@@ -294,14 +305,26 @@ plaintext random password exists only during create response construction and
 is zeroized after use. Deleting or replacing authority makes the old envelope
 unusable even before later physical cleanup.
 
-The public credential-create operation supplies its credential UUID before the
-internal call. A lost or indeterminate response is therefore resolved by
-revoking that UUID; the create call is never replayed because no later response
-may disclose the original plaintext. The credential-operation fence is locked
-by both the credential insert and revocation transaction. Revoking an absent
-UUID durably records cancellation before returning not found; an in-flight
-insert either commits first and is then revoked or observes the cancelled fence
-and fails. Re-creation uses a fresh UUID and fresh secret material.
+The public credential-create flow first prepares one reusable PostgreSQL slot
+for the tenant/principal. PostgreSQL owns the operation UUID, monotonic
+generation, and two-minute database-clock expiry; an unexpired prepared slot is
+returned again rather than appended. SMB/FTPS credential insertion requires
+the exact UUID and generation, locks the slot, rejects expired or terminal
+state, and commits the slot plus credential, encrypted verifier, audit, and
+outbox changes in one transaction. The credential stores its creation
+generation separately from its authorization and verifier generations. NFS
+credential admission continues through its separate approval fences and does
+not consume the browser credential slot.
+
+A lost or indeterminate create response is resolved by cancelling the exact
+slot tuple; the create call is never replayed because no later response may
+disclose the original plaintext. Recovery cancellation locks the slot before
+re-reading the credential. It therefore either cancels a prepared create or
+waits for an in-flight create and revokes the committed credential. Stale,
+expired, mismatched, cross-principal, and unknown tuples do not mutate state.
+Ordinary credential revocation does not create a slot or legacy fence when the
+credential is absent. The durable cardinality is one creation-slot row per
+tenant/principal rather than one row per caller-controlled UUID.
 
 The Headscale synchronizer treats one successful API response as a full
 snapshot. It validates the entire bounded response, rejects duplicate node IDs

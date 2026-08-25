@@ -76,6 +76,17 @@ trigger rejects any later create for that UUID. Keep credential routes quiesced
 until the release-matched API and grants are active; rollback retains the
 additive fence and requires those routes to remain disabled on older APIs.
 
+`000025_mount_credential_creation_slots.sql` replaces new runtime fence writes
+with one reusable, two-minute creation slot per tenant/principal. PostgreSQL
+issues the UUID and monotonic generation; SMB/FTPS inserts require the exact
+unexpired tuple, while NFS remains on its separately approved path. Apply only
+after quiescing and draining the old credential routes. The migration fails on
+an unexpected non-cancelled orphan, removes cancelled no-credential legacy
+fences, records the count in a singleton cutover receipt, and preserves every
+fence linked to a credential. Apply release-matched grants and deploy API, VFS,
+and Web together. Rollback keeps credential creation/recovery disabled and
+rolls forward; old SMB/FTPS writers fail closed.
+
 `000024_mcp_broker_operation_receipts.sql` adds the digest-only, 24-hour broker
 journal for signed management/probe operation UUIDs. Keep the seven affected
 MCP routes quiesced until the migration, grants, API, and broker are all

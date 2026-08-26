@@ -17,6 +17,31 @@ const VersionId = "00000000-0000-4000-8000-000000000004";
 const NewVersionId = "00000000-0000-4000-8000-000000000015";
 const MarkdownBody = "# Readme\n\n<img src=x onerror=alert(1)>\n";
 
+test("keeps invalid and missing preview paths out of static and SPA fallback", async ({
+  request: Request,
+}) => {
+  for (const Path of [
+    "/markdown-preview/missing.html",
+    "/markdown-preview/%252e%252e/%252e%252e/%252e%252e/web/index.html",
+    "/%6darkdown-preview/missing.html",
+    "/%6darkdown-preview/%zz",
+    "/%256darkdown-preview/missing.html",
+    "/%25%36%64arkdown-preview/missing.html",
+    "/markdown-preview%2fmissing.html",
+    "/markdown-preview%25%32%66missing.html",
+    "/%2e/markdown-preview/missing.html",
+    "/%3f/../markdown-preview/missing.html",
+    "/%2f%5b/../%6darkdown-preview/missing.html",
+  ]) {
+    const Response = await Request.get(Path);
+    expect(Response.status()).toBe(404);
+    expect((await Response.body()).byteLength).toBe(0);
+    expect(Response.headers()["access-control-allow-origin"]).toBe("*");
+    expect(Response.headers()["cross-origin-resource-policy"]).toBe("cross-origin");
+    expect(Response.headers()["content-security-policy"]).toContain("connect-src 'none'");
+  }
+});
+
 test("opens an eligible Markdown file through its lazy editor route", async ({ page: Page }) => {
   await Page.route("**/*", async (Route) => {
     const Request = Route.request();

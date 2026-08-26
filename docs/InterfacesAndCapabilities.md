@@ -342,6 +342,15 @@ wildcard `postMessage` is permitted only for the initial connection handshake
 that transfers a dedicated `MessageChannel` port to the opaque child. All AST
 and link messages use that port, are bounded and typed, and the child
 recursively validates the complete AST before rendering it.
+The local Vite development and preview servers own the complete
+`/markdown-preview/` namespace before normal static or SPA routing. They decode
+an asset path exactly once, reject encoded separators, residual encodings, and
+non-canonical or non-portable segments, and serve only allowlisted file types
+whose resolved paths are strict children of the applicable built preview root.
+Encoded or normalized namespace aliases, invalid, unsupported, and missing
+assets return an empty `404` without falling through to another Vite route. The
+production OxiBelt route remains a separate fixed static root with its existing
+preview-specific browser headers.
 
 ## Provider-neutral document contracts
 

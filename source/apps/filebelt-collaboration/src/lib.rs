@@ -9,24 +9,39 @@ use std::fmt;
 use blake3::Hash;
 use filebelt_collaboration_protocol::normalized_markdown_source_digest;
 use filebelt_control_protocol::CollaborationLimitConfig;
-use yrs::updates::decoder::Decode as _;
+use yrs::Transact as _;
 use yrs::updates::encoder::Encode as _;
 use yrs::{
     ClientID, Doc, GetString as _, OffsetKind, Options, ReadTxn as _, StateVector, Text as _,
 };
-use yrs::{Transact as _, Update};
 
 mod rate_limit;
 mod source;
+mod update_decoder;
 mod wire;
+
+#[cfg(test)]
+mod containment_tests;
 
 pub mod io_client;
 pub mod server;
 pub mod webtransport;
 
+#[cfg(not(panic = "unwind"))]
+compile_error!("filebelt-collaboration requires panic unwinding for decoder containment");
+
 pub use rate_limit::{AdmissionKind, RateAdmission, RateLimiter};
 pub use source::{LineEnding, MarkdownSource, MarkdownSourceError};
 pub use wire::{FrameError, decode_frame, encode_frame, validate_awareness};
+
+/// Installs the process-wide hook required to let decoder containment unwind
+/// while preserving the existing hook for every unrelated panic.
+///
+/// The collaboration binary installs this before startup. No later component
+/// may replace the process panic hook with an aborting hook.
+pub fn install_decoder_panic_containment_hook() {
+    update_decoder::install_containment_aware_panic_hook();
+}
 
 /// Side-effect-free exercises for repository-owned fuzz targets.
 #[cfg(feature = "fuzzing")]
@@ -35,6 +50,13 @@ pub mod fuzzing {
     use filebelt_control_protocol::CollaborationLimitConfig;
 
     use crate::{RoomDocument, decode_frame, encode_frame, validate_awareness};
+
+    /// Replaces libFuzzer's aborting panic hook with a containment-aware
+    /// wrapper. Panics outside FileBelt's untrusted decoder boundary retain
+    /// libFuzzer's original crash behavior.
+    pub fn install_containment_aware_panic_hook() {
+        crate::install_decoder_panic_containment_hook();
+    }
 
     /// Exercises collaboration Protobuf, awareness, and bounded Yjs decoding.
     pub fn exercise_collaboration_wire(input: &[u8]) {
@@ -59,6 +81,8 @@ pub mod fuzzing {
             max_state_bytes: 512 * 1024,
             ..CollaborationLimitConfig::default()
         };
+        let staged = RoomDocument::from_source("", limits.clone());
+        let _ = staged.stage_group(&[input.to_vec()]);
         if let Ok(restored) = RoomDocument::from_snapshot(input, 1, limits.clone()) {
             let snapshot = restored.snapshot();
             let round_trip = RoomDocument::from_snapshot(&snapshot, 1, limits)
@@ -166,6 +190,11 @@ pub struct RoomDocument {
     frozen: Option<RoomFreezeReason>,
 }
 
+struct ValidatedDocument {
+    source: Vec<u8>,
+    snapshot: Vec<u8>,
+}
+
 impl RoomDocument {
     #[must_use]
     pub fn from_source(source: &str, limits: CollaborationLimitConfig) -> Self {
@@ -204,12 +233,17 @@ impl RoomDocument {
         if snapshot.len() > usize::try_from(limits.max_state_bytes).unwrap_or(usize::MAX) {
             return Err(RoomDocumentError::StateTooLarge);
         }
-        let update = Update::decode_v1(snapshot).map_err(|_| RoomDocumentError::InvalidSnapshot)?;
-        let doc = yjs_document();
-        doc.transact_mut()
-            .apply_update(update)
-            .map_err(|_| RoomDocumentError::InvalidSnapshot)?;
-        validate_document(&doc, &limits)?;
+        let doc =
+            update_decoder::contain_untrusted_panic(RoomDocumentError::InvalidSnapshot, || {
+                let update = update_decoder::decode_update_v1(snapshot)
+                    .map_err(|_| RoomDocumentError::InvalidSnapshot)?;
+                let doc = yjs_document();
+                doc.transact_mut()
+                    .apply_update(update)
+                    .map_err(|_| RoomDocumentError::InvalidSnapshot)?;
+                validate_document(&doc, &limits)?;
+                Ok(doc)
+            })?;
         Ok(Self {
             doc,
             limits,
@@ -266,22 +300,25 @@ impl RoomDocument {
         staged
             .transact_mut()
             .apply_update(
-                Update::decode_v1(current_snapshot.as_slice())
+                update_decoder::decode_update_v1(current_snapshot.as_slice())
                     .map_err(|_| RoomDocumentError::InvalidSnapshot)?,
             )
             .map_err(|_| RoomDocumentError::InvalidSnapshot)?;
-        let update = Update::decode_v1(encoded_update.as_slice())
-            .map_err(|_| RoomDocumentError::InvalidUpdate)?;
-        staged
-            .transact_mut()
-            .apply_update(update)
-            .map_err(|_| RoomDocumentError::InvalidUpdate)?;
-        let source_after = validate_document(&staged, &self.limits)?;
+        let validated =
+            update_decoder::contain_untrusted_panic(RoomDocumentError::InvalidUpdate, || {
+                let update = update_decoder::decode_update_v1(encoded_update.as_slice())
+                    .map_err(|_| RoomDocumentError::InvalidUpdate)?;
+                staged
+                    .transact_mut()
+                    .apply_update(update)
+                    .map_err(|_| RoomDocumentError::InvalidUpdate)?;
+                validate_document(&staged, &self.limits)
+            })?;
 
         let first_sequence = self.server_sequence.saturating_add(1);
         let last_sequence = first_sequence;
         let state_vector = staged.transact().state_vector().encode_v1();
-        let state_digest = digest(&snapshot(&staged));
+        let state_digest = digest(&validated.snapshot);
         Ok(StagedUpdate {
             doc: staged,
             receipt: ApplyReceipt {
@@ -290,7 +327,7 @@ impl RoomDocument {
                 state_vector,
                 state_digest,
                 source_before_digest: normalized_markdown_source_digest(&source_before),
-                source_after_digest: normalized_markdown_source_digest(&source_after),
+                source_after_digest: normalized_markdown_source_digest(&validated.source),
             },
         })
     }
@@ -375,14 +412,17 @@ fn normalized_source(doc: &Doc) -> Result<Vec<u8>, RoomDocumentError> {
 fn validate_document(
     doc: &Doc,
     limits: &CollaborationLimitConfig,
-) -> Result<Vec<u8>, RoomDocumentError> {
+) -> Result<ValidatedDocument, RoomDocumentError> {
     let transaction = doc.transact();
     let snapshot = transaction.encode_state_as_update_v1(&StateVector::default());
     if snapshot.len() > usize::try_from(limits.max_state_bytes).unwrap_or(usize::MAX) {
         return Err(RoomDocumentError::StateTooLarge);
     }
     drop(transaction);
-    normalized_source(doc)
+    Ok(ValidatedDocument {
+        source: normalized_source(doc)?,
+        snapshot,
+    })
 }
 
 fn digest(bytes: &[u8]) -> [u8; 32] {
@@ -468,7 +508,7 @@ mod tests {
         let initial = RoomDocument::from_source_with_client_id("base", limits.clone(), 42);
         let peer = yjs_document();
         peer.transact_mut()
-            .apply_update(Update::decode_v1(&initial.snapshot()).unwrap())
+            .apply_update(update_decoder::decode_update_v1(&initial.snapshot()).unwrap())
             .unwrap();
         let known = peer.transact().state_vector();
         let text = peer.get_or_insert_text(MARKDOWN_ROOT);

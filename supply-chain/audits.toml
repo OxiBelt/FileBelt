@@ -543,6 +543,12 @@ criteria = "safe-to-deploy"
 version = "0.27.3"
 notes = "Reviewed complete checksum-matched source with default features only; sync and weak features are unselected. It has no build script or ambient I/O. The CRDT's pointer, interior-mutability, and transaction unsafe blocks retain ownership in document/block-store lifetimes, while decoder unchecked UTF-8 follows validated wire-string reads. FileBelt additionally bounds each yjs-v1 group to 2 MiB and chunk to 256 KiB, serializes durable ordering through fenced PostgreSQL manifests, and does not expose Yrs raw-pointer APIs to untrusted callers."
 
+[[audits.yrs]]
+who = "OpenAI Codex"
+criteria = "safe-to-deploy"
+delta = "0.27.3 -> 0.27.4"
+notes = "Reviewed the checksum-matched decoder-hardening delta with default features only. Infallible length-driven reservations in Any arrays and maps, state vectors, and awareness updates become fallible try_reserve calls; IdSet grows only as encoded ranges are consumed; and a client-block lookup past the final clock returns no match instead of indexing past the slice. The top-level update clients_len and blocks_len reservations are byte-identical, so FileBelt retains its exact-identity fuzz quarantine and accepted availability risk. The production graph and empty default feature set are unchanged, and the delta adds no unsafe code, build script, or ambient I/O."
+
 [[audits.zerotrie]]
 who = "OpenAI Codex"
 criteria = "safe-to-deploy"

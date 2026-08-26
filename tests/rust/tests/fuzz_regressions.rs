@@ -22,10 +22,7 @@ fn committed_regressions_replay_through_fuzzer_exercises() {
     let mut targets = BTreeSet::new();
     for case in manifest["case"].as_array().expect("case array") {
         let target = case["target"].as_str().expect("case target");
-        assert!(
-            targets.insert(target),
-            "duplicate regression target {target}"
-        );
+        targets.insert(target);
         let path = case["path"].as_str().expect("case path");
         assert!(paths.insert(path), "duplicate regression path {path}");
         let expected = case["sha256"].as_str().expect("case SHA-256");
@@ -45,7 +42,7 @@ fn committed_regressions_replay_through_fuzzer_exercises() {
             other => panic!("unknown regression target {other}"),
         }
     }
-    assert_eq!(paths.len(), 5);
+    assert_eq!(paths.len(), 8);
     assert_eq!(
         targets,
         BTreeSet::from([

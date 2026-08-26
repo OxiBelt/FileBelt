@@ -23,6 +23,11 @@ pub const COLLABORATION_WIRE_MAX_INPUT_BYTES: usize = 256 * 1024;
 pub const REVISION_PROTOCOL_MAX_INPUT_BYTES: usize = 1024 * 1024;
 pub const RUNTIME_CONFIG_MAX_INPUT_BYTES: usize = 64 * 1024;
 
+#[cfg(feature = "fuzz-target")]
+pub fn install_collaboration_panic_hook() {
+    filebelt_collaboration::fuzzing::install_containment_aware_panic_hook();
+}
+
 pub fn nfs_vfs_boundary(input: &[u8]) {
     if input.len() <= NFS_VFS_BOUNDARY_MAX_INPUT_BYTES {
         filebelt_vfs::fuzzing::exercise_nfs_vfs_boundary(input);

@@ -112,6 +112,13 @@ immutable versions remain available. Preserve dirty rooms for explicit diff3
 review or their fenced 30-day expiry. WebTransport has no Phase 5 deployment
 path and cannot be enabled or rolled back independently.
 
+Rolling back to a collaboration binary without the guarded Yrs admission path
+reopens process-termination risk for malformed snapshots and live updates.
+Keep collaboration grants and routes disabled after that rollback; do not
+re-enable them until an image with zero-length block rejection and the isolated
+unwind boundary is restored and its snapshot/live regressions pass. Existing
+dirty manifests remain fenced and are not rewritten by this guard.
+
 ## MCP broker or runner rollback
 
 Disable runner admission first. Cancel active runner invocations and keep the

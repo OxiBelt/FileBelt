@@ -18,6 +18,21 @@ path = "tests/fixtures/fuzz-regressions/collaboration_wire/b8bb034f9b63bd0254fbc
 sha256 = "b8bb034f9b63bd0254fbc7c157cae746c75853f4643d6cea844dc48ddb57f522"
 
 [[case]]
+target = "collaboration_wire"
+path = "tests/fixtures/fuzz-regressions/collaboration_wire/8abb3daa6dec1eea1777b68b794bf554f4536571b60029f415be8dcee18d61c0"
+sha256 = "8abb3daa6dec1eea1777b68b794bf554f4536571b60029f415be8dcee18d61c0"
+
+[[case]]
+target = "collaboration_wire"
+path = "tests/fixtures/fuzz-regressions/collaboration_wire/f9654d9a75dc6cd2fc8de95630188d5643b7b90ad449573d06c5fd8cf6443068"
+sha256 = "f9654d9a75dc6cd2fc8de95630188d5643b7b90ad449573d06c5fd8cf6443068"
+
+[[case]]
+target = "collaboration_wire"
+path = "tests/fixtures/fuzz-regressions/collaboration_wire/dd24c4cd842a14c2ffeb8cb5a878e16466a935512eda6aab991463d2ba8ed866"
+sha256 = "dd24c4cd842a14c2ffeb8cb5a878e16466a935512eda6aab991463d2ba8ed866"
+
+[[case]]
 target = "revision_protocol"
 path = "tests/fixtures/fuzz-regressions/revision_protocol/1658f4e419b698170a08dd5c832053d91d95df9952a7b0e5f6a1b4a5c19f1882"
 sha256 = "1658f4e419b698170a08dd5c832053d91d95df9952a7b0e5f6a1b4a5c19f1882"

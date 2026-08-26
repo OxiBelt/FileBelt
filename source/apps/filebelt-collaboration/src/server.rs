@@ -648,17 +648,24 @@ async fn load_room_after_lock(
         .await
         .map_err(database_session_error)?;
     let mut document = if let Some(snapshot) = snapshot {
-        let bytes = state
-            .io
-            .read_object(claims, &snapshot.object)
-            .await
-            .map_err(io_session_error)?;
-        RoomDocument::from_snapshot(
+        let bytes = match state.io.read_object(claims, &snapshot.object).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                freeze_corrupt_room(state, key).await;
+                return Err(io_session_error(error));
+            }
+        };
+        match RoomDocument::from_snapshot(
             &bytes,
             u64::try_from(snapshot.covered_sequence).map_err(|_| SessionError::Protocol)?,
             state.limits.clone(),
-        )
-        .map_err(document_session_error)?
+        ) {
+            Ok(document) => document,
+            Err(error) => {
+                freeze_corrupt_room(state, key).await;
+                return Err(document_session_error(error));
+            }
+        }
     } else {
         RoomDocument::from_source_with_client_id(
             &source.text,
@@ -666,19 +673,10 @@ async fn load_room_after_lock(
             deterministic_base_client_id(claims),
         )
     };
-    replay_durable_groups(state, claims, &mut document)
-        .await
-        .inspect_err(|_| {
-            let database = state.database.clone();
-            let tenant_id = state.tenant_id;
-            let room_id = key.room_id;
-            let epoch = i64::try_from(key.epoch).unwrap_or(i64::MAX);
-            tokio::spawn(async move {
-                let _ = database
-                    .collaboration_freeze(tenant_id, room_id, epoch, "corrupt_state")
-                    .await;
-            });
-        })?;
+    if let Err(error) = replay_durable_groups(state, claims, &mut document).await {
+        freeze_corrupt_room(state, key).await;
+        return Err(error);
+    }
     let (sender, _) = broadcast::channel(2_048);
     let room = Arc::new(Mutex::new(LiveRoom {
         document,
@@ -692,6 +690,14 @@ async fn load_room_after_lock(
     // unrelated rooms. Concurrent initializers may each construct a candidate,
     // but only one is published and every caller uses that single live room.
     Ok(cache_loaded_room(&state.rooms, key, room).await)
+}
+
+async fn freeze_corrupt_room(state: &CollaborationServerState, key: RoomKey) {
+    let epoch = i64::try_from(key.epoch).unwrap_or(i64::MAX);
+    let _ = state
+        .database
+        .collaboration_freeze(state.tenant_id, key.room_id, epoch, "corrupt_state")
+        .await;
 }
 
 async fn room_load_lock(
@@ -1145,7 +1151,13 @@ async fn catch_up_room(
         .await
         .map_err(database_session_error)?;
     for group in groups {
-        let chunks = apply_replay_group(state, claims, &mut live.document, &group).await?;
+        let chunks = match apply_replay_group(state, claims, &mut live.document, &group).await {
+            Ok(chunks) => chunks,
+            Err(error) => {
+                freeze_claimed_room(state, claims, "corrupt_state").await;
+                return Err(error);
+            }
+        };
         let count = u32::try_from(chunks.len()).map_err(|_| SessionError::Internal)?;
         for (index, chunk) in chunks.into_iter().enumerate() {
             let sequence =

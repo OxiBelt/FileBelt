@@ -453,7 +453,7 @@ removes its durable edits.
 
 ## Collaboration durability and recovery
 
-The collaboration role is a dedicated Rust process using Yrs `0.27.3`; the
+The collaboration role is a dedicated Rust process using Yrs `0.27.4`; the
 browser uses Yjs `13.6.32`. A room accepts only `yjs-v1` groups no larger than
 2 MiB, assembled from chunks no larger than 256 KiB. The role writes each
 group through a scoped `fbcap1` collaboration-object capability. It returns an
@@ -464,6 +464,29 @@ projection and committed the corresponding manifest sequence. A restarted
 role reconstructs room state from the PostgreSQL manifest sequence and the
 referenced payload objects; it never reconstructs authority or order from an
 event stream.
+
+Snapshot restore follows decode, isolated apply, guarded full-state re-encode,
+source/size validation, then publication. A live group follows the same guarded
+path on a disposable copy of the acknowledged room. A zero-length Yrs
+garbage-collection block is rejected during decode; any Rust unwind panic from
+the remaining Yrs decode, apply, or re-encode path becomes `InvalidSnapshot`
+or `InvalidUpdate`. A rejected live group cannot mutate the current room,
+advance its sequence, persist a manifest, or receive an acknowledgement. The
+collaboration crate fails to build under an abort-on-panic Rust profile because
+that profile cannot provide this containment boundary. The service installs a
+process hook that suppresses only a panic currently inside the marked
+containment scope and forwards every unrelated panic to the preceding hook;
+no later component may replace it with an aborting hook. A rejected current
+snapshot or replay group freezes the epoch as `corrupt_state` so repeated room
+loads cannot turn persisted corruption into a retry or log loop.
+
+Yrs `0.27.4` partially hardens attacker-controlled length-prefixed decoder
+allocations, but its top-level `clients_len` and `blocks_len` reservation paths
+remain under the accepted-risk quarantine tracked by issue 10. The guarded
+admission path does not contain allocation failure that aborts the process.
+It changes no persisted `yjs-v1` format, schema, input ceiling, or
+acknowledgement boundary; restore validation is stricter only for malformed
+states that cannot be safely admitted.
 
 Every payload row has an immutable authority class. Collaboration manifests
 carry a foreign key to the `collaboration` class, and the collaboration runtime

@@ -309,11 +309,25 @@ under the Unlicense. `khroma@2.1.0` ships an MIT license file but omits a
 package metadata field, so the policy records an exact package-and-version MIT
 correction; an `Unknown` license remains a failure for every other package.
 
-The collaboration image admits Yrs `0.27.3` and the exact CRDT-support graph
-through local `safe-to-deploy` audits, not Cargo Vet exemptions. The WebSocket
-support graph is audited at its locked `tokio-tungstenite@0.29.0` and
-`tungstenite@0.29.0` versions. These audits are evidence for the exact source
-and features in `Cargo.lock`; an update requires a new review.
+The collaboration image admits Yrs `0.27.4` and the exact CRDT-support graph
+through local `safe-to-deploy` audits, not Cargo Vet exemptions. Its reviewed
+`0.27.3 -> 0.27.4` source delta hardens several attacker-controlled
+length-prefixed decoder paths without adding a dependency, feature, unsafe-code,
+build-script, or ambient-I/O boundary. The top-level `clients_len` and
+`blocks_len` reservation paths remain unchanged, so the accepted risk and its
+exact-identity fuzz quarantine remain active. The WebSocket support graph is
+audited at its locked `tokio-tungstenite@0.29.0` and `tungstenite@0.29.0`
+versions. These audits are evidence for the exact source and features in
+`Cargo.lock`; an update requires a new review.
+
+The Apache collaboration crate wraps Yrs's public v1 decoder to reject a
+decoded zero-length garbage-collection block before it reaches the block store.
+It also contains Rust unwind panics while an untrusted snapshot or live update
+is decoded, applied, and re-encoded on disposable state, and refuses to build
+with an abort-on-panic profile. This is local admission hardening, not a fork,
+Cargo patch, Cargo Vet exemption, or change to the checksum-matched Yrs source.
+It cannot convert allocator abort or out-of-memory termination into a typed
+error, so the accepted allocation risk remains.
 
 The ten-image plan adds `filebelt-collaboration` to the prior nine roles. Nine
 roles are deployable and publishable; the media controller remains probe-only.

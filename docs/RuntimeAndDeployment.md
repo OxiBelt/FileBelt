@@ -49,7 +49,7 @@ The current build matrix contains seventeen Apache-region images on
 | `filebelt-worker-maintenance` | Active and publishable. Leases durable jobs and reconciles, deletes, and scrubs through a narrow PostgreSQL role and one payload mount. |
 | `filebelt-tools` | Active and publishable. Runs bounded, explicit configuration, migration, bootstrap, key, audit, job, storage, and recovery commands with command-specific credentials and mounts. |
 | `filebelt-web` | Active and publishable. Combines static SPA/Markdown assets and reviewed route configuration with the pinned OxiBelt TLS edge. Has TLS material and isolated backend access, but no PostgreSQL or payload mount. |
-| `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.3`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
+| `filebelt-collaboration` | Dedicated Rust collaboration role for Yrs `0.27.4`. When enabled, admits authenticated Markdown editors, persists fenced CRDT manifests through scoped I/O capabilities, and has narrow PostgreSQL/I/O access but no payload mount, browser session authority, or general Internet egress. |
 | `filebelt-document` | Active, publishable, and disabled by default. Coordinates provider-neutral document sessions, revalidates Virtual ACL and API-session generations, signs `document-storage` exact-version/revision I/O capabilities, and reconciles expected-head commits. It has a narrow PostgreSQL role and no payload mount, browser cookie authority, adapter implementation dependency, or Internet egress. |
 | `filebelt-revision` | Compatibility-gated and disabled by default. Coordinates PostgreSQL-authoritative text Git revisions, shared-chunk backfill, bounded comparison, activation, and repair holds through purpose-scoped I/O and adapter calls. Comparison admission defaults to two globally and one per authenticated user, with immediate overload rejection. It has a narrow PostgreSQL role and no payload/Git mount, browser session credential, or Internet egress. |
 | `filebelt-media-controller` | Probe-only. Built and validated for identity but not deployed or promoted as a service. |
@@ -737,14 +737,31 @@ then take a coordinated checkpoint. Enable WebSocket collaboration only after
 the I/O finalize/fsync-to-manifest ACK path, 60-second authorization checks,
 external-head freeze, reconnect, diff3, and dirty-retention tests pass.
 Collaboration remains disabled by default. Its `yjs-v1` decoder dependency is
-a risk-accepted operator opt-in under the single-target, exact-version fuzz
-quarantine tracked by [issue 10](https://github.com/OxiBelt/FileBelt/issues/10).
+a risk-accepted operator opt-in at Yrs `0.27.4` under the single-target,
+exact-version fuzz quarantine tracked by
+[issue 10](https://github.com/OxiBelt/FileBelt/issues/10). Version `0.27.4`
+hardens several attacker-controlled length-prefixed decoder paths, but the
+reviewed top-level `clients_len` and `blocks_len` reservation paths remain.
+The collaboration binary rejects decoded zero-length GC blocks and contains
+Rust unwind panics while an untrusted snapshot or live group is decoded,
+applied, and fully re-encoded on isolated state. Images must retain the
+repository's unwind panic profile; an abort-on-panic build fails compilation.
+The binary installs the containment-aware process panic hook before startup;
+later telemetry or hardening code must not replace it with an aborting hook.
+The hook suppresses its predecessor only for the marked disposable Yrs scope,
+so contained attacker panics do not produce default panic/backtrace log
+amplification; unrelated panics retain normal process behavior. A rejected
+persisted snapshot freezes its epoch as corrupt.
+This prevents those malformed states from reaching persistence or ACK, but it
+does not contain allocator abort, stack overflow, native faults, double-panic
+abort, or remove the operator opt-in.
 The quarantine preserves the existing resource ceilings and stable/ASan smoke
 coverage while substituting an exact dependency sentinel for this target's
-sustained campaign; it is not a protocol change or a claim of remediation. A
-dependency identity or quarantined-target change requires review. Clearance
-requires the tracker gates, private snapshot/live-update regressions, and the
-full sustained campaign against a reviewed later distribution.
+sustained campaign; it is not a protocol change or a claim of complete
+remediation. A dependency identity or quarantined-target change requires
+review. Clearance requires the tracker gates, private snapshot/live-update
+regressions, and the full sustained campaign against a reviewed later
+distribution.
 WebTransport is not part of the Phase 5 baseline. Its reviewed Phase 8 route is
 separately opt-in and falls back to WebSocket. On a fault, stop new grants,
 drain connections, fence rooms, and preserve dirty manifests

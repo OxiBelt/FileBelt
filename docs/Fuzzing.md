@@ -36,14 +36,34 @@ dependency risk. The exact runner dependency is `cargo-fuzz 0.13.2` with
 `collaboration_wire` remains an active, single-target fuzz quarantine for the
 accepted third-party `yrs` decoder risk tracked in
 [issue 10](https://github.com/OxiBelt/FileBelt/issues/10). The catalog pins
-the exact reviewed dependency identity: `yrs` `0.27.3` from crates.io with its
-lockfile checksum. The quarantine does not change the target's input ceiling,
-smoke coverage, sanitizer coverage, production protocol, or deployment
-defaults.
+the exact reviewed dependency identity: `yrs` `0.27.4` from crates.io with its
+lockfile checksum. It also verifies that the named manifest binary still points
+to the reviewed wrapper, then digest-binds that wrapper, shared fuzz dispatch,
+collaboration containment, and checked decoder so the sustained-job exception
+cannot outlive a semantic implementation change without explicit review. This
+direct-source closure is not a claim about every transitive dependency. The
+quarantine does not change the target's input ceiling, smoke coverage,
+sanitizer coverage, production protocol, or deployment defaults.
 
-Any change to the quarantined target or that dependency identity makes the
-dedicated sustained-matrix verifier fail and requires review of the quarantine
-metadata and tracker. Clearance requires a later upstream distribution whose
+Yrs `0.27.4` hardens several attacker-controlled length-prefixed decoder paths,
+including `IdSet`, but the top-level update decoder retains the reviewed
+`clients_len` and `blocks_len` reservation paths tracked by issue 10. This
+partial hardening does not clear the accepted risk or the quarantine.
+
+FileBelt additionally rejects decoded zero-length Yrs garbage-collection
+blocks and contains Rust unwind panics across isolated snapshot/live-update
+decode, apply, and full-state re-encode. The libFuzzer target replaces the
+runner's aborting hook only while such a panic is inside that reviewed
+containment boundary; every panic outside it is forwarded to libFuzzer's
+original crash hook. Repository-constructed regressions cover zero-length and
+overflowing block ranges plus valid sparse updates. This local containment does
+not cover process-aborting allocation failure and therefore does not clear the
+top-level reservation risk or issue 10.
+
+Any change to the quarantined target, its digest-bound direct implementation,
+or that dependency identity makes the dedicated sustained-matrix verifier fail
+and requires review of the quarantine metadata and tracker. Clearance requires
+a later upstream distribution whose
 relevant decoder allocations have been reviewed, preservation of valid
 `yjs-v1` inputs without a new FileBelt wire limit, sanitized snapshot-restore
 and live-update regressions, a passing 900-second ASan campaign, and removal of

@@ -22,7 +22,7 @@ fn document(path: &str) -> Value {
 fn fuzz_catalog_matches_explicit_bins_and_limits() {
     let root = repository_root();
     let catalog = document("fuzz/targets.toml");
-    assert_eq!(catalog["schema_version"].as_integer(), Some(2));
+    assert_eq!(catalog["schema_version"].as_integer(), Some(3));
     assert_eq!(catalog["cargo_fuzz_version"].as_str(), Some("0.13.2"));
     assert_eq!(catalog["libfuzzer_sys_version"].as_str(), Some("0.4.13"));
     assert_eq!(catalog["stable_toolchain"].as_str(), Some("1.97.1"));
@@ -96,18 +96,57 @@ fn collaboration_wire_quarantine_is_single_target_and_lockfile_pinned() {
     );
     assert_eq!(
         quarantine["target_sha256"].as_str(),
-        Some("ade6705cb0a691a9c9e6d7779932ede34a7b127e50d95fc2eac0a081d2c26d8b")
+        Some("de7845d41dce16f42c6afaa0128426484c119e1d05af29f909e1e2bd4fdc7421")
     );
+    assert_eq!(
+        quarantine["target_manifest"].as_str(),
+        Some("fuzz/Cargo.toml")
+    );
+    assert_eq!(
+        quarantine["target_manifest_bin_path"].as_str(),
+        Some("fuzz_targets/collaboration_wire.rs")
+    );
+    let expected_implementation_sources = [
+        (
+            "fuzz/src/lib.rs",
+            "ff50f91441c6d445d0cd0d9abc6570165730255eaf1091388a8892c303a2ec69",
+        ),
+        (
+            "source/apps/filebelt-collaboration/src/lib.rs",
+            "552ada6729d16225429bf9a94e595b796b7507bc3c8685120bde564d2ed5dbd4",
+        ),
+        (
+            "source/apps/filebelt-collaboration/src/update_decoder.rs",
+            "96d9e159c99794465f469809bc157a11d3ae9aeb228b53c7f45085083cca83ab",
+        ),
+    ];
+    let implementation_sources = quarantine["implementation_sources"]
+        .as_array()
+        .expect("quarantined implementation sources");
+    assert_eq!(
+        implementation_sources.len(),
+        expected_implementation_sources.len()
+    );
+    for (implementation, (expected_path, expected_digest)) in implementation_sources
+        .iter()
+        .zip(expected_implementation_sources)
+    {
+        assert_eq!(implementation["path"].as_str(), Some(expected_path));
+        assert_eq!(implementation["sha256"].as_str(), Some(expected_digest));
+        let bytes = fs::read(repository_root().join(expected_path))
+            .expect("quarantined implementation source must exist");
+        assert_eq!(sha256_hex(&bytes), expected_digest);
+    }
     assert_eq!(quarantine["status"].as_str(), Some("risk_accepted"));
     assert_eq!(quarantine["dependency_name"].as_str(), Some("yrs"));
-    assert_eq!(quarantine["dependency_version"].as_str(), Some("0.27.3"));
+    assert_eq!(quarantine["dependency_version"].as_str(), Some("0.27.4"));
     assert_eq!(
         quarantine["dependency_source"].as_str(),
         Some("registry+https://github.com/rust-lang/crates.io-index")
     );
     assert_eq!(
         quarantine["dependency_checksum"].as_str(),
-        Some("9d3a728b1abffeca5b9e5319c5b81e04b73790cbdc1e342da8d91b440b3026cb")
+        Some("3987db9bdbe6f0f49c58ec3d0daf4750a70b40019c190f6c6708abfcdfe6bea0")
     );
     assert_eq!(
         quarantine["tracker"].as_str(),
@@ -158,6 +197,23 @@ fn collaboration_wire_quarantine_is_single_target_and_lockfile_pinned() {
         quarantine["target_sha256"]
             .as_str()
             .expect("quarantined target digest")
+    );
+
+    let manifest = document(
+        quarantine["target_manifest"]
+            .as_str()
+            .expect("quarantined target manifest"),
+    );
+    let matching_bins = manifest["bin"]
+        .as_array()
+        .expect("explicit fuzz bins")
+        .iter()
+        .filter(|binary| binary["name"].as_str() == quarantine["target"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(matching_bins.len(), 1, "quarantined target manifest bin");
+    assert_eq!(
+        matching_bins[0]["path"].as_str(),
+        quarantine["target_manifest_bin_path"].as_str()
     );
 
     let lockfile = document("Cargo.lock");

@@ -47,6 +47,7 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    filebelt_collaboration::install_decoder_panic_containment_hook();
     let raw = std::env::args().skip(1).collect::<Vec<_>>();
     let raw_refs = raw.iter().map(String::as_str).collect::<Vec<_>>();
     if matches!(raw_refs.as_slice(), ["--version"] | ["--build-info=json"]) {

@@ -24,6 +24,19 @@ SPEC.loader.exec_module(CHECKER)
 
 
 class FuzzQuarantineTests(unittest.TestCase):
+    @staticmethod
+    def copy_reviewed_inputs(root: Path) -> None:
+        for relative in (
+            "Cargo.lock",
+            "fuzz/Cargo.toml",
+            "fuzz/targets.toml",
+            "fuzz/fuzz_targets/collaboration_wire.rs",
+            *(entry["path"] for entry in CHECKER.EXPECTED_QUARANTINE["implementation_sources"]),
+        ):
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(REPO_ROOT / relative, destination)
+
     def test_accepts_the_exact_reviewed_quarantine(self) -> None:
         CHECKER.validate_quarantine(REPO_ROOT, "collaboration_wire")
 
@@ -35,8 +48,8 @@ class FuzzQuarantineTests(unittest.TestCase):
         for path, old, new, message in (
             (
                 "Cargo.lock",
-                'version = "0.27.3"',
                 'version = "0.27.4"',
+                'version = "0.27.3"',
                 "missing or duplicated",
             ),
             (
@@ -60,13 +73,7 @@ class FuzzQuarantineTests(unittest.TestCase):
             with self.subTest(path=path, old=old, new=new):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
-                    (root / "fuzz/fuzz_targets").mkdir(parents=True)
-                    shutil.copy(REPO_ROOT / "Cargo.lock", root / "Cargo.lock")
-                    shutil.copy(REPO_ROOT / "fuzz/targets.toml", root / "fuzz/targets.toml")
-                    shutil.copy(
-                        REPO_ROOT / "fuzz/fuzz_targets/collaboration_wire.rs",
-                        root / "fuzz/fuzz_targets/collaboration_wire.rs",
-                    )
+                    self.copy_reviewed_inputs(root)
                     fixture = root / path
                     source = fixture.read_text(encoding="utf-8")
                     self.assertIn(old, source)
@@ -77,9 +84,7 @@ class FuzzQuarantineTests(unittest.TestCase):
     def test_rejects_target_source_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "fuzz/fuzz_targets").mkdir(parents=True)
-            shutil.copy(REPO_ROOT / "Cargo.lock", root / "Cargo.lock")
-            shutil.copy(REPO_ROOT / "fuzz/targets.toml", root / "fuzz/targets.toml")
+            self.copy_reviewed_inputs(root)
             target = root / "fuzz/fuzz_targets/collaboration_wire.rs"
             target.write_bytes(
                 (REPO_ROOT / "fuzz/fuzz_targets/collaboration_wire.rs").read_bytes()
@@ -88,6 +93,36 @@ class FuzzQuarantineTests(unittest.TestCase):
             with self.assertRaisesRegex(CHECKER.QuarantineError, "target source changed"):
                 CHECKER.validate_quarantine(root, "collaboration_wire")
 
+    def test_rejects_manifest_bin_path_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_reviewed_inputs(root)
+            manifest = root / "fuzz/Cargo.toml"
+            source = manifest.read_text(encoding="utf-8")
+            old = 'path = "fuzz_targets/collaboration_wire.rs"'
+            self.assertIn(old, source)
+            manifest.write_text(
+                source.replace(old, 'path = "fuzz_targets/runtime_config.rs"', 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                CHECKER.QuarantineError, "manifest bin path changed"
+            ):
+                CHECKER.validate_quarantine(root, "collaboration_wire")
+
+    def test_rejects_implementation_source_drift(self) -> None:
+        for implementation in CHECKER.EXPECTED_QUARANTINE["implementation_sources"]:
+            with self.subTest(path=implementation["path"]):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.copy_reviewed_inputs(root)
+                    source = root / implementation["path"]
+                    source.write_bytes(source.read_bytes() + b"\n")
+                    with self.assertRaisesRegex(
+                        CHECKER.QuarantineError, "implementation source changed"
+                    ):
+                        CHECKER.validate_quarantine(root, "collaboration_wire")
+
     @staticmethod
     def toml(value: object) -> str:
         if value is True:
@@ -95,7 +130,16 @@ class FuzzQuarantineTests(unittest.TestCase):
         if isinstance(value, str):
             return f'"{value}"'
         if isinstance(value, list):
-            return "[" + ", ".join(f'"{item}"' for item in value) + "]"
+            return "[" + ", ".join(FuzzQuarantineTests.toml(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return (
+                "{ "
+                + ", ".join(
+                    f"{key} = {FuzzQuarantineTests.toml(item)}"
+                    for key, item in value.items()
+                )
+                + " }"
+            )
         raise AssertionError(f"unsupported TOML test value: {value!r}")
 
 

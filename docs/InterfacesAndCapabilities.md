@@ -294,6 +294,14 @@ has no Phase 5 listener, route, or configuration toggle; a future transport
 must repeat this contract review before it can carry these frames. Every
 participant reauthenticates within 60 seconds. Frame groups are capped at 2
 MiB, transferred chunks at 256 KiB, and use only the `yjs-v1` codec.
+Snapshot restore and each live group are decoded, applied, and fully
+re-encoded only on an isolated document before acceptance. A decoded
+zero-length garbage-collection block is structurally rejected. Any Rust unwind
+panic raised by Yrs while processing the isolated document is contained and
+reported through the existing invalid-snapshot or invalid-update result. This
+narrows acceptance only for malformed states: canonical and sparse Yjs updates,
+including a valid explicit zero state-vector clock, remain compatible. No new
+public error, frame, codec, or byte limit is introduced.
 The collaboration runtime verifies join grants exclusively with the configured
 API key generation. Its distinct collaboration capability key may sign only
 scoped storage capabilities and is never accepted as a join-grant issuer.

@@ -5,4 +5,7 @@
 
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|input: &[u8]| filebelt_fuzz::collaboration_wire(input));
+fuzz_target!(
+    init: filebelt_fuzz::install_collaboration_panic_hook(),
+    |input: &[u8]| filebelt_fuzz::collaboration_wire(input)
+);

@@ -25,7 +25,7 @@
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "mdast-util-math": "3.0.0",
-    "mermaid": "11.17.0",
+    "mermaid": "11.17.1",
     "micromark": "4.0.2",
     "micromark-extension-gfm": "3.0.0",
     "micromark-extension-math": "3.1.0",
@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/react-dom": "19.2.5",
     "vite": "8.2.2",
     "vitest": "4.1.11"
   }

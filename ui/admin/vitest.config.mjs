@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { defineConfig } from "vitest/config";
-import { ResolveFluentIconsContext } from "../vitest-fluent-icons-resolver.ts";
+import { defineConfig } from 'vitest/config'
+import { ResolveFluentIconsContext } from '../vitest-fluent-icons-resolver.ts'
 
 export default defineConfig({
   plugins: [ResolveFluentIconsContext()],
@@ -10,4 +10,4 @@ export default defineConfig({
       deps: { inline: [/@fluentui/] },
     },
   },
-});
+})

@@ -23,7 +23,9 @@
     "typeAware": true
   },
   "rules": {
-    "no-unused-vars": "error"
+    "no-unused-vars": "error",
+    "filebelt/no-semicolons": "error",
+    "filebelt/single-quotes": "error"
   },
   "overrides": [
     {
@@ -124,7 +126,9 @@
       "files": ["ui/web/source/generated/openapi.ts"],
       "rules": {
         "typescript/consistent-type-imports": "off",
-        "filebelt/pascal-case": "off"
+        "filebelt/no-semicolons": "off",
+        "filebelt/pascal-case": "off",
+        "filebelt/single-quotes": "off"
       }
     },
     {

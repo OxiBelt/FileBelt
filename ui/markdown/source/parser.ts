@@ -2,14 +2,14 @@
 
 /* oxlint-disable filebelt/pascal-case -- mdast is an external AST contract with exact lowercase field names. */
 
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown } from "mdast-util-gfm";
-import { mathFromMarkdown } from "mdast-util-math";
-import { gfm } from "micromark-extension-gfm";
-import { math } from "micromark-extension-math";
-import { ParseFileBeltReference } from "./links.js";
-import { CreateLineStarts, RangeFromPosition } from "./ranges.js";
-import type { MarkdownPosition } from "./ranges.js";
+import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfmFromMarkdown } from 'mdast-util-gfm'
+import { mathFromMarkdown } from 'mdast-util-math'
+import { gfm } from 'micromark-extension-gfm'
+import { math } from 'micromark-extension-math'
+import { ParseFileBeltReference } from './links.js'
+import { CreateLineStarts, RangeFromPosition } from './ranges.js'
+import type { MarkdownPosition } from './ranges.js'
 import type {
   FileBeltOfficeAstV1,
   MarkdownDiagnostic,
@@ -18,38 +18,38 @@ import type {
   OfficeInline,
   ParseResult,
   SourceRange,
-} from "./types.js";
-import { FileBeltGfmProfile } from "./types.js";
+} from './types.js'
+import { FileBeltGfmProfile } from './types.js'
 
 interface MdastNode {
-  align?: readonly ("center" | "left" | "right" | null)[];
-  checked?: boolean | null;
-  children?: readonly MdastNode[];
-  depth?: number;
-  identifier?: string;
-  lang?: string | null;
-  position?: MarkdownPosition;
-  start?: number;
-  title?: string | null;
-  type: string;
-  url?: string;
-  value?: string;
+  align?: readonly ('center' | 'left' | 'right' | null)[]
+  checked?: boolean | null
+  children?: readonly MdastNode[]
+  depth?: number
+  identifier?: string
+  lang?: string | null
+  position?: MarkdownPosition
+  start?: number
+  title?: string | null
+  type: string
+  url?: string
+  value?: string
 }
 
 interface NormalizationContext {
-  Diagnostics: MarkdownDiagnostic[];
-  LineStarts: readonly number[];
+  Diagnostics: MarkdownDiagnostic[]
+  LineStarts: readonly number[]
 }
 
-type AlertSeverity = "caution" | "important" | "note" | "tip" | "warning";
+type AlertSeverity = 'caution' | 'important' | 'note' | 'tip' | 'warning'
 
 export function ParseFileBeltGfmV1(Source: Readonly<MarkdownSource>): ParseResult {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The composed micromark extension profile lacks a public mdast overload.
   const Root = fromMarkdown(Source.Text, {
     extensions: [gfm(), math()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()],
-  } as never) as unknown as MdastNode;
-  return NormalizeMdast(Root, Source);
+  } as never) as unknown as MdastNode
+  return NormalizeMdast(Root, Source)
 }
 
 export function NormalizeMdast(
@@ -60,7 +60,7 @@ export function NormalizeMdast(
   const Context: NormalizationContext = {
     Diagnostics: [],
     LineStarts: CreateLineStarts(Source.Text),
-  };
+  }
   if (!MdastWithinBudget(Root)) {
     return {
       Ast: {
@@ -70,35 +70,35 @@ export function NormalizeMdast(
       },
       Diagnostics: [
         {
-          Code: "markdown.complexity",
-          Message: "Markdown structure exceeds the preview complexity limit.",
+          Code: 'markdown.complexity',
+          Message: 'Markdown structure exceeds the preview complexity limit.',
           Range: { End: Source.Text.length, Start: 0 },
-          Severity: "error",
+          Severity: 'error',
         },
       ],
-    };
+    }
   }
   const Ast: FileBeltOfficeAstV1 = {
     Children: (Root.children ?? []).flatMap((Node) => NormalizeBlock(Node, Context)),
     Profile: FileBeltGfmProfile,
     Range: { End: Source.Text.length, Start: 0 },
-  };
-  return { Ast, Diagnostics: Context.Diagnostics };
+  }
+  return { Ast, Diagnostics: Context.Diagnostics }
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- mdast's nested position objects are intentionally accepted without changing its external shape.
 function MdastWithinBudget(Root: Readonly<MdastNode>): boolean {
-  const Pending: Array<{ Depth: number; Node: Readonly<MdastNode> }> = [{ Depth: 0, Node: Root }];
-  let Nodes = 0;
+  const Pending: Array<{ Depth: number; Node: Readonly<MdastNode> }> = [{ Depth: 0, Node: Root }]
+  let Nodes = 0
   while (Pending.length > 0) {
-    const Current = Pending.pop();
-    if (Current === undefined || Current.Depth > 64) return false;
-    Nodes += 1;
-    if (Nodes > 100_000) return false;
+    const Current = Pending.pop()
+    if (Current === undefined || Current.Depth > 64) return false
+    Nodes += 1
+    if (Nodes > 100_000) return false
     for (const Child of Current.Node.children ?? [])
-      Pending.push({ Depth: Current.Depth + 1, Node: Child });
+      Pending.push({ Depth: Current.Depth + 1, Node: Child })
   }
-  return true;
+  return true
 }
 
 function NormalizeBlock(
@@ -107,30 +107,30 @@ function NormalizeBlock(
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Normalization accumulates diagnostics in this parser-local context.
   Context: NormalizationContext,
 ): readonly OfficeBlock[] {
-  const Range = NodeRange(Node, Context);
+  const Range = NodeRange(Node, Context)
   switch (Node.type) {
-    case "heading":
+    case 'heading':
       return [
         {
           Children: NormalizeInlines(Node.children ?? [], Context),
           Depth: ClampHeadingDepth(Node.depth),
-          Kind: "heading",
+          Kind: 'heading',
           Range,
         },
-      ];
-    case "paragraph":
+      ]
+    case 'paragraph':
       return [
-        { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "paragraph", Range },
-      ];
-    case "code":
-      return NormalizeCode(Node, Range);
-    case "math":
-      return [{ Expression: Node.value ?? "", Kind: "math", Range }];
-    case "thematicBreak":
-      return [{ Kind: "thematicBreak", Range }];
-    case "blockquote":
-      return [NormalizeQuote(Node, Context, Range)];
-    case "list":
+        { Children: NormalizeInlines(Node.children ?? [], Context), Kind: 'paragraph', Range },
+      ]
+    case 'code':
+      return NormalizeCode(Node, Range)
+    case 'math':
+      return [{ Expression: Node.value ?? '', Kind: 'math', Range }]
+    case 'thematicBreak':
+      return [{ Kind: 'thematicBreak', Range }]
+    case 'blockquote':
+      return [NormalizeQuote(Node, Context, Range)]
+    case 'list':
       return [
         {
           Items: (Node.children ?? []).map((Item) => ({
@@ -138,16 +138,16 @@ function NormalizeBlock(
             Children: (Item.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
             Range: NodeRange(Item, Context),
           })),
-          Kind: "list",
+          Kind: 'list',
           Ordered: Node.start !== undefined,
           Range,
         },
-      ];
-    case "table":
+      ]
+    case 'table':
       return [
         {
           Align: Node.align ?? [],
-          Kind: "table",
+          Kind: 'table',
           Range,
           Rows: (Node.children ?? []).map((Row) => ({
             Cells: (Row.children ?? []).map((Cell) =>
@@ -156,34 +156,34 @@ function NormalizeBlock(
             Range: NodeRange(Row, Context),
           })),
         },
-      ];
-    case "footnoteDefinition":
+      ]
+    case 'footnoteDefinition':
       return [
         {
           Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
-          Identifier: Node.identifier ?? "",
-          Kind: "footnoteDefinition",
+          Identifier: Node.identifier ?? '',
+          Kind: 'footnoteDefinition',
           Range,
         },
-      ];
-    case "html":
+      ]
+    case 'html':
       Context.Diagnostics.push({
-        Code: "markdown.raw-html",
-        Message: "Raw HTML is rendered as literal text.",
+        Code: 'markdown.raw-html',
+        Message: 'Raw HTML is rendered as literal text.',
         Range,
-        Severity: "warning",
-      });
+        Severity: 'warning',
+      })
       return [
-        { Children: [{ Kind: "text", Range, Text: Node.value ?? "" }], Kind: "paragraph", Range },
-      ];
+        { Children: [{ Kind: 'text', Range, Text: Node.value ?? '' }], Kind: 'paragraph', Range },
+      ]
     default:
       Context.Diagnostics.push({
-        Code: "markdown.unsupported",
+        Code: 'markdown.unsupported',
         Message: `Unsupported Markdown node: ${Node.type}.`,
         Range,
-        Severity: "warning",
-      });
-      return [];
+        Severity: 'warning',
+      })
+      return []
   }
 }
 
@@ -194,37 +194,37 @@ function NormalizeQuote(
   Context: NormalizationContext,
   Range: Readonly<SourceRange>,
 ): OfficeBlock {
-  const First = Node.children?.[0];
-  const FirstText = First?.children?.[0];
+  const First = Node.children?.[0]
+  const FirstText = First?.children?.[0]
   const Alert =
-    First?.type === "paragraph" && FirstText?.type === "text"
-      ? /^\[!(CAUTION|IMPORTANT|NOTE|TIP|WARNING)\]\s*/.exec(FirstText.value ?? "")
-      : null;
+    First?.type === 'paragraph' && FirstText?.type === 'text'
+      ? /^\[!(CAUTION|IMPORTANT|NOTE|TIP|WARNING)\]\s*/.exec(FirstText.value ?? '')
+      : null
   if (Alert === null)
     return {
       Children: (Node.children ?? []).flatMap((Child) => NormalizeBlock(Child, Context)),
-      Kind: "quote",
+      Kind: 'quote',
       Range,
-    };
-  const CandidateSeverity = (Alert[1] ?? "note").toLowerCase();
-  const Severity: AlertSeverity = IsAlertSeverity(CandidateSeverity) ? CandidateSeverity : "note";
+    }
+  const CandidateSeverity = (Alert[1] ?? 'note').toLowerCase()
+  const Severity: AlertSeverity = IsAlertSeverity(CandidateSeverity) ? CandidateSeverity : 'note'
   const AlertChildren = (Node.children ?? []).map((Child, Index) => {
-    if (Index !== 0 || Child !== First) return Child;
+    if (Index !== 0 || Child !== First) return Child
     return {
       ...Child,
       children: (Child.children ?? []).map((Inline, InlineIndex) =>
         InlineIndex === 0 && Inline === FirstText
-          ? { ...Inline, value: (Inline.value ?? "").slice(Alert[0].length) }
+          ? { ...Inline, value: (Inline.value ?? '').slice(Alert[0].length) }
           : Inline,
       ),
-    };
-  });
+    }
+  })
   return {
     Children: AlertChildren.flatMap((Child) => NormalizeBlock(Child, Context)),
-    Kind: "alert",
+    Kind: 'alert',
     Range,
     Severity,
-  };
+  }
 }
 
 function NormalizeCode(
@@ -232,9 +232,9 @@ function NormalizeCode(
   Node: Readonly<MdastNode>,
   Range: Readonly<SourceRange>,
 ): readonly OfficeBlock[] {
-  if (Node.lang === "mermaid") return [{ Kind: "mermaid", Range, Source: Node.value ?? "" }];
-  if (Node.lang === "math") return [{ Expression: Node.value ?? "", Kind: "math", Range }];
-  return [{ Code: Node.value ?? "", Kind: "code", Language: Node.lang ?? null, Range }];
+  if (Node.lang === 'mermaid') return [{ Kind: 'mermaid', Range, Source: Node.value ?? '' }]
+  if (Node.lang === 'math') return [{ Expression: Node.value ?? '', Kind: 'math', Range }]
+  return [{ Code: Node.value ?? '', Kind: 'code', Language: Node.lang ?? null, Range }]
 }
 
 function NormalizeInlines(
@@ -244,44 +244,42 @@ function NormalizeInlines(
   Context: NormalizationContext,
 ): readonly OfficeInline[] {
   return Nodes.flatMap((Node) => {
-    const Range = NodeRange(Node, Context);
+    const Range = NodeRange(Node, Context)
     switch (Node.type) {
-      case "text":
-        return [{ Kind: "text", Range, Text: Node.value ?? "" }];
-      case "inlineCode":
-        return [{ Kind: "code", Range, Text: Node.value ?? "" }];
-      case "emphasis":
+      case 'text':
+        return [{ Kind: 'text', Range, Text: Node.value ?? '' }]
+      case 'inlineCode':
+        return [{ Kind: 'code', Range, Text: Node.value ?? '' }]
+      case 'emphasis':
         return [
-          { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "emphasis", Range },
-        ];
-      case "strong":
-        return [
-          { Children: NormalizeInlines(Node.children ?? [], Context), Kind: "strong", Range },
-        ];
-      case "link":
-        return NormalizeLink(Node, Context, Range);
-      case "footnoteReference":
-        return [{ Identifier: Node.identifier ?? "", Kind: "footnoteReference", Range }];
-      case "break":
-        return [{ Kind: "text", Range, Text: "\n" }];
-      case "html":
+          { Children: NormalizeInlines(Node.children ?? [], Context), Kind: 'emphasis', Range },
+        ]
+      case 'strong':
+        return [{ Children: NormalizeInlines(Node.children ?? [], Context), Kind: 'strong', Range }]
+      case 'link':
+        return NormalizeLink(Node, Context, Range)
+      case 'footnoteReference':
+        return [{ Identifier: Node.identifier ?? '', Kind: 'footnoteReference', Range }]
+      case 'break':
+        return [{ Kind: 'text', Range, Text: '\n' }]
+      case 'html':
         Context.Diagnostics.push({
-          Code: "markdown.raw-html",
-          Message: "Raw HTML is rendered as literal text.",
+          Code: 'markdown.raw-html',
+          Message: 'Raw HTML is rendered as literal text.',
           Range,
-          Severity: "warning",
-        });
-        return [{ Kind: "text", Range, Text: Node.value ?? "" }];
+          Severity: 'warning',
+        })
+        return [{ Kind: 'text', Range, Text: Node.value ?? '' }]
       default:
         Context.Diagnostics.push({
-          Code: "markdown.unsupported",
+          Code: 'markdown.unsupported',
           Message: `Unsupported Markdown inline: ${Node.type}.`,
           Range,
-          Severity: "warning",
-        });
-        return [];
+          Severity: 'warning',
+        })
+        return []
     }
-  });
+  })
 }
 
 function NormalizeLink(
@@ -291,26 +289,26 @@ function NormalizeLink(
   Context: NormalizationContext,
   Range: Readonly<SourceRange>,
 ): readonly OfficeInline[] {
-  const Target = ParseFileBeltReference(Node.url ?? "");
+  const Target = ParseFileBeltReference(Node.url ?? '')
   if (Target !== undefined)
-    return [{ Kind: "filebeltLink", Range, Target, Title: Node.title ?? null }];
-  if ((Node.url ?? "").startsWith("filebelt:")) {
+    return [{ Kind: 'filebeltLink', Range, Target, Title: Node.title ?? null }]
+  if ((Node.url ?? '').startsWith('filebelt:')) {
     Context.Diagnostics.push({
-      Code: "markdown.filebelt-link",
-      Message: "The FileBelt link is not valid.",
+      Code: 'markdown.filebelt-link',
+      Message: 'The FileBelt link is not valid.',
       Range,
-      Severity: "error",
-    });
+      Severity: 'error',
+    })
   }
   return [
     {
       Children: NormalizeInlines(Node.children ?? [], Context),
-      Destination: Node.url ?? "",
-      Kind: "link",
+      Destination: Node.url ?? '',
+      Kind: 'link',
       Range,
       Title: Node.title ?? null,
     },
-  ];
+  ]
 }
 
 function NodeRange(
@@ -319,20 +317,20 @@ function NodeRange(
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Context exposes mutable diagnostic storage to normalizers.
   Context: Readonly<NormalizationContext>,
 ): SourceRange {
-  return RangeFromPosition(Node.position, Context.LineStarts);
+  return RangeFromPosition(Node.position, Context.LineStarts)
 }
 
 function ClampHeadingDepth(Depth: number | undefined): 1 | 2 | 3 | 4 | 5 | 6 {
-  if (Depth === 2 || Depth === 3 || Depth === 4 || Depth === 5 || Depth === 6) return Depth;
-  return 1;
+  if (Depth === 2 || Depth === 3 || Depth === 4 || Depth === 5 || Depth === 6) return Depth
+  return 1
 }
 
 function IsAlertSeverity(Value: string): Value is AlertSeverity {
   return (
-    Value === "caution" ||
-    Value === "important" ||
-    Value === "note" ||
-    Value === "tip" ||
-    Value === "warning"
-  );
+    Value === 'caution' ||
+    Value === 'important' ||
+    Value === 'note' ||
+    Value === 'tip' ||
+    Value === 'warning'
+  )
 }

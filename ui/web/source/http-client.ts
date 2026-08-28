@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import createClient from "openapi-fetch";
-import type { Client } from "openapi-fetch";
+import createClient from 'openapi-fetch'
+import type { Client } from 'openapi-fetch'
 
-import { AclConflictError, AuthenticationRequiredError, VersionConflictError } from "./client.js";
+import { AclConflictError, AuthenticationRequiredError, VersionConflictError } from './client.js'
 import type {
   AclCollection,
   AclEntryMutation,
@@ -21,8 +21,8 @@ import type {
   TextPreferences,
   VersionPage as TextVersionPage,
   WorkspaceLoadScope,
-} from "./client.js";
-import type { components, operations, paths } from "./generated/openapi.js";
+} from './client.js'
+import type { components, operations, paths } from './generated/openapi.js'
 import type {
   FileEntry,
   SessionRecord,
@@ -31,217 +31,217 @@ import type {
   UploadTarget,
   VersionRecord,
   WorkspaceSnapshot,
-} from "./model.js";
+} from './model.js'
 
-type SessionResponse = components["schemas"]["Session"];
-type SessionSummaryResponse = components["schemas"]["SessionSummary"];
-type DriveResponse = components["schemas"]["Drive"];
-type NodeResponse = components["schemas"]["Node"];
-type VersionResponse = components["schemas"]["FileVersion"];
-type ShareResponse = components["schemas"]["DirectShare"];
-type UploadAllocation = components["schemas"]["UploadAllocation"];
-type ByteGrant = components["schemas"]["ByteGrant"];
-type UploadGrants = components["schemas"]["UploadGrants"];
-type DownloadGrant = components["schemas"]["DownloadGrant"];
-type CollaborationGrant = components["schemas"]["CollaborationGrant"];
-type MarkdownImportIntent = components["schemas"]["MarkdownImportIntent"];
-type DrivePage = components["schemas"]["DrivePage"];
-type NodePage = components["schemas"]["NodePage"];
-type VersionPage = components["schemas"]["VersionPage"];
-type TextComparisonResponse = components["schemas"]["TextVersionComparison"];
-type TextPreferencesResponse = components["schemas"]["TextPreferences"];
-type AclCollectionResponse = components["schemas"]["AclCollection"];
-type UploadCommit = operations["commitUpload"]["responses"][201]["content"]["application/json"];
+type SessionResponse = components['schemas']['Session']
+type SessionSummaryResponse = components['schemas']['SessionSummary']
+type DriveResponse = components['schemas']['Drive']
+type NodeResponse = components['schemas']['Node']
+type VersionResponse = components['schemas']['FileVersion']
+type ShareResponse = components['schemas']['DirectShare']
+type UploadAllocation = components['schemas']['UploadAllocation']
+type ByteGrant = components['schemas']['ByteGrant']
+type UploadGrants = components['schemas']['UploadGrants']
+type DownloadGrant = components['schemas']['DownloadGrant']
+type CollaborationGrant = components['schemas']['CollaborationGrant']
+type MarkdownImportIntent = components['schemas']['MarkdownImportIntent']
+type DrivePage = components['schemas']['DrivePage']
+type NodePage = components['schemas']['NodePage']
+type VersionPage = components['schemas']['VersionPage']
+type TextComparisonResponse = components['schemas']['TextVersionComparison']
+type TextPreferencesResponse = components['schemas']['TextPreferences']
+type AclCollectionResponse = components['schemas']['AclCollection']
+type UploadCommit = operations['commitUpload']['responses'][201]['content']['application/json']
 
 interface NodeLocation {
-  DriveId: string;
-  HeadVersionId: string | null;
-  Kind: NodeResponse["kind"];
-  NamespaceGeneration: number;
-  ParentId: string | null;
+  DriveId: string
+  HeadVersionId: string | null
+  Kind: NodeResponse['kind']
+  NamespaceGeneration: number
+  ParentId: string | null
 }
 
 interface DirectShareLocation {
-  DriveId: string;
-  NodeId: string;
-  PrincipalId: string;
+  DriveId: string
+  NodeId: string
+  PrincipalId: string
 }
 
 interface WorkspaceRoutingState {
-  Locations: Map<string, NodeLocation>;
-  Session: SessionResponse | null;
-  Shares: Map<string, DirectShareLocation>;
-  UploadTarget: { DriveId: string; NamespaceGeneration: number; RootId: string } | null;
-  Versions: Map<string, { DriveId: string; NodeId: string }>;
+  Locations: Map<string, NodeLocation>
+  Session: SessionResponse | null
+  Shares: Map<string, DirectShareLocation>
+  UploadTarget: { DriveId: string; NamespaceGeneration: number; RootId: string } | null
+  Versions: Map<string, { DriveId: string; NodeId: string }>
 }
 
 interface Page<T> {
   // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI page responses expose this exact key.
-  readonly items: readonly T[];
+  readonly items: readonly T[]
   // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI page responses expose this exact key.
-  readonly next_cursor: string | null;
+  readonly next_cursor: string | null
 }
 
 interface ApiResult<T> {
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly data?: T;
+  readonly data?: T
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly error?: unknown;
+  readonly error?: unknown
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly response: Response;
+  readonly response: Response
 }
 
 interface MutationHeaders {
-  Origin: string;
-  "Sec-Fetch-Site": "same-origin";
-  "X-FileBelt-Csrf": string;
+  Origin: string
+  'Sec-Fetch-Site': 'same-origin'
+  'X-FileBelt-Csrf': string
 }
 
 interface IdempotencyHeaders {
-  "Idempotency-Key": string;
+  'Idempotency-Key': string
 }
 
 interface PageQueryShape {
   // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI query parameters expose this exact key.
-  cursor?: string;
+  cursor?: string
   // oxlint-disable-next-line filebelt/pascal-case -- Generated OpenAPI query parameters expose this exact key.
-  limit: number;
+  limit: number
 }
 
 type SignalInitShape = {
   // oxlint-disable-next-line filebelt/pascal-case -- Fetch `RequestInit` exposes this exact abort-signal key.
-  signal?: AbortSignal;
-};
+  signal?: AbortSignal
+}
 
 export class ApiRequestError extends Error {
-  readonly Code: string | null;
-  readonly Detail: string | null;
-  readonly Status: number;
+  readonly Code: string | null
+  readonly Detail: string | null
+  readonly Status: number
 
   constructor(Status: number, Message: string, Code: string | null, Detail: string | null) {
-    super(Message);
-    this.name = "ApiRequestError";
-    this.Code = Code;
-    this.Detail = Detail;
-    this.Status = Status;
+    super(Message)
+    this.name = 'ApiRequestError'
+    this.Code = Code
+    this.Detail = Detail
+    this.Status = Status
   }
 }
 
-const PageLimit = 200;
+const PageLimit = 200
 
 /** Same-origin production adapter for the generated FileBelt HTTP contract. */
 export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
-  readonly #Api: Client<paths>;
-  readonly #BaseUrl: string;
-  readonly #Fetch: typeof fetch;
+  readonly #Api: Client<paths>
+  readonly #BaseUrl: string
+  readonly #Fetch: typeof fetch
   #Routing: WorkspaceRoutingState = {
     Locations: new Map(),
     Session: null,
     Shares: new Map(),
     UploadTarget: null,
     Versions: new Map(),
-  };
-  #WorkspaceRefreshGeneration = 0;
+  }
+  #WorkspaceRefreshGeneration = 0
 
   constructor(
     FetchImplementation: typeof fetch = globalThis.fetch.bind(globalThis),
     BaseUrl: string = DefaultBaseUrl(),
   ) {
-    this.#BaseUrl = BaseUrl;
-    this.#Fetch = FetchImplementation;
+    this.#BaseUrl = BaseUrl
+    this.#Fetch = FetchImplementation
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
-      credentials: "same-origin",
+      credentials: 'same-origin',
       fetch: async (Request) => this.#Fetch(Request),
-    });
+    })
   }
 
   async getWorkspace(
     Signal?: Readonly<AbortSignal>,
-    Scope: WorkspaceLoadScope = { Kind: "global" },
+    Scope: WorkspaceLoadScope = { Kind: 'global' },
   ): Promise<WorkspaceSnapshot> {
-    const RefreshGeneration = ++this.#WorkspaceRefreshGeneration;
+    const RefreshGeneration = ++this.#WorkspaceRefreshGeneration
     const Session = RequireData<SessionResponse>(
-      await this.#Api.GET("/api/v1/session", SignalInit(Signal)),
-    );
+      await this.#Api.GET('/api/v1/session', SignalInit(Signal)),
+    )
     const Drives = await this.#collectPages<DriveResponse>(async (Cursor) =>
       RequireData<DrivePage>(
-        await this.#Api.GET("/api/v1/drives", {
+        await this.#Api.GET('/api/v1/drives', {
           params: { query: PageQuery(Cursor) },
           ...SignalInit(Signal),
         }),
       ),
-    );
-    const PrivateDrive = Drives.find(({ kind: Kind }) => Kind === "private") ?? null;
-    let UploadTarget: WorkspaceRoutingState["UploadTarget"];
+    )
+    const PrivateDrive = Drives.find(({ kind: Kind }) => Kind === 'private') ?? null
+    let UploadTarget: WorkspaceRoutingState['UploadTarget']
     if (PrivateDrive === null) {
-      UploadTarget = null;
+      UploadTarget = null
     } else {
-      const Root = await this.#getNode(PrivateDrive.id, PrivateDrive.root_id, Signal);
-      if (Root.kind !== "directory") throw new Error("The private drive root is unavailable.");
+      const Root = await this.#getNode(PrivateDrive.id, PrivateDrive.root_id, Signal)
+      if (Root.kind !== 'directory') throw new Error('The private drive root is unavailable.')
       UploadTarget = {
         DriveId: PrivateDrive.id,
         NamespaceGeneration: Root.namespace_generation,
         RootId: PrivateDrive.root_id,
-      };
+      }
     }
 
-    const Entries: FileEntry[] = [];
-    const Versions: VersionRecord[] = [];
-    const Shares: ShareRecord[] = [];
-    const Locations = new Map<string, NodeLocation>();
-    const ShareLocations = new Map<string, DirectShareLocation>();
-    const VersionLocations = new Map<string, { DriveId: string; NodeId: string }>();
+    const Entries: FileEntry[] = []
+    const Versions: VersionRecord[] = []
+    const Shares: ShareRecord[] = []
+    const Locations = new Map<string, NodeLocation>()
+    const ShareLocations = new Map<string, DirectShareLocation>()
+    const VersionLocations = new Map<string, { DriveId: string; NodeId: string }>()
     const FolderDriveId =
-      Scope.Kind === "folder" ? (Scope.DriveId ?? PrivateDrive?.id ?? null) : null;
+      Scope.Kind === 'folder' ? (Scope.DriveId ?? PrivateDrive?.id ?? null) : null
     for (const Drive of Drives) {
-      if (Scope.Kind === "folder" && Drive.id !== FolderDriveId) continue;
-      const Nodes: NodeResponse[] = [];
-      if (Scope.Kind === "folder") {
-        const CurrentNodeId = Scope.NodeId ?? Drive.root_id;
+      if (Scope.Kind === 'folder' && Drive.id !== FolderDriveId) continue
+      const Nodes: NodeResponse[] = []
+      if (Scope.Kind === 'folder') {
+        const CurrentNodeId = Scope.NodeId ?? Drive.root_id
         if (Scope.NodeId !== null) {
-          const Current = await this.#getNode(Drive.id, CurrentNodeId, Signal);
-          if (Current.kind !== "directory") throw new Error("The selected folder is unavailable.");
-          Nodes.push(Current);
+          const Current = await this.#getNode(Drive.id, CurrentNodeId, Signal)
+          if (Current.kind !== 'directory') throw new Error('The selected folder is unavailable.')
+          Nodes.push(Current)
         }
-        Nodes.push(...(await this.#listChildren(Drive.id, CurrentNodeId, Signal)));
+        Nodes.push(...(await this.#listChildren(Drive.id, CurrentNodeId, Signal)))
       } else {
-        const Directories = [Drive.root_id];
+        const Directories = [Drive.root_id]
         while (Directories.length > 0) {
-          const ParentId = Directories.shift();
-          if (ParentId === undefined) break;
-          const Children = await this.#listChildren(Drive.id, ParentId, Signal);
-          Nodes.push(...Children);
+          const ParentId = Directories.shift()
+          if (ParentId === undefined) break
+          const Children = await this.#listChildren(Drive.id, ParentId, Signal)
+          Nodes.push(...Children)
           Directories.push(
-            ...Children.filter(({ kind: Kind }) => Kind === "directory").map(({ id: Id }) => Id),
-          );
+            ...Children.filter(({ kind: Kind }) => Kind === 'directory').map(({ id: Id }) => Id),
+          )
         }
-        Nodes.push(...(await this.#listTrash(Drive.id, Signal)));
+        Nodes.push(...(await this.#listTrash(Drive.id, Signal)))
       }
       for (const Node of Nodes) {
         Locations.set(Node.id, {
           DriveId: Drive.id,
-          HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
+          HeadVersionId: Node.kind === 'file' ? Node.head_version_id : null,
           Kind: Node.kind,
           NamespaceGeneration: Node.namespace_generation,
           ParentId: Node.parent_id,
-        });
+        })
         const NodeVersions =
-          Scope.Kind === "global" && Node.kind === "file"
+          Scope.Kind === 'global' && Node.kind === 'file'
             ? await this.#listVersions(Drive.id, Node.id, Signal)
-            : [];
+            : []
         for (const Version of NodeVersions) {
-          VersionLocations.set(Version.id, { DriveId: Drive.id, NodeId: Node.id });
-          Versions.push(VersionRecord(Version));
+          VersionLocations.set(Version.id, { DriveId: Drive.id, NodeId: Node.id })
+          Versions.push(VersionRecord(Version))
         }
-        const NodeShares = await this.#optionalShares(Drive.id, Node.id, Signal);
+        const NodeShares = await this.#optionalShares(Drive.id, Node.id, Signal)
         for (const Share of NodeShares) {
-          const ShareId = crypto.randomUUID();
+          const ShareId = crypto.randomUUID()
           ShareLocations.set(ShareId, {
             DriveId: Drive.id,
             NodeId: Node.id,
             PrincipalId: Share.principal_id,
-          });
+          })
           Shares.push({
             Id: ShareId,
             Kind: Share.kind,
@@ -249,63 +249,63 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             ResourceId: Node.id,
             ResourceName: Node.display_name,
             Target: Share.verified_email,
-          });
+          })
         }
         Entries.push(
           FileEntry(
             Node,
             Drive.owner_display_name,
-            Drive.kind === "shared" || NodeShares.length > 0,
+            Drive.kind === 'shared' || NodeShares.length > 0,
           ),
-        );
+        )
       }
     }
 
-    const KnownEntries = new Set(Entries.map(({ Id }) => Id));
+    const KnownEntries = new Set(Entries.map(({ Id }) => Id))
     const SharedNodes =
-      Scope.Kind === "global"
+      Scope.Kind === 'global'
         ? await this.#collectPages<NodeResponse>(async (Cursor) =>
             RequireData<NodePage>(
-              await this.#Api.GET("/api/v1/shared", {
+              await this.#Api.GET('/api/v1/shared', {
                 params: { query: PageQuery(Cursor) },
                 ...SignalInit(Signal),
               }),
             ),
           )
-        : [];
+        : []
     for (const Node of SharedNodes) {
-      if (KnownEntries.has(Node.id)) continue;
+      if (KnownEntries.has(Node.id)) continue
       Locations.set(Node.id, {
         DriveId: Node.drive_id,
-        HeadVersionId: Node.kind === "file" ? Node.head_version_id : null,
+        HeadVersionId: Node.kind === 'file' ? Node.head_version_id : null,
         Kind: Node.kind,
         NamespaceGeneration: Node.namespace_generation,
         ParentId: Node.parent_id,
-      });
-      if (Node.kind === "file") {
-        const NodeVersions = await this.#listVersions(Node.drive_id, Node.id, Signal);
+      })
+      if (Node.kind === 'file') {
+        const NodeVersions = await this.#listVersions(Node.drive_id, Node.id, Signal)
         for (const Version of NodeVersions) {
-          VersionLocations.set(Version.id, { DriveId: Node.drive_id, NodeId: Node.id });
-          Versions.push(VersionRecord(Version));
+          VersionLocations.set(Version.id, { DriveId: Node.drive_id, NodeId: Node.id })
+          Versions.push(VersionRecord(Version))
         }
       }
-      Entries.push(FileEntry(Node, "Owner unavailable", true));
+      Entries.push(FileEntry(Node, 'Owner unavailable', true))
     }
 
     const SessionResponse = RequireData<readonly SessionSummaryResponse[]>(
-      await this.#Api.GET("/api/v1/sessions", SignalInit(Signal)),
-    );
+      await this.#Api.GET('/api/v1/sessions', SignalInit(Signal)),
+    )
     const Sessions = SessionResponse.map<SessionRecord>((Item: SessionSummaryResponse) => ({
       Current: Item.current,
-      Device: Item.user_agent ?? "Unknown client",
+      Device: Item.user_agent ?? 'Unknown client',
       Id: Item.id,
       LastActiveAt: Item.last_seen_at,
-      Location: Item.current ? "Current device" : "Location unavailable",
-    }));
+      Location: Item.current ? 'Current device' : 'Location unavailable',
+    }))
 
     const Snapshot: WorkspaceSnapshot = {
       Admin: {
-        Drives: Drives.filter(({ kind: Kind }) => Kind === "shared").map((Drive) => ({
+        Drives: Drives.filter(({ kind: Kind }) => Kind === 'shared').map((Drive) => ({
           Id: Drive.id,
           Name: Drive.display_name,
           QuotaBytes: Drive.quota_bytes,
@@ -316,7 +316,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       },
       CurrentUser: {
         DisplayName: Session.display_name,
-        Email: Session.verified_email ?? "",
+        Email: Session.verified_email ?? '',
         IsTenantAdmin: Session.tenant_admin,
       },
       Drives: Drives.map((Drive) => ({
@@ -331,9 +331,9 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Shares,
       Uploads: [],
       Versions,
-    };
+    }
     if (RefreshGeneration !== this.#WorkspaceRefreshGeneration) {
-      throw new DOMException("Workspace refresh was superseded.", "AbortError");
+      throw new DOMException('Workspace refresh was superseded.', 'AbortError')
     }
     this.#Routing = {
       Locations,
@@ -341,17 +341,17 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
       Shares: ShareLocations,
       UploadTarget,
       Versions: VersionLocations,
-    };
-    return Snapshot;
+    }
+    return Snapshot
   }
 
   async upload(
     Files: readonly Readonly<UploadCandidate>[],
     RequestedTarget?: Readonly<UploadTarget>,
   ): Promise<void> {
-    const DefaultTarget = this.#Routing.UploadTarget;
+    const DefaultTarget = this.#Routing.UploadTarget
     if (RequestedTarget === undefined && DefaultTarget === null)
-      throw new Error("No writable private drive is available.");
+      throw new Error('No writable private drive is available.')
     const Target =
       RequestedTarget === undefined
         ? DefaultTarget
@@ -359,23 +359,23 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             DriveId: RequestedTarget.DriveId,
             NamespaceGeneration: 0,
             RootId: RequestedTarget.ParentId,
-          };
-    if (Target === null) throw new Error("No writable upload folder is available.");
+          }
+    if (Target === null) throw new Error('No writable upload folder is available.')
     if (RequestedTarget !== undefined) {
-      const Location = this.#location(RequestedTarget.ParentId);
-      if (Location.DriveId !== RequestedTarget.DriveId || Location.Kind !== "directory")
-        throw new Error("The upload folder is unavailable.");
+      const Location = this.#location(RequestedTarget.ParentId)
+      if (Location.DriveId !== RequestedTarget.DriveId || Location.Kind !== 'directory')
+        throw new Error('The upload folder is unavailable.')
     }
-    await this.#ensureSession();
+    await this.#ensureSession()
     for (const Candidate of Files) {
       if (Candidate.Data === undefined || Candidate.Data.size !== Candidate.Size) {
-        throw new Error("The selected file bytes are unavailable.");
+        throw new Error('The selected file bytes are unavailable.')
       }
-      const Root = await this.#getNode(Target.DriveId, Target.RootId);
-      if (Root.kind !== "directory") throw new Error("The private drive root is unavailable.");
-      Target.NamespaceGeneration = Root.namespace_generation;
+      const Root = await this.#getNode(Target.DriveId, Target.RootId)
+      if (Root.kind !== 'directory') throw new Error('The private drive root is unavailable.')
+      Target.NamespaceGeneration = Root.namespace_generation
       const Allocation = RequireData<UploadAllocation>(
-        await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+        await this.#Api.POST('/api/v1/drives/{drive_id}/uploads', {
           body: {
             declared_size_bytes: Candidate.Size,
             expected_parent_generation: Target.NamespaceGeneration,
@@ -387,114 +387,114 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             path: { drive_id: Target.DriveId },
           },
         }),
-      );
+      )
 
-      let Cursor: string | null = null;
-      let Finalize: ByteGrant | null;
+      let Cursor: string | null = null
+      let Finalize: ByteGrant | null
       do {
         const Grants: UploadGrants = RequireData<UploadGrants>(
-          await this.#Api.GET("/api/v1/uploads/{upload_id}", {
+          await this.#Api.GET('/api/v1/uploads/{upload_id}', {
             params: {
               path: { upload_id: Allocation.upload_id },
               query: PageQuery(Cursor),
             },
           }),
-        );
+        )
         for (let Index = 0; Index < Grants.parts.length; Index += 1) {
-          const Grant = Grants.parts[Index];
-          if (Grant === undefined) continue;
-          const PartNumber = UploadPartNumber(Grant.path) ?? Index;
-          const Start = PartNumber * Allocation.chunk_size_bytes;
-          const End = Math.min(Start + Allocation.chunk_size_bytes, Candidate.Size);
+          const Grant = Grants.parts[Index]
+          if (Grant === undefined) continue
+          const PartNumber = UploadPartNumber(Grant.path) ?? Index
+          const Start = PartNumber * Allocation.chunk_size_bytes
+          const End = Math.min(Start + Allocation.chunk_size_bytes, Candidate.Size)
           await this.#ioRequest(
             Grant.path,
             {
               body: Candidate.Data.slice(Start, End),
               headers: { Authorization: `fbcap1 ${Grant.authorization}` },
-              method: "PUT",
+              method: 'PUT',
             },
-            "omit",
-          );
+            'omit',
+          )
         }
-        Finalize = Grants.finalize;
-        Cursor = Grants.next_cursor;
-      } while (Cursor !== null);
+        Finalize = Grants.finalize
+        Cursor = Grants.next_cursor
+      } while (Cursor !== null)
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- The pagination callback assigns this required final grant across awaited iterations.
-      if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
+      if (Finalize === null) throw new Error('The upload finalize grant is unavailable.')
       await this.#ioRequest(
         Finalize.path,
         {
           headers: { Authorization: `fbcap1 ${Finalize.authorization}` },
-          method: "POST",
+          method: 'POST',
         },
-        "omit",
-      );
+        'omit',
+      )
       RequireSuccess(
-        await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
+        await this.#Api.POST('/api/v1/uploads/{upload_id}/commit', {
           body: { expected_fencing_token: Allocation.fencing_token },
           params: {
             header: this.#idempotentMutationHeaders(),
             path: { upload_id: Allocation.upload_id },
           },
         }),
-      );
+      )
     }
   }
 
   async download(EntryId: string): Promise<Blob> {
-    const Location = this.#fileLocation(EntryId);
-    await this.#ensureSession();
+    const Location = this.#fileLocation(EntryId)
+    await this.#ensureSession()
     const Grant = RequireData<DownloadGrant>(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants', {
         body: { version_id: null },
         params: {
           header: this.#mutationHeaders(),
           path: { drive_id: Location.DriveId, node_id: EntryId },
         },
       }),
-    );
-    const Response = await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin");
-    return Response.blob();
+    )
+    const Response = await this.#ioRequest(Grant.path, { method: 'GET' }, 'same-origin')
+    return Response.blob()
   }
 
   async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
-    const Location = this.#fileLocation(EntryId);
-    await this.#ensureSession();
+    const Location = this.#fileLocation(EntryId)
+    await this.#ensureSession()
     const Grant = RequireData<DownloadGrant>(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/download-grants', {
         body: { version_id: VersionId },
         params: {
           header: this.#mutationHeaders(),
           path: { drive_id: Location.DriveId, node_id: EntryId },
         },
       }),
-    );
-    return (await this.#ioRequest(Grant.path, { method: "GET" }, "same-origin")).blob();
+    )
+    return (await this.#ioRequest(Grant.path, { method: 'GET' }, 'same-origin')).blob()
   }
 
   async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
-    const Result = await this.#Api.GET("/api/v1/preferences/text");
-    const Value = RequireData<TextPreferencesResponse>(Result);
+    const Result = await this.#Api.GET('/api/v1/preferences/text')
+    const Value = RequireData<TextPreferencesResponse>(Result)
     return {
       Etag: RequireEtag(Result.response),
       Value: { EditLimitBytes: Value.edit_limit_bytes, InlineLimitBytes: Value.inline_limit_bytes },
-    };
+    }
   }
 
   async getAcl(
     EntryId: string,
     Signal?: Readonly<AbortSignal>,
   ): Promise<{ Etag: string; Value: AclCollection }> {
-    const Location = this.#location(EntryId);
-    const Result = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/acl", {
+    const Location = this.#location(EntryId)
+    const Result = await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}/acl', {
       params: { path: { drive_id: Location.DriveId, node_id: EntryId } },
       ...SignalInit(Signal),
-    });
-    const Value = RequireData<AclCollectionResponse>(Result);
+    })
+    const Value = RequireData<AclCollectionResponse>(Result)
     return {
       Etag: RequireEtag(Result.response),
       Value: AclCollectionValue(Value),
-    };
+    }
   }
 
   async replaceAcl(
@@ -503,10 +503,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     Principal: Readonly<AclPrincipalSelector>,
     Entries: readonly Readonly<AclEntryMutation>[],
   ): Promise<{ Etag: string; Value: AclCollection }> {
-    const Location = this.#location(EntryId);
-    await this.#ensureSession();
+    const Location = this.#location(EntryId)
+    await this.#ensureSession()
     try {
-      const Result = await this.#Api.PUT("/api/v1/drives/{drive_id}/nodes/{node_id}/acl", {
+      const Result = await this.#Api.PUT('/api/v1/drives/{drive_id}/nodes/{node_id}/acl', {
         body: {
           entries: Entries.map((Entry) => ({
             action: Entry.Action,
@@ -520,18 +520,18 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         },
         params: {
-          header: { ...this.#mutationHeaders(), "If-Match": ExpectedEtag },
+          header: { ...this.#mutationHeaders(), 'If-Match': ExpectedEtag },
           path: { drive_id: Location.DriveId, node_id: EntryId },
         },
-      });
-      const Value = RequireData<AclCollectionResponse>(Result);
+      })
+      const Value = RequireData<AclCollectionResponse>(Result)
       return {
         Etag: RequireEtag(Result.response),
         Value: AclCollectionValue(Value),
-      };
+      }
     } catch (Cause) {
-      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new AclConflictError();
-      throw Cause;
+      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new AclConflictError()
+      throw Cause
     }
   }
 
@@ -539,31 +539,31 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }> {
-    await this.#ensureSession();
-    const Result = await this.#Api.PATCH("/api/v1/preferences/text", {
+    await this.#ensureSession()
+    const Result = await this.#Api.PATCH('/api/v1/preferences/text', {
       body: { edit_limit_bytes: Patch.EditLimitBytes, inline_limit_bytes: Patch.InlineLimitBytes },
-      params: { header: { ...this.#mutationHeaders(), "If-Match": ExpectedEtag } },
-    });
-    const Value = RequireData<TextPreferencesResponse>(Result);
+      params: { header: { ...this.#mutationHeaders(), 'If-Match': ExpectedEtag } },
+    })
+    const Value = RequireData<TextPreferencesResponse>(Result)
     return {
       Etag: RequireEtag(Result.response),
       Value: { EditLimitBytes: Value.edit_limit_bytes, InlineLimitBytes: Value.inline_limit_bytes },
-    };
+    }
   }
 
   async listTextVersions(EntryId: string, Cursor: string | null): Promise<TextVersionPage> {
-    const Location = this.#fileLocation(EntryId);
+    const Location = this.#fileLocation(EntryId)
     const Page = RequireData<VersionPage>(
-      await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
+      await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}/versions', {
         params: {
           path: { drive_id: Location.DriveId, node_id: EntryId },
           query: PageQuery(Cursor),
         },
       }),
-    );
+    )
     for (const Version of Page.items)
-      this.#Routing.Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId });
-    return { Items: Page.items.map(VersionRecord), NextCursor: Page.next_cursor };
+      this.#Routing.Versions.set(Version.id, { DriveId: Location.DriveId, NodeId: EntryId })
+    return { Items: Page.items.map(VersionRecord), NextCursor: Page.next_cursor }
   }
 
   async compareTextVersions(
@@ -571,10 +571,10 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     BaseVersionId: string,
     TargetVersionId: string,
   ): Promise<TextComparison> {
-    const Location = this.#fileLocation(EntryId);
+    const Location = this.#fileLocation(EntryId)
     const Comparison = RequireData<TextComparisonResponse>(
       await this.#Api.GET(
-        "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}",
+        '/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{base_version_id}/compare/{target_version_id}',
         {
           params: {
             path: {
@@ -586,60 +586,60 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         },
       ),
-    );
+    )
     return {
       Hunks: Comparison.hunks.map((Hunk) => ({
         BaseLines: Hunk.base_lines,
         BaseStart: Hunk.base_start,
         Lines: Hunk.lines.map((Line) => ({
-          Kind: Line.kind === "delete" ? "remove" : Line.kind,
+          Kind: Line.kind === 'delete' ? 'remove' : Line.kind,
           Text: Line.text,
         })),
         TargetLines: Hunk.target_lines,
         TargetStart: Hunk.target_start,
       })),
-    };
+    }
   }
 
-  async setNodeContentClass(EntryId: string, ContentClass: "auto" | "binary"): Promise<void> {
-    const Location = this.#fileLocation(EntryId);
-    await this.#ensureSession();
-    const Current = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
+  async setNodeContentClass(EntryId: string, ContentClass: 'auto' | 'binary'): Promise<void> {
+    const Location = this.#fileLocation(EntryId)
+    await this.#ensureSession()
+    const Current = await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}', {
       params: { path: { drive_id: Location.DriveId, node_id: EntryId } },
-    });
-    RequireData<NodeResponse>(Current);
+    })
+    RequireData<NodeResponse>(Current)
     RequireSuccess(
-      await this.#Api.PATCH("/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy", {
+      await this.#Api.PATCH('/api/v1/drives/{drive_id}/nodes/{node_id}/content-class-policy', {
         body: { policy: ContentClass },
         params: {
           header: {
             ...this.#idempotentMutationHeaders(),
-            "If-Match": RequireEtag(Current.response),
+            'If-Match': RequireEtag(Current.response),
           },
           path: { drive_id: Location.DriveId, node_id: EntryId },
         },
       }),
-    );
+    )
   }
 
   async importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string> {
-    const Location = this.#fileLocation(Input.EntryId);
-    await this.#ensureSession();
+    const Location = this.#fileLocation(Input.EntryId)
+    await this.#ensureSession()
     const Intent = RequireData<MarkdownImportIntent>(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/markdown-import-intents', {
         body: { source_version_id: Input.SourceVersionId, target_name: Input.TargetName },
         params: {
           header: this.#idempotentMutationHeaders(),
           path: { drive_id: Location.DriveId, node_id: Input.EntryId },
         },
       }),
-    );
-    const Parent = await this.#getNode(Location.DriveId, Intent.target_parent_id);
-    if (Parent.kind !== "directory") throw new Error("The Office source parent is unavailable.");
+    )
+    const Parent = await this.#getNode(Location.DriveId, Intent.target_parent_id)
+    if (Parent.kind !== 'directory') throw new Error('The Office source parent is unavailable.')
     const Allocation = RequireData<UploadAllocation>(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/uploads', {
         body: {
-          declared_media_type: "text/markdown",
+          declared_media_type: 'text/markdown',
           declared_size_bytes: Input.Contents.size,
           expected_parent_generation: Parent.namespace_generation,
           import_intent_id: Intent.id,
@@ -648,66 +648,66 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
         },
         params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
       }),
-    );
-    return this.#putUploadContents(Allocation, Input.Contents);
+    )
+    return this.#putUploadContents(Allocation, Input.Contents)
   }
 
   async beginMarkdownCollaboration(
     EntryId: string,
     ClientId: string,
   ): Promise<MarkdownCollaborationGrant | null> {
-    const Location = this.#fileLocation(EntryId);
-    await this.#ensureSession();
-    let Grant: CollaborationGrant;
+    const Location = this.#fileLocation(EntryId)
+    await this.#ensureSession()
+    let Grant: CollaborationGrant
     try {
       Grant = RequireData<CollaborationGrant>(
-        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants", {
-          body: { client_id: ClientId, presence_mode: "display_name", transport: "websocket" },
+        await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/collaboration-grants', {
+          body: { client_id: ClientId, presence_mode: 'display_name', transport: 'websocket' },
           params: {
             header: this.#idempotentMutationHeaders(),
             path: { drive_id: Location.DriveId, node_id: EntryId },
           },
         }),
-      );
+      )
     } catch (Cause) {
-      if (Cause instanceof ApiRequestError && Cause.Status === 404) return null;
-      throw Cause;
+      if (Cause instanceof ApiRequestError && Cause.Status === 404) return null
+      throw Cause
     }
-    const Endpoint = Grant.endpoints.find(({ transport: Transport }) => Transport === "websocket");
+    const Endpoint = Grant.endpoints.find(({ transport: Transport }) => Transport === 'websocket')
     if (Endpoint === undefined || Grant.room.room_id === null)
-      throw new Error("The collaboration endpoint is unavailable.");
+      throw new Error('The collaboration endpoint is unavailable.')
     return {
       Authorization: Grant.authorization,
       ClientId,
       EndpointUrl: Endpoint.url,
       PresenceLabel: Grant.presence_label,
       RoomId: Grant.room.room_id,
-    };
+    }
   }
 
   async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
-    const Location = this.#fileLocation(EntryId);
-    await this.#ensureSession();
-    const Node = await this.#getNode(Location.DriveId, EntryId);
-    if (Node.head_version_id === null) throw new Error("The Markdown file has no current version.");
+    const Location = this.#fileLocation(EntryId)
+    await this.#ensureSession()
+    const Node = await this.#getNode(Location.DriveId, EntryId)
+    if (Node.head_version_id === null) throw new Error('The Markdown file has no current version.')
     return {
       Contents: await this.readMarkdown(EntryId, Node.head_version_id),
       VersionId: Node.head_version_id,
-    };
+    }
   }
 
   async saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string> {
-    const Location = this.#fileLocation(Input.EntryId);
-    if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
-    await this.#ensureSession();
+    const Location = this.#fileLocation(Input.EntryId)
+    if (Location.ParentId === null) throw new Error('The Markdown file has no writable parent.')
+    await this.#ensureSession()
     try {
       const Allocation = RequireData<UploadAllocation>(
-        await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+        await this.#Api.POST('/api/v1/drives/{drive_id}/uploads', {
           body: {
             ...(Input.CheckpointId === undefined
               ? {}
               : { collaboration_checkpoint_id: Input.CheckpointId }),
-            declared_media_type: Input.Contents.type || "text/plain",
+            declared_media_type: Input.Contents.type || 'text/plain',
             declared_size_bytes: Input.Contents.size,
             expected_head_version_id: Input.ExpectedHeadVersionId,
             name: Input.Name,
@@ -719,27 +719,26 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
             path: { drive_id: Location.DriveId },
           },
         }),
-      );
-      return await this.#putUploadContents(Allocation, Input.Contents);
+      )
+      return await this.#putUploadContents(Allocation, Input.Contents)
     } catch (Cause) {
-      if (Cause instanceof ApiRequestError && Cause.Status === 409)
-        throw new VersionConflictError();
-      throw Cause;
+      if (Cause instanceof ApiRequestError && Cause.Status === 409) throw new VersionConflictError()
+      throw Cause
     }
   }
 
   async saveMarkdownCopy(
-    Input: Omit<MarkdownSaveInput, "CheckpointId" | "ExpectedHeadVersionId">,
+    Input: Omit<MarkdownSaveInput, 'CheckpointId' | 'ExpectedHeadVersionId'>,
   ): Promise<string> {
-    const Location = this.#fileLocation(Input.EntryId);
-    if (Location.ParentId === null) throw new Error("The Markdown file has no writable parent.");
-    await this.#ensureSession();
-    const Parent = await this.#getNode(Location.DriveId, Location.ParentId);
-    if (Parent.kind !== "directory") throw new Error("The Markdown file parent is unavailable.");
+    const Location = this.#fileLocation(Input.EntryId)
+    if (Location.ParentId === null) throw new Error('The Markdown file has no writable parent.')
+    await this.#ensureSession()
+    const Parent = await this.#getNode(Location.DriveId, Location.ParentId)
+    if (Parent.kind !== 'directory') throw new Error('The Markdown file parent is unavailable.')
     const Allocation = RequireData<UploadAllocation>(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/uploads", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/uploads', {
         body: {
-          declared_media_type: Input.Contents.type || "text/plain",
+          declared_media_type: Input.Contents.type || 'text/plain',
           declared_size_bytes: Input.Contents.size,
           expected_parent_generation: Parent.namespace_generation,
           name: Input.Name,
@@ -747,48 +746,48 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
         },
         params: { header: this.#idempotentMutationHeaders(), path: { drive_id: Location.DriveId } },
       }),
-    );
-    return this.#putUploadContents(Allocation, Input.Contents);
+    )
+    return this.#putUploadContents(Allocation, Input.Contents)
   }
 
   async trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
     return this.#batchEntryMutation(EntryIds, async (EntryId, Location) => {
       RequireSuccess(
-        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/trash", {
+        await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/trash', {
           body: { expected_namespace_generation: Location.NamespaceGeneration },
           params: {
             header: this.#mutationHeaders(),
             path: { drive_id: Location.DriveId, node_id: EntryId },
           },
         }),
-      );
-    });
+      )
+    })
   }
 
   async restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
     return this.#batchEntryMutation(EntryIds, async (EntryId, Location) => {
       RequireSuccess(
-        await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/restore", {
+        await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/restore', {
           body: { expected_namespace_generation: Location.NamespaceGeneration },
           params: {
             header: this.#mutationHeaders(),
             path: { drive_id: Location.DriveId, node_id: EntryId },
           },
         }),
-      );
-    });
+      )
+    })
   }
 
   async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
-    if (Input.Kind !== "direct") {
-      throw new Error("This FileBelt version supports direct verified-email shares only.");
+    if (Input.Kind !== 'direct') {
+      throw new Error('This FileBelt version supports direct verified-email shares only.')
     }
-    await this.#ensureSession();
-    const Location = this.#location(Input.FileId);
+    await this.#ensureSession()
+    const Location = this.#location(Input.FileId)
     RequireSuccess(
-      await this.#Api.POST("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
+      await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/shares', {
         body: {
-          inheritance: "self",
+          inheritance: 'self',
           kind: Input.Kind,
           preset: SharePreset(Input.Permission),
           verified_email: Input.Target,
@@ -798,15 +797,15 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           path: { drive_id: Location.DriveId, node_id: Input.FileId },
         },
       }),
-    );
+    )
   }
 
   async revokeShare(ShareId: string): Promise<void> {
-    const Location = this.#Routing.Shares.get(ShareId);
-    if (Location === undefined) throw new Error("The selected share is unavailable.");
-    await this.#ensureSession();
+    const Location = this.#Routing.Shares.get(ShareId)
+    if (Location === undefined) throw new Error('The selected share is unavailable.')
+    await this.#ensureSession()
     RequireSuccess(
-      await this.#Api.DELETE("/api/v1/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}", {
+      await this.#Api.DELETE('/api/v1/drives/{drive_id}/nodes/{node_id}/shares/{principal_id}', {
         params: {
           header: this.#mutationHeaders(),
           path: {
@@ -816,18 +815,18 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         },
       }),
-    );
+    )
   }
 
   async restoreVersion(VersionId: string): Promise<void> {
-    const Location = this.#Routing.Versions.get(VersionId);
-    if (Location === undefined) throw new Error("The selected version is unavailable.");
-    const Node = this.#location(Location.NodeId);
-    if (Node.HeadVersionId === null) throw new Error("The selected file head is unavailable.");
-    await this.#ensureSession();
+    const Location = this.#Routing.Versions.get(VersionId)
+    if (Location === undefined) throw new Error('The selected version is unavailable.')
+    const Node = this.#location(Location.NodeId)
+    if (Node.HeadVersionId === null) throw new Error('The selected file head is unavailable.')
+    await this.#ensureSession()
     RequireSuccess(
       await this.#Api.POST(
-        "/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore",
+        '/api/v1/drives/{drive_id}/nodes/{node_id}/versions/{version_id}/restore',
         {
           body: { expected_head_version_id: Node.HeadVersionId },
           params: {
@@ -840,137 +839,137 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           },
         },
       ),
-    );
+    )
   }
 
   async revokeSession(SessionId: string): Promise<void> {
-    await this.#ensureSession();
+    await this.#ensureSession()
     RequireSuccess(
-      await this.#Api.DELETE("/api/v1/sessions/{session_id}", {
+      await this.#Api.DELETE('/api/v1/sessions/{session_id}', {
         params: {
           header: this.#mutationHeaders(),
           path: { session_id: SessionId },
         },
       }),
-    );
+    )
   }
 
   // oxlint-disable typescript/require-await -- Unsupported operations must retain the asynchronous client interface while rejecting immediately.
   async markPrivacyRead(): Promise<void> {
-    throw new Error("Privacy notification updates are not available in this release.");
+    throw new Error('Privacy notification updates are not available in this release.')
   }
 
   async suspendUser(): Promise<void> {
-    throw new Error("Tenant user administration is not available in this release.");
+    throw new Error('Tenant user administration is not available in this release.')
   }
 
   async createGroup(): Promise<void> {
-    throw new Error("Group administration is not available in this release.");
+    throw new Error('Group administration is not available in this release.')
   }
 
   async createSharedDrive(): Promise<void> {
-    throw new Error("Shared-drive administration is not available in this release.");
+    throw new Error('Shared-drive administration is not available in this release.')
   }
 
   async exchangePublicShare(): Promise<PublicShareGrant> {
-    throw new Error("Anonymous share links are not available in this release.");
+    throw new Error('Anonymous share links are not available in this release.')
   }
 
   async downloadPublic(): Promise<Blob> {
-    throw new Error("Anonymous share links are not available in this release.");
+    throw new Error('Anonymous share links are not available in this release.')
   }
   // oxlint-enable typescript/require-await
 
   #location(EntryId: string): NodeLocation {
-    const Location = this.#Routing.Locations.get(EntryId);
-    if (Location === undefined) throw new Error("The selected resource is unavailable.");
-    return Location;
+    const Location = this.#Routing.Locations.get(EntryId)
+    if (Location === undefined) throw new Error('The selected resource is unavailable.')
+    return Location
   }
 
   #fileLocation(EntryId: string): NodeLocation {
-    const Location = this.#location(EntryId);
-    if (Location.Kind !== "file") throw new Error("The selected resource is not a file.");
-    return Location;
+    const Location = this.#location(EntryId)
+    if (Location.Kind !== 'file') throw new Error('The selected resource is not a file.')
+    return Location
   }
 
   async #putUploadContents(Allocation: UploadAllocation, Contents: Blob): Promise<string> {
-    let Cursor: string | null = null;
-    let Finalize: ByteGrant | null;
+    let Cursor: string | null = null
+    let Finalize: ByteGrant | null
     do {
       const Grants: UploadGrants = RequireData<UploadGrants>(
-        await this.#Api.GET("/api/v1/uploads/{upload_id}", {
+        await this.#Api.GET('/api/v1/uploads/{upload_id}', {
           params: { path: { upload_id: Allocation.upload_id }, query: PageQuery(Cursor) },
         }),
-      );
+      )
       for (let Index = 0; Index < Grants.parts.length; Index += 1) {
-        const Grant = Grants.parts[Index];
-        if (Grant === undefined) continue;
-        const PartNumber = UploadPartNumber(Grant.path) ?? Index;
-        const Start = PartNumber * Allocation.chunk_size_bytes;
-        const End = Math.min(Start + Allocation.chunk_size_bytes, Contents.size);
+        const Grant = Grants.parts[Index]
+        if (Grant === undefined) continue
+        const PartNumber = UploadPartNumber(Grant.path) ?? Index
+        const Start = PartNumber * Allocation.chunk_size_bytes
+        const End = Math.min(Start + Allocation.chunk_size_bytes, Contents.size)
         await this.#ioRequest(
           Grant.path,
           {
             body: Contents.slice(Start, End),
             headers: { Authorization: `fbcap1 ${Grant.authorization}` },
-            method: "PUT",
+            method: 'PUT',
           },
-          "omit",
-        );
+          'omit',
+        )
       }
-      Finalize = Grants.finalize;
-      Cursor = Grants.next_cursor;
-    } while (Cursor !== null);
+      Finalize = Grants.finalize
+      Cursor = Grants.next_cursor
+    } while (Cursor !== null)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- The pagination callback assigns this required final grant across awaited iterations.
-    if (Finalize === null) throw new Error("The upload finalize grant is unavailable.");
+    if (Finalize === null) throw new Error('The upload finalize grant is unavailable.')
     await this.#ioRequest(
       Finalize.path,
-      { headers: { Authorization: `fbcap1 ${Finalize.authorization}` }, method: "POST" },
-      "omit",
-    );
+      { headers: { Authorization: `fbcap1 ${Finalize.authorization}` }, method: 'POST' },
+      'omit',
+    )
     const Committed = RequireData<UploadCommit>(
-      await this.#Api.POST("/api/v1/uploads/{upload_id}/commit", {
+      await this.#Api.POST('/api/v1/uploads/{upload_id}/commit', {
         body: { expected_fencing_token: Allocation.fencing_token },
         params: {
           header: this.#idempotentMutationHeaders(),
           path: { upload_id: Allocation.upload_id },
         },
       }),
-    );
-    return Committed.version_id;
+    )
+    return Committed.version_id
   }
 
   async #collectPages<T>(LoadPage: (Cursor: string | null) => Promise<Page<T>>): Promise<T[]> {
-    const Items: T[] = [];
-    let Cursor: string | null = null;
+    const Items: T[] = []
+    let Cursor: string | null = null
     do {
-      const Page = await LoadPage(Cursor);
-      Items.push(...Page.items);
-      Cursor = Page.next_cursor;
-    } while (Cursor !== null);
-    return Items;
+      const Page = await LoadPage(Cursor)
+      Items.push(...Page.items)
+      Cursor = Page.next_cursor
+    } while (Cursor !== null)
+    return Items
   }
 
   async #batchEntryMutation(
     EntryIds: readonly string[],
     Operation: (EntryId: string, Location: Readonly<NodeLocation>) => Promise<void>,
   ): Promise<readonly EntryMutationOutcome[]> {
-    if (EntryIds.length === 0) return [];
+    if (EntryIds.length === 0) return []
     try {
-      await this.#ensureSession();
+      await this.#ensureSession()
     } catch (Cause) {
-      return EntryIds.map((EntryId) => FailedEntryMutation(EntryId, Cause));
+      return EntryIds.map((EntryId) => FailedEntryMutation(EntryId, Cause))
     }
-    const Outcomes: EntryMutationOutcome[] = [];
+    const Outcomes: EntryMutationOutcome[] = []
     for (const EntryId of EntryIds) {
       try {
-        await Operation(EntryId, this.#location(EntryId));
-        Outcomes.push({ EntryId, Kind: "success" });
+        await Operation(EntryId, this.#location(EntryId))
+        Outcomes.push({ EntryId, Kind: 'success' })
       } catch (Cause) {
-        Outcomes.push(FailedEntryMutation(EntryId, Cause));
+        Outcomes.push(FailedEntryMutation(EntryId, Cause))
       }
     }
-    return Outcomes;
+    return Outcomes
   }
 
   async #getNode(
@@ -979,11 +978,11 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     Signal?: Readonly<AbortSignal>,
   ): Promise<NodeResponse> {
     return RequireData<NodeResponse>(
-      await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}", {
+      await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}', {
         params: { path: { drive_id: DriveId, node_id: NodeId } },
         ...SignalInit(Signal),
       }),
-    );
+    )
   }
 
   async #listChildren(
@@ -993,7 +992,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   ): Promise<NodeResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<NodePage>(
-        await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/children", {
+        await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}/children', {
           params: {
             path: { drive_id: DriveId, node_id: NodeId },
             query: PageQuery(Cursor),
@@ -1001,13 +1000,13 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           ...SignalInit(Signal),
         }),
       ),
-    );
+    )
   }
 
   async #listTrash(DriveId: string, Signal?: Readonly<AbortSignal>): Promise<NodeResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<NodePage>(
-        await this.#Api.GET("/api/v1/drives/{drive_id}/trash", {
+        await this.#Api.GET('/api/v1/drives/{drive_id}/trash', {
           params: {
             path: { drive_id: DriveId },
             query: PageQuery(Cursor),
@@ -1015,7 +1014,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           ...SignalInit(Signal),
         }),
       ),
-    );
+    )
   }
 
   async #listVersions(
@@ -1025,7 +1024,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
   ): Promise<VersionResponse[]> {
     return this.#collectPages(async (Cursor) =>
       RequireData<VersionPage>(
-        await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/versions", {
+        await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}/versions', {
           params: {
             path: { drive_id: DriveId, node_id: NodeId },
             query: PageQuery(Cursor),
@@ -1033,7 +1032,7 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
           ...SignalInit(Signal),
         }),
       ),
-    );
+    )
   }
 
   async #optionalShares(
@@ -1041,32 +1040,32 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     NodeId: string,
     Signal?: Readonly<AbortSignal>,
   ): Promise<readonly ShareResponse[]> {
-    const Result = await this.#Api.GET("/api/v1/drives/{drive_id}/nodes/{node_id}/shares", {
+    const Result = await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}/shares', {
       params: { path: { drive_id: DriveId, node_id: NodeId } },
       ...SignalInit(Signal),
-    });
-    if (Result.response.status === 404) return [];
-    return RequireData<readonly ShareResponse[]>(Result);
+    })
+    if (Result.response.status === 404) return []
+    return RequireData<readonly ShareResponse[]>(Result)
   }
 
   async #ensureSession(): Promise<SessionResponse> {
-    if (this.#Routing.Session !== null) return this.#Routing.Session;
-    const Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session"));
-    this.#Routing = { ...this.#Routing, Session };
-    return Session;
+    if (this.#Routing.Session !== null) return this.#Routing.Session
+    const Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
+    this.#Routing = { ...this.#Routing, Session }
+    return Session
   }
 
   #mutationHeaders(): MutationHeaders {
-    if (this.#Routing.Session === null) throw new Error("The session is unavailable.");
+    if (this.#Routing.Session === null) throw new Error('The session is unavailable.')
     return {
       Origin: new URL(this.#BaseUrl).origin,
-      "Sec-Fetch-Site": "same-origin",
-      "X-FileBelt-Csrf": this.#Routing.Session.csrf_token,
-    };
+      'Sec-Fetch-Site': 'same-origin',
+      'X-FileBelt-Csrf': this.#Routing.Session.csrf_token,
+    }
   }
 
   #idempotentMutationHeaders(): MutationHeaders & IdempotencyHeaders {
-    return { ...this.#mutationHeaders(), "Idempotency-Key": crypto.randomUUID() };
+    return { ...this.#mutationHeaders(), 'Idempotency-Key': crypto.randomUUID() }
   }
 
   async #ioRequest(
@@ -1078,30 +1077,30 @@ export class HttpFileBeltClient implements FileBeltClient, PublicShareClient {
     const HttpRequest = new Request(new URL(Path, this.#BaseUrl), {
       ...Init,
       credentials: Credentials,
-    });
-    const Response = await this.#Fetch(HttpRequest);
-    if (Response.ok) return Response;
-    let Problem: unknown;
+    })
+    const Response = await this.#Fetch(HttpRequest)
+    if (Response.ok) return Response
+    let Problem: unknown
     try {
-      Problem = await Response.json();
+      Problem = await Response.json()
     } catch {
-      Problem = undefined;
+      Problem = undefined
     }
-    throw RequestError(Response, Problem);
+    throw RequestError(Response, Problem)
   }
 }
 
 function DefaultBaseUrl(): string {
-  return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
+  return typeof window === 'undefined' ? 'https://filebelt.localhost' : window.location.origin
 }
 
 function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntry {
-  const IsFile = Node.kind === "file";
+  const IsFile = Node.kind === 'file'
   return {
     DriveId: Node.drive_id,
     Id: Node.id,
     HeadVersionId: IsFile ? Node.head_version_id : null,
-    Kind: Node.kind === "directory" ? "folder" : Node.kind,
+    Kind: Node.kind === 'directory' ? 'folder' : Node.kind,
     ModifiedAt: Node.updated_at,
     TextEligibility: IsFile
       ? TextEligibility(
@@ -1110,34 +1109,34 @@ function FileEntry(Node: NodeResponse, Owner: string, Shared: boolean): FileEntr
           Node.head_media_type,
           Node.size_bytes,
         )
-      : "ineligible",
+      : 'ineligible',
     MediaType: IsFile ? Node.head_media_type : null,
     Name: Node.display_name,
     Owner,
     ParentId: Node.parent_id,
     Shared,
     Size: IsFile ? Node.size_bytes : null,
-    Status: "ready",
+    Status: 'ready',
     Trashed: Node.trashed,
     Version: IsFile ? (Node.version_ordinal ?? 0) : 0,
-  };
+  }
 }
 
 function TextEligibility(
-  Policy: NodeResponse["content_class_policy"],
+  Policy: NodeResponse['content_class_policy'],
   Name: string,
   MediaType: string | null,
   Size: number | null,
-): FileEntry["TextEligibility"] {
+): FileEntry['TextEligibility'] {
   const IsText =
-    MediaType?.startsWith("text/") === true ||
+    MediaType?.startsWith('text/') === true ||
     /\.(?:asc|conf|csv|ini|json|log|md|markdown|mdown|mkdn|rst|sh|text|toml|ts|tsx|txt|xml|yaml|yml)$/i.test(
       Name,
-    );
-  if (Policy === "binary") return "history-only";
-  if (!IsText || Size === null) return "ineligible";
-  if (Size > 100 * 1024 * 1024) return "history-only";
-  return Size <= 16 * 1024 * 1024 ? "editable" : "viewable";
+    )
+  if (Policy === 'binary') return 'history-only'
+  if (!IsText || Size === null) return 'ineligible'
+  if (Size > 100 * 1024 * 1024) return 'history-only'
+  return Size <= 16 * 1024 * 1024 ? 'editable' : 'viewable'
 }
 
 function AclCollectionValue(Value: Readonly<AclCollectionResponse>): AclCollection {
@@ -1155,39 +1154,39 @@ function AclCollectionValue(Value: Readonly<AclCollectionResponse>): AclCollecti
       VerifiedEmail: Entry.verified_email,
     })),
     SupportedActions: Value.supported_actions,
-  };
+  }
 }
 
 function PageQuery(Cursor: string | null): PageQueryShape {
-  return Cursor === null ? { limit: PageLimit } : { cursor: Cursor, limit: PageLimit };
+  return Cursor === null ? { limit: PageLimit } : { cursor: Cursor, limit: PageLimit }
 }
 
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
-  if (Result.response.ok && Result.data !== undefined) return Result.data as T;
-  throw RequestError(Result.response, Result.error);
+  if (Result.response.ok && Result.data !== undefined) return Result.data as T
+  throw RequestError(Result.response, Result.error)
 }
 
 function RequireSuccess(Result: ApiResult<unknown>): void {
-  if (!Result.response.ok) throw RequestError(Result.response, Result.error);
+  if (!Result.response.ok) throw RequestError(Result.response, Result.error)
 }
 
 function RequireEtag(Response: Response): string {
-  const Etag = Response.headers.get("ETag");
+  const Etag = Response.headers.get('ETag')
   if (Etag === null || Etag.length === 0)
-    throw new Error("The server did not return the required generation ETag.");
-  return Etag;
+    throw new Error('The server did not return the required generation ETag.')
+  return Etag
 }
 
 function RequestError(Response: Response, Error: unknown): Error {
-  if (Response.status === 401) return new AuthenticationRequiredError();
+  if (Response.status === 401) return new AuthenticationRequiredError()
   return new ApiRequestError(
     Response.status,
     ProblemTitle(Error) ?? `FileBelt request failed (${Response.status}).`,
-    ProblemString(Error, "code"),
-    ProblemString(Error, "detail"),
-  );
+    ProblemString(Error, 'code'),
+    ProblemString(Error, 'detail'),
+  )
 }
 
 function FailedEntryMutation(EntryId: string, Cause: unknown): EntryMutationOutcome {
@@ -1200,15 +1199,15 @@ function FailedEntryMutation(EntryId: string, Cause: unknown): EntryMutationOutc
         Message: Cause.message,
         Status: Cause.Status,
       },
-      Kind: "failure",
-    };
+      Kind: 'failure',
+    }
   }
   if (Cause instanceof AuthenticationRequiredError) {
     return {
       EntryId,
       Error: { Code: null, Detail: null, Message: Cause.message, Status: 401 },
-      Kind: "failure",
-    };
+      Kind: 'failure',
+    }
   }
   return {
     EntryId,
@@ -1216,61 +1215,61 @@ function FailedEntryMutation(EntryId: string, Cause: unknown): EntryMutationOutc
       Code: null,
       Detail: null,
       Message:
-        Cause instanceof Error ? Cause.message : "The selected resource could not be changed.",
+        Cause instanceof Error ? Cause.message : 'The selected resource could not be changed.',
       Status: null,
     },
-    Kind: "failure",
-  };
+    Kind: 'failure',
+  }
 }
 
 function ProblemTitle(Value: unknown): string | null {
-  return ProblemString(Value, "title");
+  return ProblemString(Value, 'title')
 }
 
-function ProblemString(Value: unknown, Key: "code" | "detail" | "title"): string | null {
-  if (!IsProblemObject(Value)) return null;
-  const Candidate = Value[Key];
-  return typeof Candidate === "string" ? Candidate : null;
+function ProblemString(Value: unknown, Key: 'code' | 'detail' | 'title'): string | null {
+  if (!IsProblemObject(Value)) return null
+  const Candidate = Value[Key]
+  return typeof Candidate === 'string' ? Candidate : null
 }
 
 function IsProblemObject(
   Value: unknown,
-): Value is Partial<Record<"code" | "detail" | "title", unknown>> {
-  return typeof Value === "object" && Value !== null;
+): Value is Partial<Record<'code' | 'detail' | 'title', unknown>> {
+  return typeof Value === 'object' && Value !== null
 }
 
 function UploadPartNumber(Path: string): number | null {
-  const Match = /\/parts\/(\d+)$/.exec(Path);
-  if (Match?.[1] === undefined) return null;
-  const Value = Number.parseInt(Match[1], 10);
-  return Number.isSafeInteger(Value) ? Value : null;
+  const Match = /\/parts\/(\d+)$/.exec(Path)
+  if (Match?.[1] === undefined) return null
+  const Value = Number.parseInt(Match[1], 10)
+  return Number.isSafeInteger(Value) ? Value : null
 }
 
 function SignalInit(Signal: Readonly<AbortSignal> | undefined): SignalInitShape {
-  return Signal === undefined ? {} : { signal: Signal };
+  return Signal === undefined ? {} : { signal: Signal }
 }
 
 // oxlint-disable-next-line typescript/consistent-return -- The generated preset union is exhaustive and has no fallback wire value.
-function SharePermission(Preset: ShareResponse["preset"]): ShareRecord["Permission"] {
+function SharePermission(Preset: ShareResponse['preset']): ShareRecord['Permission'] {
   switch (Preset) {
-    case "contributor":
-      return "Contributor";
-    case "manager":
-      return "Manager";
-    case "viewer":
-      return "Viewer";
+    case 'contributor':
+      return 'Contributor'
+    case 'manager':
+      return 'Manager'
+    case 'viewer':
+      return 'Viewer'
   }
 }
 
 // oxlint-disable-next-line typescript/consistent-return -- The local permission union is exhaustive and has no fallback wire value.
-function SharePreset(Permission: ShareRecord["Permission"]): ShareResponse["preset"] {
+function SharePreset(Permission: ShareRecord['Permission']): ShareResponse['preset'] {
   switch (Permission) {
-    case "Contributor":
-      return "contributor";
-    case "Manager":
-      return "manager";
-    case "Viewer":
-      return "viewer";
+    case 'Contributor':
+      return 'contributor'
+    case 'Manager':
+      return 'manager'
+    case 'Viewer':
+      return 'viewer'
   }
 }
 
@@ -1285,5 +1284,5 @@ function VersionRecord(Version: VersionResponse): VersionRecord {
     RevisionBackend: Version.revision_backend,
     Size: Version.size_bytes,
     Version: Version.ordinal,
-  };
+  }
 }

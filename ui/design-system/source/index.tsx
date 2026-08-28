@@ -6,66 +6,66 @@ import {
   createDarkTheme,
   createLightTheme,
   mergeClasses,
-} from "@fluentui/react-components";
-import type { BrandVariants, Theme } from "@fluentui/react-components";
-import type { LucideIcon, LucideProps } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, PropsWithChildren, ReactNode } from "react";
+} from '@fluentui/react-components'
+import type { BrandVariants, Theme } from '@fluentui/react-components'
+import type { LucideIcon, LucideProps } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import type { CSSProperties, PropsWithChildren, ReactNode } from 'react'
 
-export type ThemeChoice = "system" | "light" | "dark";
-export type ResolvedTheme = Exclude<ThemeChoice, "system">;
-export type Density = "comfortable" | "compact";
+export type ThemeChoice = 'system' | 'light' | 'dark'
+export type ResolvedTheme = Exclude<ThemeChoice, 'system'>
+export type Density = 'comfortable' | 'compact'
 
 const FileBeltBrand: BrandVariants = {
-  10: "#02050a",
-  20: "#0b1727",
-  30: "#102842",
-  40: "#153a5f",
-  50: "#1c4c7c",
-  60: "#265f99",
-  70: "#3472b5",
-  80: "#4586cf",
-  90: "#5d9ae3",
-  100: "#78a9ff",
-  110: "#91b9ff",
-  120: "#a6c8ff",
-  130: "#bfd7ff",
-  140: "#d5e5ff",
-  150: "#e9f1ff",
-  160: "#f7faff",
-};
+  10: '#02050a',
+  20: '#0b1727',
+  30: '#102842',
+  40: '#153a5f',
+  50: '#1c4c7c',
+  60: '#265f99',
+  70: '#3472b5',
+  80: '#4586cf',
+  90: '#5d9ae3',
+  100: '#78a9ff',
+  110: '#91b9ff',
+  120: '#a6c8ff',
+  130: '#bfd7ff',
+  140: '#d5e5ff',
+  150: '#e9f1ff',
+  160: '#f7faff',
+}
 
-const LightTheme = createLightTheme(FileBeltBrand);
-const DarkTheme = createDarkTheme(FileBeltBrand);
+const LightTheme = createLightTheme(FileBeltBrand)
+const DarkTheme = createDarkTheme(FileBeltBrand)
 
 export function ResolveTheme(Choice: ThemeChoice, SystemPrefersDark: boolean): ResolvedTheme {
-  return Choice === "system" ? (SystemPrefersDark ? "dark" : "light") : Choice;
+  return Choice === 'system' ? (SystemPrefersDark ? 'dark' : 'light') : Choice
 }
 
 function useSystemTheme(): boolean {
   const [PrefersDark, SetPrefersDark] = useState(() =>
-    typeof window === "undefined"
+    typeof window === 'undefined'
       ? false
-      : window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
+      : window.matchMedia('(prefers-color-scheme: dark)').matches,
+  )
 
   useEffect(() => {
-    const Query = window.matchMedia("(prefers-color-scheme: dark)");
+    const Query = window.matchMedia('(prefers-color-scheme: dark)')
     const Update = (): void => {
-      SetPrefersDark(Query.matches);
-    };
-    Query.addEventListener("change", Update);
+      SetPrefersDark(Query.matches)
+    }
+    Query.addEventListener('change', Update)
     return () => {
-      Query.removeEventListener("change", Update);
-    };
-  }, []);
+      Query.removeEventListener('change', Update)
+    }
+  }, [])
 
-  return PrefersDark;
+  return PrefersDark
 }
 
 export interface FileBeltProviderProps extends PropsWithChildren {
-  Density: Density;
-  ThemeChoice: ThemeChoice;
+  Density: Density
+  ThemeChoice: ThemeChoice
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone provider props.
@@ -74,26 +74,26 @@ export function FileBeltProvider({
   Density,
   ThemeChoice,
 }: FileBeltProviderProps): ReactNode {
-  const SystemPrefersDark = useSystemTheme();
-  const Resolved = ResolveTheme(ThemeChoice, SystemPrefersDark);
-  const Theme = useMemo<Theme>(() => (Resolved === "dark" ? DarkTheme : LightTheme), [Resolved]);
+  const SystemPrefersDark = useSystemTheme()
+  const Resolved = ResolveTheme(ThemeChoice, SystemPrefersDark)
+  const Theme = useMemo<Theme>(() => (Resolved === 'dark' ? DarkTheme : LightTheme), [Resolved])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = Resolved;
-    document.documentElement.dataset.density = Density;
-    document.documentElement.style.colorScheme = Resolved;
-  }, [Density, Resolved]);
+    document.documentElement.dataset.theme = Resolved
+    document.documentElement.dataset.density = Density
+    document.documentElement.style.colorScheme = Resolved
+  }, [Density, Resolved])
 
   return (
-    <FluentProvider theme={Theme} className="fb-provider">
+    <FluentProvider theme={Theme} className='fb-provider'>
       {Children}
     </FluentProvider>
-  );
+  )
 }
 
-export interface FileBeltIconProps extends Omit<LucideProps, "ref"> {
-  Icon: LucideIcon;
-  Label?: string;
+export interface FileBeltIconProps extends Omit<LucideProps, 'ref'> {
+  Icon: LucideIcon
+  Label?: string
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
@@ -109,20 +109,20 @@ export function FileBeltIcon({
       {...Props}
       aria-hidden={Label === undefined ? true : undefined}
       aria-label={Label}
-      role={Label === undefined ? undefined : "img"}
+      role={Label === undefined ? undefined : 'img'}
       size={Size}
       strokeWidth={StrokeWidth}
     />
-  );
+  )
 }
 
 export interface BidiTextProps {
   // oxlint-disable-next-line filebelt/pascal-case -- React reserves `children` for nested JSX content.
-  children: string;
+  children: string
   // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `className` contract.
-  className?: string;
+  className?: string
   // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `title` contract.
-  title?: string;
+  title?: string
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
@@ -132,31 +132,31 @@ export function BidiText({
   title: Title,
 }: BidiTextProps): ReactNode {
   return (
-    <bdi className={ClassName} dir="auto" title={Title}>
+    <bdi className={ClassName} dir='auto' title={Title}>
       {Children}
     </bdi>
-  );
+  )
 }
 
 export interface StatusPillProps {
   // oxlint-disable-next-line filebelt/pascal-case -- React reserves `children` for nested JSX content.
-  children: ReactNode;
-  Kind?: "brand" | "danger" | "informative" | "subtle" | "success" | "warning";
+  children: ReactNode
+  Kind?: 'brand' | 'danger' | 'informative' | 'subtle' | 'success' | 'warning'
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
-export function StatusPill({ children: Children, Kind = "subtle" }: StatusPillProps): ReactNode {
+export function StatusPill({ children: Children, Kind = 'subtle' }: StatusPillProps): ReactNode {
   return (
-    <Badge appearance="tint" color={Kind} size="small">
+    <Badge appearance='tint' color={Kind} size='small'>
       {Children}
     </Badge>
-  );
+  )
 }
 
 export interface BrandMarkProps {
   // oxlint-disable-next-line filebelt/pascal-case -- This component forwards the DOM `className` contract.
-  className?: string;
-  Label?: string;
+  className?: string
+  Label?: string
 }
 
 /** Original FileBelt mark: a secured file folded through a belt-like horizon. */
@@ -166,41 +166,41 @@ export function BrandMark({ className: ClassName, Label }: BrandMarkProps): Reac
     <svg
       aria-hidden={Label === undefined ? true : undefined}
       aria-label={Label}
-      className={mergeClasses("fb-brand-mark", ClassName)}
-      fill="none"
-      role={Label === undefined ? undefined : "img"}
-      viewBox="0 0 36 36"
-      xmlns="http://www.w3.org/2000/svg"
+      className={mergeClasses('fb-brand-mark', ClassName)}
+      fill='none'
+      role={Label === undefined ? undefined : 'img'}
+      viewBox='0 0 36 36'
+      xmlns='http://www.w3.org/2000/svg'
     >
       <path
-        d="M9 4.5h12l6 6V29a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 7 29V7a2.5 2.5 0 0 1 2-2.45Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="2"
+        d='M9 4.5h12l6 6V29a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 7 29V7a2.5 2.5 0 0 1 2-2.45Z'
+        stroke='currentColor'
+        strokeLinejoin='round'
+        strokeWidth='2'
       />
-      <path d="M21 4.8V11h6" stroke="currentColor" strokeLinejoin="round" strokeWidth="2" />
-      <path d="M4 20.5h28" stroke="currentColor" strokeLinecap="round" strokeWidth="5" />
+      <path d='M21 4.8V11h6' stroke='currentColor' strokeLinejoin='round' strokeWidth='2' />
+      <path d='M4 20.5h28' stroke='currentColor' strokeLinecap='round' strokeWidth='5' />
       <path
-        d="M5 20.5h26"
-        stroke="var(--fb-brand-cut, #121212)"
-        strokeDasharray="2.5 3"
-        strokeLinecap="round"
-        strokeWidth="1.5"
+        d='M5 20.5h26'
+        stroke='var(--fb-brand-cut, #121212)'
+        strokeDasharray='2.5 3'
+        strokeLinecap='round'
+        strokeWidth='1.5'
       />
     </svg>
-  );
+  )
 }
 
 export const VisuallyHiddenStyle: CSSProperties = {
   border: 0,
   // oxlint-disable-next-line typescript/no-deprecated -- Retained visual-hidden fallback for legacy assistive-technology stacks.
-  clip: "rect(0 0 0 0)",
-  clipPath: "inset(50%)",
-  height: "1px",
-  margin: "-1px",
-  overflow: "hidden",
+  clip: 'rect(0 0 0 0)',
+  clipPath: 'inset(50%)',
+  height: '1px',
+  margin: '-1px',
+  overflow: 'hidden',
   padding: 0,
-  position: "absolute",
-  whiteSpace: "nowrap",
-  width: "1px",
-};
+  position: 'absolute',
+  whiteSpace: 'nowrap',
+  width: '1px',
+}

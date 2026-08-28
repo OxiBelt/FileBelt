@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useDeferredValue, useId, useMemo, type JSX, type KeyboardEvent } from "react";
-import { TextSourceEditor, type TextCollaboration } from "./editor.js";
-import { ParseFileBeltGfmV1 } from "./parser.js";
-import { MarkdownPreview } from "./renderer.js";
+import { useDeferredValue, useId, useMemo, type JSX, type KeyboardEvent } from 'react'
+import { TextSourceEditor, type TextCollaboration } from './editor.js'
+import { ParseFileBeltGfmV1 } from './parser.js'
+import { MarkdownPreview } from './renderer.js'
 import type {
   CollaborationIdentity,
   MarkdownMode,
@@ -11,16 +11,16 @@ import type {
   MarkdownStrings,
   TextSource,
   TextStrings,
-} from "./types.js";
+} from './types.js'
 
 export interface TextSurfaceProps {
-  Collaboration?: TextCollaboration;
-  Disabled?: boolean;
-  Identity?: CollaborationIdentity;
-  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void;
-  OnTextChange?: (Text: string) => void;
-  Source: TextSource;
-  Strings: TextStrings;
+  Collaboration?: TextCollaboration
+  Disabled?: boolean
+  Identity?: CollaborationIdentity
+  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void
+  OnTextChange?: (Text: string) => void
+  Source: TextSource
+  Strings: TextStrings
 }
 
 /** Accessible language-neutral source editor/viewer for validated text. */
@@ -35,7 +35,7 @@ export function TextSurface({
   Strings,
 }: TextSurfaceProps): JSX.Element {
   return (
-    <section data-filebelt-text-mode={Disabled === true ? "view" : "edit"}>
+    <section data-filebelt-text-mode={Disabled === true ? 'view' : 'edit'}>
       <div aria-label={Disabled === true ? Strings.View : Strings.Edit}>
         <TextSourceEditor
           {...(Collaboration === undefined ? {} : { Collaboration })}
@@ -48,20 +48,20 @@ export function TextSurface({
         />
       </div>
     </section>
-  );
+  )
 }
 
 export interface MarkdownSurfaceProps {
-  Collaboration?: TextCollaboration;
-  Disabled?: boolean;
-  Identity?: CollaborationIdentity;
-  Mode: MarkdownMode;
-  OnFileBeltLink?: Parameters<typeof MarkdownPreview>[0]["OnFileBeltLink"];
-  OnModeChange: (Mode: MarkdownMode) => void;
-  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void;
-  OnTextChange?: (Text: string) => void;
-  Source: MarkdownSource;
-  Strings: MarkdownStrings;
+  Collaboration?: TextCollaboration
+  Disabled?: boolean
+  Identity?: CollaborationIdentity
+  Mode: MarkdownMode
+  OnFileBeltLink?: Parameters<typeof MarkdownPreview>[0]['OnFileBeltLink']
+  OnModeChange: (Mode: MarkdownMode) => void
+  OnSelectionChange?: (Selection: Readonly<{ End: number; Start: number }>) => void
+  OnTextChange?: (Text: string) => void
+  Source: MarkdownSource
+  Strings: MarkdownStrings
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
@@ -78,39 +78,39 @@ export function MarkdownSurface({
   Strings,
 }: MarkdownSurfaceProps): JSX.Element {
   // Parsing and preview delivery are non-urgent; keep CodeMirror input responsive.
-  const PreviewSource = useDeferredValue(Source);
-  const Parsed = useMemo(() => ParseFileBeltGfmV1(PreviewSource), [PreviewSource]);
-  const SurfaceId = useId().replaceAll(":", "-");
-  const SourcePanelId = `${SurfaceId}-source`;
-  const PreviewPanelId = `${SurfaceId}-preview`;
-  const ShowSource = Mode === "source" || Mode === "split";
-  const ShowPreview = Mode === "preview" || Mode === "split";
+  const PreviewSource = useDeferredValue(Source)
+  const Parsed = useMemo(() => ParseFileBeltGfmV1(PreviewSource), [PreviewSource])
+  const SurfaceId = useId().replaceAll(':', '-')
+  const SourcePanelId = `${SurfaceId}-source`
+  const PreviewPanelId = `${SurfaceId}-preview`
+  const ShowSource = Mode === 'source' || Mode === 'split'
+  const ShowPreview = Mode === 'preview' || Mode === 'split'
   return (
     <section data-filebelt-markdown-mode={Mode}>
-      <div aria-label="Markdown mode" role="tablist">
+      <div aria-label='Markdown mode' role='tablist'>
         <ModeButton
-          Active={Mode === "source"}
+          Active={Mode === 'source'}
           Controls={SourcePanelId}
           Label={Strings.Edit}
-          Mode="source"
+          Mode='source'
           OnModeChange={OnModeChange}
         />
         <ModeButton
-          Active={Mode === "split"}
+          Active={Mode === 'split'}
           Controls={`${SourcePanelId} ${PreviewPanelId}`}
           Label={Strings.Split}
-          Mode="split"
+          Mode='split'
           OnModeChange={OnModeChange}
         />
         <ModeButton
-          Active={Mode === "preview"}
+          Active={Mode === 'preview'}
           Controls={PreviewPanelId}
           Label={Strings.Preview}
-          Mode="preview"
+          Mode='preview'
           OnModeChange={OnModeChange}
         />
       </div>
-      <div aria-label={Strings.Edit} hidden={!ShowSource} id={SourcePanelId} role="tabpanel">
+      <div aria-label={Strings.Edit} hidden={!ShowSource} id={SourcePanelId} role='tabpanel'>
         <TextSourceEditor
           {...(Collaboration === undefined ? {} : { Collaboration })}
           {...(Disabled === undefined ? {} : { Disabled })}
@@ -121,14 +121,14 @@ export function MarkdownSurface({
           SourceEditorLabel={Strings.SourceEditor}
         />
       </div>
-      <div aria-label={Strings.Preview} hidden={!ShowPreview} id={PreviewPanelId} role="tabpanel">
+      <div aria-label={Strings.Preview} hidden={!ShowPreview} id={PreviewPanelId} role='tabpanel'>
         <MarkdownPreview
           Ast={Parsed.Ast}
           {...(OnFileBeltLink === undefined ? {} : { OnFileBeltLink })}
         />
       </div>
     </section>
-  );
+  )
 }
 
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
@@ -139,47 +139,47 @@ function ModeButton({
   Mode,
   OnModeChange,
 }: {
-  Active: boolean;
-  Controls: string;
-  Label: string;
-  Mode: MarkdownMode;
-  OnModeChange: (Mode: MarkdownMode) => void;
+  Active: boolean
+  Controls: string
+  Label: string
+  Mode: MarkdownMode
+  OnModeChange: (Mode: MarkdownMode) => void
 }): JSX.Element {
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Keyboard handling calls preventDefault and focuses DOM elements.
   const OnKeyDown = (Event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!MatchesTabNavigationKey(Event.key)) return;
+    if (!MatchesTabNavigationKey(Event.key)) return
     const Tabs = [
-      ...(Event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role=tab]") ??
+      ...(Event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=tab]') ??
         []),
-    ];
-    const Current = Tabs.indexOf(Event.currentTarget);
+    ]
+    const Current = Tabs.indexOf(Event.currentTarget)
     const Next =
-      Event.key === "Home"
+      Event.key === 'Home'
         ? 0
-        : Event.key === "End"
+        : Event.key === 'End'
           ? Tabs.length - 1
-          : (Current + (Event.key === "ArrowLeft" ? -1 : 1) + Tabs.length) % Tabs.length;
-    Event.preventDefault();
-    Tabs[Next]?.focus();
-    Tabs[Next]?.click();
-  };
+          : (Current + (Event.key === 'ArrowLeft' ? -1 : 1) + Tabs.length) % Tabs.length
+    Event.preventDefault()
+    Tabs[Next]?.focus()
+    Tabs[Next]?.click()
+  }
   return (
     <button
       aria-controls={Controls}
       aria-selected={Active}
       onClick={() => {
-        OnModeChange(Mode);
+        OnModeChange(Mode)
       }}
       onKeyDown={OnKeyDown}
-      role="tab"
+      role='tab'
       tabIndex={Active ? 0 : -1}
-      type="button"
+      type='button'
     >
       {Label}
     </button>
-  );
+  )
 }
 
 function MatchesTabNavigationKey(Key: string): boolean {
-  return Key === "ArrowLeft" || Key === "ArrowRight" || Key === "Home" || Key === "End";
+  return Key === 'ArrowLeft' || Key === 'ArrowRight' || Key === 'Home' || Key === 'End'
 }

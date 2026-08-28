@@ -75,8 +75,9 @@ baseline. A new adapter manifest must first receive its component-specific
 license, graph, formatting, lint, and test policy and must remain outside the
 root workspace.
 
-Hand-authored JavaScript and TypeScript use two-space indentation, double
-quotes, and semicolons. Hand-authored TypeScript uses PascalCase for
+Hand-authored JavaScript and TypeScript use two-space indentation,
+formatter-compatible preferred single quotes (including JSX attributes), and omit safely
+removable semicolons. Hand-authored TypeScript uses PascalCase for
 variable-like declarations, parameter properties, class properties, type
 properties, and type-like declarations. Methods, accessors, imports, and
 object-literal keys are outside the naming rule. React custom hooks retain the

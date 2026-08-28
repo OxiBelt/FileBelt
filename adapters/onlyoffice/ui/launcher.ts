@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-export type LauncherState = "idle" | "loading-api" | "launching" | "ready" | "error";
+export type LauncherState = 'idle' | 'loading-api' | 'launching' | 'ready' | 'error'
 
 export interface LaunchResponse {
   /* oxlint-disable filebelt/pascal-case -- ONLYOFFICE launch responses retain provider field names. */
-  apiJsUrl: string;
-  editorConfig: Record<string, unknown>;
+  apiJsUrl: string
+  editorConfig: Record<string, unknown>
   /* oxlint-enable filebelt/pascal-case */
 }
 
 export interface LauncherView {
-  setState(State: LauncherState, Message: string): void;
-  setLaunchEnabled(Enabled: boolean): void;
+  setState(State: LauncherState, Message: string): void
+  setLaunchEnabled(Enabled: boolean): void
 }
 
 /**
@@ -19,63 +19,63 @@ export interface LauncherView {
  * launch must be redeemed by the server for every new tab.
  */
 export class OnlyOfficeLauncher {
-  #State: LauncherState = "idle";
-  #ProviderApi: Promise<void> | undefined;
+  #State: LauncherState = 'idle'
+  #ProviderApi: Promise<void> | undefined
 
   public constructor(private readonly View: LauncherView) {
-    this.View.setState("idle", "Editor is ready to launch.");
-    this.View.setLaunchEnabled(true);
+    this.View.setState('idle', 'Editor is ready to launch.')
+    this.View.setLaunchEnabled(true)
   }
 
   public get State(): LauncherState {
-    return this.#State;
+    return this.#State
   }
 
   public async launch(Launch: () => Promise<LaunchResponse>): Promise<void> {
-    if (this.#State === "launching" || this.#State === "loading-api") return;
-    this.#State = "launching";
-    this.View.setLaunchEnabled(false);
-    this.View.setState(this.#State, "Preparing secure editor launch.");
+    if (this.#State === 'launching' || this.#State === 'loading-api') return
+    this.#State = 'launching'
+    this.View.setLaunchEnabled(false)
+    this.View.setState(this.#State, 'Preparing secure editor launch.')
     try {
-      const Response = await Launch();
-      this.#State = "loading-api";
-      this.View.setState(this.#State, "Loading editor provider.");
-      await this.loadProviderApi(Response.apiJsUrl);
-      const DocsApi = window.DocsAPI;
-      if (DocsApi === undefined) throw new Error("provider API did not expose DocsAPI");
-      DocsApi.DocEditor("onlyoffice-editor", Response.editorConfig);
-      this.#State = "ready";
-      this.View.setState(this.#State, "Editor is ready.");
+      const Response = await Launch()
+      this.#State = 'loading-api'
+      this.View.setState(this.#State, 'Loading editor provider.')
+      await this.loadProviderApi(Response.apiJsUrl)
+      const DocsApi = window.DocsAPI
+      if (DocsApi === undefined) throw new Error('provider API did not expose DocsAPI')
+      DocsApi.DocEditor('onlyoffice-editor', Response.editorConfig)
+      this.#State = 'ready'
+      this.View.setState(this.#State, 'Editor is ready.')
     } catch {
-      this.#State = "error";
-      this.View.setState(this.#State, "Unable to launch the editor. Try again.");
-      this.View.setLaunchEnabled(true);
+      this.#State = 'error'
+      this.View.setState(this.#State, 'Unable to launch the editor. Try again.')
+      this.View.setLaunchEnabled(true)
     }
   }
 
   private async loadProviderApi(ApiJsUrl: string): Promise<void> {
-    if (this.#ProviderApi !== undefined) return this.#ProviderApi;
+    if (this.#ProviderApi !== undefined) return this.#ProviderApi
     this.#ProviderApi = new Promise((Resolve, Reject) => {
-      const Script = document.createElement("script");
-      Script.src = ApiJsUrl;
-      Script.async = true;
-      Script.referrerPolicy = "no-referrer";
+      const Script = document.createElement('script')
+      Script.src = ApiJsUrl
+      Script.async = true
+      Script.referrerPolicy = 'no-referrer'
       Script.onload = () => {
-        Resolve();
-      };
+        Resolve()
+      }
       Script.onerror = () => {
-        Reject(new Error("provider API failed to load"));
-      };
-      document.head.append(Script);
-    });
-    return this.#ProviderApi;
+        Reject(new Error('provider API failed to load'))
+      }
+      document.head.append(Script)
+    })
+    return this.#ProviderApi
   }
 }
 
 declare global {
   interface Window {
     DocsAPI?: {
-      DocEditor(ElementId: string, Config: Readonly<Record<string, unknown>>): unknown;
-    };
+      DocEditor(ElementId: string, Config: Readonly<Record<string, unknown>>): unknown
+    }
   }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import createClient from "openapi-fetch";
-import type { Client } from "openapi-fetch";
+import createClient from 'openapi-fetch'
+import type { Client } from 'openapi-fetch'
 
 import type {
   NfsAdminClient,
@@ -11,79 +11,79 @@ import type {
   NfsFeatureState,
   NfsMappingUpsert,
   NfsPosixGroupRegistration,
-} from "@filebelt/admin";
+} from '@filebelt/admin'
 
-import { AuthenticationRequiredError } from "./client.js";
-import type { components, paths } from "./generated/openapi.js";
+import { AuthenticationRequiredError } from './client.js'
+import type { components, paths } from './generated/openapi.js'
 
-type SessionResponse = components["schemas"]["Session"];
-type NfsOverviewResponse = components["schemas"]["NfsAdminOverview"];
-type NfsConflictResponse = components["schemas"]["NfsWriteConflict"];
-type NfsMappingProposalResponse = components["schemas"]["NfsMappingProposal"];
-type NfsQuarantinedMappingResponse = components["schemas"]["NfsQuarantinedMapping"];
-type NfsConflictCopyInput = Parameters<NfsAdminClient["copyConflict"]>[1];
+type SessionResponse = components['schemas']['Session']
+type NfsOverviewResponse = components['schemas']['NfsAdminOverview']
+type NfsConflictResponse = components['schemas']['NfsWriteConflict']
+type NfsMappingProposalResponse = components['schemas']['NfsMappingProposal']
+type NfsQuarantinedMappingResponse = components['schemas']['NfsQuarantinedMapping']
+type NfsConflictCopyInput = Parameters<NfsAdminClient['copyConflict']>[1]
 
 export class NfsReauthenticationRequiredError extends Error {
   constructor() {
-    super("Recent tenant administrator authentication is required.");
-    this.name = "NfsReauthenticationRequiredError";
+    super('Recent tenant administrator authentication is required.')
+    this.name = 'NfsReauthenticationRequiredError'
   }
 }
 
 interface ApiResult<T> {
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly data?: T;
+  readonly data?: T
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly error?: unknown;
+  readonly error?: unknown
   // oxlint-disable-next-line filebelt/pascal-case -- `openapi-fetch` returns this exact result key.
-  readonly response: Response;
+  readonly response: Response
 }
 
 interface MutationHeaders {
-  "Idempotency-Key": string;
-  Origin: string;
-  "Sec-Fetch-Site": "same-origin";
-  "X-FileBelt-Csrf": string;
+  'Idempotency-Key': string
+  Origin: string
+  'Sec-Fetch-Site': 'same-origin'
+  'X-FileBelt-Csrf': string
 }
 
 type SignalInitShape = {
   // oxlint-disable-next-line filebelt/pascal-case -- Fetch `RequestInit` exposes this exact abort-signal key.
-  signal?: Readonly<AbortSignal>;
-};
+  signal?: Readonly<AbortSignal>
+}
 
 /** Same-origin adapter for generation-fenced tenant NFS administration. */
 export class HttpNfsAdminClient implements NfsAdminClient {
-  readonly #Api: Client<paths>;
-  readonly #Origin: string;
-  #CsrfToken: string | null = null;
+  readonly #Api: Client<paths>
+  readonly #Origin: string
+  #CsrfToken: string | null = null
 
   constructor(
     FetchImplementation: typeof fetch = globalThis.fetch.bind(globalThis),
     BaseUrl: string = DefaultBaseUrl(),
   ) {
-    this.#Origin = new URL(BaseUrl).origin;
+    this.#Origin = new URL(BaseUrl).origin
     this.#Api = createClient<paths>({
       baseUrl: BaseUrl,
-      credentials: "same-origin",
+      credentials: 'same-origin',
       fetch: async (Request) => FetchImplementation(Request),
-    });
+    })
   }
 
   async getOverview(Signal?: Readonly<AbortSignal>): Promise<NfsAdminSnapshot> {
     const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all(
       [
-        this.#Api.GET("/api/v1/admin/mounts/nfs", SignalInit(Signal)),
-        this.#Api.GET("/api/v1/admin/mounts/nfs/conflicts", SignalInit(Signal)),
-        this.#Api.GET("/api/v1/admin/mounts/nfs/mapping-proposals", SignalInit(Signal)),
-        this.#Api.GET("/api/v1/admin/mounts/nfs/quarantined-mappings", SignalInit(Signal)),
+        this.#Api.GET('/api/v1/admin/mounts/nfs', SignalInit(Signal)),
+        this.#Api.GET('/api/v1/admin/mounts/nfs/conflicts', SignalInit(Signal)),
+        this.#Api.GET('/api/v1/admin/mounts/nfs/mapping-proposals', SignalInit(Signal)),
+        this.#Api.GET('/api/v1/admin/mounts/nfs/quarantined-mappings', SignalInit(Signal)),
       ],
-    );
+    )
     return Snapshot(
       RequireData<NfsOverviewResponse>(OverviewResult),
       RequireData<NfsConflictResponse[]>(ConflictsResult),
       RequireData<NfsMappingProposalResponse[]>(ProposalsResult),
       RequireData<NfsQuarantinedMappingResponse[]>(QuarantinedResult),
-    );
+    )
   }
 
   async transitionFeature(
@@ -92,7 +92,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.PUT("/api/v1/admin/mounts/nfs/feature", {
+      await this.#Api.PUT('/api/v1/admin/mounts/nfs/feature', {
         body: {
           confirm_tenant: ConfirmTenant,
           expected_generation: ExpectedGeneration,
@@ -100,7 +100,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
         },
         params: { header: await this.#mutationHeaders() },
       }),
-    );
+    )
   }
 
   async registerExport(
@@ -108,11 +108,11 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.POST("/api/v1/admin/mounts/nfs/exports", {
+      await this.#Api.POST('/api/v1/admin/mounts/nfs/exports', {
         body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
         params: { header: await this.#mutationHeaders() },
       }),
-    );
+    )
   }
 
   async transitionExport(
@@ -122,7 +122,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.PUT("/api/v1/admin/mounts/nfs/exports/{drive_id}", {
+      await this.#Api.PUT('/api/v1/admin/mounts/nfs/exports/{drive_id}', {
         body: {
           confirm_tenant: ConfirmTenant,
           expected_generation: ExpectedGeneration,
@@ -133,7 +133,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           path: { drive_id: DriveId },
         },
       }),
-    );
+    )
   }
 
   async registerPosixGroup(
@@ -141,7 +141,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.POST("/api/v1/admin/mounts/nfs/posix-groups", {
+      await this.#Api.POST('/api/v1/admin/mounts/nfs/posix-groups', {
         body: {
           confirm_tenant: ConfirmTenant,
           group_id: Input.GroupId,
@@ -150,13 +150,13 @@ export class HttpNfsAdminClient implements NfsAdminClient {
         },
         params: { header: await this.#mutationHeaders() },
       }),
-    );
+    )
   }
 
   // oxlint-disable-next-line typescript/no-deprecated -- The admin interface intentionally retains this compatibility shape for proposal creation.
   async proposeMapping(Input: Readonly<NfsMappingUpsert>, ConfirmTenant: string): Promise<void> {
     RequireData(
-      await this.#Api.POST("/api/v1/admin/mounts/nfs/mapping-proposals", {
+      await this.#Api.POST('/api/v1/admin/mounts/nfs/mapping-proposals', {
         body: {
           allowed_drive_ids: Input.AllowedDriveIds,
           confirm_tenant: ConfirmTenant,
@@ -167,7 +167,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
         },
         params: { header: await this.#mutationHeaders() },
       }),
-    );
+    )
   }
 
   async cancelProposal(
@@ -176,14 +176,14 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireSuccess(
-      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}", {
+      await this.#Api.DELETE('/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}', {
         params: {
           header: await this.#mutationHeaders(),
           path: { proposal_id: ProposalId },
           query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
         },
       }),
-    );
+    )
   }
 
   async attenuateMappingScope(
@@ -193,7 +193,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.PUT("/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope", {
+      await this.#Api.PUT('/api/v1/admin/mounts/nfs/mappings/{credential_id}/scope', {
         body: {
           allowed_drive_ids: AllowedDriveIds,
           confirm_tenant: ConfirmTenant,
@@ -204,7 +204,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           path: { credential_id: CredentialId },
         },
       }),
-    );
+    )
   }
 
   async revokeMapping(
@@ -213,14 +213,14 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireSuccess(
-      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/mappings/{credential_id}", {
+      await this.#Api.DELETE('/api/v1/admin/mounts/nfs/mappings/{credential_id}', {
         params: {
           header: await this.#mutationHeaders(),
           path: { credential_id: CredentialId },
           query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
         },
       }),
-    );
+    )
   }
 
   async copyConflict(
@@ -229,7 +229,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
-      await this.#Api.POST("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy", {
+      await this.#Api.POST('/api/v1/admin/mounts/nfs/conflicts/{conflict_id}/copy', {
         body: {
           confirm_tenant: ConfirmTenant,
           display_name: Input.DisplayName,
@@ -242,32 +242,32 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           path: { conflict_id: ConflictId },
         },
       }),
-    );
+    )
   }
 
   async discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void> {
     RequireSuccess(
-      await this.#Api.DELETE("/api/v1/admin/mounts/nfs/conflicts/{conflict_id}", {
+      await this.#Api.DELETE('/api/v1/admin/mounts/nfs/conflicts/{conflict_id}', {
         params: {
           header: await this.#mutationHeaders(),
           path: { conflict_id: ConflictId },
           query: { confirm_tenant: ConfirmTenant },
         },
       }),
-    );
+    )
   }
 
   async #mutationHeaders(): Promise<MutationHeaders> {
     if (this.#CsrfToken === null) {
-      const Session = RequireData<SessionResponse>(await this.#Api.GET("/api/v1/session"));
-      this.#CsrfToken = Session.csrf_token;
+      const Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
+      this.#CsrfToken = Session.csrf_token
     }
     return {
-      "Idempotency-Key": crypto.randomUUID(),
+      'Idempotency-Key': crypto.randomUUID(),
       Origin: this.#Origin,
-      "Sec-Fetch-Site": "same-origin",
-      "X-FileBelt-Csrf": this.#CsrfToken,
-    };
+      'Sec-Fetch-Site': 'same-origin',
+      'X-FileBelt-Csrf': this.#CsrfToken,
+    }
   }
 }
 
@@ -324,7 +324,7 @@ function Snapshot(
       ProjectedGid: Mapping.projected_gid,
       ProjectedUid: Mapping.projected_uid,
     })),
-    PendingProposals: Proposals.filter(({ state: State }) => State === "pending").map(
+    PendingProposals: Proposals.filter(({ state: State }) => State === 'pending').map(
       (Proposal) => ({
         AllowedDriveIds: Proposal.allowed_drive_ids,
         CreatedAt: Proposal.created_at,
@@ -361,45 +361,45 @@ function Snapshot(
     })),
     Realm: Response.realm,
     TenantSlug: Response.tenant_slug,
-  };
+  }
 }
 
 function DefaultBaseUrl(): string {
-  return typeof window === "undefined" ? "https://filebelt.localhost" : window.location.origin;
+  return typeof window === 'undefined' ? 'https://filebelt.localhost' : window.location.origin
 }
 
 function SignalInit(Signal?: Readonly<AbortSignal>): SignalInitShape {
-  return Signal === undefined ? {} : { signal: Signal };
+  return Signal === undefined ? {} : { signal: Signal }
 }
 
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- The generated operation at each call site supplies the expected response schema.
 function RequireData<T>(Result: ApiResult<unknown>): T {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- openapi-fetch has already selected the generated schema for the successful operation.
-  if (Result.response.ok && Result.data !== undefined) return Result.data as T;
-  throw RequestError(Result);
+  if (Result.response.ok && Result.data !== undefined) return Result.data as T
+  throw RequestError(Result)
 }
 
 function RequireSuccess(Result: ApiResult<unknown>): void {
-  if (!Result.response.ok) throw RequestError(Result);
+  if (!Result.response.ok) throw RequestError(Result)
 }
 
 function RequestError(Result: ApiResult<unknown>): Error {
-  if (Result.response.status === 401) return new AuthenticationRequiredError();
-  if (ProblemCode(Result.error) === "admin.reauthentication_required") {
-    return new NfsReauthenticationRequiredError();
+  if (Result.response.status === 401) return new AuthenticationRequiredError()
+  if (ProblemCode(Result.error) === 'admin.reauthentication_required') {
+    return new NfsReauthenticationRequiredError()
   }
-  const Title = ProblemTitle(Result.error);
+  const Title = ProblemTitle(Result.error)
   return new Error(
     Title ?? `FileBelt NFS administration request failed (${Result.response.status}).`,
-  );
+  )
 }
 
 function ProblemCode(Value: unknown): string | null {
-  if (typeof Value !== "object" || Value === null || !("code" in Value)) return null;
-  return typeof Value.code === "string" ? Value.code : null;
+  if (typeof Value !== 'object' || Value === null || !('code' in Value)) return null
+  return typeof Value.code === 'string' ? Value.code : null
 }
 
 function ProblemTitle(Value: unknown): string | null {
-  if (typeof Value !== "object" || Value === null || !("title" in Value)) return null;
-  return typeof Value.title === "string" ? Value.title : null;
+  if (typeof Value !== 'object' || Value === null || !('title' in Value)) return null
+  return typeof Value.title === 'string' ? Value.title : null
 }

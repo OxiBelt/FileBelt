@@ -39,10 +39,11 @@ Repository JavaScript and TypeScript tooling is also lockfile-pinned. The root
 uses exact `oxfmt` 0.64.0, `oxlint` 1.79.0, `oxlint-tsgolint` 7.0.2001, and
 TypeScript 6.0.3. Oxlint enables every one of tsgolint v7's 59 implemented
 type-aware rules as an error while compiler diagnostics remain in the separate
-`pnpm typecheck` lane. The local diagnostic-only `filebelt/pascal-case` rule
-preserves the naming selectors that tsgolint does not implement; its structure
-is adapted under Apache-2.0 from OxiBelt commit
-`9daacf938a7d79fd618c18904435510eecb2f4c3` and its behavior is independently
+`pnpm typecheck` lane. The local diagnostic-only `filebelt/pascal-case`,
+`filebelt/no-semicolons`, and `filebelt/single-quotes` rules preserve naming
+and style contracts that Oxlint does not implement; their structure is adapted
+under Apache-2.0 from OxiBelt commit
+`9daacf938a7d79fd618c18904435510eecb2f4c3` and their behavior is independently
 covered by FileBelt fixtures.
 
 Oxfmt, Oxlint, tsgolint, and their registry-integrity-pinned optional native

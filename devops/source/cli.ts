@@ -18,142 +18,142 @@ import {
   type ImageRole,
   type SourceKind,
   type VulnerabilityFinding,
-} from "./index.js";
+} from './index.js'
 
 interface RuntimeProcessContract {
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
-  readonly argv: readonly string[];
+  readonly argv: readonly string[]
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
-  readonly stderr: { write(Value: string): void };
+  readonly stderr: { write(Value: string): void }
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
-  exitCode: number | undefined;
-  getBuiltinModule(Name: "node:fs"): unknown;
+  exitCode: number | undefined
+  getBuiltinModule(Name: 'node:fs'): unknown
 }
 
 interface ReadFileOptions {
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js requires this exact file-system option.
-  readonly encoding: "utf8";
+  readonly encoding: 'utf8'
 }
 
 interface WriteFileOptions extends ReadFileOptions {
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js requires this exact file-system option.
-  readonly flag: "w";
+  readonly flag: 'w'
 }
 
 interface FileSystem {
-  readFileSync(Path: string, Options: ReadFileOptions): string;
-  writeFileSync(Path: string, Data: string, Options: WriteFileOptions): void;
+  readFileSync(Path: string, Options: ReadFileOptions): string
+  writeFileSync(Path: string, Data: string, Options: WriteFileOptions): void
 }
 
 interface RuntimeGlobals {
   // oxlint-disable-next-line filebelt/pascal-case -- The JavaScript global exposes this exact property.
-  readonly process: RuntimeProcessContract;
+  readonly process: RuntimeProcessContract
 }
 
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The intentionally minimal Node global contract isolates CLI runtime access.
-const RuntimeProcess = (globalThis as unknown as RuntimeGlobals).process;
+const RuntimeProcess = (globalThis as unknown as RuntimeGlobals).process
 
 try {
-  Run(RuntimeProcess.argv.slice(2));
+  Run(RuntimeProcess.argv.slice(2))
 } catch (ErrorValue: unknown) {
-  const Message = ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue);
-  RuntimeProcess.stderr.write(`filebelt devops: ${Message}\n`);
-  RuntimeProcess.exitCode = 1;
+  const Message = ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)
+  RuntimeProcess.stderr.write(`filebelt devops: ${Message}\n`)
+  RuntimeProcess.exitCode = 1
 }
 
 function Run(InputArguments: readonly string[]): void {
-  const [Command, ...CommandArguments] = InputArguments;
-  if (Command === "image-plan") {
-    CreateImagePlanFile(CommandArguments);
-    return;
+  const [Command, ...CommandArguments] = InputArguments
+  if (Command === 'image-plan') {
+    CreateImagePlanFile(CommandArguments)
+    return
   }
-  if (Command === "adapter-image-plan") {
-    CreateAdapterImagePlanFile(CommandArguments);
-    return;
+  if (Command === 'adapter-image-plan') {
+    CreateAdapterImagePlanFile(CommandArguments)
+    return
   }
-  if (Command === "validate-adapter-image-plan") {
-    ValidateAdapterImagePlanFile(CommandArguments);
-    return;
+  if (Command === 'validate-adapter-image-plan') {
+    ValidateAdapterImagePlanFile(CommandArguments)
+    return
   }
-  if (Command === "validate-image-plan") {
-    ValidateImagePlanFile(CommandArguments);
-    return;
+  if (Command === 'validate-image-plan') {
+    ValidateImagePlanFile(CommandArguments)
+    return
   }
-  if (Command === "evaluate-vulnerabilities") {
-    EvaluateVulnerabilities(CommandArguments);
-    return;
+  if (Command === 'evaluate-vulnerabilities') {
+    EvaluateVulnerabilities(CommandArguments)
+    return
   }
   throw new Error(
-    "expected the image-plan, adapter-image-plan, validate-image-plan, validate-adapter-image-plan, or evaluate-vulnerabilities command",
-  );
+    'expected the image-plan, adapter-image-plan, validate-image-plan, validate-adapter-image-plan, or evaluate-vulnerabilities command',
+  )
 }
 
 function CreateAdapterImagePlanFile(InputArguments: readonly string[]): void {
   /* oxlint-disable typescript/no-unsafe-type-assertion -- The image-plan validator checks evidence before any serialized plan is accepted. */
   const Options = ParseOptions(InputArguments, [
-    "version",
-    "revision",
-    "source-ref",
-    "created",
-    "dirty",
-    "kind",
-    "evidence",
-    "output",
-  ]);
-  const Kind = ReadKind(Options);
+    'version',
+    'revision',
+    'source-ref',
+    'created',
+    'dirty',
+    'kind',
+    'evidence',
+    'output',
+  ])
+  const Kind = ReadKind(Options)
   const Source = {
     url: SourceUrl,
-    ref: ReadOption(Options, "source-ref"),
-    revision: ReadOption(Options, "revision"),
-    created: ReadOption(Options, "created"),
-    dirty: ReadBoolean(Options, "dirty"),
+    ref: ReadOption(Options, 'source-ref'),
+    revision: ReadOption(Options, 'revision'),
+    created: ReadOption(Options, 'created'),
+    dirty: ReadBoolean(Options, 'dirty'),
     kind: Kind,
-  } as const;
-  let Evidence: Partial<Record<AdapterImageRole, AdapterRoleQualificationInput>> | undefined;
-  const EvidencePath = Options.get("evidence");
+  } as const
+  let Evidence: Partial<Record<AdapterImageRole, AdapterRoleQualificationInput>> | undefined
+  const EvidencePath = Options.get('evidence')
   if (EvidencePath !== undefined) {
     Evidence = ReadJson(EvidencePath) as Partial<
       Record<AdapterImageRole, AdapterRoleQualificationInput>
-    >;
+    >
   }
   const Plan = CreateAdapterImagePlan({
-    Version: ReadOption(Options, "version"),
+    Version: ReadOption(Options, 'version'),
     Source,
     ...(Evidence === undefined ? {} : { Evidence }),
-  });
-  const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
-  FileSystemModule.writeFileSync(ReadOption(Options, "output"), SerializeAdapterImagePlan(Plan), {
-    encoding: "utf8",
-    flag: "w",
-  });
+  })
+  const FileSystemModule = RuntimeProcess.getBuiltinModule('node:fs') as FileSystem
+  FileSystemModule.writeFileSync(ReadOption(Options, 'output'), SerializeAdapterImagePlan(Plan), {
+    encoding: 'utf8',
+    flag: 'w',
+  })
   /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ValidateAdapterImagePlanFile(InputArguments: readonly string[]): void {
-  const Options = ParseOptions(InputArguments, ["input"]);
-  ValidateAdapterImagePlan(ReadJson(ReadOption(Options, "input")));
+  const Options = ParseOptions(InputArguments, ['input'])
+  ValidateAdapterImagePlan(ReadJson(ReadOption(Options, 'input')))
 }
 
 function CreateImagePlanFile(InputArguments: readonly string[]): void {
   /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates CLI output. */
   const Options = ParseOptions(InputArguments, [
-    "channel",
-    "version",
-    "revision",
-    "source-ref",
-    "created",
-    "dirty",
-    "kind",
-    "output",
-  ]);
-  const Channel = ReadChannel(Options);
-  const Kind = ReadKind(Options);
-  const Dirty = ReadBoolean(Options, "dirty");
-  const Version = ReadOption(Options, "version");
-  const Revision = ReadOption(Options, "revision");
-  const Ref = ReadOption(Options, "source-ref");
-  const Created = ReadOption(Options, "created");
-  const Output = ReadOption(Options, "output");
+    'channel',
+    'version',
+    'revision',
+    'source-ref',
+    'created',
+    'dirty',
+    'kind',
+    'output',
+  ])
+  const Channel = ReadChannel(Options)
+  const Kind = ReadKind(Options)
+  const Dirty = ReadBoolean(Options, 'dirty')
+  const Version = ReadOption(Options, 'version')
+  const Revision = ReadOption(Options, 'revision')
+  const Ref = ReadOption(Options, 'source-ref')
+  const Created = ReadOption(Options, 'created')
+  const Output = ReadOption(Options, 'output')
 
   const Plan = CreateImagePlan({
     Channel,
@@ -166,41 +166,41 @@ function CreateImagePlanFile(InputArguments: readonly string[]): void {
       dirty: Dirty,
       kind: Kind,
     },
-  });
-  const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
-  FileSystemModule.writeFileSync(Output, SerializeImagePlan(Plan), { encoding: "utf8", flag: "w" });
+  })
+  const FileSystemModule = RuntimeProcess.getBuiltinModule('node:fs') as FileSystem
+  FileSystemModule.writeFileSync(Output, SerializeImagePlan(Plan), { encoding: 'utf8', flag: 'w' })
   /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 function ValidateImagePlanFile(InputArguments: readonly string[]): void {
-  const Options = ParseOptions(InputArguments, ["input"]);
-  const Input = ReadOption(Options, "input");
-  ValidateImagePlan(ReadJson(Input));
+  const Options = ParseOptions(InputArguments, ['input'])
+  const Input = ReadOption(Options, 'input')
+  ValidateImagePlan(ReadJson(Input))
 }
 
 function EvaluateVulnerabilities(InputArguments: readonly string[]): void {
   /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates CLI output. */
   const Options = ParseOptions(InputArguments, [
-    "trivy",
-    "policy",
-    "role",
-    "platform",
-    "as-of",
-    "output",
-  ]);
-  const Role = ReadRole(Options);
-  const Platform = ReadPlatform(Options);
-  const Findings = NormalizeTrivy(ReadJson(ReadOption(Options, "trivy")), Role, Platform);
-  const Policy = ReadJson(ReadOption(Options, "policy"));
-  const Decision = EvaluateVulnerabilityPolicy(Findings, Policy, ReadOption(Options, "as-of"));
-  const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
+    'trivy',
+    'policy',
+    'role',
+    'platform',
+    'as-of',
+    'output',
+  ])
+  const Role = ReadRole(Options)
+  const Platform = ReadPlatform(Options)
+  const Findings = NormalizeTrivy(ReadJson(ReadOption(Options, 'trivy')), Role, Platform)
+  const Policy = ReadJson(ReadOption(Options, 'policy'))
+  const Decision = EvaluateVulnerabilityPolicy(Findings, Policy, ReadOption(Options, 'as-of'))
+  const FileSystemModule = RuntimeProcess.getBuiltinModule('node:fs') as FileSystem
   FileSystemModule.writeFileSync(
-    ReadOption(Options, "output"),
+    ReadOption(Options, 'output'),
     `${JSON.stringify(Decision, null, 2)}\n`,
-    { encoding: "utf8", flag: "w" },
-  );
+    { encoding: 'utf8', flag: 'w' },
+  )
   if (!Decision.allowed) {
-    RuntimeProcess.exitCode = 1;
+    RuntimeProcess.exitCode = 1
   }
   /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
@@ -209,73 +209,73 @@ function ParseOptions(
   InputArguments: readonly string[],
   AllowedNames: readonly string[],
 ): ReadonlyMap<string, string> {
-  const Options = new Map<string, string>();
+  const Options = new Map<string, string>()
   for (let Index = 0; Index < InputArguments.length; Index += 2) {
-    const Option = InputArguments[Index];
-    const Value = InputArguments[Index + 1];
-    if (Option === undefined || !Option.startsWith("--") || Option.length === 2) {
-      throw new Error("image-plan options must use --name value pairs");
+    const Option = InputArguments[Index]
+    const Value = InputArguments[Index + 1]
+    if (Option === undefined || !Option.startsWith('--') || Option.length === 2) {
+      throw new Error('image-plan options must use --name value pairs')
     }
     if (Value === undefined) {
-      throw new Error(`${Option} requires a value`);
+      throw new Error(`${Option} requires a value`)
     }
-    const Name = Option.slice(2);
+    const Name = Option.slice(2)
     if (Options.has(Name)) {
-      throw new Error(`${Option} may only be provided once`);
+      throw new Error(`${Option} may only be provided once`)
     }
-    Options.set(Name, Value);
+    Options.set(Name, Value)
   }
-  const Allowed = new Set(AllowedNames);
+  const Allowed = new Set(AllowedNames)
   for (const Name of Options.keys()) {
     if (!Allowed.has(Name)) {
-      throw new Error(`unknown image-plan option --${Name}`);
+      throw new Error(`unknown image-plan option --${Name}`)
     }
   }
-  return Options;
+  return Options
 }
 
 function ReadJson(Path: string): unknown {
   /* oxlint-disable typescript/no-unsafe-type-assertion -- The intentionally minimal Node file-system contract isolates JSON input. */
-  const FileSystemModule = RuntimeProcess.getBuiltinModule("node:fs") as FileSystem;
-  let Contents: string;
+  const FileSystemModule = RuntimeProcess.getBuiltinModule('node:fs') as FileSystem
+  let Contents: string
   try {
-    Contents = FileSystemModule.readFileSync(Path, { encoding: "utf8" });
+    Contents = FileSystemModule.readFileSync(Path, { encoding: 'utf8' })
   } catch (ErrorValue: unknown) {
     throw new Error(
       `cannot read ${Path}: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`,
       {
         cause: ErrorValue,
       },
-    );
+    )
   }
   try {
-    return JSON.parse(Contents) as unknown;
+    return JSON.parse(Contents) as unknown
   } catch (ErrorValue: unknown) {
     throw new Error(
       `${Path} is not valid JSON: ${ErrorValue instanceof Error ? ErrorValue.message : String(ErrorValue)}`,
       {
         cause: ErrorValue,
       },
-    );
+    )
   }
   /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
 /* oxlint-disable typescript/no-unsafe-type-assertion -- Membership checks establish the closed image role and platform sets. */
 function ReadRole(Options: ReadonlyMap<string, string>): ImageRole {
-  const Value = ReadOption(Options, "role");
+  const Value = ReadOption(Options, 'role')
   if (!ImageRoles.includes(Value as ImageRole)) {
-    throw new Error("--role is not a FileBelt image role");
+    throw new Error('--role is not a FileBelt image role')
   }
-  return Value as ImageRole;
+  return Value as ImageRole
 }
 
 function ReadPlatform(Options: ReadonlyMap<string, string>): ImagePlatform {
-  const Value = ReadOption(Options, "platform");
+  const Value = ReadOption(Options, 'platform')
   if (!ImagePlatforms.includes(Value as ImagePlatform)) {
-    throw new Error("--platform is not a FileBelt image platform");
+    throw new Error('--platform is not a FileBelt image platform')
   }
-  return Value as ImagePlatform;
+  return Value as ImagePlatform
 }
 /* oxlint-enable typescript/no-unsafe-type-assertion */
 
@@ -285,61 +285,61 @@ function NormalizeTrivy(
   Platform: ImagePlatform,
 ): readonly VulnerabilityFinding[] {
   /* oxlint-disable typescript/no-unsafe-type-assertion -- Trivy fields are checked for exact runtime type before construction of the internal finding. */
-  const Report = AssertRecord(Value, "Trivy report");
+  const Report = AssertRecord(Value, 'Trivy report')
   if (Report.SchemaVersion !== 2) {
-    throw new Error("Trivy report SchemaVersion must be 2");
+    throw new Error('Trivy report SchemaVersion must be 2')
   }
-  const Trivy = AssertRecord(Report.Trivy, "Trivy report tool identity");
-  if (Trivy.Version !== "0.74.0") {
-    throw new Error("Trivy report must be produced by version 0.74.0");
+  const Trivy = AssertRecord(Report.Trivy, 'Trivy report tool identity')
+  if (Trivy.Version !== '0.74.0') {
+    throw new Error('Trivy report must be produced by version 0.74.0')
   }
   if (Report.Results === undefined) {
-    throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`);
+    throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`)
   }
   if (!Array.isArray(Report.Results)) {
-    throw new Error("Trivy report Results must be an array");
+    throw new Error('Trivy report Results must be an array')
   }
-  const Findings: VulnerabilityFinding[] = [];
-  let PackageCount = 0;
+  const Findings: VulnerabilityFinding[] = []
+  let PackageCount = 0
   for (const [ResultIndex, ResultValue] of Report.Results.entries()) {
-    const Result = AssertRecord(ResultValue, `Trivy result ${ResultIndex}`);
-    if (typeof Result.Target !== "string" || Result.Target.length === 0) {
-      throw new Error(`Trivy result ${ResultIndex} Target must be a non-empty string`);
+    const Result = AssertRecord(ResultValue, `Trivy result ${ResultIndex}`)
+    if (typeof Result.Target !== 'string' || Result.Target.length === 0) {
+      throw new Error(`Trivy result ${ResultIndex} Target must be a non-empty string`)
     }
     if (Result.Packages !== undefined) {
       if (!Array.isArray(Result.Packages)) {
-        throw new Error(`Trivy result ${ResultIndex} Packages must be an array`);
+        throw new Error(`Trivy result ${ResultIndex} Packages must be an array`)
       }
-      PackageCount += Result.Packages.length;
+      PackageCount += Result.Packages.length
     }
     if (Result.Vulnerabilities === null || Result.Vulnerabilities === undefined) {
-      continue;
+      continue
     }
     if (!Array.isArray(Result.Vulnerabilities)) {
-      throw new Error(`Trivy result ${ResultIndex} Vulnerabilities must be an array or null`);
+      throw new Error(`Trivy result ${ResultIndex} Vulnerabilities must be an array or null`)
     }
     for (const [VulnerabilityIndex, VulnerabilityValue] of Result.Vulnerabilities.entries()) {
-      const Description = `Trivy result ${ResultIndex} vulnerability ${VulnerabilityIndex}`;
-      const Vulnerability = AssertRecord(VulnerabilityValue, Description);
+      const Description = `Trivy result ${ResultIndex} vulnerability ${VulnerabilityIndex}`
+      const Vulnerability = AssertRecord(VulnerabilityValue, Description)
       Findings.push({
         role: Role,
         platform: Platform,
         target: Result.Target,
-        vulnerabilityId: ReadTrivyString(Vulnerability, "VulnerabilityID", Description),
-        packageName: ReadTrivyString(Vulnerability, "PkgName", Description),
-        installedVersion: ReadTrivyString(Vulnerability, "InstalledVersion", Description),
+        vulnerabilityId: ReadTrivyString(Vulnerability, 'VulnerabilityID', Description),
+        packageName: ReadTrivyString(Vulnerability, 'PkgName', Description),
+        installedVersion: ReadTrivyString(Vulnerability, 'InstalledVersion', Description),
         severity: ReadTrivyString(
           Vulnerability,
-          "Severity",
+          'Severity',
           Description,
-        ) as VulnerabilityFinding["severity"],
-      });
+        ) as VulnerabilityFinding['severity'],
+      })
     }
   }
   if (PackageCount === 0) {
-    throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`);
+    throw new Error(`${Role} Trivy report must contain a scanned runtime package inventory`)
   }
-  return Findings;
+  return Findings
   /* oxlint-enable typescript/no-unsafe-type-assertion */
 }
 
@@ -348,52 +348,52 @@ function ReadTrivyString(
   Key: string,
   Description: string,
 ): string {
-  const Field = Value[Key];
-  if (typeof Field !== "string" || Field.length === 0) {
-    throw new Error(`${Description} ${Key} must be a non-empty string`);
+  const Field = Value[Key]
+  if (typeof Field !== 'string' || Field.length === 0) {
+    throw new Error(`${Description} ${Key} must be a non-empty string`)
   }
-  return Field;
+  return Field
 }
 
 function AssertRecord(Value: unknown, Description: string): Record<string, unknown> {
-  if (typeof Value !== "object" || Value === null || Array.isArray(Value)) {
-    throw new Error(`${Description} must be an object`);
+  if (typeof Value !== 'object' || Value === null || Array.isArray(Value)) {
+    throw new Error(`${Description} must be an object`)
   }
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The preceding object/array guard establishes the record shape.
-  return Value as Record<string, unknown>;
+  return Value as Record<string, unknown>
 }
 
 function ReadOption(Options: ReadonlyMap<string, string>, Name: string): string {
-  const Value = Options.get(Name);
+  const Value = Options.get(Name)
   if (Value === undefined || Value.length === 0) {
-    throw new Error(`--${Name} is required`);
+    throw new Error(`--${Name} is required`)
   }
-  return Value;
+  return Value
 }
 
 function ReadChannel(Options: ReadonlyMap<string, string>): ImagePlanChannel {
-  const Value = ReadOption(Options, "channel");
-  if (Value !== "build" && Value !== "release") {
-    throw new Error("--channel must be build or release");
+  const Value = ReadOption(Options, 'channel')
+  if (Value !== 'build' && Value !== 'release') {
+    throw new Error('--channel must be build or release')
   }
-  return Value;
+  return Value
 }
 
 function ReadKind(Options: ReadonlyMap<string, string>): SourceKind {
-  const Value = ReadOption(Options, "kind");
-  if (Value !== "local" && Value !== "ci" && Value !== "release" && Value !== "rebuild") {
-    throw new Error("--kind must be local, ci, release, or rebuild");
+  const Value = ReadOption(Options, 'kind')
+  if (Value !== 'local' && Value !== 'ci' && Value !== 'release' && Value !== 'rebuild') {
+    throw new Error('--kind must be local, ci, release, or rebuild')
   }
-  return Value;
+  return Value
 }
 
 function ReadBoolean(Options: ReadonlyMap<string, string>, Name: string): boolean {
-  const Value = ReadOption(Options, Name);
-  if (Value === "true") {
-    return true;
+  const Value = ReadOption(Options, Name)
+  if (Value === 'true') {
+    return true
   }
-  if (Value === "false") {
-    return false;
+  if (Value === 'false') {
+    return false
   }
-  throw new Error(`--${Name} must be true or false`);
+  throw new Error(`--${Name} must be true or false`)
 }

@@ -10,14 +10,14 @@ import {
   DialogTitle,
   Input,
   ProgressBar,
-} from "@fluentui/react-components";
-import { BellRing, Clock3, Link2, RotateCcw, ShieldCheck, UploadCloud } from "lucide-react";
-import { useState } from "react";
-import type { ReactNode, SyntheticEvent } from "react";
+} from '@fluentui/react-components'
+import { BellRing, Clock3, Link2, RotateCcw, ShieldCheck, UploadCloud } from 'lucide-react'
+import { useState } from 'react'
+import type { ReactNode, SyntheticEvent } from 'react'
 
-import { BidiText, FileBeltIcon, StatusPill } from "@filebelt/design-system";
+import { BidiText, FileBeltIcon, StatusPill } from '@filebelt/design-system'
 
-import type { CreateShareInput } from "./client.js";
+import type { CreateShareInput } from './client.js'
 import type {
   FileEntry,
   PrivacyEvent,
@@ -25,23 +25,23 @@ import type {
   ShareRecord,
   UploadRecord,
   VersionRecord,
-} from "./model.js";
-import type { Strings } from "./strings.js";
+} from './model.js'
+import type { Strings } from './strings.js'
 
 function FormatBytes(Value: number): string {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 1,
-    notation: "compact",
-    style: "unit",
-    unit: "byte",
-    unitDisplay: "narrow",
-  }).format(Value);
+    notation: 'compact',
+    style: 'unit',
+    unit: 'byte',
+    unitDisplay: 'narrow',
+  }).format(Value)
 }
 
 function FormatDate(Value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(Value),
-  );
+  )
 }
 
 // oxlint-disable typescript/prefer-readonly-parameter-types -- React owns this nested props object and the component only observes it.
@@ -49,27 +49,27 @@ export function UploadsView({
   Strings,
   Uploads,
 }: {
-  Strings: Strings;
-  Uploads: readonly UploadRecord[];
+  Strings: Strings
+  Uploads: readonly UploadRecord[]
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types
   return (
-    <section aria-labelledby="uploads-heading" className="fb-activity-view">
-      <header className="fb-page-heading">
+    <section aria-labelledby='uploads-heading' className='fb-activity-view'>
+      <header className='fb-page-heading'>
         <div>
-          <h1 id="uploads-heading">{Strings.uploads}</h1>
-          <p className="fb-muted">{Strings.uploadPrivacy}</p>
+          <h1 id='uploads-heading'>{Strings.uploads}</h1>
+          <p className='fb-muted'>{Strings.uploadPrivacy}</p>
         </div>
       </header>
-      <div className="fb-card-list" role="list">
+      <div className='fb-card-list' role='list'>
         {Uploads.map((Upload) => (
-          <article className="fb-activity-card" key={Upload.Id} role="listitem">
+          <article className='fb-activity-card' key={Upload.Id} role='listitem'>
             <FileBeltIcon Icon={UploadCloud} />
-            <div className="fb-grow">
+            <div className='fb-grow'>
               <strong>
                 <BidiText>{Upload.Name}</BidiText>
               </strong>
-              <span className="fb-muted">{FormatBytes(Upload.Size)}</span>
+              <span className='fb-muted'>{FormatBytes(Upload.Size)}</span>
               <ProgressBar
                 aria-label={`${Upload.Name} ${Strings.progress}`}
                 max={1}
@@ -78,20 +78,20 @@ export function UploadsView({
             </div>
             <StatusPill
               Kind={
-                Upload.State === "complete"
-                  ? "success"
-                  : Upload.State === "failed"
-                    ? "danger"
-                    : "informative"
+                Upload.State === 'complete'
+                  ? 'success'
+                  : Upload.State === 'failed'
+                    ? 'danger'
+                    : 'informative'
               }
             >
-              {Upload.State === "complete" ? Strings.ready : Strings.uploading}
+              {Upload.State === 'complete' ? Strings.ready : Strings.uploading}
             </StatusPill>
           </article>
         ))}
       </div>
     </section>
-  );
+  )
 }
 
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
@@ -101,43 +101,43 @@ export function VersionsView({
   Strings,
   Versions,
 }: {
-  File: FileEntry | undefined;
-  onRestore(VersionId: string): Promise<void>;
-  Strings: Strings;
-  Versions: readonly VersionRecord[];
+  File: FileEntry | undefined
+  onRestore(VersionId: string): Promise<void>
+  Strings: Strings
+  Versions: readonly VersionRecord[]
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
-  const Matching = File === undefined ? [] : Versions.filter(({ FileId }) => FileId === File.Id);
+  const Matching = File === undefined ? [] : Versions.filter(({ FileId }) => FileId === File.Id)
   return (
-    <section aria-labelledby="versions-heading" className="fb-activity-view">
-      <header className="fb-page-heading">
+    <section aria-labelledby='versions-heading' className='fb-activity-view'>
+      <header className='fb-page-heading'>
         <div>
-          <h1 id="versions-heading">{Strings.versions}</h1>
-          <p className="fb-muted">
+          <h1 id='versions-heading'>{Strings.versions}</h1>
+          <p className='fb-muted'>
             {File === undefined ? Strings.noVersions : <BidiText>{File.Name}</BidiText>}
           </p>
         </div>
       </header>
-      <div className="fb-card-list" role="list">
+      <div className='fb-card-list' role='list'>
         {Matching.map((Version, Index) => (
-          <article className="fb-activity-card" key={Version.Id} role="listitem">
+          <article className='fb-activity-card' key={Version.Id} role='listitem'>
             <FileBeltIcon Icon={Clock3} />
-            <div className="fb-grow">
+            <div className='fb-grow'>
               <strong>
                 {Strings.version} {Version.Version}
               </strong>
-              <span className="fb-muted">
-                {Strings.versionCreator}: <BidiText>{Version.Author}</BidiText> ·{" "}
-                <time dateTime={Version.CreatedAt}>{FormatDate(Version.CreatedAt)}</time> ·{" "}
+              <span className='fb-muted'>
+                {Strings.versionCreator}: <BidiText>{Version.Author}</BidiText> ·{' '}
+                <time dateTime={Version.CreatedAt}>{FormatDate(Version.CreatedAt)}</time> ·{' '}
                 {FormatBytes(Version.Size)}
               </span>
             </div>
             {Index === 0 ? (
-              <StatusPill Kind="brand">{Strings.current}</StatusPill>
+              <StatusPill Kind='brand'>{Strings.current}</StatusPill>
             ) : (
               <Button
-                appearance="secondary"
-                icon={<RotateCcw aria-hidden="true" size={18} strokeWidth={1.75} />}
+                appearance='secondary'
+                icon={<RotateCcw aria-hidden='true' size={18} strokeWidth={1.75} />}
                 onClick={() => void OnRestore(Version.Id)}
               >
                 {Strings.restoreVersion}
@@ -147,7 +147,7 @@ export function VersionsView({
         ))}
       </div>
     </section>
-  );
+  )
 }
 
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
@@ -158,50 +158,50 @@ export function SharesView({
   Shares,
   Strings,
 }: {
-  File: FileEntry | undefined;
-  onCreate(Input: CreateShareInput): Promise<void>;
-  onRevoke(ShareId: string): Promise<void>;
-  Shares: readonly ShareRecord[];
-  Strings: Strings;
+  File: FileEntry | undefined
+  onCreate(Input: CreateShareInput): Promise<void>
+  onRevoke(ShareId: string): Promise<void>
+  Shares: readonly ShareRecord[]
+  Strings: Strings
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
-  const [Permission, SetPermission] = useState<ShareRecord["Permission"]>("Viewer");
-  const [Target, SetTarget] = useState("");
-  const [Busy, SetBusy] = useState(false);
-  const [PendingRevocation, SetPendingRevocation] = useState<ShareRecord | null>(null);
+  const [Permission, SetPermission] = useState<ShareRecord['Permission']>('Viewer')
+  const [Target, SetTarget] = useState('')
+  const [Busy, SetBusy] = useState(false)
+  const [PendingRevocation, SetPendingRevocation] = useState<ShareRecord | null>(null)
   const Matching =
-    File === undefined ? Shares : Shares.filter(({ ResourceId }) => ResourceId === File.Id);
+    File === undefined ? Shares : Shares.filter(({ ResourceId }) => ResourceId === File.Id)
 
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and supplies the synthetic submit event contract.
   const Submit = async (Event: Readonly<SyntheticEvent<HTMLFormElement>>): Promise<void> => {
-    Event.preventDefault();
-    if (File === undefined || Target.trim().length === 0) return;
-    SetBusy(true);
+    Event.preventDefault()
+    if (File === undefined || Target.trim().length === 0) return
+    SetBusy(true)
     try {
-      await OnCreate({ FileId: File.Id, Kind: "direct", Permission, Target: Target.trim() });
-      SetTarget("");
+      await OnCreate({ FileId: File.Id, Kind: 'direct', Permission, Target: Target.trim() })
+      SetTarget('')
     } finally {
-      SetBusy(false);
+      SetBusy(false)
     }
-  };
+  }
 
   return (
-    <section aria-labelledby="shares-heading" className="fb-activity-view">
-      <header className="fb-page-heading">
+    <section aria-labelledby='shares-heading' className='fb-activity-view'>
+      <header className='fb-page-heading'>
         <div>
-          <h1 id="shares-heading">{Strings.shares}</h1>
-          <p className="fb-muted">
+          <h1 id='shares-heading'>{Strings.shares}</h1>
+          <p className='fb-muted'>
             {File === undefined ? Strings.noSelection : <BidiText>{File.Name}</BidiText>}
           </p>
         </div>
       </header>
       {File !== undefined ? (
-        <form className="fb-share-form" onSubmit={(Event) => void Submit(Event)}>
+        <form className='fb-share-form' onSubmit={(Event) => void Submit(Event)}>
           <label>
             {Strings.shareTarget}
             <Input
               onChange={(Ignored, Data) => {
-                SetTarget(Data.value);
+                SetTarget(Data.value)
               }}
               value={Target}
             />
@@ -210,41 +210,41 @@ export function SharesView({
             {Strings.sharePermission}
             <select
               onChange={(Event) => {
-                const Value = Event.currentTarget.value;
-                if (Value === "Contributor" || Value === "Manager" || Value === "Viewer")
-                  SetPermission(Value);
+                const Value = Event.currentTarget.value
+                if (Value === 'Contributor' || Value === 'Manager' || Value === 'Viewer')
+                  SetPermission(Value)
               }}
               value={Permission}
             >
-              <option value="Viewer">{Strings.viewer}</option>
-              <option value="Contributor">{Strings.contributor}</option>
-              <option value="Manager">{Strings.manager}</option>
+              <option value='Viewer'>{Strings.viewer}</option>
+              <option value='Contributor'>{Strings.contributor}</option>
+              <option value='Manager'>{Strings.manager}</option>
             </select>
           </label>
-          <Button appearance="primary" disabled={Busy || Target.trim().length === 0} type="submit">
+          <Button appearance='primary' disabled={Busy || Target.trim().length === 0} type='submit'>
             {Strings.saveShare}
           </Button>
         </form>
       ) : null}
-      <div className="fb-card-list" role="list">
+      <div className='fb-card-list' role='list'>
         {Matching.map((Share) => (
-          <article className="fb-activity-card" key={Share.Id} role="listitem">
+          <article className='fb-activity-card' key={Share.Id} role='listitem'>
             <FileBeltIcon Icon={Link2} />
-            <div className="fb-grow">
+            <div className='fb-grow'>
               <strong>
                 <BidiText>{Share.ResourceName}</BidiText>
               </strong>
-              <span className="fb-muted">
+              <span className='fb-muted'>
                 <BidiText>{Share.Target}</BidiText> · {Share.Permission}
-                {Share.ExpiresAt === undefined ? "" : ` · expires ${FormatDate(Share.ExpiresAt)}`}
+                {Share.ExpiresAt === undefined ? '' : ` · expires ${FormatDate(Share.ExpiresAt)}`}
               </span>
             </div>
             <Button
-              appearance="secondary"
-              aria-haspopup="dialog"
+              appearance='secondary'
+              aria-haspopup='dialog'
               disabled={Busy}
               onClick={() => {
-                SetPendingRevocation(Share);
+                SetPendingRevocation(Share)
               }}
             >
               {Strings.revoke}
@@ -257,24 +257,24 @@ export function SharesView({
         Busy={Busy}
         Description={
           PendingRevocation === null
-            ? ""
+            ? ''
             : Strings.shareRevokeConfirmation(
                 PendingRevocation.ResourceName,
                 PendingRevocation.Target,
               )
         }
         OnCancel={() => {
-          SetPendingRevocation(null);
+          SetPendingRevocation(null)
         }}
         OnConfirm={async () => {
-          if (PendingRevocation === null) return;
-          const Id = PendingRevocation.Id;
-          SetPendingRevocation(null);
-          SetBusy(true);
+          if (PendingRevocation === null) return
+          const Id = PendingRevocation.Id
+          SetPendingRevocation(null)
+          SetBusy(true)
           try {
-            await OnRevoke(Id);
+            await OnRevoke(Id)
           } finally {
-            SetBusy(false);
+            SetBusy(false)
           }
         }}
         Open={PendingRevocation !== null}
@@ -282,7 +282,7 @@ export function SharesView({
         Title={Strings.shareRevokeHeading}
       />
     </section>
-  );
+  )
 }
 
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
@@ -291,43 +291,43 @@ export function SessionsView({
   Sessions,
   Strings,
 }: {
-  onRevoke(Id: string): Promise<void>;
-  Sessions: readonly SessionRecord[];
-  Strings: Strings;
+  onRevoke(Id: string): Promise<void>
+  Sessions: readonly SessionRecord[]
+  Strings: Strings
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
-  const [PendingRevocation, SetPendingRevocation] = useState<SessionRecord | null>(null);
-  const [Busy, SetBusy] = useState(false);
+  const [PendingRevocation, SetPendingRevocation] = useState<SessionRecord | null>(null)
+  const [Busy, SetBusy] = useState(false)
   return (
-    <section aria-labelledby="sessions-heading" className="fb-activity-view">
-      <header className="fb-page-heading">
+    <section aria-labelledby='sessions-heading' className='fb-activity-view'>
+      <header className='fb-page-heading'>
         <div>
-          <h1 id="sessions-heading">{Strings.sessions}</h1>
-          <p className="fb-muted">{Strings.sessionsDescription}</p>
+          <h1 id='sessions-heading'>{Strings.sessions}</h1>
+          <p className='fb-muted'>{Strings.sessionsDescription}</p>
         </div>
       </header>
-      <div className="fb-card-list" role="list">
+      <div className='fb-card-list' role='list'>
         {Sessions.map((Session) => (
-          <article className="fb-activity-card" key={Session.Id} role="listitem">
+          <article className='fb-activity-card' key={Session.Id} role='listitem'>
             <FileBeltIcon Icon={ShieldCheck} />
-            <div className="fb-grow">
+            <div className='fb-grow'>
               <strong>
                 <BidiText>{Session.Device}</BidiText>
               </strong>
-              <span className="fb-muted">
-                <BidiText>{Session.Location}</BidiText> ·{" "}
+              <span className='fb-muted'>
+                <BidiText>{Session.Location}</BidiText> ·{' '}
                 <time dateTime={Session.LastActiveAt}>{FormatDate(Session.LastActiveAt)}</time>
               </span>
             </div>
             {Session.Current ? (
-              <StatusPill Kind="success">{Strings.activeSession}</StatusPill>
+              <StatusPill Kind='success'>{Strings.activeSession}</StatusPill>
             ) : (
               <Button
-                appearance="secondary"
-                aria-haspopup="dialog"
+                appearance='secondary'
+                aria-haspopup='dialog'
                 disabled={Busy}
                 onClick={() => {
-                  SetPendingRevocation(Session);
+                  SetPendingRevocation(Session)
                 }}
               >
                 {Strings.revoke}
@@ -340,21 +340,21 @@ export function SessionsView({
         Busy={Busy}
         Description={
           PendingRevocation === null
-            ? ""
+            ? ''
             : Strings.sessionRevokeConfirmation(PendingRevocation.Device)
         }
         OnCancel={() => {
-          SetPendingRevocation(null);
+          SetPendingRevocation(null)
         }}
         OnConfirm={async () => {
-          if (PendingRevocation === null) return;
-          const Id = PendingRevocation.Id;
-          SetPendingRevocation(null);
-          SetBusy(true);
+          if (PendingRevocation === null) return
+          const Id = PendingRevocation.Id
+          SetPendingRevocation(null)
+          SetBusy(true)
           try {
-            await OnRevoke(Id);
+            await OnRevoke(Id)
           } finally {
-            SetBusy(false);
+            SetBusy(false)
           }
         }}
         Open={PendingRevocation !== null}
@@ -362,7 +362,7 @@ export function SessionsView({
         Title={Strings.sessionRevokeHeading}
       />
     </section>
-  );
+  )
 }
 
 function RevocationDialog({
@@ -374,19 +374,19 @@ function RevocationDialog({
   Strings,
   Title,
 }: Readonly<{
-  Busy: boolean;
-  Description: string;
-  OnCancel(): void;
-  OnConfirm(): Promise<void>;
-  Open: boolean;
-  Strings: Strings;
-  Title: string;
+  Busy: boolean
+  Description: string
+  OnCancel(): void
+  OnConfirm(): Promise<void>
+  Open: boolean
+  Strings: Strings
+  Title: string
 }>): ReactNode {
   return (
     <Dialog
-      modalType="alert"
+      modalType='alert'
       onOpenChange={(Ignored, Data) => {
-        if (!Data.open && !Busy) OnCancel();
+        if (!Data.open && !Busy) OnCancel()
       }}
       open={Open}
     >
@@ -395,17 +395,17 @@ function RevocationDialog({
           <DialogTitle>{Title}</DialogTitle>
           <DialogContent>{Description}</DialogContent>
           <DialogActions>
-            <Button appearance="secondary" disabled={Busy} onClick={OnCancel}>
+            <Button appearance='secondary' disabled={Busy} onClick={OnCancel}>
               {Strings.cancel}
             </Button>
-            <Button appearance="primary" disabled={Busy} onClick={() => void OnConfirm()}>
+            <Button appearance='primary' disabled={Busy} onClick={() => void OnConfirm()}>
               {Strings.revoke}
             </Button>
           </DialogActions>
         </DialogBody>
       </DialogSurface>
     </Dialog>
-  );
+  )
 }
 
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
@@ -414,46 +414,46 @@ export function PrivacyView({
   onMarkRead: OnMarkRead,
   Strings,
 }: {
-  Events: readonly PrivacyEvent[];
-  onMarkRead(): Promise<void>;
-  Strings: Strings;
+  Events: readonly PrivacyEvent[]
+  onMarkRead(): Promise<void>
+  Strings: Strings
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method
   return (
-    <section aria-labelledby="privacy-heading" className="fb-activity-view">
-      <header className="fb-page-heading">
+    <section aria-labelledby='privacy-heading' className='fb-activity-view'>
+      <header className='fb-page-heading'>
         <div>
-          <h1 id="privacy-heading">{Strings.privacy}</h1>
-          <p className="fb-muted">{Strings.privacyDescription}</p>
+          <h1 id='privacy-heading'>{Strings.privacy}</h1>
+          <p className='fb-muted'>{Strings.privacyDescription}</p>
         </div>
         <Button
-          appearance="secondary"
+          appearance='secondary'
           disabled={!Events.some(({ Unread }) => Unread)}
           onClick={() => void OnMarkRead()}
         >
           {Strings.markRead}
         </Button>
       </header>
-      <div className="fb-card-list" role="list">
+      <div className='fb-card-list' role='list'>
         {Events.map((Event) => (
           <article
-            className={Event.Unread ? "fb-activity-card is-unread" : "fb-activity-card"}
+            className={Event.Unread ? 'fb-activity-card is-unread' : 'fb-activity-card'}
             key={Event.Id}
-            role="listitem"
+            role='listitem'
           >
             <FileBeltIcon Icon={BellRing} />
-            <div className="fb-grow">
+            <div className='fb-grow'>
               <strong>
                 <BidiText>{Event.Action}</BidiText>
               </strong>
-              <span className="fb-muted">
-                <BidiText>{Event.Actor}</BidiText> ·{" "}
+              <span className='fb-muted'>
+                <BidiText>{Event.Actor}</BidiText> ·{' '}
                 <time dateTime={Event.CreatedAt}>{FormatDate(Event.CreatedAt)}</time>
               </span>
             </div>
             {Event.Unread ? (
-              <span className="fb-unread-dot">
-                <span className="fb-sr-only">Unread</span>
+              <span className='fb-unread-dot'>
+                <span className='fb-sr-only'>Unread</span>
               </span>
             ) : null}
           </article>
@@ -461,5 +461,5 @@ export function PrivacyView({
         {Events.length === 0 ? <p>{Strings.noPrivacyEvents}</p> : null}
       </div>
     </section>
-  );
+  )
 }

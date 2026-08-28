@@ -8,9 +8,9 @@
     "ui/web/source/generated/openapi.ts"
   ],
   "endOfLine": "lf",
-  "jsxSingleQuote": false,
-  "semi": true,
-  "singleQuote": false,
+  "jsxSingleQuote": true,
+  "semi": false,
+  "singleQuote": true,
   "tabWidth": 2,
   "useTabs": false
 }

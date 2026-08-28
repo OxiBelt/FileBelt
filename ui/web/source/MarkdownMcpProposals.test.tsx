@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
 import {
   IsPreparedRequestStale,
   MarkdownMcpProposals,
   type PreparedRequestIdentity,
-} from "./MarkdownMcpProposals.js";
+} from './MarkdownMcpProposals.js'
 
 const Prepared: PreparedRequestIdentity = {
-  BaseVersionId: "00000000-0000-4000-8000-000000000002",
-  Fingerprint: "sha256:capability",
-  NodeId: "00000000-0000-4000-8000-000000000001",
-  RegistrationId: "00000000-0000-4000-8000-000000000003",
+  BaseVersionId: '00000000-0000-4000-8000-000000000002',
+  Fingerprint: 'sha256:capability',
+  NodeId: '00000000-0000-4000-8000-000000000001',
+  RegistrationId: '00000000-0000-4000-8000-000000000003',
   SelectionEnd: 4,
   SelectionStart: 0,
-  Source: "# draft",
-};
+  Source: '# draft',
+}
 
-describe("Markdown MCP proposals", () => {
-  it("renders proposal-only controls without a save action", () => {
+describe('Markdown MCP proposals', () => {
+  it('renders proposal-only controls without a save action', () => {
     const Client = {
       // oxlint-disable typescript/require-await -- This object is a synchronous fake for an asynchronous MCP client contract.
       approveAndInvoke: async () => undefined,
       createInvocationIntent: async () => {
-        throw new Error("not reached");
+        throw new Error('not reached')
       },
       getCapabilityReview: async () => null,
       getSnapshot: async () => ({
@@ -35,35 +35,35 @@ describe("Markdown MCP proposals", () => {
         Templates: [],
       }),
       // oxlint-enable typescript/require-await
-    };
+    }
     const Markup = renderToStaticMarkup(
       <MarkdownMcpProposals
-        BaseVersionId="00000000-0000-4000-8000-000000000002"
+        BaseVersionId='00000000-0000-4000-8000-000000000002'
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This deliberately partial fake exercises only the server-rendered proposal shell.
         Client={Client as never}
-        NodeId="00000000-0000-4000-8000-000000000001"
+        NodeId='00000000-0000-4000-8000-000000000001'
         OnApply={() => true}
         Selection={{ End: 4, Start: 0 }}
-        Source="# draft"
+        Source='# draft'
       />,
-    );
-    expect(Markup).toContain("MCP proposal");
-    expect(Markup).toContain("Request proposal");
-    expect(Markup).not.toContain("Save");
-  });
+    )
+    expect(Markup).toContain('MCP proposal')
+    expect(Markup).toContain('Request proposal')
+    expect(Markup).not.toContain('Save')
+  })
 
-  it("invalidates confirmation when any reviewed input changes", () => {
-    expect(IsPreparedRequestStale(Prepared, Prepared)).toBe(false);
-    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Source: "# changed" })).toBe(true);
-    expect(IsPreparedRequestStale(Prepared, { ...Prepared, SelectionEnd: 3 })).toBe(true);
+  it('invalidates confirmation when any reviewed input changes', () => {
+    expect(IsPreparedRequestStale(Prepared, Prepared)).toBe(false)
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Source: '# changed' })).toBe(true)
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, SelectionEnd: 3 })).toBe(true)
     expect(
       IsPreparedRequestStale(Prepared, {
         ...Prepared,
-        BaseVersionId: "00000000-0000-4000-8000-000000000004",
+        BaseVersionId: '00000000-0000-4000-8000-000000000004',
       }),
-    ).toBe(true);
-    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Fingerprint: "sha256:other" })).toBe(
+    ).toBe(true)
+    expect(IsPreparedRequestStale(Prepared, { ...Prepared, Fingerprint: 'sha256:other' })).toBe(
       true,
-    );
-  });
-});
+    )
+  })
+})

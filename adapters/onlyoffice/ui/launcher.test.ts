@@ -15,8 +15,8 @@ void test('launcher view contract provides accessible state and disabled-launch 
   const Source = await import('node:fs/promises').then(async (Fs) =>
     Fs.readFile(new URL('./launcher.ts', import.meta.url), 'utf8'),
   )
-  assert.match(Source, /setState\(State: LauncherState, Message: string\)/)
-  assert.match(Source, /setLaunchEnabled\(Enabled: boolean\)/)
+  assert.match(Source, /SetState\(State: LauncherState, Message: string\)/)
+  assert.match(Source, /SetLaunchEnabled\(Enabled: boolean\)/)
   assert.match(Source, /DocEditor\('onlyoffice-editor', Response.editorConfig\)/)
 })
 

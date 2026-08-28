@@ -11,12 +11,12 @@ import type { SelectionAction, SelectionState } from './selection.js'
 import type { Strings } from './strings.js'
 
 export interface FileTableProps {
-  dispatchSelection(Action: SelectionAction): void
+  DispatchSelection(Action: SelectionAction): void
   Entries: readonly FileEntry[]
-  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React and DOM own these callback values; the table only forwards them.
-  onOpenActions(Entry: FileEntry, Anchor: HTMLElement): void
-  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- File entries are parent-owned values observed by the callback.
-  onOpenEntry(Entry: FileEntry): void
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The table only forwards this parent-owned callback value.
+  OnOpenActions(Entry: FileEntry, Anchor: HTMLElement): void
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The table observes this parent-owned callback value.
+  OnOpenEntry(Entry: FileEntry): void
   Selection: SelectionState
   Strings: Strings
 }
@@ -40,10 +40,10 @@ function FormatDate(Value: string): string {
 
 // oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React owns nested props and callback props are receiver-free parent functions.
 export function FileTable({
-  dispatchSelection: DispatchSelection,
+  DispatchSelection,
   Entries,
-  onOpenActions: OnOpenActions,
-  onOpenEntry: OnOpenEntry,
+  OnOpenActions,
+  OnOpenEntry,
   Selection,
   Strings,
 }: FileTableProps): ReactNode {

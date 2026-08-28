@@ -95,7 +95,7 @@ export function MarkdownMcpProposals({
 
   useEffect(() => {
     let Active = true
-    void Client.getSnapshot(false)
+    void Client.GetSnapshot(false)
       .then((Snapshot) => {
         if (!Active) return
         SetRegistrations(Snapshot.Registrations)
@@ -118,7 +118,7 @@ export function MarkdownMcpProposals({
       return undefined
     }
     let Active = true
-    void Client.getCapabilityReview(RegistrationId)
+    void Client.GetCapabilityReview(RegistrationId)
       .then((Value) => {
         if (Active) SetReview(Value)
       })
@@ -141,7 +141,7 @@ export function MarkdownMcpProposals({
     SetError(null)
     SetProposal(null)
     try {
-      const Invocation = await Client.createInvocationIntent({
+      const Invocation = await Client.CreateInvocationIntent({
         ApplicationId: 'filebelt-web-markdown-proposal',
         Arguments: { selection: { end: Selection.End, start: Selection.Start } },
         Capability: {
@@ -181,7 +181,7 @@ export function MarkdownMcpProposals({
       return
     }
     try {
-      await Client.approveAndInvoke(
+      await Client.ApproveAndInvoke(
         Prepared.Invocation,
         // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The MCP client owns this discriminated event union and the callback only observes it.
         (Event: McpInvocationEventView) => {

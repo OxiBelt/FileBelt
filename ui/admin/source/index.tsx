@@ -64,9 +64,9 @@ export interface AdminDriveView {
 export interface AdminPanelProps {
   Drives: readonly AdminDriveView[]
   Groups: readonly AdminGroupView[]
-  onCreateGroup(Name: string): Promise<void>
-  onCreateSharedDrive(Name: string): Promise<void>
-  onToggleUserSuspension(UserId: string): Promise<void>
+  OnCreateGroup(Name: string): Promise<void>
+  OnCreateSharedDrive(Name: string): Promise<void>
+  OnToggleUserSuspension(UserId: string): Promise<void>
   NfsClient?: NfsAdminClient
   Users: readonly AdminUserView[]
 }
@@ -96,11 +96,11 @@ function Bidi({
 // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- React owns and may clone component props.
 function CreationForm({
   Label,
-  // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
-  onCreate: OnCreate,
+  // oxlint-disable-next-line typescript/unbound-method -- The component callback is a receiver-free parent function.
+  OnCreate,
 }: {
   Label: string
-  onCreate(Value: string): Promise<void>
+  OnCreate(Value: string): Promise<void>
 }): ReactNode {
   const [Name, SetName] = useState('')
   const [Busy, SetBusy] = useState(false)
@@ -147,11 +147,11 @@ export default function AdminPanel({
   Drives,
   Groups,
   // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
-  onCreateGroup: OnCreateGroup,
+  OnCreateGroup,
   // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
-  onCreateSharedDrive: OnCreateSharedDrive,
+  OnCreateSharedDrive,
   // oxlint-disable-next-line typescript/unbound-method -- React callback props are invoked as functions and deliberately have no receiver.
-  onToggleUserSuspension: OnToggleUserSuspension,
+  OnToggleUserSuspension,
   NfsClient,
   Users,
 }: AdminPanelProps): ReactNode {
@@ -240,7 +240,7 @@ export default function AdminPanel({
 
       {Tab === 'groups' ? (
         <div>
-          <CreationForm Label={strings.createGroup} onCreate={OnCreateGroup} />
+          <CreationForm Label={strings.createGroup} OnCreate={OnCreateGroup} />
           <div className='fb-admin-cards' role='list'>
             {Groups.map((Group) => (
               <article className='fb-admin-card' key={Group.Id} role='listitem'>
@@ -267,7 +267,7 @@ export default function AdminPanel({
 
       {Tab === 'drives' ? (
         <div>
-          <CreationForm Label={strings.driveName} onCreate={OnCreateSharedDrive} />
+          <CreationForm Label={strings.driveName} OnCreate={OnCreateSharedDrive} />
           <div className='fb-admin-cards' role='list'>
             {Drives.map((Drive) => (
               <article className='fb-admin-card' key={Drive.Id} role='listitem'>

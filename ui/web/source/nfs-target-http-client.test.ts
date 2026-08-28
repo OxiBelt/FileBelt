@@ -108,10 +108,10 @@ describe('HttpNfsTargetClient', () => {
     const Server = new ContractServer()
     const Client = new HttpNfsTargetClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.getOverview()).resolves.toEqual(Overview)
-    await Client.approveProposal(ProposalId, 1)
-    await Client.declineProposal(ProposalId, 1)
-    await Client.revokeMapping(CredentialId, 2)
+    await expect(Client.GetOverview()).resolves.toEqual(Overview)
+    await Client.ApproveProposal(ProposalId, 1)
+    await Client.DeclineProposal(ProposalId, 1)
+    await Client.RevokeMapping(CredentialId, 2)
 
     const Mutations = Server.Requests.filter(({ method: Method }) => Method !== 'GET')
     expect(Mutations).toHaveLength(3)
@@ -131,7 +131,7 @@ describe('HttpNfsTargetClient', () => {
     Server.ReauthenticationRequired = true
     const Client = new HttpNfsTargetClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.approveProposal(ProposalId, 1)).rejects.toBeInstanceOf(
+    await expect(Client.ApproveProposal(ProposalId, 1)).rejects.toBeInstanceOf(
       MountReauthenticationRequiredError,
     )
   })

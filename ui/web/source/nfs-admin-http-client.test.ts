@@ -233,7 +233,7 @@ describe('HttpNfsAdminClient', () => {
     const Server = new ContractServer()
     const Client = new HttpNfsAdminClient(Server.fetch, 'https://filebelt.example.test')
 
-    const Result = await Client.getOverview()
+    const Result = await Client.GetOverview()
 
     expect(Result.Feature.ManifestApplied).toBe(false)
     expect(Result.Exports[0]).toMatchObject({
@@ -274,7 +274,7 @@ describe('HttpNfsAdminClient', () => {
     }
     const Client = new HttpNfsAdminClient(Server.fetch, 'https://filebelt.example.test')
 
-    const Result = await Client.getOverview()
+    const Result = await Client.GetOverview()
 
     expect(Result.Mappings[0]?.AllowedDriveIds).toBeUndefined()
   })
@@ -283,7 +283,7 @@ describe('HttpNfsAdminClient', () => {
     const Server = new ContractServer()
     const Client = new HttpNfsAdminClient(Server.fetch, 'https://filebelt.example.test')
 
-    await Client.transitionExport(DriveId, 2, 'draining', 'acme')
+    await Client.TransitionExport(DriveId, 2, 'draining', 'acme')
 
     const RequestValue = Server.Requests.at(-1)
     expect(RequestValue?.headers.get('X-FileBelt-Csrf')).toBe('csrf-memory-only')
@@ -300,9 +300,9 @@ describe('HttpNfsAdminClient', () => {
     const Server = new ContractServer()
     const Client = new HttpNfsAdminClient(Server.fetch, 'https://filebelt.example.test')
 
-    await Client.transitionFeature(3, 'draining', 'Acme')
-    await Client.registerExport({ DriveId, ExportId: 7 }, 'Acme')
-    await Client.registerPosixGroup(
+    await Client.TransitionFeature(3, 'draining', 'Acme')
+    await Client.RegisterExport({ DriveId, ExportId: 7 }, 'Acme')
+    await Client.RegisterPosixGroup(
       {
         GroupId: '00000000-0000-4000-8000-000000000117',
         PosixName: 'engineering.platform',
@@ -310,7 +310,7 @@ describe('HttpNfsAdminClient', () => {
       },
       'Acme',
     )
-    await Client.proposeMapping(
+    await Client.ProposeMapping(
       {
         AllowedDriveIds: [DriveId],
         KerberosPrincipal: 'alice@EXAMPLE.TEST',
@@ -320,10 +320,10 @@ describe('HttpNfsAdminClient', () => {
       },
       'Acme',
     )
-    await Client.cancelProposal(ProposalId, 1, 'Acme')
-    await Client.attenuateMappingScope(CredentialId, [DriveId], 2, 'Acme')
-    await Client.revokeMapping(CredentialId, 2, 'Acme')
-    await Client.copyConflict(
+    await Client.CancelProposal(ProposalId, 1, 'Acme')
+    await Client.AttenuateMappingScope(CredentialId, [DriveId], 2, 'Acme')
+    await Client.RevokeMapping(CredentialId, 2, 'Acme')
+    await Client.CopyConflict(
       ConflictId,
       {
         DisplayName: 'recovered.txt',
@@ -333,7 +333,7 @@ describe('HttpNfsAdminClient', () => {
       },
       'Acme',
     )
-    await Client.discardConflict(ConflictId, 'Acme')
+    await Client.DiscardConflict(ConflictId, 'Acme')
 
     const Mutations = Server.Requests.filter(
       (RequestValue) => !['GET'].includes(RequestValue.method),
@@ -372,7 +372,7 @@ describe('HttpNfsAdminClient', () => {
     Server.ReauthenticationRequired = true
     const Client = new HttpNfsAdminClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.getOverview()).rejects.toBeInstanceOf(NfsReauthenticationRequiredError)
+    await expect(Client.GetOverview()).rejects.toBeInstanceOf(NfsReauthenticationRequiredError)
   })
 })
 

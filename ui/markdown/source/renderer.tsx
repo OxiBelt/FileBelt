@@ -262,13 +262,18 @@ function GeneratedMarkup({
 }
 
 interface TrustedTypesFactoryLike {
+  // oxlint-disable-next-line filebelt/pascal-case -- Trusted Types defines this exact factory method.
   createPolicy(
     Name: string,
+    // oxlint-disable-next-line filebelt/pascal-case -- Trusted Types defines this exact policy callback.
     Rules: { createHTML(Value: string): string },
+    // oxlint-disable-next-line filebelt/pascal-case -- Trusted Types defines this exact policy method.
   ): { createHTML(Value: string): unknown }
 }
 
-let GeneratedMarkupPolicy: { createHTML(Value: string): unknown } | undefined
+let GeneratedMarkupPolicy:
+  // oxlint-disable-next-line filebelt/pascal-case -- Trusted Types defines this exact policy method.
+  { createHTML(Value: string): unknown } | undefined
 
 function SetTrustedMarkup(
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This is the reviewed DOM mutation sink for sanitized markup.

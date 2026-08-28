@@ -92,8 +92,8 @@ export interface PublicShareGrant {
 }
 
 export interface PublicShareClient {
-  downloadPublic(ExchangeId: string): Promise<Blob>
-  exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant>
+  DownloadPublic(ExchangeId: string): Promise<Blob>
+  ExchangePublicShare(FragmentToken: string): Promise<PublicShareGrant>
 }
 
 export interface MarkdownSaveInput {
@@ -166,55 +166,55 @@ export class AuthenticationRequiredError extends Error {
  * this interface without exposing transport details to React components.
  */
 export interface FileBeltClient {
-  beginMarkdownCollaboration(
+  BeginMarkdownCollaboration(
     EntryId: string,
     ClientId: string,
   ): Promise<MarkdownCollaborationGrant | null>
-  createGroup(Name: string): Promise<void>
-  createShare(Input: Readonly<CreateShareInput>): Promise<void>
-  createSharedDrive(Name: string): Promise<void>
-  download(EntryId: string): Promise<Blob>
-  importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string>
-  readMarkdown(EntryId: string, VersionId: string): Promise<Blob>
-  readMarkdownHead(EntryId: string): Promise<MarkdownHead>
-  saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string>
-  saveMarkdownCopy(
+  CreateGroup(Name: string): Promise<void>
+  CreateShare(Input: Readonly<CreateShareInput>): Promise<void>
+  CreateSharedDrive(Name: string): Promise<void>
+  Download(EntryId: string): Promise<Blob>
+  ImportMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string>
+  ReadMarkdown(EntryId: string, VersionId: string): Promise<Blob>
+  ReadMarkdownHead(EntryId: string): Promise<MarkdownHead>
+  SaveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string>
+  SaveMarkdownCopy(
     Input: Readonly<Omit<MarkdownSaveInput, 'CheckpointId' | 'ExpectedHeadVersionId'>>,
   ): Promise<string>
-  getWorkspace(
+  GetWorkspace(
     Signal?: Readonly<AbortSignal>,
     Scope?: WorkspaceLoadScope,
   ): Promise<WorkspaceSnapshot>
-  getAcl(
+  GetAcl(
     EntryId: string,
     Signal?: Readonly<AbortSignal>,
   ): Promise<{ Etag: string; Value: AclCollection }>
-  markPrivacyRead(): Promise<void>
-  restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>
-  restoreVersion(VersionId: string): Promise<void>
-  replaceAcl(
+  MarkPrivacyRead(): Promise<void>
+  RestoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>
+  RestoreVersion(VersionId: string): Promise<void>
+  ReplaceAcl(
     EntryId: string,
     ExpectedEtag: string,
     Principal: Readonly<AclPrincipalSelector>,
     Entries: readonly Readonly<AclEntryMutation>[],
   ): Promise<{ Etag: string; Value: AclCollection }>
-  revokeSession(SessionId: string): Promise<void>
-  revokeShare(ShareId: string): Promise<void>
-  suspendUser(UserId: string): Promise<void>
-  trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>
-  upload(
+  RevokeSession(SessionId: string): Promise<void>
+  RevokeShare(ShareId: string): Promise<void>
+  SuspendUser(UserId: string): Promise<void>
+  TrashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]>
+  Upload(
     Files: readonly Readonly<UploadCandidate>[],
     Target?: Readonly<UploadTarget>,
   ): Promise<void>
-  compareTextVersions(
+  CompareTextVersions(
     EntryId: string,
     BaseVersionId: string,
     TargetVersionId: string,
   ): Promise<TextComparison>
-  getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }>
-  listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage>
-  setNodeContentClass(EntryId: string, ContentClass: 'auto' | 'binary'): Promise<void>
-  updateTextPreferences(
+  GetTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }>
+  ListTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage>
+  SetNodeContentClass(EntryId: string, ContentClass: 'auto' | 'binary'): Promise<void>
+  UpdateTextPreferences(
     Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }>
@@ -494,18 +494,18 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
   #AclEntries: AclEntry[] = []
 
   // oxlint-disable typescript/require-await -- This in-memory adapter preserves the asynchronous production client contract without I/O.
-  async getTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
+  async GetTextPreferences(): Promise<{ Etag: string; Value: TextPreferences }> {
     return { Etag: this.#TextPreferencesEtag, Value: { ...this.#TextPreferences } }
   }
 
-  async getAcl(): Promise<{ Etag: string; Value: AclCollection }> {
+  async GetAcl(): Promise<{ Etag: string; Value: AclCollection }> {
     return {
       Etag: this.#AclEtag,
       Value: { Entries: structuredClone(this.#AclEntries), SupportedActions: AllAclActions },
     }
   }
 
-  async replaceAcl(
+  async ReplaceAcl(
     IgnoredEntryId: string,
     ExpectedEtag: string,
     Principal: Readonly<AclPrincipalSelector>,
@@ -536,10 +536,10 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
       })),
     ]
     this.#AclEtag = `"acl-${++this.#Sequence}"`
-    return this.getAcl()
+    return this.GetAcl()
   }
 
-  async updateTextPreferences(
+  async UpdateTextPreferences(
     Patch: Readonly<TextPreferences>,
     ExpectedEtag: string,
   ): Promise<{ Etag: string; Value: TextPreferences }> {
@@ -549,10 +549,10 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
       throw new Error('The inline limit must be at least the edit limit.')
     this.#TextPreferences = { ...Patch }
     this.#TextPreferencesEtag = `"text-preferences-${++this.#Sequence}"`
-    return this.getTextPreferences()
+    return this.GetTextPreferences()
   }
 
-  async listTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage> {
+  async ListTextVersions(EntryId: string, Cursor: string | null): Promise<VersionPage> {
     if (Cursor !== null) return { Items: [], NextCursor: null }
     return {
       Items: this.#Snapshot.Versions.filter(({ FileId }) => FileId === EntryId),
@@ -560,7 +560,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     }
   }
 
-  async compareTextVersions(
+  async CompareTextVersions(
     EntryId: string,
     BaseVersionId: string,
     TargetVersionId: string,
@@ -589,7 +589,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     }
   }
 
-  async setNodeContentClass(EntryId: string, ContentClass: 'auto' | 'binary'): Promise<void> {
+  async SetNodeContentClass(EntryId: string, ContentClass: 'auto' | 'binary'): Promise<void> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId)
     if (Entry === undefined) throw new Error('The selected file is unavailable.')
     Entry.TextEligibility =
@@ -598,7 +598,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
         : TextEligibility(Entry.Name, Entry.Size ?? 0, Entry.MediaType)
   }
 
-  async getWorkspace(
+  async GetWorkspace(
     Signal?: Readonly<AbortSignal>,
     IgnoredScope?: WorkspaceLoadScope,
   ): Promise<WorkspaceSnapshot> {
@@ -609,7 +609,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return CloneSnapshot(this.#Snapshot)
   }
 
-  async upload(
+  async Upload(
     Files: readonly Readonly<UploadCandidate>[],
     Target?: Readonly<UploadTarget>,
   ): Promise<void> {
@@ -650,20 +650,20 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     }
   }
 
-  async download(EntryId: string): Promise<Blob> {
+  async Download(EntryId: string): Promise<Blob> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId)
     if (Entry?.Kind !== 'file') throw new Error('The file is unavailable.')
     return new Blob([`FileBelt mock download for ${Entry.Name}\n`], { type: 'text/plain' })
   }
 
-  async readMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
+  async ReadMarkdown(EntryId: string, VersionId: string): Promise<Blob> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId)
     if (Entry?.HeadVersionId !== VersionId || Entry.Kind !== 'file')
       throw new Error('The requested file version is unavailable.')
     return new Blob([`# ${Entry.Name}\n\nFileBelt Markdown content.\n`], { type: 'text/markdown' })
   }
 
-  async importMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string> {
+  async ImportMarkdown(Input: Readonly<MarkdownImportInput>): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId)
     if (Original?.HeadVersionId !== Input.SourceVersionId)
       throw new Error('The Office source version is unavailable.')
@@ -684,23 +684,23 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return VersionId
   }
 
-  async beginMarkdownCollaboration(IgnoredEntryId: string, IgnoredClientId: string): Promise<null> {
+  async BeginMarkdownCollaboration(IgnoredEntryId: string, IgnoredClientId: string): Promise<null> {
     void IgnoredEntryId
     void IgnoredClientId
     return null
   }
 
-  async readMarkdownHead(EntryId: string): Promise<MarkdownHead> {
+  async ReadMarkdownHead(EntryId: string): Promise<MarkdownHead> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId)
     if (Entry?.HeadVersionId === null || Entry?.HeadVersionId === undefined)
       throw new Error('The Markdown file has no current version.')
     return {
-      Contents: await this.readMarkdown(EntryId, Entry.HeadVersionId),
+      Contents: await this.ReadMarkdown(EntryId, Entry.HeadVersionId),
       VersionId: Entry.HeadVersionId,
     }
   }
 
-  async saveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string> {
+  async SaveMarkdown(Input: Readonly<MarkdownSaveInput>): Promise<string> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId)
     if (Entry === undefined || Entry.HeadVersionId !== Input.ExpectedHeadVersionId)
       throw new VersionConflictError()
@@ -712,7 +712,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return Entry.HeadVersionId
   }
 
-  async saveMarkdownCopy(
+  async SaveMarkdownCopy(
     Input: Readonly<Omit<MarkdownSaveInput, 'CheckpointId' | 'ExpectedHeadVersionId'>>,
   ): Promise<string> {
     const Original = this.#Snapshot.Entries.find(({ Id }) => Id === Input.EntryId)
@@ -732,7 +732,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     return VersionId
   }
 
-  async exchangePublicShare(FragmentToken: string): Promise<PublicShareGrant> {
+  async ExchangePublicShare(FragmentToken: string): Promise<PublicShareGrant> {
     if (FragmentToken.trim().length < 8)
       throw new Error('This share link is invalid or has expired.')
     return {
@@ -743,20 +743,20 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     }
   }
 
-  async downloadPublic(ExchangeId: string): Promise<Blob> {
+  async DownloadPublic(ExchangeId: string): Promise<Blob> {
     if (ExchangeId.length === 0) throw new Error('This share link is unavailable.')
     return new Blob(['FileBelt mock public-share download\n'], { type: 'text/plain' })
   }
 
-  async trashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
-    return this.#mutateEntries(EntryIds, true)
+  async TrashEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#MutateEntries(EntryIds, true)
   }
 
-  async restoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
-    return this.#mutateEntries(EntryIds, false)
+  async RestoreEntries(EntryIds: readonly string[]): Promise<readonly EntryMutationOutcome[]> {
+    return this.#MutateEntries(EntryIds, false)
   }
 
-  async createShare(Input: Readonly<CreateShareInput>): Promise<void> {
+  async CreateShare(Input: Readonly<CreateShareInput>): Promise<void> {
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Input.FileId)
     if (Entry === undefined) {
       throw new Error('The selected resource is unavailable.')
@@ -773,12 +773,12 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     Entry.Shared = true
   }
 
-  async revokeShare(ShareId: string): Promise<void> {
+  async RevokeShare(ShareId: string): Promise<void> {
     const Index = this.#Snapshot.Shares.findIndex(({ Id }) => Id === ShareId)
     if (Index !== -1) this.#Snapshot.Shares.splice(Index, 1)
   }
 
-  async restoreVersion(VersionId: string): Promise<void> {
+  async RestoreVersion(VersionId: string): Promise<void> {
     const Version = this.#Snapshot.Versions.find(({ Id }) => Id === VersionId)
     const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === Version?.FileId)
     if (Version === undefined || Entry === undefined) return
@@ -800,22 +800,22 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     })
   }
 
-  async revokeSession(SessionId: string): Promise<void> {
+  async RevokeSession(SessionId: string): Promise<void> {
     const Index = this.#Snapshot.Sessions.findIndex(({ Id }) => Id === SessionId)
     if (this.#Snapshot.Sessions[Index]?.Current === true) return
     if (Index !== -1) this.#Snapshot.Sessions.splice(Index, 1)
   }
 
-  async markPrivacyRead(): Promise<void> {
+  async MarkPrivacyRead(): Promise<void> {
     for (const Event of this.#Snapshot.Privacy) Event.Unread = false
   }
 
-  async suspendUser(UserId: string): Promise<void> {
+  async SuspendUser(UserId: string): Promise<void> {
     const User = this.#Snapshot.Admin.Users.find(({ Id }) => Id === UserId)
     if (User !== undefined) User.Status = User.Status === 'active' ? 'suspended' : 'active'
   }
 
-  async createGroup(Name: string): Promise<void> {
+  async CreateGroup(Name: string): Promise<void> {
     const Group: AdminGroup = {
       Id: Uuid(String(++this.#Sequence)),
       ManagerCount: 1,
@@ -825,7 +825,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#Snapshot.Admin.Groups.push(Group)
   }
 
-  async createSharedDrive(Name: string): Promise<void> {
+  async CreateSharedDrive(Name: string): Promise<void> {
     const Drive: AdminDrive = {
       Id: Uuid(String(++this.#Sequence)),
       Name,
@@ -835,7 +835,7 @@ export class MockFileBeltClient implements FileBeltClient, PublicShareClient {
     this.#Snapshot.Admin.Drives.push(Drive)
   }
 
-  #mutateEntries(EntryIds: readonly string[], Trashed: boolean): EntryMutationOutcome[] {
+  #MutateEntries(EntryIds: readonly string[], Trashed: boolean): EntryMutationOutcome[] {
     const Outcomes: EntryMutationOutcome[] = []
     for (const EntryId of EntryIds) {
       const Entry = this.#Snapshot.Entries.find(({ Id }) => Id === EntryId)

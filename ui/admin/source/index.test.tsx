@@ -14,9 +14,9 @@ describe('AdminPanel', () => {
       <AdminPanel
         Drives={[]}
         Groups={[]}
-        onCreateGroup={Resolve}
-        onCreateSharedDrive={Resolve}
-        onToggleUserSuspension={Resolve}
+        OnCreateGroup={Resolve}
+        OnCreateSharedDrive={Resolve}
+        OnToggleUserSuspension={Resolve}
         Users={[{ Email: 'layla@example.test', Id: 'user-1', Name: 'ليلى', Status: 'active' }]}
       />,
     )

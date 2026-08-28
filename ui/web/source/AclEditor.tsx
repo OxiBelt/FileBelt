@@ -133,7 +133,7 @@ export function AclEditor({
     SetLoading(true)
     SetErrorMessage(null)
     try {
-      const Current = await Client.getAcl(Entry.Id, Signal)
+      const Current = await Client.GetAcl(Entry.Id, Signal)
       SetCollection(Current.Value)
       SetEtag(Current.Etag)
     } catch (Cause) {
@@ -183,7 +183,7 @@ export function AclEditor({
     SetErrorMessage(null)
     SetNotice(null)
     try {
-      const Updated = await Client.replaceAcl(Entry.Id, Etag, Selector, Draft)
+      const Updated = await Client.ReplaceAcl(Entry.Id, Etag, Selector, Draft)
       SetCollection(Updated.Value)
       SetEtag(Updated.Etag)
       SetNotice(En.aclSaved)
@@ -192,7 +192,7 @@ export function AclEditor({
       if (Cause instanceof AclConflictError) {
         SetEtag(null)
         try {
-          const Current = await Client.getAcl(Entry.Id)
+          const Current = await Client.GetAcl(Entry.Id)
           const Refreshed = PreserveAclDraftAfterConflict(Draft, Current.Value)
           SetCollection(Refreshed.Collection)
           SetDraft(Refreshed.Draft)

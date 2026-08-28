@@ -91,7 +91,7 @@ export function MarkdownFileView({
   }, [])
   useEffect(() => {
     let Active = true
-    void Client.getTextPreferences()
+    void Client.GetTextPreferences()
       .then(({ Value }) => {
         if (Active) SetTextLimits({ Edit: Value.EditLimitBytes, Inline: Value.InlineLimitBytes })
       })
@@ -107,7 +107,7 @@ export function MarkdownFileView({
     SetCollaboration(null)
     SetCollaborationState(CanEdit ? 'connecting' : 'fallback')
     SetInvalidText(false)
-    void Client.readMarkdown(Entry.Id, Entry.HeadVersionId)
+    void Client.ReadMarkdown(Entry.Id, Entry.HeadVersionId)
       .then(async (Contents) => {
         const Bytes = new Uint8Array(await Contents.arrayBuffer())
         const Decoded = CanEdit ? DecodeEditableText(Bytes) : DecodeViewableText(Bytes)
@@ -118,7 +118,7 @@ export function MarkdownFileView({
         SetConflictCopyAvailable(false)
         if (!CanEdit) return
         const ClientId = crypto.randomUUID()
-        const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId)
+        const Grant = await Client.BeginMarkdownCollaboration(Entry.Id, ClientId)
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- The effect cleanup can run while the awaited collaboration grant is pending.
         if (!Active) return
         if (Grant === null) {
@@ -163,12 +163,12 @@ export function MarkdownFileView({
     SetCollaborationState('connecting')
     SetError(null)
     try {
-      const Latest = await Client.readMarkdownHead(Entry.Id)
+      const Latest = await Client.ReadMarkdownHead(Entry.Id)
       const Remote = DecodeEditableText(new Uint8Array(await Latest.Contents.arrayBuffer()))
       FallbackRemote = Remote
       FallbackVersionId = Latest.VersionId
       const ClientId = crypto.randomUUID()
-      const Grant = await Client.beginMarkdownCollaboration(Entry.Id, ClientId)
+      const Grant = await Client.BeginMarkdownCollaboration(Entry.Id, ClientId)
       if (Grant === null) {
         ApplyFallbackMerge(LocalText, Remote, Latest.VersionId)
         return
@@ -232,7 +232,7 @@ export function MarkdownFileView({
       const Contents = new Blob([Encoded.buffer as ArrayBuffer], {
         type: Entry.MediaType ?? 'text/plain',
       })
-      const VersionId = await Client.saveMarkdown({
+      const VersionId = await Client.SaveMarkdown({
         ...(Checkpoint === undefined ? {} : { CheckpointId: Checkpoint.Id }),
         Contents,
         EntryId: Entry.Id,
@@ -255,7 +255,7 @@ export function MarkdownFileView({
       if (Cause instanceof VersionConflictError) {
         try {
           const LocalText = Collaboration?.CurrentText() ?? Source.Text
-          const Latest = await Client.readMarkdownHead(Entry.Id)
+          const Latest = await Client.ReadMarkdownHead(Entry.Id)
           const Remote = DecodeEditableText(new Uint8Array(await Latest.Contents.arrayBuffer()))
           const Merged = MergeMarkdownSources(SavedText, LocalText, Remote.Text)
           Collaboration?.Destroy()
@@ -287,7 +287,7 @@ export function MarkdownFileView({
       const CurrentSource =
         Collaboration === null ? Source : { ...Source, Text: Collaboration.CurrentText() }
       const Encoded = EncodeText(CurrentSource, TextLimits.Edit)
-      await Client.saveMarkdownCopy({
+      await Client.SaveMarkdownCopy({
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- EncodeText returns an owned byte buffer; Blob rejects only the broader SharedArrayBuffer type possibility.
         Contents: new Blob([Encoded.buffer as ArrayBuffer], {
           type: Entry.MediaType ?? 'text/plain',
@@ -451,7 +451,7 @@ export function MarkdownFileView({
       {InvalidText ? (
         <div className='fb-heading-actions'>
           <p>{En.textInvalidGuide}</p>
-          <Button onClick={() => void Client.setNodeContentClass(Entry.Id, 'binary')}>
+          <Button onClick={() => void Client.SetNodeContentClass(Entry.Id, 'binary')}>
             {En.textMarkBinary}
           </Button>
         </div>

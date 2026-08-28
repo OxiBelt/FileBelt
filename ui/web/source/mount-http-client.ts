@@ -57,12 +57,12 @@ export class MountCredentialOutcomeUnknownError extends Error {
 }
 
 export interface MountSettingsClient {
-  cancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void>
-  createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential>
-  getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview>
-  prepareCredentialOperation(): Promise<PreparedMountCredentialOperation>
-  putPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void>
-  revokeCredential(CredentialId: string): Promise<void>
+  CancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void>
+  CreateCredential(Input: CreateMountCredential): Promise<CreatedMountCredential>
+  GetOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview>
+  PrepareCredentialOperation(): Promise<PreparedMountCredentialOperation>
+  PutPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void>
+  RevokeCredential(CredentialId: string): Promise<void>
 }
 
 export class HttpMountSettingsClient implements MountSettingsClient {
@@ -82,7 +82,7 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     })
   }
 
-  async getOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview> {
+  async GetOverview(Signal?: Readonly<AbortSignal>): Promise<MountOverview> {
     const Result = await this.#Api.GET(
       '/api/v1/mounts',
       Signal === undefined ? {} : { signal: Signal },
@@ -90,18 +90,18 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     return RequireData<MountOverview>(Result)
   }
 
-  async putPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void> {
+  async PutPolicy(Protocol: MountProtocol, Input: PutMountPolicy): Promise<void> {
     await RequireSuccess(
       await this.#Api.PUT('/api/v1/mounts/policies/{protocol}', {
         body: Input,
-        params: { header: await this.#mutationHeaders(), path: { protocol: Protocol } },
+        params: { header: await this.#MutationHeaders(), path: { protocol: Protocol } },
       }),
     )
   }
 
-  async prepareCredentialOperation(): Promise<PreparedMountCredentialOperation> {
+  async PrepareCredentialOperation(): Promise<PreparedMountCredentialOperation> {
     const Result = await this.#Api.POST('/api/v1/mounts/credential-operations', {
-      params: { header: await this.#mutationHeaders() },
+      params: { header: await this.#MutationHeaders() },
     })
     return {
       Created: Result.response.status === 201,
@@ -109,8 +109,8 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     }
   }
 
-  async createCredential(Input: CreateMountCredential): Promise<CreatedMountCredential> {
-    const Headers = await this.#mutationHeaders()
+  async CreateCredential(Input: CreateMountCredential): Promise<CreatedMountCredential> {
+    const Headers = await this.#MutationHeaders()
     const Result = await (async () => {
       try {
         return await this.#Api.POST('/api/v1/mounts/credentials', {
@@ -128,10 +128,10 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     return RequireData<CreatedMountCredential>(Result)
   }
 
-  async cancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void> {
+  async CancelCredentialOperation(OperationId: string, ExpectedGeneration: number): Promise<void> {
     const Result = await this.#Api.DELETE('/api/v1/mounts/credential-operations/{operation_id}', {
       params: {
-        header: await this.#mutationHeaders(),
+        header: await this.#MutationHeaders(),
         path: { operation_id: OperationId },
         query: { expected_generation: ExpectedGeneration },
       },
@@ -140,10 +140,10 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     await RequireSuccess(Result)
   }
 
-  async revokeCredential(CredentialId: string): Promise<void> {
+  async RevokeCredential(CredentialId: string): Promise<void> {
     const Result = await this.#Api.DELETE('/api/v1/mounts/credentials/{credential_id}', {
       params: {
-        header: await this.#mutationHeaders(),
+        header: await this.#MutationHeaders(),
         path: { credential_id: CredentialId },
       },
     })
@@ -151,7 +151,7 @@ export class HttpMountSettingsClient implements MountSettingsClient {
     await RequireSuccess(Result)
   }
 
-  async #mutationHeaders(): Promise<MutationHeaders> {
+  async #MutationHeaders(): Promise<MutationHeaders> {
     if (this.#CsrfToken === null) {
       const Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
       this.#CsrfToken = Session.csrf_token

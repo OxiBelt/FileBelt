@@ -43,7 +43,7 @@ type-aware rules as an error while compiler diagnostics remain in the separate
 `filebelt/no-semicolons`, and `filebelt/single-quotes` rules preserve naming
 and style contracts that Oxlint does not implement; their structure is adapted
 under Apache-2.0 from OxiBelt commit
-`9daacf938a7d79fd618c18904435510eecb2f4c3` and their behavior is independently
+`39c4480286482082f0f465d51fa943ae83816cf1` and their behavior is independently
 covered by FileBelt fixtures.
 
 Oxfmt, Oxlint, tsgolint, and their registry-integrity-pinned optional native

@@ -67,7 +67,7 @@ export function DocumentLaunchDialog({
         // A fresh grant is intentionally held only in this stack frame, then
         // immediately submitted. Closing or waiting on consent leaves no raw
         // grant in React state or browser storage.
-        SubmitDocumentLaunch(await Client.redeemLaunch(PreparedLaunch.SessionId))
+        SubmitDocumentLaunch(await Client.RedeemLaunch(PreparedLaunch.SessionId))
         return
       }
       if (
@@ -76,7 +76,7 @@ export function DocumentLaunchDialog({
         Entry.HeadVersionId === null
       )
         return
-      const Detail = await Client.createSession({
+      const Detail = await Client.CreateSession({
         BaseVersionId: Entry.HeadVersionId,
         DriveId: Entry.DriveId,
         Mode,
@@ -247,7 +247,7 @@ export function OwnDocumentSessions({
   const Refresh = useCallback(
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
-        SetPage(await Client.listOwnSessions({ ...(Signal === undefined ? {} : { Signal }) }))
+        SetPage(await Client.ListOwnSessions({ ...(Signal === undefined ? {} : { Signal }) }))
         SetErrorMessage(null)
       } catch (Cause) {
         if (!(Cause instanceof DOMException && Cause.name === 'AbortError')) HandleFailure(Cause)
@@ -289,7 +289,7 @@ export function OwnDocumentSessions({
     SetBusy(true)
     SetErrorMessage(null)
     try {
-      const NextPage = await Client.listOwnSessions({ Cursor })
+      const NextPage = await Client.ListOwnSessions({ Cursor })
       SetPage((Current) =>
         Current === null
           ? NextPage
@@ -383,7 +383,7 @@ function SessionCard({
   const [ConfirmRevoke, SetConfirmRevoke] = useState(false)
   const LoadDetail = async (): Promise<void> => {
     try {
-      OnDetail(await Client.getOwnSession(Session.id))
+      OnDetail(await Client.GetOwnSession(Session.id))
     } catch (Cause) {
       OnFailure(Cause)
     }
@@ -413,7 +413,7 @@ function SessionCard({
             onClick={() =>
               void OnMutate(
                 async () =>
-                  Client.createConflictCopy(
+                  Client.CreateConflictCopy(
                     Session.id,
                     En.documentConflictCopyName(En.documentDefaultName),
                   ),
@@ -464,7 +464,7 @@ function SessionCard({
                 onClick={() => {
                   SetConfirmRevoke(false)
                   void OnMutate(
-                    async () => Client.revokeOwnSession(Session.id),
+                    async () => Client.RevokeOwnSession(Session.id),
                     En.documentSessionRevoked,
                   )
                 }}
@@ -544,7 +544,7 @@ export function FileDocumentSessionManagement({
   if (!CanManage) return null
   const Load = async (): Promise<void> => {
     try {
-      SetPage(await Client.listNodeSessions(DriveId, NodeId))
+      SetPage(await Client.ListNodeSessions(DriveId, NodeId))
       SetErrorMessage(null)
     } catch (Cause) {
       SetErrorMessage(Cause instanceof Error ? Cause.message : En.offline)
@@ -571,7 +571,7 @@ export function FileDocumentSessionManagement({
                   {StatusLabel(Session.state)}
                 </span>
               </div>
-              <Button appearance='secondary' onClick={() => void Client.forceClose(Session)}>
+              <Button appearance='secondary' onClick={() => void Client.ForceClose(Session)}>
                 {En.documentForceClose}
               </Button>
             </article>

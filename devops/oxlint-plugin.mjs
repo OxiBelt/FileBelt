@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Adapted from OxiBelt commit 9daacf938a7d79fd618c18904435510eecb2f4c3 under Apache-2.0.
+// Adapted from OxiBelt commit 39c4480286482082f0f465d51fa943ae83816cf1 under Apache-2.0.
 
 const RuleMeta = (Message) => ({
   type: 'suggestion',
@@ -59,6 +59,7 @@ const CheckBinding = (Context, Pattern, { AllowHook = false } = {}) => {
 }
 
 const CheckProperty = (Context, Node) => {
+  if (Node.kind === 'constructor') return
   if (!Node.computed) ReportName(Context, Node.key)
 }
 
@@ -72,7 +73,7 @@ const CheckFunction = (Context, Node) => {
 const CheckTypeLike = (Context, Node) => ReportName(Context, Node.id)
 
 const PascalCaseRule = {
-  meta: RuleMeta('Require PascalCase for FileBelt declaration names'),
+  meta: RuleMeta('Require PascalCase for FileBelt declaration names and methods'),
   create(Context) {
     return {
       VariableDeclarator(Node) {
@@ -102,6 +103,12 @@ const PascalCaseRule = {
       TSAbstractPropertyDefinition(Node) {
         CheckProperty(Context, Node)
       },
+      MethodDefinition(Node) {
+        CheckProperty(Context, Node)
+      },
+      TSAbstractMethodDefinition(Node) {
+        CheckProperty(Context, Node)
+      },
       ClassDeclaration(Node) {
         CheckTypeLike(Context, Node)
       },
@@ -124,6 +131,9 @@ const PascalCaseRule = {
         CheckBinding(Context, Node.parameter)
       },
       TSPropertySignature(Node) {
+        CheckProperty(Context, Node)
+      },
+      TSMethodSignature(Node) {
         CheckProperty(Context, Node)
       },
     }

@@ -94,15 +94,15 @@ export function UploadsView({
   )
 }
 
-// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- Component callbacks are receiver-free functions supplied by the parent.
 export function VersionsView({
   File,
-  onRestore: OnRestore,
+  OnRestore,
   Strings,
   Versions,
 }: {
   File: FileEntry | undefined
-  onRestore(VersionId: string): Promise<void>
+  OnRestore(VersionId: string): Promise<void>
   Strings: Strings
   Versions: readonly VersionRecord[]
 }): ReactNode {
@@ -150,17 +150,17 @@ export function VersionsView({
   )
 }
 
-// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- Component callbacks are receiver-free functions supplied by the parent.
 export function SharesView({
   File,
-  onCreate: OnCreate,
-  onRevoke: OnRevoke,
+  OnCreate,
+  OnRevoke,
   Shares,
   Strings,
 }: {
   File: FileEntry | undefined
-  onCreate(Input: CreateShareInput): Promise<void>
-  onRevoke(ShareId: string): Promise<void>
+  OnCreate(Input: CreateShareInput): Promise<void>
+  OnRevoke(ShareId: string): Promise<void>
   Shares: readonly ShareRecord[]
   Strings: Strings
 }): ReactNode {
@@ -285,13 +285,13 @@ export function SharesView({
   )
 }
 
-// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- Component callbacks are receiver-free functions supplied by the parent.
 export function SessionsView({
-  onRevoke: OnRevoke,
+  OnRevoke,
   Sessions,
   Strings,
 }: {
-  onRevoke(Id: string): Promise<void>
+  OnRevoke(Id: string): Promise<void>
   Sessions: readonly SessionRecord[]
   Strings: Strings
 }): ReactNode {
@@ -408,14 +408,14 @@ function RevocationDialog({
   )
 }
 
-// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- React callback props are receiver-free functions supplied by the parent.
+// oxlint-disable typescript/prefer-readonly-parameter-types, typescript/unbound-method -- Component callbacks are receiver-free functions supplied by the parent.
 export function PrivacyView({
   Events,
-  onMarkRead: OnMarkRead,
+  OnMarkRead,
   Strings,
 }: {
   Events: readonly PrivacyEvent[]
-  onMarkRead(): Promise<void>
+  OnMarkRead(): Promise<void>
   Strings: Strings
 }): ReactNode {
   // oxlint-enable typescript/prefer-readonly-parameter-types, typescript/unbound-method

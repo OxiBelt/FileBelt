@@ -40,7 +40,7 @@ export function TextHistory({
       LoadingReference.current = true
       SetLoading(true)
       try {
-        const Page = await Client.listTextVersions(Entry.Id, PageCursor)
+        const Page = await Client.ListTextVersions(Entry.Id, PageCursor)
         if (Generation !== RequestGeneration.current) return
         SetVersions((Current) => {
           const ById = new Map(Current.map((Version) => [Version.Id, Version]))
@@ -88,7 +88,7 @@ export function TextHistory({
     if (BaseVersionId.length === 0 || TargetVersionId.length === 0) return
     SetError(null)
     try {
-      SetComparison(await Client.compareTextVersions(Entry.Id, BaseVersionId, TargetVersionId))
+      SetComparison(await Client.CompareTextVersions(Entry.Id, BaseVersionId, TargetVersionId))
     } catch (Cause) {
       SetComparison(null)
       SetError(

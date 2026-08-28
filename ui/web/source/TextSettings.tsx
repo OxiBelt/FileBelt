@@ -30,7 +30,7 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
     async (PreserveDraft = false): Promise<void> => {
       SetLoading(true)
       try {
-        const Response = await Client.getTextPreferences()
+        const Response = await Client.GetTextPreferences()
         SetEtag(Response.Etag)
         if (!PreserveDraft) SetValue(Response.Value)
         SetError(null)
@@ -52,7 +52,7 @@ export function TextSettings({ Client }: { Client: FileBeltClient }): ReactNode 
     SetSaving(true)
     SetError(null)
     try {
-      const Response = await Client.updateTextPreferences(Value, Etag)
+      const Response = await Client.UpdateTextPreferences(Value, Etag)
       SetEtag(Response.Etag)
       SetValue(Response.Value)
     } catch (Cause) {

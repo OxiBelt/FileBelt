@@ -27,6 +27,7 @@ interface RuntimeProcessContract {
   readonly stderr: { write(Value: string): void }
   // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process property.
   exitCode: number | undefined
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact process method.
   getBuiltinModule(Name: 'node:fs'): unknown
 }
 
@@ -41,7 +42,9 @@ interface WriteFileOptions extends ReadFileOptions {
 }
 
 interface FileSystem {
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact file-system method.
   readFileSync(Path: string, Options: ReadFileOptions): string
+  // oxlint-disable-next-line filebelt/pascal-case -- Node.js exposes this exact file-system method.
   writeFileSync(Path: string, Data: string, Options: WriteFileOptions): void
 }
 

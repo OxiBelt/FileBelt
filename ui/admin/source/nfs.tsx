@@ -128,58 +128,58 @@ export interface NfsConflictCopy {
 }
 
 export interface NfsAdminClient {
-  attenuateMappingScope(
+  AttenuateMappingScope(
     this: void,
     CredentialId: string,
     AllowedDriveIds: readonly string[],
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>
-  cancelProposal(
+  CancelProposal(
     this: void,
     ProposalId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>
   // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- AbortSignal is supplied by the browser cancellation API.
-  getOverview(this: void, Signal?: AbortSignal): Promise<NfsAdminSnapshot>
-  copyConflict(
+  GetOverview(this: void, Signal?: AbortSignal): Promise<NfsAdminSnapshot>
+  CopyConflict(
     this: void,
     ConflictId: string,
     Input: Readonly<NfsConflictCopy>,
     ConfirmTenant: string,
   ): Promise<void>
-  discardConflict(this: void, ConflictId: string, ConfirmTenant: string): Promise<void>
-  registerExport(
+  DiscardConflict(this: void, ConflictId: string, ConfirmTenant: string): Promise<void>
+  RegisterExport(
     this: void,
     Input: Readonly<NfsExportRegistration>,
     ConfirmTenant: string,
   ): Promise<void>
-  registerPosixGroup(
+  RegisterPosixGroup(
     this: void,
     Input: Readonly<NfsPosixGroupRegistration>,
     ConfirmTenant: string,
   ): Promise<void>
-  revokeMapping(
+  RevokeMapping(
     this: void,
     CredentialId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
   ): Promise<void>
-  transitionExport(
+  TransitionExport(
     this: void,
     DriveId: string,
     ExpectedGeneration: number,
     TargetState: NfsExportState,
     ConfirmTenant: string,
   ): Promise<void>
-  transitionFeature(
+  TransitionFeature(
     this: void,
     ExpectedGeneration: number,
     TargetState: NfsFeatureState,
     ConfirmTenant: string,
   ): Promise<void>
-  proposeMapping(
+  ProposeMapping(
     this: void,
     Input: Readonly<NfsMappingProposalCreate>,
     ConfirmTenant: string,
@@ -245,7 +245,7 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- AbortSignal is supplied by the browser cancellation API.
     async (Signal?: AbortSignal): Promise<void> => {
       try {
-        SetSnapshot(await Client.getOverview(Signal))
+        SetSnapshot(await Client.GetOverview(Signal))
         SetErrorMessage(null)
         SetReauthenticationRequired(false)
       } catch (Cause) {
@@ -322,62 +322,62 @@ export function NfsAdminSurface({ Client }: { Client: NfsAdminClient }): ReactNo
         Busy={Busy}
         OnCopyConflict={async (ConflictId, Input, ConfirmTenant) =>
           Mutate(
-            async () => Client.copyConflict(ConflictId, Input, ConfirmTenant),
+            async () => Client.CopyConflict(ConflictId, Input, ConfirmTenant),
             Strings.nfsConflictCopied,
           )
         }
         OnDiscardConflict={async (ConflictId, ConfirmTenant) =>
           Mutate(
-            async () => Client.discardConflict(ConflictId, ConfirmTenant),
+            async () => Client.DiscardConflict(ConflictId, ConfirmTenant),
             Strings.nfsConflictDiscarded,
           )
         }
         OnRegisterExport={async (Input, ConfirmTenant) =>
           Mutate(
-            async () => Client.registerExport(Input, ConfirmTenant),
+            async () => Client.RegisterExport(Input, ConfirmTenant),
             Strings.nfsExportRegistered,
           )
         }
         OnRegisterPosixGroup={async (Input, ConfirmTenant) =>
           Mutate(
-            async () => Client.registerPosixGroup(Input, ConfirmTenant),
+            async () => Client.RegisterPosixGroup(Input, ConfirmTenant),
             Strings.nfsGroupRegistered,
           )
         }
         OnAttenuateMapping={async (CredentialId, DriveIds, Generation, ConfirmTenant) =>
           Mutate(
             async () =>
-              Client.attenuateMappingScope(CredentialId, DriveIds, Generation, ConfirmTenant),
+              Client.AttenuateMappingScope(CredentialId, DriveIds, Generation, ConfirmTenant),
             Strings.nfsMappingAttenuated,
           )
         }
         OnCancelProposal={async (ProposalId, Generation, ConfirmTenant) =>
           Mutate(
-            async () => Client.cancelProposal(ProposalId, Generation, ConfirmTenant),
+            async () => Client.CancelProposal(ProposalId, Generation, ConfirmTenant),
             Strings.nfsProposalCancelled,
           )
         }
         OnProposeMapping={async (Input, ConfirmTenant) =>
           Mutate(
-            async () => Client.proposeMapping(Input, ConfirmTenant),
+            async () => Client.ProposeMapping(Input, ConfirmTenant),
             Strings.nfsProposalCreated,
           )
         }
         OnRevokeMapping={async (CredentialId, Generation, ConfirmTenant) =>
           Mutate(
-            async () => Client.revokeMapping(CredentialId, Generation, ConfirmTenant),
+            async () => Client.RevokeMapping(CredentialId, Generation, ConfirmTenant),
             Strings.nfsMappingRevoked,
           )
         }
         OnTransitionExport={async (DriveId, Generation, State, ConfirmTenant) =>
           Mutate(
-            async () => Client.transitionExport(DriveId, Generation, State, ConfirmTenant),
+            async () => Client.TransitionExport(DriveId, Generation, State, ConfirmTenant),
             Strings.nfsExportTransitioned,
           )
         }
         OnTransitionFeature={async (Generation, State, ConfirmTenant) =>
           Mutate(
-            async () => Client.transitionFeature(Generation, State, ConfirmTenant),
+            async () => Client.TransitionFeature(Generation, State, ConfirmTenant),
             Strings.nfsFeatureTransitioned,
           )
         }

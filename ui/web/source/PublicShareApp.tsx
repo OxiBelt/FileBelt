@@ -58,7 +58,7 @@ export function PublicShareApp({
       SetBusy(false)
       return
     }
-    void Client.exchangePublicShare(FragmentToken)
+    void Client.ExchangePublicShare(FragmentToken)
       .then(SetGrant)
       .catch(() => {
         SetError(En.publicExpired)
@@ -72,7 +72,7 @@ export function PublicShareApp({
     if (Grant === null) return
     SetBusy(true)
     try {
-      const Url = URL.createObjectURL(await Client.downloadPublic(Grant.ExchangeId))
+      const Url = URL.createObjectURL(await Client.DownloadPublic(Grant.ExchangeId))
       const Anchor = document.createElement('a')
       Anchor.download = Grant.Name
       Anchor.href = Url

@@ -58,11 +58,14 @@ class ExampleValue<TypeValue> {
   #PrivateValue = 1;
   PropertyValue = 1;
   ["external"] = 2;
+  ["externalMethod"]() {}
   constructor(public ParameterValue: number) {}
-  get lower() { return 1; }
-  lowerMethod(MethodValue: string) { return MethodValue; }
+  get Value() { return 1; }
+  set Value(NextValue: number) { void NextValue; }
+  MethodValue(MethodParameter: string) { return MethodParameter; }
 }
-interface InterfaceValue { PropertyValue: string; lowerMethod(MethodValue: string): void; }
+abstract class AbstractValue { abstract MethodValue(MethodParameter: string): void; }
+interface InterfaceValue { PropertyValue: string; MethodValue(MethodParameter: string): void; }
 type AliasValue = InterfaceValue;
 enum EnumValue { Member }
 void ImportedValue;
@@ -94,8 +97,11 @@ class lowerClass<lowerTypeParameter> {
   useProperty = 2;
   constructor(public lowerParameterProperty: number, public useParameterProperty: number) {}
   lowerMethod(lowerMethodParameter: string) { return lowerMethodParameter; }
+  get lowerGetter() { return 1; }
+  set lowerSetter(value: number) { void value; }
 }
-interface lowerInterface { lowerTypeProperty: string; }
+abstract class AbstractValue { abstract lowerAbstractMethod(): void; }
+interface lowerInterface { lowerTypeProperty: string; lowerTypeMethod(): void; }
 type lowerAlias = string;
 type useType = string;
 enum lowerEnum { Member }
@@ -118,8 +124,13 @@ enum lowerEnum { Member }
     'lowerParameterProperty',
     'useParameterProperty',
     'lowerMethodParameter',
+    'lowerMethod',
+    'lowerGetter',
+    'lowerSetter',
+    'lowerAbstractMethod',
     'lowerInterface',
     'lowerTypeProperty',
+    'lowerTypeMethod',
     'lowerAlias',
     'useType',
     'lowerEnum',

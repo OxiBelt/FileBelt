@@ -10,8 +10,8 @@ export interface LaunchResponse {
 }
 
 export interface LauncherView {
-  setState(State: LauncherState, Message: string): void
-  setLaunchEnabled(Enabled: boolean): void
+  SetState(State: LauncherState, Message: string): void
+  SetLaunchEnabled(Enabled: boolean): void
 }
 
 /**
@@ -23,37 +23,37 @@ export class OnlyOfficeLauncher {
   #ProviderApi: Promise<void> | undefined
 
   public constructor(private readonly View: LauncherView) {
-    this.View.setState('idle', 'Editor is ready to launch.')
-    this.View.setLaunchEnabled(true)
+    this.View.SetState('idle', 'Editor is ready to launch.')
+    this.View.SetLaunchEnabled(true)
   }
 
   public get State(): LauncherState {
     return this.#State
   }
 
-  public async launch(Launch: () => Promise<LaunchResponse>): Promise<void> {
+  public async Launch(Launch: () => Promise<LaunchResponse>): Promise<void> {
     if (this.#State === 'launching' || this.#State === 'loading-api') return
     this.#State = 'launching'
-    this.View.setLaunchEnabled(false)
-    this.View.setState(this.#State, 'Preparing secure editor launch.')
+    this.View.SetLaunchEnabled(false)
+    this.View.SetState(this.#State, 'Preparing secure editor launch.')
     try {
       const Response = await Launch()
       this.#State = 'loading-api'
-      this.View.setState(this.#State, 'Loading editor provider.')
-      await this.loadProviderApi(Response.apiJsUrl)
+      this.View.SetState(this.#State, 'Loading editor provider.')
+      await this.LoadProviderApi(Response.apiJsUrl)
       const DocsApi = window.DocsAPI
       if (DocsApi === undefined) throw new Error('provider API did not expose DocsAPI')
       DocsApi.DocEditor('onlyoffice-editor', Response.editorConfig)
       this.#State = 'ready'
-      this.View.setState(this.#State, 'Editor is ready.')
+      this.View.SetState(this.#State, 'Editor is ready.')
     } catch {
       this.#State = 'error'
-      this.View.setState(this.#State, 'Unable to launch the editor. Try again.')
-      this.View.setLaunchEnabled(true)
+      this.View.SetState(this.#State, 'Unable to launch the editor. Try again.')
+      this.View.SetLaunchEnabled(true)
     }
   }
 
-  private async loadProviderApi(ApiJsUrl: string): Promise<void> {
+  private async LoadProviderApi(ApiJsUrl: string): Promise<void> {
     if (this.#ProviderApi !== undefined) return this.#ProviderApi
     this.#ProviderApi = new Promise((Resolve, Reject) => {
       const Script = document.createElement('script')

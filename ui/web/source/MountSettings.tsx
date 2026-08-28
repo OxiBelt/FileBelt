@@ -58,7 +58,7 @@ type MountCredentialDraft = Omit<CreateMountCredential, 'operation_generation' |
 
 type MountCredentialCreationClient = Pick<
   MountSettingsClient,
-  'cancelCredentialOperation' | 'createCredential' | 'prepareCredentialOperation'
+  'CancelCredentialOperation' | 'CreateCredential' | 'PrepareCredentialOperation'
 >
 
 export class MountCredentialRecoveryRequiredError extends Error {
@@ -77,9 +77,9 @@ export async function CreateCredentialWithRecovery(
   Client: MountCredentialCreationClient,
   Draft: MountCredentialDraft,
 ): Promise<CreatedMountCredential> {
-  const { Operation } = await Client.prepareCredentialOperation()
+  const { Operation } = await Client.PrepareCredentialOperation()
   try {
-    return await Client.createCredential({
+    return await Client.CreateCredential({
       ...Draft,
       operation_generation: Operation.operation_generation,
       operation_id: Operation.operation_id,
@@ -87,7 +87,7 @@ export async function CreateCredentialWithRecovery(
   } catch (Cause) {
     if (!(Cause instanceof MountCredentialOutcomeUnknownError)) throw Cause
     try {
-      await Client.cancelCredentialOperation(Operation.operation_id, Operation.operation_generation)
+      await Client.CancelCredentialOperation(Operation.operation_id, Operation.operation_generation)
     } catch {
       throw new MountCredentialRecoveryRequiredError(Operation)
     }
@@ -111,7 +111,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
   const Refresh = useCallback(
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
-        const Next = await Client.getOverview(Signal)
+        const Next = await Client.GetOverview(Signal)
         SetSnapshot(Next)
         SetDrafts(PolicyDrafts(Next))
         SetErrorMessage(null)
@@ -231,7 +231,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
             OnSave={async () =>
               Mutate(
                 async () =>
-                  Client.putPolicy(Protocol, {
+                  Client.PutPolicy(Protocol, {
                     allowed_drive_ids: [...Drafts[Protocol].AllowedDriveIds],
                     enabled: Drafts[Protocol].Enabled,
                     read_only: true,
@@ -353,7 +353,7 @@ export function MountSettings({ Client, NfsClient }: MountSettingsProps): ReactN
                   const CredentialId = PendingCredential.id
                   SetPendingCredentialId(null)
                   void Mutate(
-                    async () => Client.revokeCredential(CredentialId),
+                    async () => Client.RevokeCredential(CredentialId),
                     'Mount credential revoked.',
                   )
                 }}
@@ -417,7 +417,7 @@ function NfsConsentSettings({
   const Refresh = useCallback(
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
-        const Overview = await Client.getOverview(Signal)
+        const Overview = await Client.GetOverview(Signal)
         SetMappings(Overview.mappings)
         SetProposals(Overview.proposals.filter(({ state: State }) => State === 'pending'))
         SetErrorMessage(null)
@@ -489,13 +489,13 @@ function NfsConsentSettings({
                   key={Proposal.id}
                   OnApprove={async () =>
                     Mutate(
-                      async () => Client.approveProposal(Proposal.id, Proposal.generation),
+                      async () => Client.ApproveProposal(Proposal.id, Proposal.generation),
                       'NFS identity mapping approved.',
                     )
                   }
                   OnDecline={async () =>
                     Mutate(
-                      async () => Client.declineProposal(Proposal.id, Proposal.generation),
+                      async () => Client.DeclineProposal(Proposal.id, Proposal.generation),
                       'NFS identity mapping declined.',
                     )
                   }
@@ -515,7 +515,7 @@ function NfsConsentSettings({
                   Mapping={Mapping}
                   OnRevoke={async () =>
                     Mutate(
-                      async () => Client.revokeMapping(Mapping.credential_id, Mapping.generation),
+                      async () => Client.RevokeMapping(Mapping.credential_id, Mapping.generation),
                       'NFS identity mapping revoked.',
                     )
                   }
@@ -876,7 +876,7 @@ function CredentialCreator({
               disabled={Busy}
               onClick={() => {
                 SetBusy(true)
-                void Client.cancelCredentialOperation(
+                void Client.CancelCredentialOperation(
                   UnresolvedOperation.operation_id,
                   UnresolvedOperation.operation_generation,
                 ).then(

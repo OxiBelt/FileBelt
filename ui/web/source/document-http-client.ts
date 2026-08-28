@@ -26,18 +26,18 @@ export interface ListDocumentSessionsOptions {
 
 /** Provider-neutral browser boundary for document-session controls. */
 export interface DocumentSessionClient {
-  createSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail>
-  createConflictCopy(SessionId: string, TargetName: string): Promise<DocumentSessionConflictCopy>
-  forceClose(Session: Readonly<components['schemas']['DocumentSessionSummary']>): Promise<void>
-  getOwnSession(SessionId: string): Promise<DocumentSessionDetail>
-  listNodeSessions(
+  CreateSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail>
+  CreateConflictCopy(SessionId: string, TargetName: string): Promise<DocumentSessionConflictCopy>
+  ForceClose(Session: Readonly<components['schemas']['DocumentSessionSummary']>): Promise<void>
+  GetOwnSession(SessionId: string): Promise<DocumentSessionDetail>
+  ListNodeSessions(
     DriveId: string,
     NodeId: string,
     Options?: Readonly<ListDocumentSessionsOptions>,
   ): Promise<DocumentSessionPage>
-  listOwnSessions(Options?: Readonly<ListDocumentSessionsOptions>): Promise<DocumentSessionPage>
-  redeemLaunch(SessionId: string): Promise<DocumentSessionLaunchHandoff>
-  revokeOwnSession(SessionId: string): Promise<void>
+  ListOwnSessions(Options?: Readonly<ListDocumentSessionsOptions>): Promise<DocumentSessionPage>
+  RedeemLaunch(SessionId: string): Promise<DocumentSessionLaunchHandoff>
+  RevokeOwnSession(SessionId: string): Promise<void>
 }
 
 interface SessionResponse {
@@ -84,20 +84,20 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     })
   }
 
-  async createSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail> {
-    await this.#ensureSession()
+  async CreateSession(Input: Readonly<CreateDocumentSessionInput>): Promise<DocumentSessionDetail> {
+    await this.#EnsureSession()
     return RequireData<DocumentSessionDetail>(
       await this.#Api.POST('/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions', {
         body: { base_version_id: Input.BaseVersionId, mode: Input.Mode },
         params: {
-          header: this.#headers(),
+          header: this.#Headers(),
           path: { drive_id: Input.DriveId, node_id: Input.NodeId },
         },
       }),
     )
   }
 
-  async listOwnSessions(
+  async ListOwnSessions(
     Options: Readonly<ListDocumentSessionsOptions> = {},
   ): Promise<DocumentSessionPage> {
     return RequireData<DocumentSessionPage>(
@@ -113,7 +113,7 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     )
   }
 
-  async getOwnSession(SessionId: string): Promise<DocumentSessionDetail> {
+  async GetOwnSession(SessionId: string): Promise<DocumentSessionDetail> {
     return RequireData<DocumentSessionDetail>(
       await this.#Api.GET('/api/v1/document-sessions/{document_session_id}', {
         params: { path: { document_session_id: SessionId } },
@@ -121,25 +121,25 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     )
   }
 
-  async revokeOwnSession(SessionId: string): Promise<void> {
-    await this.#ensureSession()
+  async RevokeOwnSession(SessionId: string): Promise<void> {
+    await this.#EnsureSession()
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/document-sessions/{document_session_id}', {
-        params: { header: this.#headers(), path: { document_session_id: SessionId } },
+        params: { header: this.#Headers(), path: { document_session_id: SessionId } },
       }),
     )
   }
 
-  async redeemLaunch(SessionId: string): Promise<DocumentSessionLaunchHandoff> {
-    await this.#ensureSession()
+  async RedeemLaunch(SessionId: string): Promise<DocumentSessionLaunchHandoff> {
+    await this.#EnsureSession()
     return RequireData<DocumentSessionLaunchHandoff>(
       await this.#Api.POST('/api/v1/document-sessions/{document_session_id}/handoff', {
-        params: { header: this.#csrfHeaders(), path: { document_session_id: SessionId } },
+        params: { header: this.#CsrfHeaders(), path: { document_session_id: SessionId } },
       }),
     )
   }
 
-  async listNodeSessions(
+  async ListNodeSessions(
     DriveId: string,
     NodeId: string,
     Options: Readonly<ListDocumentSessionsOptions> = {},
@@ -158,16 +158,16 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     )
   }
 
-  async forceClose(
+  async ForceClose(
     Session: Readonly<components['schemas']['DocumentSessionSummary']>,
   ): Promise<void> {
-    await this.#ensureSession()
+    await this.#EnsureSession()
     RequireSuccess(
       await this.#Api.DELETE(
         '/api/v1/drives/{drive_id}/nodes/{node_id}/document-sessions/{document_session_id}',
         {
           params: {
-            header: this.#headers(),
+            header: this.#Headers(),
             path: {
               document_session_id: Session.id,
               drive_id: Session.drive_id,
@@ -179,12 +179,12 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
     )
   }
 
-  async createConflictCopy(
+  async CreateConflictCopy(
     SessionId: string,
     TargetName: string,
   ): Promise<DocumentSessionConflictCopy> {
-    await this.#ensureSession()
-    const Detail = await this.getOwnSession(SessionId)
+    await this.#EnsureSession()
+    const Detail = await this.GetOwnSession(SessionId)
     const Source = RequireData<components['schemas']['Node']>(
       await this.#Api.GET('/api/v1/drives/{drive_id}/nodes/{node_id}', {
         params: { path: { drive_id: Detail.session.drive_id, node_id: Detail.session.node_id } },
@@ -204,21 +204,21 @@ export class HttpDocumentSessionClient implements DocumentSessionClient {
           target_name: TargetName,
           target_parent_id: Parent.id,
         },
-        params: { header: this.#headers(), path: { document_session_id: SessionId } },
+        params: { header: this.#Headers(), path: { document_session_id: SessionId } },
       }),
     )
   }
 
-  async #ensureSession(): Promise<void> {
+  async #EnsureSession(): Promise<void> {
     if (this.#Session !== null) return
     this.#Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
   }
 
-  #headers(): MutationHeaders {
-    return { ...this.#csrfHeaders(), 'Idempotency-Key': crypto.randomUUID() }
+  #Headers(): MutationHeaders {
+    return { ...this.#CsrfHeaders(), 'Idempotency-Key': crypto.randomUUID() }
   }
 
-  #csrfHeaders(): CsrfHeaders {
+  #CsrfHeaders(): CsrfHeaders {
     if (this.#Session === null) throw new Error('The session is unavailable.')
     return {
       Origin: new URL(this.#BaseUrl).origin,

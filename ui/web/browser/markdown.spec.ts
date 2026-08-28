@@ -168,6 +168,7 @@ test('reconnects after an initial collaboration failure and closes a live sessio
         }, 0)
       }
 
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
       close(IgnoredCode?: number, IgnoredReason?: string): void {
         void IgnoredCode
         void IgnoredReason
@@ -177,6 +178,7 @@ test('reconnects after an initial collaboration failure and closes a live sessio
         this.dispatchEvent(new Event('close'))
       }
 
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
       send(IgnoredData: ArrayBufferLike): void {
         void IgnoredData
       }
@@ -314,12 +316,14 @@ test('retains the latest head when reconnect falls back after a frozen room', as
         }, 0)
       }
 
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
       close(): void {
         if (this.readyState === 3) return
         this.readyState = 3
         this.dispatchEvent(new CloseEvent('close'))
       }
 
+      // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
       send(IgnoredData: ArrayBufferLike): void {
         void IgnoredData
       }

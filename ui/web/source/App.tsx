@@ -435,7 +435,7 @@ export function App({
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
         SetError(null)
-        SetSnapshot(await Client.getWorkspace(Signal, WorkspaceScope))
+        SetSnapshot(await Client.GetWorkspace(Signal, WorkspaceScope))
         SetAuthenticationRequired(false)
       } catch (Cause) {
         if (!(Cause instanceof DOMException && Cause.name === 'AbortError')) HandleFailure(Cause)
@@ -608,7 +608,7 @@ export function App({
     if (Candidates.length > 0)
       void Mutate(
         async () =>
-          Client.upload(
+          Client.Upload(
             Candidates,
             CurrentDrive === undefined || CurrentFolder === undefined
               ? undefined
@@ -622,7 +622,7 @@ export function App({
     if (Entry.Kind !== 'file') return
     SetBusy(true)
     try {
-      SaveBlob(await Client.download(Entry.Id), Entry.Name)
+      SaveBlob(await Client.Download(Entry.Id), Entry.Name)
       SetAnnouncement(En.downloadStarted(Entry.Name))
     } catch (Cause) {
       HandleFailure(Cause)
@@ -640,10 +640,10 @@ export function App({
       const Markdown = await import('@filebelt/markdown')
       const SourceType = Markdown.OfficeImportType(Entry.Name)
       if (SourceType === null) throw new Error(En.markdownImportUnavailable)
-      const Source = await Client.readMarkdown(Entry.Id, HeadVersionId)
+      const Source = await Client.ReadMarkdown(Entry.Id, HeadVersionId)
       const Contents = new Uint8Array(await Source.arrayBuffer())
       const Converted = await Markdown.ImportOfficeMarkdown({ Contents, SourceType })
-      await Client.importMarkdown({
+      await Client.ImportMarkdown({
         Contents: new Blob([Converted], { type: 'text/markdown' }),
         EntryId: Entry.Id,
         SourceVersionId: HeadVersionId,
@@ -857,17 +857,17 @@ export function App({
                   <AdminPanel
                     Drives={Snapshot.Admin.Drives}
                     Groups={Snapshot.Admin.Groups}
-                    onCreateGroup={async (Name) =>
-                      Mutate(async () => Client.createGroup(Name), En.createdGroup(Name))
+                    OnCreateGroup={async (Name) =>
+                      Mutate(async () => Client.CreateGroup(Name), En.createdGroup(Name))
                     }
-                    onCreateSharedDrive={async (Name) =>
+                    OnCreateSharedDrive={async (Name) =>
                       Mutate(
-                        async () => Client.createSharedDrive(Name),
+                        async () => Client.CreateSharedDrive(Name),
                         En.createdSharedDrive(Name),
                       )
                     }
-                    onToggleUserSuspension={async (Id) =>
-                      Mutate(async () => Client.suspendUser(Id), En.userStatusUpdated)
+                    OnToggleUserSuspension={async (Id) =>
+                      Mutate(async () => Client.SuspendUser(Id), En.userStatusUpdated)
                     }
                     {...(NfsClient === undefined ? {} : { NfsClient })}
                     Users={Snapshot.Admin.Users}
@@ -886,7 +886,7 @@ export function App({
                     Client={Client}
                     Entry={RouteEntry}
                     OnRestore={async (Id) =>
-                      Mutate(async () => Client.restoreVersion(Id), En.versionRestored)
+                      Mutate(async () => Client.RestoreVersion(Id), En.versionRestored)
                     }
                   />
                 </Suspense>
@@ -894,8 +894,8 @@ export function App({
               {Route === 'versions' && RouteEntry?.Kind !== 'file' ? (
                 <VersionsView
                   File={undefined}
-                  onRestore={async (Id) =>
-                    Mutate(async () => Client.restoreVersion(Id), En.versionRestored)
+                  OnRestore={async (Id) =>
+                    Mutate(async () => Client.RestoreVersion(Id), En.versionRestored)
                   }
                   Strings={En}
                   Versions={Snapshot.Versions}
@@ -904,11 +904,11 @@ export function App({
               {Route === 'shares' ? (
                 <SharesView
                   File={RouteEntry}
-                  onCreate={async (Input) =>
-                    Mutate(async () => Client.createShare(Input), En.shareCreated)
+                  OnCreate={async (Input) =>
+                    Mutate(async () => Client.CreateShare(Input), En.shareCreated)
                   }
-                  onRevoke={async (Id) =>
-                    Mutate(async () => Client.revokeShare(Id), En.shareRevoked)
+                  OnRevoke={async (Id) =>
+                    Mutate(async () => Client.RevokeShare(Id), En.shareRevoked)
                   }
                   Shares={Snapshot.Shares}
                   Strings={En}
@@ -916,8 +916,8 @@ export function App({
               ) : null}
               {Route === 'sessions' ? (
                 <SessionsView
-                  onRevoke={async (Id) =>
-                    Mutate(async () => Client.revokeSession(Id), En.sessionRevoked)
+                  OnRevoke={async (Id) =>
+                    Mutate(async () => Client.RevokeSession(Id), En.sessionRevoked)
                   }
                   Sessions={Snapshot.Sessions}
                   Strings={En}
@@ -936,8 +936,8 @@ export function App({
               {Route === 'privacy' ? (
                 <PrivacyView
                   Events={Snapshot.Privacy}
-                  onMarkRead={async () =>
-                    Mutate(async () => Client.markPrivacyRead(), En.privacyRead)
+                  OnMarkRead={async () =>
+                    Mutate(async () => Client.MarkPrivacyRead(), En.privacyRead)
                   }
                   Strings={En}
                 />
@@ -1076,8 +1076,8 @@ export function App({
                         const Restoring = Route === 'trash'
                         void MutateEntries(
                           Restoring
-                            ? async (EntryIds) => Client.restoreEntries(EntryIds)
-                            : async (EntryIds) => Client.trashEntries(EntryIds),
+                            ? async (EntryIds) => Client.RestoreEntries(EntryIds)
+                            : async (EntryIds) => Client.TrashEntries(EntryIds),
                           SelectedEntries,
                           Restoring ? 'restore' : 'trash',
                         )
@@ -1170,13 +1170,13 @@ export function App({
                   </div>
                   <div className='fb-content-split'>
                     <FileTable
-                      dispatchSelection={DispatchSelection}
+                      DispatchSelection={DispatchSelection}
                       Entries={Entries}
-                      onOpenActions={(Entry) => {
+                      OnOpenActions={(Entry) => {
                         DispatchSelection({ Id: Entry.Id, Type: 'replace' })
                         SetActionEntryId(Entry.Id)
                       }}
-                      onOpenEntry={(Entry) => {
+                      OnOpenEntry={(Entry) => {
                         if (Entry.Kind === 'folder' && Entry.DriveId !== undefined)
                           OpenFolder(Entry.DriveId, Entry.Id)
                         else if (
@@ -1379,8 +1379,8 @@ export function App({
                       SetActionEntryId(null)
                       void MutateEntries(
                         ActionEntry.Trashed
-                          ? async (EntryIds) => Client.restoreEntries(EntryIds)
-                          : async (EntryIds) => Client.trashEntries(EntryIds),
+                          ? async (EntryIds) => Client.RestoreEntries(EntryIds)
+                          : async (EntryIds) => Client.TrashEntries(EntryIds),
                         [ActionEntry],
                         ActionEntry.Trashed ? 'restore' : 'trash',
                       )

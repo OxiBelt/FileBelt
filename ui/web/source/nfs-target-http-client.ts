@@ -30,10 +30,10 @@ interface MutationHeaders {
 type SessionResponse = components['schemas']['Session']
 
 export interface NfsTargetClient {
-  approveProposal(ProposalId: string, ExpectedGeneration: number): Promise<void>
-  declineProposal(ProposalId: string, ExpectedGeneration: number): Promise<void>
-  getOverview(Signal?: Readonly<AbortSignal>): Promise<NfsTargetOverview>
-  revokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void>
+  ApproveProposal(ProposalId: string, ExpectedGeneration: number): Promise<void>
+  DeclineProposal(ProposalId: string, ExpectedGeneration: number): Promise<void>
+  GetOverview(Signal?: Readonly<AbortSignal>): Promise<NfsTargetOverview>
+  RevokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void>
 }
 
 /** Same-origin client for the target user's exact NFS mapping consent. */
@@ -54,7 +54,7 @@ export class HttpNfsTargetClient implements NfsTargetClient {
     })
   }
 
-  async getOverview(Signal?: Readonly<AbortSignal>): Promise<NfsTargetOverview> {
+  async GetOverview(Signal?: Readonly<AbortSignal>): Promise<NfsTargetOverview> {
     const Result = await this.#Api.GET(
       '/api/v1/mounts/nfs',
       Signal === undefined ? {} : { signal: Signal },
@@ -62,29 +62,29 @@ export class HttpNfsTargetClient implements NfsTargetClient {
     return RequireData<NfsTargetOverview>(Result)
   }
 
-  async approveProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
+  async ApproveProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
     RequireData(
       await this.#Api.POST('/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/approval', {
         body: { expected_generation: ExpectedGeneration },
-        params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
+        params: { header: await this.#MutationHeaders(), path: { proposal_id: ProposalId } },
       }),
     )
   }
 
-  async declineProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
+  async DeclineProposal(ProposalId: string, ExpectedGeneration: number): Promise<void> {
     RequireSuccess(
       await this.#Api.POST('/api/v1/mounts/nfs/mapping-proposals/{proposal_id}/decline', {
         body: { expected_generation: ExpectedGeneration },
-        params: { header: await this.#mutationHeaders(), path: { proposal_id: ProposalId } },
+        params: { header: await this.#MutationHeaders(), path: { proposal_id: ProposalId } },
       }),
     )
   }
 
-  async revokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void> {
+  async RevokeMapping(CredentialId: string, ExpectedGeneration: number): Promise<void> {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/mounts/nfs/mappings/{credential_id}', {
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { credential_id: CredentialId },
           query: { expected_generation: ExpectedGeneration },
         },
@@ -92,7 +92,7 @@ export class HttpNfsTargetClient implements NfsTargetClient {
     )
   }
 
-  async #mutationHeaders(): Promise<MutationHeaders> {
+  async #MutationHeaders(): Promise<MutationHeaders> {
     if (this.#CsrfToken === null) {
       const Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
       this.#CsrfToken = Session.csrf_token

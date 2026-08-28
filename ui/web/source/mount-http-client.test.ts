@@ -104,7 +104,7 @@ describe('HttpMountSettingsClient', () => {
   it('creates a scoped credential with CSRF protection and keeps secrets out of the URL', async () => {
     const Server = new ContractServer()
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
-    const Created = await Client.createCredential({
+    const Created = await Client.CreateCredential({
       allowed_drive_ids: [DriveId],
       bound_device_id: null,
       expires_at: '2026-08-15T10:00:00Z',
@@ -135,7 +135,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.createCredential({
+      Client.CreateCredential({
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: '2026-08-15T10:00:00Z',
@@ -153,7 +153,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.createCredential({
+      Client.CreateCredential({
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: '2026-08-15T10:00:00Z',
@@ -172,7 +172,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.createCredential({
+      Client.CreateCredential({
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: '2026-08-15T10:00:00Z',
@@ -191,7 +191,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.createCredential({
+      Client.CreateCredential({
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: '2026-08-15T10:00:00Z',
@@ -209,7 +209,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.createCredential({
+      Client.CreateCredential({
         allowed_drive_ids: [DriveId],
         bound_device_id: null,
         expires_at: '2026-08-15T10:00:00Z',
@@ -226,7 +226,7 @@ describe('HttpMountSettingsClient', () => {
     const Server = new ContractServer()
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.revokeCredential(CredentialId)).resolves.toBeUndefined()
+    await expect(Client.RevokeCredential(CredentialId)).resolves.toBeUndefined()
     const RequestValue = Server.Requests.at(-1)
     expect(RequestValue?.method).toBe('DELETE')
     expect(RequestValue?.url).toBe(
@@ -238,7 +238,7 @@ describe('HttpMountSettingsClient', () => {
     const Server = new ContractServer()
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.prepareCredentialOperation()).resolves.toEqual({
+    await expect(Client.PrepareCredentialOperation()).resolves.toEqual({
       Created: true,
       Operation: {
         expires_at: '2026-08-08T10:02:00Z',
@@ -256,7 +256,7 @@ describe('HttpMountSettingsClient', () => {
     Server.ReusedOperation = true
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
-    await expect(Client.prepareCredentialOperation()).resolves.toMatchObject({ Created: false })
+    await expect(Client.PrepareCredentialOperation()).resolves.toMatchObject({ Created: false })
   })
 
   it('recovers the exact operation tuple through the dedicated route', async () => {
@@ -264,7 +264,7 @@ describe('HttpMountSettingsClient', () => {
     const Client = new HttpMountSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
     await expect(
-      Client.cancelCredentialOperation(CredentialId, OperationGeneration),
+      Client.CancelCredentialOperation(CredentialId, OperationGeneration),
     ).resolves.toBeUndefined()
     const RequestValue = Server.Requests.at(-1)
     expect(RequestValue?.method).toBe('DELETE')

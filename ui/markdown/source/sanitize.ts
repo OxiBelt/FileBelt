@@ -10,6 +10,7 @@ export interface GeneratedMarkupSanitizer {
 }
 
 export interface DomPurifyLike {
+  // oxlint-disable-next-line filebelt/pascal-case -- DOMPurify exposes this exact sanitizer method.
   sanitize(DirtyMarkup: string, Options: Readonly<Record<string, unknown>>): string
 }
 

@@ -246,7 +246,7 @@ class ContractServer {
         finalize: ByteGrant('POST', `/io/v1/uploads/${UploadId}/finalize`, 'finalize-secret'),
         next_cursor: null,
         parts: [ByteGrant('PUT', `/io/v1/uploads/${UploadId}/parts/0`, 'part-secret')],
-        upload: UploadAllocation(),
+        Upload: UploadAllocation(),
       })
     }
     if (Path === `/io/v1/uploads/${UploadId}/parts/0` && HttpRequest.method === 'PUT') {
@@ -303,9 +303,9 @@ describe('HttpFileBeltClient', () => {
     const NestedDirectory = DirectoryNode(FirstNodeId, 'Nested')
     const Server = new ContractServer([NestedDirectory])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace(undefined, { DriveId, Kind: 'folder', NodeId: null })
+    await Client.GetWorkspace(undefined, { DriveId, Kind: 'folder', NodeId: null })
 
-    await Client.upload([{ Data: new Blob(['data']), Name: 'nested.txt', Size: 4 }], {
+    await Client.Upload([{ Data: new Blob(['data']), Name: 'nested.txt', Size: 4 }], {
       DriveId,
       ParentId: FirstNodeId,
     })
@@ -322,7 +322,7 @@ describe('HttpFileBeltClient', () => {
     const Server = new ContractServer([NestedDirectory])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
 
-    const Workspace = await Client.getWorkspace(undefined, {
+    const Workspace = await Client.GetWorkspace(undefined, {
       DriveId,
       Kind: 'folder',
       NodeId: null,
@@ -347,13 +347,13 @@ describe('HttpFileBeltClient', () => {
     const Server = new ContractServer([Node(FirstNodeId, 'File one.txt')])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
 
-    await Client.getWorkspace()
-    await Client.upload([{ Data: new Blob(['data']), Name: 'upload.txt', Size: 4 }])
-    expect(await (await Client.download(FirstNodeId)).text()).toBe('data')
+    await Client.GetWorkspace()
+    await Client.Upload([{ Data: new Blob(['data']), Name: 'upload.txt', Size: 4 }])
+    expect(await (await Client.Download(FirstNodeId)).text()).toBe('data')
     expect(
-      await (await Client.readMarkdown(FirstNodeId, '00000000-0000-4000-8000-000000000012')).text(),
+      await (await Client.ReadMarkdown(FirstNodeId, '00000000-0000-4000-8000-000000000012')).text(),
     ).toBe('data')
-    await Client.saveMarkdown({
+    await Client.SaveMarkdown({
       Contents: new Blob(['# replacement'], { type: 'text/markdown' }),
       EntryId: FirstNodeId,
       ExpectedHeadVersionId: '00000000-0000-4000-8000-000000000012',
@@ -397,7 +397,7 @@ describe('HttpFileBeltClient', () => {
       Node(SecondNodeId, 'File two.txt'),
     ])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
-    const Workspace = await Client.getWorkspace()
+    const Workspace = await Client.GetWorkspace()
     const First = Workspace.Shares.find(({ ResourceName }) => ResourceName === 'File one.txt')
     const Second = Workspace.Shares.find(({ ResourceName }) => ResourceName === 'File two.txt')
 
@@ -409,8 +409,8 @@ describe('HttpFileBeltClient', () => {
     expect(First?.Id).not.toBe(PrincipalId)
     if (First === undefined || Second === undefined) return
 
-    await Client.revokeShare(First.Id)
-    await Client.revokeShare(Second.Id)
+    await Client.RevokeShare(First.Id)
+    await Client.RevokeShare(Second.Id)
 
     expect(RequestPaths(Server.Requests, 'DELETE')).toEqual([
       `/api/v1/drives/${DriveId}/nodes/${FirstNodeId}/shares/${PrincipalId}`,
@@ -443,11 +443,11 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(HttpRequest)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
+    await Client.GetWorkspace()
 
     for (const Mutate of [
-      async (EntryIds: readonly string[]) => Client.trashEntries(EntryIds),
-      async (EntryIds: readonly string[]) => Client.restoreEntries(EntryIds),
+      async (EntryIds: readonly string[]) => Client.TrashEntries(EntryIds),
+      async (EntryIds: readonly string[]) => Client.RestoreEntries(EntryIds),
     ]) {
       const Outcomes = await Mutate([FirstNodeId, SecondNodeId])
       expect(Outcomes).toEqual([
@@ -480,7 +480,7 @@ describe('HttpFileBeltClient', () => {
       )
     const Client = new HttpFileBeltClient(FetchImplementation, 'https://filebelt.localhost')
 
-    await expect(Client.getWorkspace()).rejects.toBeInstanceOf(AuthenticationRequiredError)
+    await expect(Client.GetWorkspace()).rejects.toBeInstanceOf(AuthenticationRequiredError)
   })
 
   it('keeps the last complete routing state when a refresh fails late', async () => {
@@ -516,17 +516,17 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(HttpRequest)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    const Initial = await Client.getWorkspace()
+    const Initial = await Client.GetWorkspace()
     const InitialShare = Initial.Shares[0]
     expect(InitialShare).toBeDefined()
     if (InitialShare === undefined) return
 
     FailRefresh = true
-    await expect(Client.getWorkspace()).rejects.toThrow('Refresh failed')
-    expect(await (await Client.download(FirstNodeId)).text()).toBe('data')
-    await Client.revokeShare(InitialShare.Id)
-    await Client.restoreVersion(FirstVersionId)
-    await Client.upload([{ Data: new Blob(['data']), Name: 'after-failure.txt', Size: 4 }])
+    await expect(Client.GetWorkspace()).rejects.toThrow('Refresh failed')
+    expect(await (await Client.Download(FirstNodeId)).text()).toBe('data')
+    await Client.RevokeShare(InitialShare.Id)
+    await Client.RestoreVersion(FirstVersionId)
+    await Client.Upload([{ Data: new Blob(['data']), Name: 'after-failure.txt', Size: 4 }])
 
     const Revocation = FindRequest(
       Requests,
@@ -573,18 +573,18 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(HttpRequest)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    const Initial = await Client.getWorkspace()
+    const Initial = await Client.GetWorkspace()
     const InitialShare = Initial.Shares[0]
     expect(InitialShare).toBeDefined()
     if (InitialShare === undefined) return
 
     AbortRefresh = true
     const Controller = new AbortController()
-    const Refresh = Client.getWorkspace(Controller.signal)
+    const Refresh = Client.GetWorkspace(Controller.signal)
     await AbortRequestReached
     Controller.abort()
     await expect(Refresh).rejects.toMatchObject({ name: 'AbortError' })
-    await Client.revokeShare(InitialShare.Id)
+    await Client.RevokeShare(InitialShare.Id)
   })
 
   it('prevents a superseded refresh from replacing newer routing state', async () => {
@@ -611,25 +611,25 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(HttpRequest)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    const FirstRefresh = Client.getWorkspace()
+    const FirstRefresh = Client.GetWorkspace()
     await FirstRefreshReached
-    const Newer = await Client.getWorkspace()
+    const Newer = await Client.GetWorkspace()
     const NewerShare = Newer.Shares[0]
     ReleaseFirstRefresh()
     expect(NewerShare).toBeDefined()
     await expect(FirstRefresh).rejects.toMatchObject({ name: 'AbortError' })
     if (NewerShare === undefined) return
-    await Client.revokeShare(NewerShare.Id)
+    await Client.RevokeShare(NewerShare.Id)
   })
 
   it('binds an Office conversion to an exact source version and one new sibling upload', async () => {
     const Source = Node(FirstNodeId, 'Source.docx')
     const Server = new ContractServer([Source])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
+    await Client.GetWorkspace()
     if (Source.head_version_id === null) return
 
-    await Client.importMarkdown({
+    await Client.ImportMarkdown({
       Contents: new Blob(['# hi'], { type: 'text/markdown' }),
       EntryId: FirstNodeId,
       SourceVersionId: Source.head_version_id,
@@ -664,30 +664,30 @@ describe('HttpFileBeltClient', () => {
   it('uses generated text preferences, history, comparison, and content-class routes', async () => {
     const Server = new ContractServer([Node(FirstNodeId, 'File one.txt')])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
-    const Preferences = await Client.getTextPreferences()
+    await Client.GetWorkspace()
+    const Preferences = await Client.GetTextPreferences()
     expect(Preferences).toMatchObject({
       Etag: '"preferences-5"',
       Value: { EditLimitBytes: 2_097_152, InlineLimitBytes: 8_388_608 },
     })
-    await Client.updateTextPreferences(
+    await Client.UpdateTextPreferences(
       { EditLimitBytes: 4_194_304, InlineLimitBytes: 8_388_608 },
       Preferences.Etag,
     )
-    const History = await Client.listTextVersions(FirstNodeId, null)
+    const History = await Client.ListTextVersions(FirstNodeId, null)
     expect(History.Items).toHaveLength(2)
     expect(History.Items[0]).toMatchObject({
       GitCommitOid: 'a'.repeat(64),
       ObservedContentClass: 'text',
       RevisionBackend: 'git_sha256',
     })
-    const Comparison = await Client.compareTextVersions(
+    const Comparison = await Client.CompareTextVersions(
       FirstNodeId,
       FirstVersionId,
       SecondVersionId,
     )
     expect(Comparison.Hunks[0]?.Lines[0]).toEqual({ Kind: 'context', Text: 'same' })
-    await Client.setNodeContentClass(FirstNodeId, 'binary')
+    await Client.SetNodeContentClass(FirstNodeId, 'binary')
     const PreferencePatch = FindRequest(Server.Requests, 'PATCH', '/api/v1/preferences/text')
     expect(PreferencePatch.headers.get('if-match')).toBe('"preferences-5"')
     const PolicyPatch = FindRequest(
@@ -702,9 +702,9 @@ describe('HttpFileBeltClient', () => {
   it('round-trips ACL provenance and fences exact replacement with the GET ETag', async () => {
     const Server = new ContractServer([Node(FirstNodeId, 'File one.txt')])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
+    await Client.GetWorkspace()
 
-    const Current = await Client.getAcl(FirstNodeId)
+    const Current = await Client.GetAcl(FirstNodeId)
     expect(Current).toMatchObject({
       Etag: '"acl-7"',
       Value: {
@@ -719,7 +719,7 @@ describe('HttpFileBeltClient', () => {
         ],
       },
     })
-    await Client.replaceAcl(
+    await Client.ReplaceAcl(
       FirstNodeId,
       Current.Etag,
       { GroupId, Kind: 'group', VerifiedEmail: null },
@@ -751,10 +751,10 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(HttpRequest)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
+    await Client.GetWorkspace()
 
     await expect(
-      Client.replaceAcl(
+      Client.ReplaceAcl(
         FirstNodeId,
         '"acl-6"',
         { GroupId: null, Kind: 'user', VerifiedEmail: 'avery@example.test' },
@@ -786,9 +786,9 @@ describe('HttpFileBeltClient', () => {
       return Server.fetch(RequestValue)
     }
     const Client = new HttpFileBeltClient(Fetch, 'https://filebelt.localhost')
-    await Client.getWorkspace()
+    await Client.GetWorkspace()
     await expect(
-      Client.compareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId),
+      Client.CompareTextVersions(FirstNodeId, FirstVersionId, SecondVersionId),
     ).rejects.toThrow('Text revision comparison is temporarily at capacity')
   })
 
@@ -796,7 +796,7 @@ describe('HttpFileBeltClient', () => {
     const Server = new ContractServer([SymlinkNode()])
     const Client = new HttpFileBeltClient(Server.fetch, 'https://filebelt.localhost')
 
-    const Workspace = await Client.getWorkspace()
+    const Workspace = await Client.GetWorkspace()
     expect(Workspace.Entries.find(({ Id }) => Id === SymlinkNodeId)).toMatchObject({
       HeadVersionId: null,
       Kind: 'symlink',
@@ -819,7 +819,7 @@ describe('HttpFileBeltClient', () => {
           `/api/v1/drives/${DriveId}/nodes/${SymlinkNodeId}/versions`,
       ),
     ).toBe(false)
-    await expect(Client.download(SymlinkNodeId)).rejects.toThrow('not a file')
+    await expect(Client.Download(SymlinkNodeId)).rejects.toThrow('not a file')
     expect(
       Server.Requests.some(
         (Request) =>

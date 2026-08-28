@@ -18,38 +18,38 @@ const EmptySnapshot: McpSettingsSnapshot = {
 
 const Client: McpSettingsClient = {
   // oxlint-disable typescript/require-await -- The fake implements an asynchronous client contract without real I/O.
-  async approveAndInvoke() {},
-  async cancelInvocation() {},
-  async assignTemplate() {},
-  async changeRegistrationState() {},
-  async createBlockRule() {},
-  async createInvocationIntent() {
+  async ApproveAndInvoke() {},
+  async CancelInvocation() {},
+  async AssignTemplate() {},
+  async ChangeRegistrationState() {},
+  async CreateBlockRule() {},
+  async CreateInvocationIntent() {
     throw new Error('not used')
   },
-  async createRegistration() {},
-  async createServiceIdentity() {},
-  async createServiceInvocationGrant() {},
-  async createTemplate() {},
-  async deleteRegistration() {},
-  async discoverCapabilities() {
+  async CreateRegistration() {},
+  async CreateServiceIdentity() {},
+  async CreateServiceInvocationGrant() {},
+  async CreateTemplate() {},
+  async DeleteRegistration() {},
+  async DiscoverCapabilities() {
     throw new Error('not used')
   },
-  async exportRegistration() {
+  async ExportRegistration() {
     return '{}'
   },
-  async getCapabilityReview() {
+  async GetCapabilityReview() {
     return null
   },
-  async getSnapshot() {
+  async GetSnapshot() {
     return EmptySnapshot
   },
-  async importRegistration() {},
-  async putCapabilityReview() {},
-  async putCredential() {},
-  async startOauth() {
+  async ImportRegistration() {},
+  async PutCapabilityReview() {},
+  async PutCredential() {},
+  async StartOauth() {
     return 'https://issuer.example.test/authorize'
   },
-  async testRegistration() {
+  async TestRegistration() {
     return true
   },
   // oxlint-enable typescript/require-await

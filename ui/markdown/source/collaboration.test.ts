@@ -106,10 +106,12 @@ class FakeWebSocket extends EventTarget {
     })
   }
 
+  // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
   send(Payload: ArrayBuffer): void {
     this.#OnSend(new Uint8Array(Payload))
   }
 
+  // oxlint-disable-next-line filebelt/pascal-case -- WebSocket exposes this exact platform method.
   close(Code?: number): void {
     this.CloseCodes.push(Code)
     this.readyState = 3

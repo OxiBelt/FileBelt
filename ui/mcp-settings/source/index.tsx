@@ -128,14 +128,12 @@ function InvocationResult({
 
 function AddRegistrationForm({
   Busy,
-  onCreate: OnCreate,
-  onImport: OnImport,
+  OnCreate,
+  OnImport,
 }: Readonly<{
   Busy: boolean
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onCreate: (DisplayName: string, EndpointUri: string, TrustProfile: string) => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onImport: (Document: string) => Promise<void>
+  OnCreate: (DisplayName: string, EndpointUri: string, TrustProfile: string) => Promise<void>
+  OnImport: (Document: string) => Promise<void>
 }>): ReactNode {
   const [DisplayName, SetDisplayName] = useState('')
   const [EndpointUri, SetEndpointUri] = useState('')
@@ -222,15 +220,13 @@ function AddRegistrationForm({
 function CredentialForm({
   Busy,
   Registration,
-  onOauth: OnOauth,
-  onSave: OnSave,
+  OnOauth,
+  OnSave,
 }: Readonly<{
   Busy: boolean
   Registration: Readonly<McpRegistrationView>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onOauth: () => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onSave: (Kind: 'api_key' | 'bearer', Secret: string) => Promise<void>
+  OnOauth: () => Promise<void>
+  OnSave: (Kind: 'api_key' | 'bearer', Secret: string) => Promise<void>
 }>): ReactNode {
   const [Kind, SetKind] = useState<'api_key' | 'bearer'>('bearer')
   const [Secret, SetSecret] = useState('')
@@ -293,16 +289,15 @@ function CapabilityReview({
   Busy,
   Registration,
   Review,
-  onDiscover: OnDiscover,
-  onSave: OnSave,
+  OnDiscover,
+  OnSave,
 }: Readonly<{
   Busy: boolean
   Registration: Readonly<McpRegistrationView>
   Review: Readonly<McpCapabilityReviewView> | null
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onDiscover: () => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case, typescript/prefer-readonly-parameter-types -- React callback props use onX spelling and receive an observed nested review value.
-  onSave: (Review: Readonly<McpCapabilityReviewView>) => Promise<void>
+  OnDiscover: () => Promise<void>
+  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This callback receives an observed nested review value.
+  OnSave: (Review: Readonly<McpCapabilityReviewView>) => Promise<void>
 }>): ReactNode {
   const [Decisions, SetDecisions] = useState<Readonly<Record<string, 'approved' | 'blocked'>>>({})
   useEffect(() => {
@@ -395,13 +390,12 @@ function InvocationForm({
   Busy,
   Registration,
   Review,
-  onPrepare: OnPrepare,
+  OnPrepare,
 }: Readonly<{
   Busy: boolean
   Registration: Readonly<McpRegistrationView>
   Review: Readonly<McpCapabilityReviewView> | null
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onPrepare: (Fingerprint: string, Arguments: unknown) => Promise<void>
+  OnPrepare: (Fingerprint: string, Arguments: unknown) => Promise<void>
 }>): ReactNode {
   const Approved =
     Review?.Capabilities.filter(
@@ -480,26 +474,22 @@ function InvocationForm({
 function AdminSurface({
   Busy,
   Snapshot,
-  onAssign: OnAssign,
-  onBlock: OnBlock,
-  onService: OnService,
-  onServiceGrant: OnServiceGrant,
-  onTemplate: OnTemplate,
+  OnAssign,
+  OnBlock,
+  OnService,
+  OnServiceGrant,
+  OnTemplate,
 }: Readonly<{
   Busy: boolean
   Snapshot: Readonly<McpSettingsSnapshot>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onAssign: (
+  OnAssign: (
     TemplateId: string,
     PrincipalId: string,
     PrincipalKind: 'group' | 'service' | 'user',
   ) => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onBlock: (Kind: AdminMcpBlockRuleView['Kind'], Value: string, Reason: string) => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onService: (Name: string, SpiffeUri: string) => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onServiceGrant: (
+  OnBlock: (Kind: AdminMcpBlockRuleView['Kind'], Value: string, Reason: string) => Promise<void>
+  OnService: (Name: string, SpiffeUri: string) => Promise<void>
+  OnServiceGrant: (
     ServiceId: string,
     RegistrationId: string,
     CapabilityKind: 'prompt' | 'resource' | 'tool',
@@ -508,8 +498,7 @@ function AdminSurface({
     ApplicationId: string,
     ExpiresAt: string,
   ) => Promise<void>
-  // oxlint-disable-next-line filebelt/pascal-case -- React callback props use the conventional onX public spelling.
-  onTemplate: (Name: string, Endpoint: string, Profile: string) => Promise<void>
+  OnTemplate: (Name: string, Endpoint: string, Profile: string) => Promise<void>
 }>): ReactNode {
   const [TemplateName, SetTemplateName] = useState('')
   const [TemplateEndpoint, SetTemplateEndpoint] = useState('')
@@ -847,7 +836,7 @@ export default function McpSettings({
   const Refresh = useCallback(
     async (Signal?: Readonly<AbortSignal>): Promise<void> => {
       try {
-        const Next = await Client.getSnapshot(IsTenantAdmin, Signal)
+        const Next = await Client.GetSnapshot(IsTenantAdmin, Signal)
         SetSnapshot(Next)
         SetSelectedId((Current) => Current ?? Next.Registrations[0]?.Id ?? null)
         SetError(null)
@@ -874,7 +863,7 @@ export default function McpSettings({
       return undefined
     }
     let Active = true
-    void Client.getCapabilityReview(Selected.Id)
+    void Client.GetCapabilityReview(Selected.Id)
       .then((Value) => {
         if (Active) SetReview(Value)
       })
@@ -906,7 +895,7 @@ export default function McpSettings({
     SetBusy(true)
     try {
       SetPendingInvocation(
-        await Client.createInvocationIntent({
+        await Client.CreateInvocationIntent({
           ApplicationId: 'filebelt-web',
           Arguments,
           Capability: {
@@ -930,7 +919,7 @@ export default function McpSettings({
     SetBusy(true)
     SetError(null)
     try {
-      await Client.approveAndInvoke(Prepared, (Event) => {
+      await Client.ApproveAndInvoke(Prepared, (Event) => {
         SetEvents((Current) => [...Current, Event])
       })
       await Refresh()
@@ -995,12 +984,12 @@ export default function McpSettings({
           <aside aria-label={McpEn.registrationList} className='fb-mcp-sidebar'>
             <AddRegistrationForm
               Busy={Busy}
-              onCreate={async (DisplayName, EndpointUri, TrustProfile) =>
+              OnCreate={async (DisplayName, EndpointUri, TrustProfile) =>
                 Mutate(async () =>
-                  Client.createRegistration({ DisplayName, EndpointUri, TrustProfile }),
+                  Client.CreateRegistration({ DisplayName, EndpointUri, TrustProfile }),
                 )
               }
-              onImport={async (Document) => Mutate(async () => Client.importRegistration(Document))}
+              OnImport={async (Document) => Mutate(async () => Client.ImportRegistration(Document))}
             />
             <div role='list'>
               {Snapshot.Registrations.length === 0 ? (
@@ -1059,7 +1048,7 @@ export default function McpSettings({
                   icon={<TestTube2 aria-hidden='true' />}
                   onClick={() =>
                     void Mutate(async () => {
-                      await Client.testRegistration(Selected)
+                      await Client.TestRegistration(Selected)
                     })
                   }
                 >
@@ -1073,7 +1062,7 @@ export default function McpSettings({
                   }
                   onClick={() =>
                     void Mutate(async () =>
-                      Client.changeRegistrationState(
+                      Client.ChangeRegistrationState(
                         Selected,
                         Selected.LifecycleState === 'enabled' ? 'disable' : 'enable',
                       ),
@@ -1086,7 +1075,7 @@ export default function McpSettings({
                   appearance='secondary'
                   disabled={Busy}
                   onClick={() =>
-                    void Mutate(async () => Client.changeRegistrationState(Selected, 'revoke'))
+                    void Mutate(async () => Client.ChangeRegistrationState(Selected, 'revoke'))
                   }
                 >
                   {McpEn.revoke}
@@ -1095,7 +1084,7 @@ export default function McpSettings({
                   appearance='secondary'
                   disabled={Busy}
                   onClick={() =>
-                    void Client.exportRegistration(Selected.Id)
+                    void Client.ExportRegistration(Selected.Id)
                       .then((Document) => {
                         DownloadConfiguration(Document, Selected)
                       })
@@ -1109,7 +1098,7 @@ export default function McpSettings({
                 <Button
                   appearance='secondary'
                   disabled={Busy || Selected.ManagedLocked}
-                  onClick={() => void Mutate(async () => Client.deleteRegistration(Selected))}
+                  onClick={() => void Mutate(async () => Client.DeleteRegistration(Selected))}
                 >
                   {McpEn.delete}
                 </Button>
@@ -1117,25 +1106,25 @@ export default function McpSettings({
               <CredentialForm
                 Busy={Busy}
                 key={Selected.Id}
-                onOauth={async () => {
-                  const Url = await Client.startOauth(Selected)
+                OnOauth={async () => {
+                  const Url = await Client.StartOauth(Selected)
                   window.location.assign(Url)
                 }}
-                onSave={async (Kind, Secret) =>
-                  Mutate(async () => Client.putCredential(Selected, Kind, Secret))
+                OnSave={async (Kind, Secret) =>
+                  Mutate(async () => Client.PutCredential(Selected, Kind, Secret))
                 }
                 Registration={Selected}
               />
               <CapabilityReview
                 Busy={Busy}
-                onDiscover={async () => {
-                  const Value = await Client.discoverCapabilities(Selected)
+                OnDiscover={async () => {
+                  const Value = await Client.DiscoverCapabilities(Selected)
                   SetReview(Value)
                   await Refresh()
                 }}
-                onSave={async (Value) =>
+                OnSave={async (Value) =>
                   Mutate(async () => {
-                    await Client.putCapabilityReview(Selected, Value)
+                    await Client.PutCapabilityReview(Selected, Value)
                     SetReview(Value)
                   })
                 }
@@ -1144,7 +1133,7 @@ export default function McpSettings({
               />
               <InvocationForm
                 Busy={Busy}
-                onPrepare={PrepareInvocation}
+                OnPrepare={PrepareInvocation}
                 Registration={Selected}
                 Review={Review}
               />
@@ -1227,7 +1216,7 @@ export default function McpSettings({
                   <Button
                     appearance='secondary'
                     onClick={() =>
-                      void Client.cancelInvocation(ActiveInvocationId).catch((Cause: unknown) => {
+                      void Client.CancelInvocation(ActiveInvocationId).catch((Cause: unknown) => {
                         SetError(Cause instanceof Error ? Cause.message : McpEn.error)
                       })
                     }
@@ -1284,19 +1273,19 @@ export default function McpSettings({
       {!Loading && Tab === 'admin' && IsTenantAdmin ? (
         <AdminSurface
           Busy={Busy}
-          onAssign={async (TemplateId, PrincipalId, PrincipalKind) => {
+          OnAssign={async (TemplateId, PrincipalId, PrincipalKind) => {
             const Template = Snapshot.Templates.find(({ Id }) => Id === TemplateId)
             return Template === undefined
               ? Promise.reject(new Error(McpEn.managedTemplateUnavailable))
-              : Mutate(async () => Client.assignTemplate(Template, PrincipalId, PrincipalKind))
+              : Mutate(async () => Client.AssignTemplate(Template, PrincipalId, PrincipalKind))
           }}
-          onBlock={async (Kind, Value, Reason) =>
-            Mutate(async () => Client.createBlockRule(Kind, Value, Reason))
+          OnBlock={async (Kind, Value, Reason) =>
+            Mutate(async () => Client.CreateBlockRule(Kind, Value, Reason))
           }
-          onService={async (Name, SpiffeUri) =>
-            Mutate(async () => Client.createServiceIdentity(Name, SpiffeUri))
+          OnService={async (Name, SpiffeUri) =>
+            Mutate(async () => Client.CreateServiceIdentity(Name, SpiffeUri))
           }
-          onServiceGrant={async (
+          OnServiceGrant={async (
             ServiceId,
             RegistrationId,
             CapabilityKind,
@@ -1309,7 +1298,7 @@ export default function McpSettings({
             return Service === undefined
               ? Promise.reject(new Error(McpEn.serviceUnavailable))
               : Mutate(async () =>
-                  Client.createServiceInvocationGrant(
+                  Client.CreateServiceInvocationGrant(
                     Service,
                     RegistrationId,
                     CapabilityKind,
@@ -1320,8 +1309,8 @@ export default function McpSettings({
                   ),
                 )
           }}
-          onTemplate={async (Name, Endpoint, Profile) =>
-            Mutate(async () => Client.createTemplate(Name, Endpoint, Profile))
+          OnTemplate={async (Name, Endpoint, Profile) =>
+            Mutate(async () => Client.CreateTemplate(Name, Endpoint, Profile))
           }
           Snapshot={Snapshot}
         />

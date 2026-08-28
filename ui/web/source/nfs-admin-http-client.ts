@@ -21,7 +21,7 @@ type NfsOverviewResponse = components['schemas']['NfsAdminOverview']
 type NfsConflictResponse = components['schemas']['NfsWriteConflict']
 type NfsMappingProposalResponse = components['schemas']['NfsMappingProposal']
 type NfsQuarantinedMappingResponse = components['schemas']['NfsQuarantinedMapping']
-type NfsConflictCopyInput = Parameters<NfsAdminClient['copyConflict']>[1]
+type NfsConflictCopyInput = Parameters<NfsAdminClient['CopyConflict']>[1]
 
 export class NfsReauthenticationRequiredError extends Error {
   constructor() {
@@ -69,7 +69,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     })
   }
 
-  async getOverview(Signal?: Readonly<AbortSignal>): Promise<NfsAdminSnapshot> {
+  async GetOverview(Signal?: Readonly<AbortSignal>): Promise<NfsAdminSnapshot> {
     const [OverviewResult, ConflictsResult, ProposalsResult, QuarantinedResult] = await Promise.all(
       [
         this.#Api.GET('/api/v1/admin/mounts/nfs', SignalInit(Signal)),
@@ -86,7 +86,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     )
   }
 
-  async transitionFeature(
+  async TransitionFeature(
     ExpectedGeneration: number,
     TargetState: NfsFeatureState,
     ConfirmTenant: string,
@@ -98,24 +98,24 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           expected_generation: ExpectedGeneration,
           target_state: TargetState,
         },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async registerExport(
+  async RegisterExport(
     Input: Readonly<NfsExportRegistration>,
     ConfirmTenant: string,
   ): Promise<void> {
     RequireData(
       await this.#Api.POST('/api/v1/admin/mounts/nfs/exports', {
         body: { confirm_tenant: ConfirmTenant, drive_id: Input.DriveId, export_id: Input.ExportId },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async transitionExport(
+  async TransitionExport(
     DriveId: string,
     ExpectedGeneration: number,
     TargetState: NfsExportState,
@@ -129,14 +129,14 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           target_state: TargetState,
         },
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { drive_id: DriveId },
         },
       }),
     )
   }
 
-  async registerPosixGroup(
+  async RegisterPosixGroup(
     Input: Readonly<NfsPosixGroupRegistration>,
     ConfirmTenant: string,
   ): Promise<void> {
@@ -148,13 +148,13 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           posix_name: Input.PosixName,
           projected_gid: Input.ProjectedGid,
         },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
   // oxlint-disable-next-line typescript/no-deprecated -- The admin interface intentionally retains this compatibility shape for proposal creation.
-  async proposeMapping(Input: Readonly<NfsMappingUpsert>, ConfirmTenant: string): Promise<void> {
+  async ProposeMapping(Input: Readonly<NfsMappingUpsert>, ConfirmTenant: string): Promise<void> {
     RequireData(
       await this.#Api.POST('/api/v1/admin/mounts/nfs/mapping-proposals', {
         body: {
@@ -165,12 +165,12 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           projected_gid: Input.ProjectedGid,
           projected_uid: Input.ProjectedUid,
         },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async cancelProposal(
+  async CancelProposal(
     ProposalId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
@@ -178,7 +178,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/admin/mounts/nfs/mapping-proposals/{proposal_id}', {
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { proposal_id: ProposalId },
           query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
         },
@@ -186,7 +186,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     )
   }
 
-  async attenuateMappingScope(
+  async AttenuateMappingScope(
     CredentialId: string,
     AllowedDriveIds: readonly string[],
     ExpectedGeneration: number,
@@ -200,14 +200,14 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           expected_generation: ExpectedGeneration,
         },
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { credential_id: CredentialId },
         },
       }),
     )
   }
 
-  async revokeMapping(
+  async RevokeMapping(
     CredentialId: string,
     ExpectedGeneration: number,
     ConfirmTenant: string,
@@ -215,7 +215,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/admin/mounts/nfs/mappings/{credential_id}', {
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { credential_id: CredentialId },
           query: { confirm_tenant: ConfirmTenant, expected_generation: ExpectedGeneration },
         },
@@ -223,7 +223,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     )
   }
 
-  async copyConflict(
+  async CopyConflict(
     ConflictId: string,
     Input: Readonly<NfsConflictCopyInput>,
     ConfirmTenant: string,
@@ -238,18 +238,18 @@ export class HttpNfsAdminClient implements NfsAdminClient {
           parent_id: Input.ParentId,
         },
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { conflict_id: ConflictId },
         },
       }),
     )
   }
 
-  async discardConflict(ConflictId: string, ConfirmTenant: string): Promise<void> {
+  async DiscardConflict(ConflictId: string, ConfirmTenant: string): Promise<void> {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/admin/mounts/nfs/conflicts/{conflict_id}', {
         params: {
-          header: await this.#mutationHeaders(),
+          header: await this.#MutationHeaders(),
           path: { conflict_id: ConflictId },
           query: { confirm_tenant: ConfirmTenant },
         },
@@ -257,7 +257,7 @@ export class HttpNfsAdminClient implements NfsAdminClient {
     )
   }
 
-  async #mutationHeaders(): Promise<MutationHeaders> {
+  async #MutationHeaders(): Promise<MutationHeaders> {
     if (this.#CsrfToken === null) {
       const Session = RequireData<SessionResponse>(await this.#Api.GET('/api/v1/session'))
       this.#CsrfToken = Session.csrf_token

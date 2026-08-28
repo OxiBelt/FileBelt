@@ -79,10 +79,10 @@ describe('mount credential recovery', () => {
     await expect(
       CreateCredentialWithRecovery(
         {
-          cancelCredentialOperation: async () => {
+          CancelCredentialOperation: async () => {
             throw new Error('cancellation must not run after success')
           },
-          createCredential: async (Input) => {
+          CreateCredential: async (Input) => {
             Calls.push(`create:${Input.operation_id}:${Input.operation_generation}`)
             return {
               credential_id: Input.operation_id,
@@ -92,7 +92,7 @@ describe('mount credential recovery', () => {
               username: 'fb-example',
             }
           },
-          prepareCredentialOperation: async () => {
+          PrepareCredentialOperation: async () => {
             Calls.push('prepare')
             return { Created: true, Operation: CredentialOperation }
           },
@@ -121,14 +121,14 @@ describe('mount credential recovery', () => {
     await expect(
       CreateCredentialWithRecovery(
         {
-          cancelCredentialOperation: async (OperationId, Generation) => {
+          CancelCredentialOperation: async (OperationId, Generation) => {
             Calls.push(`cancel:${OperationId}:${Generation}`)
           },
-          createCredential: async () => {
+          CreateCredential: async () => {
             Calls.push('create')
             throw Rejection
           },
-          prepareCredentialOperation: async () => {
+          PrepareCredentialOperation: async () => {
             Calls.push('prepare')
             return { Created: false, Operation: CredentialOperation }
           },
@@ -149,11 +149,11 @@ describe('mount credential recovery', () => {
     let CredentialActive = false
     let CancellationCount = 0
     const SharedClient = {
-      cancelCredentialOperation: async () => {
+      CancelCredentialOperation: async () => {
         CancellationCount += 1
         CredentialActive = false
       },
-      createCredential: async (Input: Parameters<MountSettingsClient['createCredential']>[0]) => {
+      CreateCredential: async (Input: Parameters<MountSettingsClient['CreateCredential']>[0]) => {
         if (CredentialActive) throw new Error('credential operation is stale')
         CredentialActive = true
         return {
@@ -164,7 +164,7 @@ describe('mount credential recovery', () => {
           username: 'fb-example',
         }
       },
-      prepareCredentialOperation: async () => ({
+      PrepareCredentialOperation: async () => ({
         Created: false,
         Operation: CredentialOperation,
       }),
@@ -195,13 +195,13 @@ describe('mount credential recovery', () => {
     await expect(
       CreateCredentialWithRecovery(
         {
-          cancelCredentialOperation: async () => {
+          CancelCredentialOperation: async () => {
             throw new TypeError('connection interrupted')
           },
-          createCredential: async () => {
+          CreateCredential: async () => {
             throw UnknownCreate
           },
-          prepareCredentialOperation: async () => ({
+          PrepareCredentialOperation: async () => ({
             Created: true,
             Operation: CredentialOperation,
           }),

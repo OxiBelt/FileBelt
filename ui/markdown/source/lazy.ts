@@ -11,7 +11,9 @@ export interface MermaidRenderBudget {
 
 // Mermaid's dynamic module, render result, and initialize options retain its public key spellings.
 interface MermaidRenderer {
+  // oxlint-disable-next-line filebelt/pascal-case -- Mermaid exposes this exact dynamic-module method.
   initialize(Options: MermaidSecurityOptions): void
+  // oxlint-disable-next-line filebelt/pascal-case -- Mermaid exposes this exact dynamic-module method.
   render(Id: string, Source: string): Promise<Record<'svg', string>>
 }
 
@@ -21,7 +23,7 @@ export type MermaidSecurityOptions = Record<'flowchart', Record<'htmlLabels', fa
   Record<'startOnLoad', false>
 
 interface KaTeXRenderer {
-  // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This preserves KaTeX's public dynamic-module contract.
+  // oxlint-disable-next-line filebelt/pascal-case, typescript/prefer-readonly-parameter-types -- This preserves KaTeX's exact public dynamic-module contract.
   renderToString(Expression: string, Options: KaTeXRenderOptions): string
 }
 
@@ -72,6 +74,7 @@ type OfficeParserOptions = Record<'generatorConfig', OfficeGeneratorConfig> &
   Record<'parseConfig', OfficeParseConfig>
 
 export interface OfficeImportModule {
+  // oxlint-disable-next-line filebelt/pascal-case -- officeparser exposes this exact dynamic-module method.
   convert(
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- This preserves officeparser's public dynamic-module contract.
     Contents: Uint8Array,

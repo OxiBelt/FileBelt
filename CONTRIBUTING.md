@@ -76,19 +76,21 @@ license, graph, formatting, lint, and test policy and must remain outside the
 root workspace.
 
 Hand-authored JavaScript and TypeScript use two-space indentation,
-formatter-compatible preferred single quotes (including JSX attributes), and omit safely
-removable semicolons. Hand-authored TypeScript uses PascalCase for
-variable-like declarations, parameter properties, class properties, type
-properties, and type-like declarations. Methods, accessors, imports, and
-object-literal keys are outside the naming rule. React custom hooks retain the
-required `useX` spelling through a filtered exception.
+formatter-compatible preferred single quotes (including JSX attributes), and
+omit safely removable semicolons. Hand-authored TypeScript uses PascalCase for
+variable-like declarations, parameter properties, class and type properties,
+methods, accessors, signatures, and type-like declarations. Constructors,
+computed members, imports, and object-literal keys are outside the naming rule.
+React custom hooks retain the required `useX` spelling through a filtered
+exception; custom React callback props use PascalCase.
 
 Names fixed by platform APIs, wire formats, persisted browser formats, or
 third-party contracts retain their external spelling only at the relevant
 boundary. Alias their local bindings to PascalCase and use a narrowly scoped,
 rationale-bearing `filebelt/pascal-case` disable only when the declaration
-itself must keep the external name. Run `pnpm format:check` and `pnpm lint`; warnings fail
-the lint check. Use `pnpm format` to apply the repository formatter. Files
+itself must keep the external name. Run `pnpm format:check` and `pnpm lint`;
+warnings fail the lint check. Use `pnpm format` to apply the repository
+formatter. Files
 registered as generated outputs retain semantic lint, typecheck, build, and
 generation-drift coverage but are exempt from hand-authored naming and layout
 rules. Never edit generated output directly.

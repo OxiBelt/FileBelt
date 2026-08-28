@@ -77,11 +77,11 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     })
   }
 
-  async getSnapshot(
+  async GetSnapshot(
     IsTenantAdmin: boolean,
     Signal?: Readonly<AbortSignal>,
   ): Promise<McpSettingsSnapshot> {
-    await this.#ensureSession(Signal)
+    await this.#EnsureSession(Signal)
     const SignalInit = Signal === undefined ? {} : { signal: Signal }
     const [Registrations, Activity, Templates, Services, BlockRules] = await Promise.all([
       this.#Api.GET('/api/v1/mcp/registrations', { params: { query: PageQuery }, ...SignalInit }),
@@ -114,7 +114,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     }
   }
 
-  async createRegistration(Input: Readonly<CreateMcpRegistrationInput>): Promise<void> {
+  async CreateRegistration(Input: Readonly<CreateMcpRegistrationInput>): Promise<void> {
     RequireSuccess(
       await this.#Api.POST('/api/v1/mcp/registrations', {
         body: {
@@ -130,12 +130,12 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
           transport: 'streamable_http',
           trust_profile: Input.TrustProfile,
         },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async importRegistration(Document: string): Promise<void> {
+  async ImportRegistration(Document: string): Promise<void> {
     let Parsed: unknown
     try {
       Parsed = JSON.parse(Document) as unknown
@@ -145,12 +145,12 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     RequireSuccess(
       await this.#Api.POST('/api/v1/mcp/registrations/import', {
         body: RegistrationExport(Parsed),
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async exportRegistration(RegistrationId: string): Promise<string> {
+  async ExportRegistration(RegistrationId: string): Promise<string> {
     const Value = RequireData<components['schemas']['McpRegistrationExport']>(
       await this.#Api.GET('/api/v1/mcp/registrations/{registration_id}/export', {
         params: { path: { registration_id: RegistrationId } },
@@ -159,18 +159,18 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return `${JSON.stringify(Value, null, 2)}\n`
   }
 
-  async deleteRegistration(Registration: Readonly<McpRegistrationView>): Promise<void> {
+  async DeleteRegistration(Registration: Readonly<McpRegistrationView>): Promise<void> {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/mcp/registrations/{registration_id}', {
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
     )
   }
 
-  async changeRegistrationState(
+  async ChangeRegistrationState(
     Registration: Readonly<McpRegistrationView>,
     Action: 'disable' | 'enable' | 'revoke',
   ): Promise<void> {
@@ -178,18 +178,18 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
       await this.#Api.POST('/api/v1/mcp/registrations/{registration_id}/state', {
         body: { action: Action },
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
     )
   }
 
-  async testRegistration(Registration: Readonly<McpRegistrationView>): Promise<boolean> {
+  async TestRegistration(Registration: Readonly<McpRegistrationView>): Promise<boolean> {
     const Result = RequireData<components['schemas']['McpTestResult']>(
       await this.#Api.POST('/api/v1/mcp/registrations/{registration_id}/test', {
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
@@ -197,7 +197,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return Result.succeeded
   }
 
-  async putCredential(
+  async PutCredential(
     Registration: Readonly<McpRegistrationView>,
     Kind: 'api_key' | 'bearer',
     Secret: string,
@@ -206,19 +206,19 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
       await this.#Api.PUT('/api/v1/mcp/registrations/{registration_id}/credentials', {
         body: { kind: Kind, secret: Secret },
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
     )
   }
 
-  async startOauth(Registration: Readonly<McpRegistrationView>): Promise<string> {
+  async StartOauth(Registration: Readonly<McpRegistrationView>): Promise<string> {
     const Result = RequireData<components['schemas']['McpOauthStart']>(
       await this.#Api.POST('/api/v1/mcp/registrations/{registration_id}/oauth/start', {
         body: { return_path: `/settings/mcp/${Registration.Id}` },
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
@@ -226,7 +226,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return Result.authorization_url
   }
 
-  async getCapabilityReview(RegistrationId: string): Promise<McpCapabilityReviewView | null> {
+  async GetCapabilityReview(RegistrationId: string): Promise<McpCapabilityReviewView | null> {
     const Result = await this.#Api.GET(
       '/api/v1/mcp/registrations/{registration_id}/capability-review',
       {
@@ -237,13 +237,13 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return CapabilityReviewView(RequireData<CapabilityReviewResponse>(Result))
   }
 
-  async discoverCapabilities(
+  async DiscoverCapabilities(
     Registration: Readonly<McpRegistrationView>,
   ): Promise<McpCapabilityReviewView> {
     const Snapshot = RequireData<CapabilitySnapshotResponse>(
       await this.#Api.POST('/api/v1/mcp/registrations/{registration_id}/discover', {
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
@@ -251,7 +251,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     return CapabilityReviewView({ decisions: [], reviewed_at: null, snapshot: Snapshot })
   }
 
-  async putCapabilityReview(
+  async PutCapabilityReview(
     Registration: Readonly<McpRegistrationView>,
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Capability entries are caller-owned review values and are not mutated by the adapter.
     Review: Readonly<McpCapabilityReviewView>,
@@ -267,14 +267,14 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
           snapshot_id: Review.SnapshotId,
         },
         params: {
-          header: await this.#versionedHeaders(Registration.Etag),
+          header: await this.#VersionedHeaders(Registration.Etag),
           path: { registration_id: Registration.Id },
         },
       }),
     )
   }
 
-  async createInvocationIntent(
+  async CreateInvocationIntent(
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
     Input: Readonly<McpInvocationInput>,
   ): Promise<McpPreparedInvocation> {
@@ -282,7 +282,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     const Intent = RequireData<InvocationIntent>(
       await this.#Api.POST('/api/v1/mcp/invocation-intents', {
         body: Body,
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
     return {
@@ -291,7 +291,7 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     }
   }
 
-  async approveAndInvoke(
+  async ApproveAndInvoke(
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- The nested invocation DTO is caller-owned and observed without mutation.
     Prepared: Readonly<McpPreparedInvocation>,
     // oxlint-disable-next-line typescript/prefer-readonly-parameter-types -- Union event payloads are observer values even though the mapped type is not deeply readonly.
@@ -302,11 +302,11 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     RequireSuccess(
       await this.#Api.POST('/api/v1/mcp/invocation-intents/{intent_id}/approval', {
         body: { expires_at: null, scope: 'once' },
-        params: { header: await this.#mutationHeaders(), path: { intent_id: Prepared.Intent.Id } },
+        params: { header: await this.#MutationHeaders(), path: { intent_id: Prepared.Intent.Id } },
         ...(Signal === undefined ? {} : { signal: Signal }),
       }),
     )
-    const Headers = await this.#streamHeaders()
+    const Headers = await this.#StreamHeaders()
     const Response = await this.#Fetch(
       new Request(
         new URL(`/api/v1/mcp/invocation-intents/${Prepared.Intent.Id}/stream`, this.#BaseUrl),
@@ -345,15 +345,15 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
       OnEvent(InvocationEventView(JSON.parse(Pending) as InvocationEvent))
   }
 
-  async cancelInvocation(InvocationId: string): Promise<void> {
+  async CancelInvocation(InvocationId: string): Promise<void> {
     RequireSuccess(
       await this.#Api.DELETE('/api/v1/mcp/invocations/{invocation_id}', {
-        params: { header: await this.#mutationHeaders(), path: { invocation_id: InvocationId } },
+        params: { header: await this.#MutationHeaders(), path: { invocation_id: InvocationId } },
       }),
     )
   }
 
-  async createTemplate(
+  async CreateTemplate(
     DisplayName: string,
     EndpointUri: string,
     TrustProfile: string,
@@ -366,12 +366,12 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
           transport: 'streamable_http',
           trust_profile: TrustProfile,
         },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async assignTemplate(
+  async AssignTemplate(
     Template: Readonly<AdminMcpTemplateView>,
     PrincipalId: string,
     PrincipalKind: 'group' | 'service' | 'user',
@@ -380,23 +380,23 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
       await this.#Api.PUT('/api/v1/admin/mcp/templates/{template_id}/assignments/{principal_id}', {
         body: { principal_kind: PrincipalKind },
         params: {
-          header: await this.#versionedHeaders(Template.Etag),
+          header: await this.#VersionedHeaders(Template.Etag),
           path: { principal_id: PrincipalId, template_id: Template.Id },
         },
       }),
     )
   }
 
-  async createServiceIdentity(DisplayName: string, SpiffeUri: string): Promise<void> {
+  async CreateServiceIdentity(DisplayName: string, SpiffeUri: string): Promise<void> {
     RequireSuccess(
       await this.#Api.POST('/api/v1/admin/mcp/service-identities', {
         body: { display_name: DisplayName, spiffe_uri: SpiffeUri },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async createServiceInvocationGrant(
+  async CreateServiceInvocationGrant(
     Service: Readonly<AdminMcpServiceIdentityView>,
     RegistrationId: string,
     CapabilityKind: 'prompt' | 'resource' | 'tool',
@@ -421,14 +421,14 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
           registration_id: RegistrationId,
         },
         params: {
-          header: await this.#versionedHeaders(Service.Etag),
+          header: await this.#VersionedHeaders(Service.Etag),
           path: { service_id: Service.Id },
         },
       }),
     )
   }
 
-  async createBlockRule(
+  async CreateBlockRule(
     Kind: AdminMcpBlockRuleView['Kind'],
     Value: string,
     Reason: string,
@@ -436,12 +436,12 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     RequireSuccess(
       await this.#Api.POST('/api/v1/admin/mcp/block-rules', {
         body: { kind: Kind, reason: Reason, value: Value },
-        params: { header: await this.#mutationHeaders() },
+        params: { header: await this.#MutationHeaders() },
       }),
     )
   }
 
-  async #ensureSession(Signal?: Readonly<AbortSignal>): Promise<void> {
+  async #EnsureSession(Signal?: Readonly<AbortSignal>): Promise<void> {
     if (this.#CsrfToken !== null) return
     const Session = RequireData<SessionResponse>(
       await this.#Api.GET('/api/v1/session', Signal === undefined ? {} : { signal: Signal }),
@@ -449,8 +449,8 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     this.#CsrfToken = Session.csrf_token
   }
 
-  async #mutationHeaders(): Promise<MutationHeaders> {
-    await this.#ensureSession()
+  async #MutationHeaders(): Promise<MutationHeaders> {
+    await this.#EnsureSession()
     if (this.#CsrfToken === null) throw new AuthenticationRequiredError()
     return {
       'Idempotency-Key': crypto.randomUUID(),
@@ -460,12 +460,12 @@ export class HttpMcpSettingsClient implements McpSettingsClient {
     }
   }
 
-  async #versionedHeaders(Etag: string): Promise<VersionedMutationHeaders> {
-    return { ...(await this.#mutationHeaders()), 'If-Match': Etag }
+  async #VersionedHeaders(Etag: string): Promise<VersionedMutationHeaders> {
+    return { ...(await this.#MutationHeaders()), 'If-Match': Etag }
   }
 
-  async #streamHeaders(): Promise<Omit<MutationHeaders, 'Idempotency-Key'>> {
-    const Headers = await this.#mutationHeaders()
+  async #StreamHeaders(): Promise<Omit<MutationHeaders, 'Idempotency-Key'>> {
+    const Headers = await this.#MutationHeaders()
     return {
       Origin: Headers.Origin,
       'Sec-Fetch-Site': Headers['Sec-Fetch-Site'],

@@ -55,14 +55,14 @@ describe('document session controls', () => {
     expect(Source).toContain(
       'SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })',
     )
-    expect(Source).toContain('Client.redeemLaunch(PreparedLaunch.SessionId)')
+    expect(Source).toContain('Client.RedeemLaunch(PreparedLaunch.SessionId)')
     expect(Source).toContain('PreparedLaunch.ProviderOrigin')
     expect(Source).not.toContain('window.location.origin')
-    const AfterCreation = Source.slice(Source.indexOf('const Detail = await Client.createSession'))
+    const AfterCreation = Source.slice(Source.indexOf('const Detail = await Client.CreateSession'))
     expect(AfterCreation).toContain(
       'SetPreparedLaunch({ ProviderOrigin: Detail.provider_origin, SessionId: Detail.session.id })',
     )
-    expect(AfterCreation).not.toContain('redeemLaunch(Detail.session.id)')
+    expect(AfterCreation).not.toContain('RedeemLaunch(Detail.session.id)')
     expect(Source).not.toContain('useState<DocumentSessionLaunchHandoff')
     expect(Source).toContain(
       'IsIsolatedDocumentLaunchAction(Handoff.action, window.location.hostname)',
@@ -130,7 +130,7 @@ describe('document session controls', () => {
     const Source = await import('node:fs/promises').then(async (Fs) =>
       Fs.readFile(new URL('./DocumentSessions.tsx', import.meta.url), 'utf8'),
     )
-    expect(Source).toContain('Client.listOwnSessions({ Cursor })')
+    expect(Source).toContain('Client.ListOwnSessions({ Cursor })')
     expect(Source).toContain('OnFailure(Cause)')
     expect(Source).toContain('if (WorkspaceChanged) await OnWorkspaceChanged?.()')
     expect(Source).toContain('En.documentLoadMore')

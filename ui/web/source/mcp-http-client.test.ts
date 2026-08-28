@@ -124,12 +124,12 @@ describe('HttpMcpSettingsClient', () => {
   it('sends credentials once in a protected body and never places them in a URL', async () => {
     const Server = new ContractServer()
     const Client = new HttpMcpSettingsClient(Server.fetch, 'https://filebelt.example.test')
-    const Snapshot = await Client.getSnapshot(false)
+    const Snapshot = await Client.GetSnapshot(false)
     const View = Snapshot.Registrations[0]
     expect(View).toBeDefined()
     if (View === undefined) return
 
-    await Client.putCredential(View, 'bearer', 'top-secret-value')
+    await Client.PutCredential(View, 'bearer', 'top-secret-value')
     const RequestValue = Server.Requests.at(-1)
     expect(RequestValue?.url).not.toContain('top-secret-value')
     expect(RequestValue?.headers.get('X-FileBelt-Csrf')).toBe('csrf-memory-only')
@@ -145,7 +145,7 @@ describe('HttpMcpSettingsClient', () => {
     const Client = new HttpMcpSettingsClient(Server.fetch, 'https://filebelt.example.test')
     const Events: string[] = []
 
-    const Prepared = await Client.createInvocationIntent({
+    const Prepared = await Client.CreateInvocationIntent({
       ApplicationId: 'filebelt-web',
       Arguments: { query: 'quarterly plan' },
       Capability: { Fingerprint: 'b'.repeat(64), Kind: 'tool', Name: 'search' },
@@ -153,7 +153,7 @@ describe('HttpMcpSettingsClient', () => {
       SemanticInput: { BaseVersionId, Markdown: '# Current source', NodeId },
     })
     expect(Server.Requests.some(({ url: Url }) => Url.endsWith('/stream'))).toBe(false)
-    await Client.approveAndInvoke(Prepared, (Event) => {
+    await Client.ApproveAndInvoke(Prepared, (Event) => {
       Events.push(Event.Kind)
     })
 
@@ -178,7 +178,7 @@ describe('HttpMcpSettingsClient', () => {
     const Server = new ContractServer()
     const Client = new HttpMcpSettingsClient(Server.fetch, 'https://filebelt.example.test')
 
-    await Client.cancelInvocation(InvocationId)
+    await Client.CancelInvocation(InvocationId)
 
     const RequestValue = Server.Requests.at(-1)
     expect(RequestValue?.method).toBe('DELETE')

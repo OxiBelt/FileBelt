@@ -22,12 +22,12 @@ describe('Markdown MCP proposals', () => {
   it('renders proposal-only controls without a save action', () => {
     const Client = {
       // oxlint-disable typescript/require-await -- This object is a synchronous fake for an asynchronous MCP client contract.
-      approveAndInvoke: async () => undefined,
-      createInvocationIntent: async () => {
+      ApproveAndInvoke: async () => undefined,
+      CreateInvocationIntent: async () => {
         throw new Error('not reached')
       },
-      getCapabilityReview: async () => null,
-      getSnapshot: async () => ({
+      GetCapabilityReview: async () => null,
+      GetSnapshot: async () => ({
         Activity: [],
         BlockRules: [],
         Registrations: [],

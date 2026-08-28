@@ -10,7 +10,7 @@ describe('FileTable', () => {
   it('renders a multiselect grid with selected state and bidi-isolated names', () => {
     const Markup = renderToStaticMarkup(
       <FileTable
-        dispatchSelection={() => undefined}
+        DispatchSelection={() => undefined}
         Entries={[
           {
             HeadVersionId: '00000000-0000-4000-8000-000000000012',
@@ -28,8 +28,8 @@ describe('FileTable', () => {
             Version: 4,
           },
         ]}
-        onOpenActions={() => undefined}
-        onOpenEntry={() => undefined}
+        OnOpenActions={() => undefined}
+        OnOpenEntry={() => undefined}
         Selection={{ AnchorId: 'file-1', FocusedId: 'file-1', SelectedIds: new Set(['file-1']) }}
         Strings={En}
       />,
@@ -46,7 +46,7 @@ describe('FileTable', () => {
   it('labels logical symlinks without making them file-open candidates', () => {
     const Markup = renderToStaticMarkup(
       <FileTable
-        dispatchSelection={() => undefined}
+        DispatchSelection={() => undefined}
         Entries={[
           {
             HeadVersionId: null,
@@ -64,8 +64,8 @@ describe('FileTable', () => {
             Version: 0,
           },
         ]}
-        onOpenActions={() => undefined}
-        onOpenEntry={() => undefined}
+        OnOpenActions={() => undefined}
+        OnOpenEntry={() => undefined}
         Selection={{ AnchorId: null, FocusedId: 'symlink-1', SelectedIds: new Set() }}
         Strings={En}
       />,

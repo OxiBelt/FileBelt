@@ -152,12 +152,12 @@ describe('HttpDocumentSessionClient', () => {
     }
     const Client = new HttpDocumentSessionClient(Fetch, 'https://filebelt.localhost')
 
-    await Client.createSession({ BaseVersionId: VersionId, DriveId, Mode: 'edit', NodeId })
-    await Client.listOwnSessions({ Cursor })
-    await Client.revokeOwnSession(SessionId)
-    await Client.redeemLaunch(SessionId)
-    const ConflictCopy = await Client.createConflictCopy(SessionId, 'Plan (conflicted copy).docx')
-    await Client.forceClose(Summary)
+    await Client.CreateSession({ BaseVersionId: VersionId, DriveId, Mode: 'edit', NodeId })
+    await Client.ListOwnSessions({ Cursor })
+    await Client.RevokeOwnSession(SessionId)
+    await Client.RedeemLaunch(SessionId)
+    const ConflictCopy = await Client.CreateConflictCopy(SessionId, 'Plan (conflicted copy).docx')
+    await Client.ForceClose(Summary)
 
     const Create = Find(
       Requests,

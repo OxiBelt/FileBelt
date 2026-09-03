@@ -20,7 +20,7 @@ qualified-release = []
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 hmac = "=0.13.0"
 prost = "=0.14.4"
-quick-xml = { version = "=0.41.0", default-features = false }
+quick-xml = { version = "=0.42.0", default-features = false }
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls-webpki-roots-no-provider"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "=1.0.229", features = ["derive"] }

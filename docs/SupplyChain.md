@@ -224,13 +224,13 @@ The immutable external integration inputs are:
 
 | Input | Accepted version and digest | Distribution role |
 | --- | --- | --- |
-| OxiBelt | `0.7.1-beta.2`, `ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030` | Base of `filebelt-web`; prerelease exception |
+| OxiBelt | `0.9.2-beta.2`, `ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8` | Qualified prerelease base of `filebelt-web` |
 | PostgreSQL | `18.6`, `docker.io/library/postgres@sha256:ae6c78831cbc35fa3a4aaf4d763ddacf6183d6004774cc2dc28b3920410d1d1a` | Docker integration helper only |
 | Apache Iggy | `0.8.0`, `docker.io/apache/iggy@sha256:99b42016a898381d4bab3c2d4613456eb04ad06a7a0688314823d798a685636b` | Optional Docker integration helper only |
 | Iggy Rust client | exact crate `0.8.0` | Optional notification publisher/consumer |
 
 Changing one of these versions or digests requires a focused dependency
-review. OxiBelt review repeats source-revision, prerelease rationale, route
+review. OxiBelt review repeats source-revision, release-qualification, route
 behavior, architecture, SBOM, vulnerability, license, and notice checks.
 
 The compatible resolver candidate `quinn-proto@0.11.17` remains deferred
@@ -441,19 +441,26 @@ their probe contracts with role-specific runtime contracts. Evidence adds:
 - the exact OxiBelt base/source/route relationship for `filebelt-web`.
 
 The OxiBelt relationship is admitted offline through
-`supply-chain/oxibelt-admission-v2.json` and the retained index and AMD64-child
-GitHub/Sigstore rebuild bundles. Admission verified the public-good signature,
-GitHub-hosted runner, `OxiBelt/OxiBelt` release workflow identity, tag, and
-source revision. Routine checks use the retained raw OCI manifest subjects and
-Sigstore trusted-root snapshot to repeat the signature, certificate identity,
-OIDC issuer, transparency-log, source, and runner-policy verification without a
-network lookup. The verifier code independently fixes the snapshot path and
-SHA-256; the v2 admission record contains no root selector, and the verifier
-rejects the legacy self-referential v1 schema. Routine checks also bind retained
-bundle hashes, decoded predicates, the index-to-child digest, child
-`targetCpu: x86-64-v3`, and the admitted index directly to the
-`ui/web/Dockerfile` base. Root rotation changes the retained snapshot, verifier
-pin, regression evidence, and this contract atomically.
+`supply-chain/oxibelt-admission-v3.json`, retained index plus AMD64, ARM64, and
+RISC-V manifest subjects, and four GitHub/Sigstore rebuild bundles. The beta
+qualification archive binds the annotated tag, release, producer attempt,
+automatic verifier workflow revision and attempt, 30 platform receipts, two
+chart receipts, 12 three-child manifests, and an empty stable-alias inventory;
+no waiver or prerequisite aggregate is accepted. The separately retained vulnerability-decision
+archive binds the same producer attempt and all 30 platform subjects to an
+`allow` decision with no findings or errors.
+
+Routine checks use those retained archive bytes, raw OCI subjects, bundles,
+and the Sigstore trusted-root snapshot to repeat the archive/member hashes,
+signature, certificate identity, OIDC issuer, transparency-log, source, and
+runner-policy verification without a network lookup. The verifier code
+independently fixes the snapshot path and SHA-256; the v3 admission record has
+no root selector, and the validator accepts no earlier schema. It also binds
+decoded predicates, all three index children, AMD64 `targetCpu: x86-64-v3`,
+architecture-default ARM64 and RISC-V children, and the admitted index directly
+to the `ui/web/Dockerfile`, image plan, and notice. Root rotation changes the
+retained snapshot, verifier pin, regression evidence, and this contract
+atomically.
 
 The media-controller image remains probe-only and its evidence must continue to
 say so. Broker, controller, and runner evidence instead proves their active
@@ -536,13 +543,14 @@ no PostgreSQL, Iggy, OIDC, egress gateway, certificate issuer, monitoring stack,
 Secret, or PVC; cluster-test fixtures retain their upstream names, licenses,
 and immutable digests and are not FileBelt release artifacts.
 
-The exact OxiBelt prerelease admitted above remains the current immutable input,
-and its separate outbound client-certificate behavior for each upstream is
-covered by edge and Kubernetes acceptance. Before the FileBelt pin changes,
-its source revision, prerelease rationale, route/cache/retry behavior,
-server-name validation, client-key handling, architecture set,
-license/notices, SBOM, and vulnerability evidence are reviewed again. FileBelt
-does not copy from or build the local reference checkout.
+The exact qualified OxiBelt prerelease admitted above remains the current immutable
+input, and its separate outbound client-certificate behavior for each upstream
+is covered by native rendered-configuration, edge, and Kubernetes acceptance.
+Before the FileBelt pin changes, its source revision, release qualification,
+route/cache/retry behavior, server-name validation, client-key handling,
+architecture set, license/notices, SBOM, and vulnerability evidence are
+reviewed again. FileBelt does not copy from or build the local reference
+checkout.
 
 Kubernetes acceptance uses digest-pinned Kind node images for the supported
 1.34, 1.35, and 1.36 lines; pinned Minikube, kubectl, Helm, CNI, fixture, and
@@ -678,8 +686,8 @@ static linkage, NVIDIA support, or a different upstream version repeats the
 license and security review.
 
 The Apache collaboration image admits the exact Quinn/h3 versions recorded in
-`Cargo.lock` and keeps OxiBelt `0.7.1-beta.2` pinned by public source revision
-and image digest. WebTransport evidence includes UDP service and route
+`Cargo.lock` and keeps OxiBelt `0.9.2-beta.2` pinned by public source revision and
+image digest. WebTransport evidence includes UDP service and route
 identity, QUIC host-key lifecycle, Retry/0-RTT settings, browser parity,
 loss/reconnect correctness, drain, CPU/memory comparison, and the required
 latency improvement. The read-only local OxiBelt reference is never a build

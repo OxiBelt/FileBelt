@@ -90,14 +90,14 @@ spec:
 {{ toYaml .Values.workloads.web.resources | indent 12 }}
           volumeMounts:
             - {name: oxibelt-config, mountPath: /etc/oxibelt/config, readOnly: true}
-            - {name: public-tls, mountPath: /run/secrets/public-tls, readOnly: true}
-            - {name: api-client-tls, mountPath: /run/secrets/api-client-tls, readOnly: true}
-            - {name: io-client-tls, mountPath: /run/secrets/io-client-tls, readOnly: true}
+            - {name: public-tls, mountPath: /etc/oxibelt/cert/public-tls, readOnly: true}
+            - {name: api-client-tls, mountPath: /etc/oxibelt/cert/api-client-tls, readOnly: true}
+            - {name: io-client-tls, mountPath: /etc/oxibelt/cert/io-client-tls, readOnly: true}
             {{- if .Values.collaboration.enabled }}
-            - {name: collaboration-edge-client-tls, mountPath: /run/secrets/collaboration-edge-client-tls, readOnly: true}
+            - {name: collaboration-edge-client-tls, mountPath: /etc/oxibelt/cert/collaboration-edge-client-tls, readOnly: true}
             {{- end }}
             {{- if .Values.documents.enabled }}
-            - {name: onlyoffice-edge-client-tls, mountPath: /run/secrets/onlyoffice-edge-client-tls, readOnly: true}
+            - {name: onlyoffice-edge-client-tls, mountPath: /etc/oxibelt/cert/onlyoffice-edge-client-tls, readOnly: true}
             {{- end }}
             - {name: tmp, mountPath: /tmp}
       volumes:

@@ -100,12 +100,27 @@ cannot be made production-ready by changing only a value.
 `configuration.filebelt` and `configuration.oxibelt` become separate
 content-addressed, immutable ConfigMaps. Any content change produces a new
 name and a workload checksum. Never put a password, token, private key, or
-certificate in either string: use its absolute projected path.
+certificate in either string. FileBelt configuration uses its required
+absolute projected paths. OxiBelt configuration instead resolves public and
+upstream TLS paths beneath the sibling certificate root
+`/etc/oxibelt/cert` of `/etc/oxibelt/config/oxibelt.toml`; its TLS paths must
+remain root-relative and must not use `/run/secrets` or another absolute path.
 
 The default OxiBelt configuration uses exclusive trust for each backend. Its
 all-zero `trusted_ca_sha256` entries are static-validation sentinels; replace
 each with the lowercase SHA-256 of the corresponding projected
 `server-ca.crt` before installation.
+
+The web Pod projects `publicTls`, `apiClientTls`, and `ioClientTls` as
+`public-tls`, `api-client-tls`, and `io-client-tls` below that certificate
+root. Enabled collaboration and documents project their distinct client
+identities there as well. Every upstream uses
+`[upstreams.tls.client_identity]` with `cert_chain` and `private_key`; do not
+restore the legacy flat client-certificate fields. The chart preserves the
+operator Secret names, keys, modes, and generation-driven rollout behavior.
+When collaboration WebTransport is enabled, the OxiBelt QUIC socket workers
+remain automatic and `quic.socket.reuse_port = true` keeps the corresponding
+HTTP/3 UDP listener valid on multi-worker Pods.
 
 The default `filebelt.toml` is version 9 in Kubernetes mode and configures the
 private operations listener on `9090`, backend TLS 1.3 mTLS, structured JSON
@@ -197,6 +212,14 @@ client Secret and generation, verifying convergence, and then removing the old
 identity in a second immutable configuration revision.
 When MCP is enabled, changing `secrets.apiMcpClientTls.generation` is included
 in the API Pod-template checksum and therefore rolls the API client identity.
+
+OxiBelt `0.9.2-beta.2` is the minimum compatible web image for the nested outbound
+client-identity configuration and certificate-root confinement. To roll back
+the edge, use one chart revision that restores the matching older web image,
+OxiBelt configuration, and web Secret mount paths together; do not roll back
+only the image or only the ConfigMap. Retain the existing backend client
+identities until the reverted edge is healthy, then complete the normal
+generation-controlled identity rotation.
 
 ## Networking and exposure
 
@@ -342,6 +365,14 @@ Validate locally with the pinned Helm release:
 ```sh
 tests/scripts/check-helm-chart.sh
 ```
+
+Phase 1 additionally runs the built `filebelt-web` archive through
+`tests/scripts/check-oxibelt-helm-config.sh`. The helper renders default,
+collaboration/WebTransport, and documents configurations, replaces only the
+CA-hash sentinels with an ephemeral CA, and invokes the image's native
+`oxibelt --check`. It proves valid root-relative identities are accepted and
+rejects a world-readable API client key, missing API client key or certificate,
+and a mismatched API client certificate/key pair without changing public TLS.
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
 negative schema/helper cases, proves core and MCP workload/RBAC/mount

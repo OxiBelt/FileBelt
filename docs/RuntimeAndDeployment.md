@@ -216,21 +216,27 @@ The Rust final stages contain the role executable and required identity,
 license, and notice files without a shell or package manager. The web image is
 derived from the exact OxiBelt input recorded in the image plan and copies only
 FileBelt assets, reviewed configuration, identity metadata, licenses, and
-notices. The current pin is OxiBelt `0.7.1-beta.2` at
-`sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030`.
-Its admitted AMD64 child is
-`sha256:bda2474f0ae5b7413751381009990d0627228aba0658e03549a00b953fddb130`,
-and its retained GitHub/Sigstore rebuild predicate binds role `standalone`,
-source revision `bf40172e40298325775ca9d708162a9d8d14e6d4`, and target CPU
-`x86-64-v3`. The retained raw index and AMD64 manifests provide the exact
-attestation subjects. The verifier fixes the retained Sigstore trusted-root
-snapshot path and SHA-256 independently of admission schema v2, which contains
-no trust-root selector. This permits offline signature, certificate-identity,
-OIDC-issuer, transparency-log, source, and GitHub-hosted-runner verification.
-The admission validator also binds this index digest directly to the
-`ui/web/Dockerfile` base. FileBelt does not rebuild that upstream binary.
-Changing that prerelease input requires a focused source, route, mTLS,
-architecture, vulnerability, license, and notice review.
+notices. The current pin is qualified OxiBelt `0.9.2-beta.2` at
+`sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8`.
+Its admitted AMD64, ARM64, and RISC-V children are respectively
+`sha256:d9df633854cbe8fcc5dde7fde08ced529ce1fb49646cc84451c5fb9f5f8d9e72`,
+`sha256:30b4bb267b86c7b1025a707aa3d5060c57c684e0309e9d760b5656fb79d5328a`,
+and
+`sha256:08db6a84b5e2403beb620fbd4f5aa3c1208c7e0089bacd81896ca08e2d9853b7`.
+The retained GitHub/Sigstore predicates bind role `standalone`, source revision
+`ed19e61fa7ce49ac0218987ec269d4e9aad611a1`, all three architectures, and AMD64
+target CPU `x86-64-v3`. Admission schema v3 also retains and hashes the release
+aggregate and vulnerability-decision archives, binding their exact producer
+and automatic-verifier attempts and complete receipt/manifest inventories.
+Because the admitted release is a beta, the aggregate must contain no stable
+aliases or waiver. The verifier fixes the retained Sigstore
+trusted-root snapshot path and SHA-256 independently of the admission record,
+which contains no trust-root selector. This permits offline archive, signature,
+certificate-identity, OIDC-issuer, transparency-log, source, and
+GitHub-hosted-runner verification. The admission validator binds the index
+directly to the `ui/web/Dockerfile`, image plan, and shipped notice. FileBelt
+does not rebuild that upstream binary. Changing this input requires a focused
+source, route, mTLS, architecture, vulnerability, license, and notice review.
 Changing the trust root requires one reviewed change to the retained snapshot,
 verifier pin, regression tests, and this contract. An older release remains
 verifiable only with that release's retained verifier and root; rollback never
@@ -535,7 +541,14 @@ traffic uses TLS 1.3 mutual authentication. OxiBelt has a distinct client
 certificate for each upstream, including the ONLYOFFICE adapter. FileBelt and
 the adapter validate the operator CA, client-authentication purpose, and exact
 configured URI SAN; one retiring identity may overlap during rotation.
-OxiBelt validates each service DNS SAN.
+OxiBelt validates each service DNS SAN. The web Pod mounts its public and
+per-upstream Secret projections below `/etc/oxibelt/cert`; OxiBelt TOML names
+every certificate and private key relative to that fixed root and expresses
+outbound identities through `[upstreams.tls.client_identity]`. Runtime and QUIC
+accept workers use native reuse-port support when automatic worker counts are
+configured. Phase 1 renders the default, collaboration/WebTransport, and
+documents variants and runs each through the pinned image's `oxibelt --check`;
+world-readable, missing, or mismatched outbound credentials must fail closed.
 Health and metrics use a separate low-information internal listener because
 kubelet does not present a client certificate.
 
@@ -671,7 +684,7 @@ operator-projected TLS identity as HTTPS. The collaboration QUIC listener uses
 TLS 1.3 mutual authentication and disables 0-RTT. OxiBelt forwards only the
 dedicated H3/WebTransport route over UDP 8086. Drain rejects new sessions,
 retains authenticated connections for at most 300 seconds, then requires a
-fresh grant. The current OxiBelt `0.7.1-beta.2` source and digest remain pinned
+fresh grant. The current OxiBelt `0.9.2-beta.2` source and digest remain pinned
 for Phase 8.
 
 Rollout installs migrations and reviewed grants with every feature disabled,

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 ARG NODE_BUILDER_IMAGE=node:24-alpine3.24@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
-ARG OXIBELT_IMAGE=ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030
+ARG OXIBELT_IMAGE=ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8
 
 FROM --platform=$BUILDPLATFORM ${NODE_BUILDER_IMAGE} AS builder
 
@@ -72,15 +72,15 @@ LABEL org.opencontainers.image.title="filebelt-web" \
       org.opencontainers.image.description="FileBelt OxiBelt TLS edge and web application" \
       org.opencontainers.image.source="https://github.com/OxiBelt/FileBelt" \
       org.opencontainers.image.url="https://github.com/OxiBelt/FileBelt" \
-      org.opencontainers.image.base.name="ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030" \
-      org.opencontainers.image.base.digest="sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030" \
+      org.opencontainers.image.base.name="ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8" \
+      org.opencontainers.image.base.digest="sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8" \
       org.opencontainers.image.version="${FILEBELT_BUILD_VERSION}" \
       org.opencontainers.image.revision="${FILEBELT_BUILD_REVISION}" \
       org.opencontainers.image.created="${FILEBELT_CREATED}" \
       org.opencontainers.image.licenses="Apache-2.0 AND MIT AND ISC AND 0BSD" \
       io.filebelt.image.role="filebelt-web" \
-      io.filebelt.upstream.oxibelt.version="0.7.1-beta.2" \
-      io.filebelt.upstream.oxibelt.revision="bf40172e40298325775ca9d708162a9d8d14e6d4" \
+      io.filebelt.upstream.oxibelt.version="0.9.2-beta.2" \
+      io.filebelt.upstream.oxibelt.revision="ed19e61fa7ce49ac0218987ec269d4e9aad611a1" \
       io.filebelt.build.source-ref="${FILEBELT_BUILD_SOURCE_REF}" \
       io.filebelt.build.dirty="${FILEBELT_BUILD_DIRTY}" \
       io.filebelt.build.kind="${FILEBELT_BUILD_KIND}" \

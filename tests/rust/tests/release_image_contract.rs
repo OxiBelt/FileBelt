@@ -47,8 +47,10 @@ fn image_plan_contract_fixes_roles_platforms_and_registry() {
     assert!(plan.contains("Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0"));
     assert!(plan.contains("WebImageLicense = 'Apache-2.0 AND MIT AND ISC AND 0BSD'"));
     assert!(plan.contains(
-        "ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030"
+        "ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8"
     ));
+    assert!(plan.contains("OxibeltVersion = '0.9.2-beta.2'"));
+    assert!(plan.contains("OxibeltRevision = 'ed19e61fa7ce49ac0218987ec269d4e9aad611a1'"));
     assert!(plan.contains("kind: 'oxibelt-edge'"));
     assert!(plan.contains("PlatformComponentInventory"));
     for component in [
@@ -183,7 +185,11 @@ fn role_dockerfiles_use_non_root_runtimes_and_complete_oci_labels() {
     assert!(!rust.contains("apt-get install -y --no-install-recommends binutils musl-tools"));
     assert!(web.contains("FROM ${OXIBELT_IMAGE} AS filebelt-web"));
     assert!(web.contains(
-        "ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030"
+        "ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8"
+    ));
+    assert!(web.contains("io.filebelt.upstream.oxibelt.version=\"0.9.2-beta.2\""));
+    assert!(web.contains(
+        "io.filebelt.upstream.oxibelt.revision=\"ed19e61fa7ce49ac0218987ec269d4e9aad611a1\""
     ));
     assert!(
         web.contains("org.opencontainers.image.licenses=\"Apache-2.0 AND MIT AND ISC AND 0BSD\"")

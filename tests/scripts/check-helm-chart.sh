@@ -141,6 +141,68 @@ raise SystemExit(f"{manifest_path}: could not find ConfigMap data key {key}")
 PY
 }
 
+assert_oxibelt_tls_contract() {
+  local file="$1" expected_upstreams="$2"
+  python3 - "${file}" "${expected_upstreams}" <<'PY'
+import sys
+import tomllib
+
+
+def oxibelt_config(manifest_path: str) -> dict:
+    for document in open(manifest_path, encoding="utf-8").read().split("\n---\n"):
+        lines = document.splitlines()
+        if "kind: ConfigMap" not in lines or "  oxibelt.toml: |" not in lines:
+            continue
+        start = lines.index("  oxibelt.toml: |") + 1
+        rendered = []
+        for line in lines[start:]:
+            if line.startswith("    "):
+                rendered.append(line[4:])
+            elif not line:
+                rendered.append("")
+            else:
+                break
+        return tomllib.loads("\n".join(rendered))
+    raise AssertionError("missing rendered OxiBelt configuration")
+
+
+manifest_path, expected_upstreams = sys.argv[1:]
+config = oxibelt_config(manifest_path)
+assert config["runtime"]["accept"] == {
+    "workers": "auto",
+    "reuse_port": True,
+    "backlog": 1024,
+    "accept_error_backoff_ms": 10,
+}
+assert config["quic"]["socket"] == {"workers": "auto", "reuse_port": True}
+assert config["tls"]["cert_chain"] == "public-tls/tls.crt"
+assert config["tls"]["private_key"] == "public-tls/tls.key"
+
+paths = {
+    "filebelt-api": "api-client-tls",
+    "filebelt-io": "io-client-tls",
+    "filebelt-collaboration": "collaboration-edge-client-tls",
+    "filebelt-collaboration-webtransport": "collaboration-edge-client-tls",
+    "filebelt-onlyoffice-adapter": "onlyoffice-edge-client-tls",
+}
+upstreams = {upstream["name"]: upstream for upstream in config["upstreams"]}
+expected = expected_upstreams.split(",")
+assert set(upstreams) == set(expected)
+for name in expected:
+    tls = upstreams[name]["tls"]
+    directory = paths[name]
+    assert tls["trusted_ca_certs"] == [f"{directory}/server-ca.crt"]
+    assert tls["client_identity"] == {
+        "cert_chain": f"{directory}/tls.crt",
+        "private_key": f"{directory}/tls.key",
+    }
+    assert "client_certificate" not in tls
+    assert "client_private_key" not in tls
+    for path in [*tls["trusted_ca_certs"], *tls["client_identity"].values()]:
+        assert not path.startswith("/"), path
+PY
+}
+
 expect_failure() {
   local name="$1"
   shift
@@ -207,6 +269,7 @@ assert_rendered_toml "${temporary}/render-documents.yaml" oxibelt.toml
 assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/render-documents-editor-override.yaml" oxibelt.toml
 assert_rendered_toml "${temporary}/render-revisions.yaml" filebelt.toml
+assert_oxibelt_tls_contract "${default_manifest}" 'filebelt-api,filebelt-io'
 assert_count "${default_manifest}" '^kind: Deployment$' 4
 assert_count "${default_manifest}" '^kind: Service$' 7
 assert_count "${default_manifest}" '^kind: ServiceAccount$' 5
@@ -269,7 +332,7 @@ assert_document_contains "${temporary}/render-documents.yaml" Service filebelt-d
 assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-document-ingress 'filebelt-onlyoffice'
 assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-io-ingress 'filebelt-onlyoffice'
 assert_document_contains "${temporary}/render-documents.yaml" NetworkPolicy filebelt-web-egress 'filebelt-onlyoffice'
-assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /run/secrets/onlyoffice-edge-client-tls'
+assert_document_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /etc/oxibelt/cert/onlyoffice-edge-client-tls'
 assert_document_contains "${temporary}/recovery-documents.yaml" Job filebelt-recovery-checkpoint-123e4567-e89 'mountPath: /run/secrets/document-storage-capability-public-keyset'
 assert_contains "${temporary}/render-documents.yaml" 'origin = "https://filebelt-onlyoffice-adapter.filebelt-integrations.svc:8089"'
 assert_contains "${temporary}/render-documents.yaml" 'server_name = "filebelt-onlyoffice-adapter.filebelt-integrations.svc"'
@@ -409,6 +472,7 @@ helm template phase5-recovery "${chart}" --kube-version 1.36.0 \
   >"${temporary}/recovery-collaboration.yaml"
 assert_rendered_toml "${temporary}/collaboration.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/collaboration.yaml" oxibelt.toml
+assert_oxibelt_tls_contract "${temporary}/collaboration.yaml" 'filebelt-api,filebelt-collaboration,filebelt-io'
 assert_count "${temporary}/collaboration.yaml" '^kind: Deployment$' 5
 assert_count "${temporary}/collaboration.yaml" '^kind: PodDisruptionBudget$' 4
 assert_count "${temporary}/collaboration.yaml" '^kind: NetworkPolicy$' 11
@@ -433,6 +497,7 @@ helm template phase8 "${chart}" --kube-version 1.36.0 \
   --set collaboration.webtransport.enabled=true >"${temporary}/collaboration-webtransport.yaml"
 assert_rendered_toml "${temporary}/collaboration-webtransport.yaml" filebelt.toml
 assert_rendered_toml "${temporary}/collaboration-webtransport.yaml" oxibelt.toml
+assert_oxibelt_tls_contract "${temporary}/collaboration-webtransport.yaml" 'filebelt-api,filebelt-collaboration,filebelt-collaboration-webtransport,filebelt-io'
 assert_document_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-web 'containerPort: 8443'
 assert_document_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-collaboration 'containerPort: 8086'
 assert_document_contains "${temporary}/collaboration-webtransport.yaml" Service filebelt-web 'protocol: UDP'
@@ -441,6 +506,21 @@ assert_contains "${temporary}/collaboration-webtransport.yaml" 'path_prefix = "/
 assert_contains "${temporary}/collaboration-webtransport.yaml" 'max_http_version = "h3"'
 assert_contains "${temporary}/collaboration-webtransport.yaml" 'webtransport = true'
 assert_contains "${temporary}/collaboration-webtransport.yaml" 'webtransport_enabled = true'
+assert_oxibelt_tls_contract "${temporary}/render-documents.yaml" 'filebelt-api,filebelt-onlyoffice-adapter,filebelt-io'
+for path in public-tls api-client-tls io-client-tls; do
+  assert_document_contains "${default_manifest}" Deployment filebelt-web "mountPath: /etc/oxibelt/cert/${path}"
+  assert_document_not_contains "${default_manifest}" Deployment filebelt-web "mountPath: /run/secrets/${path}"
+done
+assert_document_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-web 'mountPath: /etc/oxibelt/cert/collaboration-edge-client-tls'
+assert_document_not_contains "${temporary}/collaboration-webtransport.yaml" Deployment filebelt-web 'mountPath: /run/secrets/collaboration-edge-client-tls'
+assert_document_not_contains "${temporary}/render-documents.yaml" Deployment filebelt-web 'mountPath: /run/secrets/onlyoffice-edge-client-tls'
+assert_not_contains "${chart}/values.yaml" 'client_certificate ='
+assert_not_contains "${chart}/values.yaml" 'client_private_key ='
+assert_not_contains "${chart}/values.yaml" '"/run/secrets/public-tls/'
+assert_not_contains "${chart}/values.yaml" '"/run/secrets/api-client-tls/'
+assert_not_contains "${chart}/values.yaml" '"/run/secrets/io-client-tls/'
+assert_not_contains "${chart}/values.yaml" '"/run/secrets/collaboration-edge-client-tls/'
+assert_not_contains "${chart}/values.yaml" '"/run/secrets/onlyoffice-edge-client-tls/'
 preview_line=$(grep -n 'name = "filebelt-markdown-preview"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
 spa_line=$(grep -n 'name = "filebelt-spa"' "${temporary}/collaboration.yaml" | head -n1 | cut -d: -f1)
 if [ "${preview_line}" -ge "${spa_line}" ]; then

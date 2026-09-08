@@ -273,10 +273,20 @@ configuration:
     unprivileged_mode = true
     worker_threads = "auto"
 
+    [runtime.accept]
+    workers = "auto"
+    reuse_port = true
+    backlog = 1024
+    accept_error_backoff_ms = 10
+
     [runtime.drain]
     graceful_timeout_ms = 45000
     long_connection_close_delay_ms = 45000
     shutdown_delay_ms = 0
+
+    [quic.socket]
+    workers = "auto"
+    reuse_port = true
 
     [listeners]
     https_binds = ["0.0.0.0:8443"]
@@ -297,8 +307,8 @@ configuration:
     detail = "basic"
 
     [tls]
-    cert_chain = "/run/secrets/public-tls/tls.crt"
-    private_key = "/run/secrets/public-tls/tls.key"
+    cert_chain = "public-tls/tls.crt"
+    private_key = "public-tls/tls.key"
     {{ if .Values.documents.enabled }}
     {{- $editorLaunch := urlParse .Values.documents.launchAction }}
     server_names = ["filebelt.example.invalid", {{ $editorLaunch.host | quote }}]
@@ -363,11 +373,12 @@ configuration:
     [upstreams.tls]
     server_name = "filebelt-api"
     trust = "exclusive"
-    trusted_ca_certs = ["/run/secrets/api-client-tls/server-ca.crt"]
+    trusted_ca_certs = ["api-client-tls/server-ca.crt"]
     # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
     trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
-    client_certificate = "/run/secrets/api-client-tls/tls.crt"
-    client_private_key = "/run/secrets/api-client-tls/tls.key"
+    [upstreams.tls.client_identity]
+    cert_chain = "api-client-tls/tls.crt"
+    private_key = "api-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
 
@@ -390,11 +401,12 @@ configuration:
     [upstreams.tls]
     server_name = "filebelt-collaboration"
     trust = "exclusive"
-    trusted_ca_certs = ["/run/secrets/collaboration-edge-client-tls/server-ca.crt"]
+    trusted_ca_certs = ["collaboration-edge-client-tls/server-ca.crt"]
     # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
     trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
-    client_certificate = "/run/secrets/collaboration-edge-client-tls/tls.crt"
-    client_private_key = "/run/secrets/collaboration-edge-client-tls/tls.key"
+    [upstreams.tls.client_identity]
+    cert_chain = "collaboration-edge-client-tls/tls.crt"
+    private_key = "collaboration-edge-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
     {{ if .Values.collaboration.webtransport.enabled }}
@@ -413,10 +425,11 @@ configuration:
     [upstreams.tls]
     server_name = "filebelt-collaboration"
     trust = "exclusive"
-    trusted_ca_certs = ["/run/secrets/collaboration-edge-client-tls/server-ca.crt"]
+    trusted_ca_certs = ["collaboration-edge-client-tls/server-ca.crt"]
     trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
-    client_certificate = "/run/secrets/collaboration-edge-client-tls/tls.crt"
-    client_private_key = "/run/secrets/collaboration-edge-client-tls/tls.key"
+    [upstreams.tls.client_identity]
+    cert_chain = "collaboration-edge-client-tls/tls.crt"
+    private_key = "collaboration-edge-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
     {{ end }}
@@ -441,11 +454,12 @@ configuration:
     [upstreams.tls]
     server_name = {{ .Values.documents.adapterServerName | quote }}
     trust = "exclusive"
-    trusted_ca_certs = ["/run/secrets/onlyoffice-edge-client-tls/server-ca.crt"]
+    trusted_ca_certs = ["onlyoffice-edge-client-tls/server-ca.crt"]
     # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
     trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
-    client_certificate = "/run/secrets/onlyoffice-edge-client-tls/tls.crt"
-    client_private_key = "/run/secrets/onlyoffice-edge-client-tls/tls.key"
+    [upstreams.tls.client_identity]
+    cert_chain = "onlyoffice-edge-client-tls/tls.crt"
+    private_key = "onlyoffice-edge-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
     {{ end }}
@@ -468,11 +482,12 @@ configuration:
     [upstreams.tls]
     server_name = "filebelt-worker-io"
     trust = "exclusive"
-    trusted_ca_certs = ["/run/secrets/io-client-tls/server-ca.crt"]
+    trusted_ca_certs = ["io-client-tls/server-ca.crt"]
     # Replace this sentinel with the lowercase SHA-256 of server-ca.crt.
     trusted_ca_sha256 = ["0000000000000000000000000000000000000000000000000000000000000000"]
-    client_certificate = "/run/secrets/io-client-tls/tls.crt"
-    client_private_key = "/run/secrets/io-client-tls/tls.key"
+    [upstreams.tls.client_identity]
+    cert_chain = "io-client-tls/tls.crt"
+    private_key = "io-client-tls/tls.key"
     [upstreams.tls.ech]
     mode = "disabled"
 

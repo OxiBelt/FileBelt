@@ -11,9 +11,9 @@ export const RustIggyImageLicense =
   'Apache-2.0 AND MIT AND MPL-2.0 AND CDLA-Permissive-2.0' as const
 export const WebImageLicense = 'Apache-2.0 AND MIT AND ISC AND 0BSD' as const
 export const OxibeltImage =
-  'ghcr.io/oxibelt/oxibelt@sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030' as const
-export const OxibeltVersion = '0.7.1-beta.2' as const
-export const OxibeltRevision = 'bf40172e40298325775ca9d708162a9d8d14e6d4' as const
+  'ghcr.io/oxibelt/oxibelt@sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8' as const
+export const OxibeltVersion = '0.9.2-beta.2' as const
+export const OxibeltRevision = 'ed19e61fa7ce49ac0218987ec269d4e9aad611a1' as const
 
 export const ImageRoles = [
   'filebelt-api',

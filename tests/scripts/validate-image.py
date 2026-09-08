@@ -43,7 +43,7 @@ RUST_IMAGE_LICENSES = {
 WEB_IMAGE_LICENSE = "Apache-2.0 AND MIT AND ISC AND 0BSD"
 OXIBELT_IMAGE = (
     "ghcr.io/oxibelt/oxibelt@"
-    "sha256:e8556a0103feff47bf6135062e70e980e000176598fd438959ea55d99c844030"
+    "sha256:6ecf55a7b63576883080d10fb3d17c957b4f48d95ad9ee561c9231c8baa407e8"
 )
 OXIBELT_ENTRYPOINT = [
     "/usr/local/bin/oxibelt",
@@ -552,8 +552,8 @@ def validate(
         expected_base_labels = {
             "org.opencontainers.image.base.name": OXIBELT_IMAGE,
             "org.opencontainers.image.base.digest": OXIBELT_IMAGE.split("@", 1)[1],
-            "io.filebelt.upstream.oxibelt.version": "0.7.1-beta.2",
-            "io.filebelt.upstream.oxibelt.revision": "bf40172e40298325775ca9d708162a9d8d14e6d4",
+            "io.filebelt.upstream.oxibelt.version": "0.9.2-beta.2",
+            "io.filebelt.upstream.oxibelt.revision": "ed19e61fa7ce49ac0218987ec269d4e9aad611a1",
         }
         for key, value in expected_base_labels.items():
             if labels.get(key) != value:

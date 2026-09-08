@@ -318,6 +318,15 @@ checkpoint through the existing expected-head upload/commit path and creates a
 linear immutable version. `DELETE .../collaboration` discards dirty state; a
 head change outside the room freezes it for deterministic diff3 review.
 
+While a browser text editor has a collaboration session attached, its Yjs
+document owns the editable text. React source values mirror local and remote
+updates for rendering; delayed values must not replace newer document state.
+Intentional reconnect merges and MCP proposals mutate the session explicitly.
+When no session is attached, source values control the local/fallback editor,
+and detaching a session preserves the current fallback source even if its text
+has not changed. This browser ownership rule does not change durable manifest,
+checkpoint, authorization, or wire-format contracts.
+
 `POST .../markdown-import-intents` binds one short-lived import to an exact
 source drive/node/version and a new named sibling. A later `BeginUpload` may consume
 that `import_intent_id` or a `collaboration_checkpoint_id`, never both. Its

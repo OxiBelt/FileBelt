@@ -122,10 +122,12 @@ export function TextSourceEditor({
 
   useEffect(() => {
     const View = ViewReference.current
-    if (View !== null && View.state.doc.toString() !== Source.Text) {
+    // Attached sessions own their text; React may still be rendering an older
+    // local or remote update. Only a local/fallback document accepts prop resets.
+    if (Collaboration === undefined && View !== null && View.state.doc.toString() !== Source.Text) {
       View.dispatch({ changes: { from: 0, insert: Source.Text, to: View.state.doc.length } })
     }
-  }, [Source.Text])
+  }, [Collaboration, Source.Text])
 
   useEffect(() => {
     const AwarenessValue = ActiveCollaborationReference.current?.Awareness

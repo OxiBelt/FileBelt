@@ -73,7 +73,14 @@ The collaboration unit requires the frozen pnpm workspace plus the pinned
 Playwright Chromium and Firefox binaries. It drives two users through the real
 Compose TLS edge and covers convergence, durable save/checkpoint behavior,
 one-use grants, restart/reconnect, revocation within 60 seconds, and dirty-room
-freeze/conflict after an external head change. Docker interface changes during
+freeze/conflict after an external head change. The same browser invocation also
+runs source-level text ownership regressions in a disposable loopback Vite
+fixture with the real editor. These verify that delayed React text cannot
+overwrite local or remote Yjs updates, and that session/fallback transitions
+preserve the current source. The fixture has no application credentials, uses
+an ephemeral port and cache, disables traces, and closes with its browser
+worker. Its source-level results are separate from the real TLS-edge flow's
+image qualification. Docker interface changes during
 the exercised restart can make Chromium report an exact
 `net::ERR_NETWORK_CHANGED`. The acceptance driver retries the initial login
 navigation once. When the signed-in workspace bootstrap shows `Failed to

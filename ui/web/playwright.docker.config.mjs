@@ -15,7 +15,7 @@ export default defineConfig({
   ],
   reporter: [['line']],
   testDir: 'browser',
-  testMatch: 'docker-integration.spec.mjs',
+  testMatch: ['docker-integration.spec.mjs', 'editor-state.spec.mjs'],
   tsconfig: './playwright.tsconfig.json',
   timeout: 120_000,
   // Both projects exercise the same intentionally shared room and revocation

@@ -32,6 +32,13 @@ Visibility, disabled controls, and route guards improve usability only. The API
 must resolve the session to an internal principal and enforce the common
 [Virtual ACL](../docs/NamespaceAndAuthorization.md) for every operation.
 
+The text editor uses the attached collaboration session's Yjs document as its
+editable source. `Source.Text` mirrors that document for React rendering and
+must not write an older render back into the session. Intentional live changes,
+including reconnect merges and MCP proposals, use the session's mutation
+methods. Without a collaboration session, `Source.Text` continues to control
+the local editor, including when a session is detached into fallback editing.
+
 ## Browser security
 
 - Never place session, CSRF, share, capability, OIDC, signing, or payload
@@ -108,3 +115,8 @@ excludes `docker-integration.spec.mjs`. The Docker-only browser contract has an
 explicit `pnpm --filter @filebelt/web test:browser:docker` entry point and
 requires the prepared, running collaboration integration topology; the Docker
 unit runner remains the normal owner of that lifecycle and cleanup.
+
+Both browser configurations also exercise text ownership with the real
+CodeMirror/Yjs editor in a disposable loopback fixture. Those source-level
+regressions cover delayed React echoes and session/fallback transitions; the
+Docker collaboration flow separately validates the selected application images.

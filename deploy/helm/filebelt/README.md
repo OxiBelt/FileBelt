@@ -373,6 +373,11 @@ CA-hash sentinels with an ephemeral CA, and invokes the image's native
 `oxibelt --check`. It proves valid root-relative identities are accepted and
 rejects a world-readable API client key, missing API client key or certificate,
 and a mismatched API client certificate/key pair without changing public TLS.
+Each case stages independent files and applies content faults before setting
+the final projected-file permissions. Repository-script regression tests exercise
+all seven fixtures without root privileges, including when the test runner is
+root; Docker is doubled only for those staging tests. The native image checks
+remain the runtime acceptance and rejection evidence.
 
 The check lints and renders Kubernetes `1.34`, `1.35`, and `1.36`, exercises
 negative schema/helper cases, proves core and MCP workload/RBAC/mount

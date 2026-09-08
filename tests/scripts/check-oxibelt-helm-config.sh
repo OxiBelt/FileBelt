@@ -127,10 +127,10 @@ PY
 }
 
 install_variant() {
-  local name="$1" fault="$2"
-  local root="${temporary}/${name}-root"
+  local case_name="$1" config_name="$2" fault="$3"
+  local root="${temporary}/${case_name}-root"
   mkdir -p "${root}/etc/oxibelt/config" "${root}/etc/oxibelt/cert"
-  cp "${temporary}/${name}.toml" "${root}/etc/oxibelt/config/oxibelt.toml"
+  cp "${temporary}/${config_name}.toml" "${root}/etc/oxibelt/config/oxibelt.toml"
   for directory in public-tls api-client-tls io-client-tls collaboration-edge-client-tls onlyoffice-edge-client-tls; do
     mkdir -p "${root}/etc/oxibelt/cert/${directory}"
     cp "${temporary}/ca.crt" "${root}/etc/oxibelt/cert/${directory}/server-ca.crt"
@@ -139,14 +139,9 @@ install_variant() {
   done
   cp "${temporary}/public.crt" "${root}/etc/oxibelt/cert/public-tls/tls.crt"
   cp "${temporary}/public.key" "${root}/etc/oxibelt/cert/public-tls/tls.key"
-  chmod 0444 "${root}/etc/oxibelt/config/oxibelt.toml"
-  find "${root}/etc/oxibelt/cert" -name '*.crt' -exec chmod 0444 {} +
-  find "${root}/etc/oxibelt/cert" -name '*.key' -exec chmod 0440 {} +
+  # Inject content faults before making the independent fixture read-only.
   case "${fault}" in
-    none) ;;
-    world-readable-api-key)
-      chmod 0644 "${root}/etc/oxibelt/cert/api-client-tls/tls.key"
-      ;;
+    none|world-readable-api-key) ;;
     missing-api-key)
       rm -f -- "${root}/etc/oxibelt/cert/api-client-tls/tls.key"
       ;;
@@ -155,14 +150,19 @@ install_variant() {
       ;;
     mismatched-api-cert-key)
       cp "${temporary}/mismatched-client.key" "${root}/etc/oxibelt/cert/api-client-tls/tls.key"
-      chmod 0440 "${root}/etc/oxibelt/cert/api-client-tls/tls.key"
       ;;
     *)
       echo "unsupported OxiBelt configuration fault: ${fault}" >&2
       exit 2
       ;;
   esac
-  python3 - "${root}" "${temporary}/${name}.tar" <<'PY'
+  chmod 0444 "${root}/etc/oxibelt/config/oxibelt.toml"
+  find "${root}/etc/oxibelt/cert" -name '*.crt' -exec chmod 0444 {} +
+  find "${root}/etc/oxibelt/cert" -name '*.key' -exec chmod 0440 {} +
+  if [[ "${fault}" == world-readable-api-key ]]; then
+    chmod 0644 "${root}/etc/oxibelt/cert/api-client-tls/tls.key"
+  fi
+  python3 - "${root}" "${temporary}/${case_name}.tar" <<'PY'
 import pathlib
 import tarfile
 import sys
@@ -186,10 +186,11 @@ PY
 
 check_variant() {
   local case_name="$1" config_name="$2" fault="$3" expected="$4"
-  install_variant "${config_name}" "${fault}"
+  echo "checking ${case_name} OxiBelt configuration (expected ${expected})"
+  install_variant "${case_name}" "${config_name}" "${fault}"
   container="filebelt-oxibelt-helm-${case_name}-${RANDOM}-$$"
   docker create --name "${container}" --network none "${local_ref}" --check >/dev/null
-  docker cp - "${container}:/" <"${temporary}/${config_name}.tar"
+  docker cp - "${container}:/" <"${temporary}/${case_name}.tar"
   if docker start --attach "${container}" >"${temporary}/${case_name}.log" 2>&1; then
     actual=success
   else
@@ -202,6 +203,7 @@ check_variant() {
     cat "${temporary}/${case_name}.log" >&2
     exit 1
   }
+  echo "${case_name} OxiBelt configuration check passed (${actual})"
 }
 
 render_variant default

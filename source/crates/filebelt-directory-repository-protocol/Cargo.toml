@@ -12,8 +12,8 @@ publish.workspace = true
 [dependencies]
 filebelt-domain.workspace = true
 prost = "=0.14.4"
-thiserror = "=2.0.20"
-uuid = "=1.24.1"
+thiserror = "=2.0.21"
+uuid = "=1.26.1"
 
 [lints.rust]
 unsafe_code = "deny"

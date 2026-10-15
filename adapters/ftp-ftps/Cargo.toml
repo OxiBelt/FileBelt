@@ -22,13 +22,13 @@ filebelt-vfs-protocol = { version = "=0.1.0", path = "../../source/crates/filebe
 libunftp = "=0.23.0"
 prost = "=0.14.4"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
-rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs"] }
-tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs"] }
+tokio = { version = "=1.53.2", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "=0.1.19"
-tokio-util = { version = "=0.7.19", features = ["io"] }
+tokio-util = { version = "=0.7.20", features = ["io"] }
 unftp-core = "=0.1.0"
-uuid = { version = "=1.24.1", features = ["v4"] }
-zeroize = "=1.9.0"
+uuid = { version = "=1.28.0", features = ["v4"] }
+zeroize = "=1.9.1"
 
 [lints.rust]
 unsafe_code = "deny"

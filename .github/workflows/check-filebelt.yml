@@ -21,7 +21,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.7"
       - name: Set up Helm
@@ -120,7 +120,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.7"
       - name: Show pinned toolchain
@@ -176,7 +176,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
@@ -213,7 +213,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
@@ -361,7 +361,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
@@ -375,7 +375,7 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm --filter @filebelt/devops build
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.36.1
       - name: Set up Trivy
@@ -397,7 +397,7 @@ jobs:
           --archive artifacts/phase1/${{ matrix.artifact-arch }}/filebelt-web-${{ matrix.artifact-arch }}.docker.tar
       - name: Upload image evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: filebelt-phase1-${{ matrix.artifact-arch }}
           path: artifacts/phase1
@@ -415,7 +415,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
@@ -425,7 +425,7 @@ jobs:
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm --filter @filebelt/devops build
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.36.1
       - name: Set up Trivy
@@ -444,7 +444,7 @@ jobs:
           --output-dir artifacts/phase1/riscv64
       - name: Upload RISC-V evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: filebelt-phase1-riscv64
           path: artifacts/phase1
@@ -500,7 +500,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node
         if: matrix.requires_playwright
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.19.0"
       - name: Activate pinned pnpm
@@ -513,7 +513,7 @@ jobs:
         if: matrix.requires_playwright
         run: pnpm --filter @filebelt/web exec playwright install --with-deps chromium firefox
       - name: Download exact AMD64 image evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: filebelt-phase1-amd64
           path: artifacts/docker/${{ matrix.unit }}-images
@@ -527,7 +527,7 @@ jobs:
           --diagnostics-dir artifacts/docker/${{ matrix.unit }}
       - name: Upload scrubbed failure diagnostics for ${{ matrix.unit }}
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: filebelt-docker-${{ matrix.unit }}-diagnostics
           path: artifacts/docker/${{ matrix.unit }}
@@ -564,7 +564,7 @@ jobs:
         with:
           version: v4.2.4
       - name: Install pinned Kind and kubectl
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.32.0
           kubectl_version: v1.36.3
@@ -613,7 +613,7 @@ jobs:
         with:
           version: v4.2.4
       - name: Install pinned Kind and kubectl
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.32.0
           kubectl_version: ${{ matrix.kubectl }}
@@ -649,7 +649,7 @@ jobs:
         with:
           version: v4.2.4
       - name: Install pinned Kubernetes client
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.32.0
           kubectl_version: v1.36.3
@@ -691,7 +691,7 @@ jobs:
         with:
           version: v4.2.4
       - name: Install pinned Kubernetes client
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.32.0
           kubectl_version: v1.34.10
@@ -730,7 +730,7 @@ jobs:
         with:
           version: v4.2.4
       - name: Install pinned Kubernetes client
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           version: v0.32.0
           kubectl_version: v1.34.10

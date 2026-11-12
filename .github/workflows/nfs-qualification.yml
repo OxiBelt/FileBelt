@@ -99,7 +99,7 @@ jobs:
           --output "$EVIDENCE_OUTPUT"
       - name: Upload native build evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: filebelt-nfs-native-${{ matrix.artifact-arch }}
           path: artifacts/nfs/native
@@ -174,7 +174,7 @@ jobs:
           --cleanup-only
       - name: Upload secret-free client evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: filebelt-nfs-client-${{ matrix.distribution }}-${{ matrix.architecture }}
           path: artifacts/nfs/clients

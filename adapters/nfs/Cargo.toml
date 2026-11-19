@@ -18,16 +18,16 @@ resolver = "3"
 # this LGPL package.
 blake3 = "=1.8.7"
 filebelt-vfs-protocol = { version = "=0.1.0", path = "../../source/crates/filebelt-vfs-protocol" }
-nix = { version = "=0.31.3", features = ["fs", "socket", "uio", "user"] }
-prost = "=0.14.4"
+nix = { version = "=0.32.0", features = ["fs", "socket", "uio", "user"] }
+prost = "=0.14.6"
 reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls-webpki-roots-no-provider"] }
-rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["aws_lc_rs", "std"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 socket2 = { version = "=0.6.5", features = ["all"] }
-thiserror = "=2.0.20"
-toml = "=1.1.4"
-uuid = { version = "=1.24.1", features = ["v4"] }
-zeroize = "=1.9.0"
+thiserror = "=2.0.21"
+toml = "=1.2.1"
+uuid = { version = "=1.29.2", features = ["v4"] }
+zeroize = "=1.9.1"
 x509-parser = "=0.18.1"
 
 [lib]

@@ -13,7 +13,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-prost = "=0.14.4"
+prost = "=0.14.6"
 
 [lints.rust]
 unsafe_code = "deny"
